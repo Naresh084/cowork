@@ -1,0 +1,25 @@
+{
+  "name": "@gemini-cowork/sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@gemini-cowork/core": "workspace:*",
+    "@gemini-cowork/providers": "workspace:*",
+    "@gemini-cowork/storage": "workspace:*",
+    "@gemini-cowork/shared": "workspace:*",
+    "@gemini-cowork/mcp": "workspace:*",
+    "@gemini-cowork/sandbox": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^20.0.0"
+  }
+}

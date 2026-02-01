@@ -1,0 +1,168 @@
+import type { AgentEventType } from './types.js';
+
+/**
+ * SidecarEvent format expected by Rust (camelCase due to serde rename_all)
+ */
+interface SidecarEvent {
+  type: string;
+  sessionId: string | null;
+  data: unknown;
+}
+
+/**
+ * Emits events to the Rust backend via stdout.
+ * Events are JSON objects with a specific structure that Tauri can parse.
+ */
+export class EventEmitter {
+  private eventBuffer: SidecarEvent[] = [];
+  private flushTimeout: NodeJS.Timeout | null = null;
+  private flushIntervalMs = 10; // Batch events every 10ms for performance
+
+  /**
+   * Emit an event to the Rust backend.
+   */
+  emit(type: AgentEventType, sessionId: string | undefined, data: unknown): void {
+    const event: SidecarEvent = {
+      type,
+      sessionId: sessionId ?? null,
+      data,
+    };
+
+    this.eventBuffer.push(event);
+    this.scheduleFlush();
+  }
+
+  /**
+   * Emit stream chunk event.
+   */
+  streamStart(sessionId: string): void {
+    this.emit('stream:start', sessionId, { timestamp: Date.now() });
+  }
+
+  /**
+   * Emit stream chunk event.
+   */
+  streamChunk(sessionId: string, content: string): void {
+    this.emit('stream:chunk', sessionId, { content });
+  }
+
+  /**
+   * Emit stream done event.
+   */
+  streamDone(sessionId: string, message: unknown): void {
+    this.emit('stream:done', sessionId, { message });
+  }
+
+  /**
+   * Emit tool start event.
+   */
+  toolStart(sessionId: string, toolCall: unknown): void {
+    this.emit('tool:start', sessionId, { toolCall, startTime: Date.now() });
+  }
+
+  /**
+   * Emit tool result event.
+   */
+  toolResult(sessionId: string, toolCall: unknown, result: unknown): void {
+    this.emit('tool:result', sessionId, { toolCall, result, endTime: Date.now() });
+  }
+
+  /**
+   * Emit permission request event.
+   */
+  permissionRequest(sessionId: string, request: unknown): void {
+    this.emit('permission:request', sessionId, { request });
+  }
+
+  /**
+   * Emit permission resolved event.
+   */
+  permissionResolved(sessionId: string, permissionId: string): void {
+    this.emit('permission:resolved', sessionId, { permissionId });
+  }
+
+  /**
+   * Emit task create event.
+   */
+  taskCreate(sessionId: string, task: unknown): void {
+    this.emit('task:create', sessionId, { task });
+  }
+
+  /**
+   * Emit task update event.
+   */
+  taskUpdate(sessionId: string, task: unknown): void {
+    this.emit('task:update', sessionId, { task });
+  }
+
+  /**
+   * Emit artifact created event.
+   */
+  artifactCreated(sessionId: string, artifact: unknown): void {
+    this.emit('artifact:created', sessionId, { artifact });
+  }
+
+  /**
+   * Emit context update event.
+   */
+  contextUpdate(sessionId: string, used: number, total: number): void {
+    this.emit('context:update', sessionId, { used, total });
+  }
+
+  /**
+   * Emit session updated event.
+   */
+  sessionUpdated(session: unknown): void {
+    this.emit('session:updated', undefined, { session });
+  }
+
+  /**
+   * Emit error event.
+   */
+  error(sessionId: string | undefined, errorMessage: string, code?: string): void {
+    this.emit('error', sessionId, { error: errorMessage, code });
+  }
+
+  /**
+   * Schedule a flush of the event buffer.
+   */
+  private scheduleFlush(): void {
+    if (this.flushTimeout) return;
+
+    this.flushTimeout = setTimeout(() => {
+      this.flush();
+    }, this.flushIntervalMs);
+  }
+
+  /**
+   * Flush the event buffer to stdout.
+   */
+  flush(): void {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+
+    if (this.eventBuffer.length === 0) return;
+
+    const events = this.eventBuffer;
+    this.eventBuffer = [];
+
+    for (const event of events) {
+      // Write event directly as JSON followed by newline
+      // The Rust side expects SidecarEvent format: { type, session_id, data }
+      const line = JSON.stringify(event) + '\n';
+      process.stdout.write(line);
+    }
+  }
+
+  /**
+   * Flush all pending events immediately.
+   */
+  flushSync(): void {
+    this.flush();
+  }
+}
+
+// Singleton instance
+export const eventEmitter = new EventEmitter();
