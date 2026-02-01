@@ -1,0 +1,312 @@
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+import type { Message, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
+
+export interface Attachment {
+  type: 'file' | 'image';
+  name: string;
+  path?: string;
+  mimeType?: string;
+  data?: string; // base64 encoded
+  size?: number;
+}
+
+export interface ToolExecution {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  status: 'pending' | 'running' | 'success' | 'error';
+  result?: unknown;
+  error?: string;
+  startedAt: number;
+  completedAt?: number;
+}
+
+export interface ExtendedPermissionRequest extends BasePermissionRequest {
+  id: string;
+  sessionId: string;
+  toolName?: string;
+  riskLevel?: 'low' | 'medium' | 'high';
+  createdAt: number;
+}
+
+export interface QuestionOption {
+  label: string;
+  description?: string;
+  value?: string;
+}
+
+export interface UserQuestion {
+  id: string;
+  sessionId: string;
+  question: string;
+  header?: string;
+  options: QuestionOption[];
+  multiSelect?: boolean;
+  allowCustom?: boolean;
+  createdAt: number;
+}
+
+interface ChatState {
+  messages: Message[];
+  isStreaming: boolean;
+  streamingContent: string;
+  streamingToolCalls: ToolExecution[];
+  pendingPermissions: ExtendedPermissionRequest[];
+  pendingQuestions: UserQuestion[];
+  currentTool: ToolExecution | null;
+  error: string | null;
+  isLoadingMessages: boolean;
+}
+
+interface ChatActions {
+  loadMessages: (sessionId: string) => Promise<void>;
+  sendMessage: (
+    sessionId: string,
+    content: string,
+    attachments?: Attachment[]
+  ) => Promise<void>;
+  respondToPermission: (
+    sessionId: string,
+    permissionId: string,
+    decision: 'allow' | 'deny' | 'always_allow'
+  ) => Promise<void>;
+  stopGeneration: (sessionId: string) => Promise<void>;
+  clearError: () => void;
+
+  // Internal actions for event handling
+  appendStreamChunk: (chunk: string) => void;
+  setStreamingTool: (tool: ToolExecution | null) => void;
+  addMessage: (message: Message) => void;
+  updateToolExecution: (toolId: string, updates: Partial<ToolExecution>) => void;
+  addPermissionRequest: (request: ExtendedPermissionRequest) => void;
+  removePermissionRequest: (id: string) => void;
+  addQuestion: (question: UserQuestion) => void;
+  removeQuestion: (id: string) => void;
+  respondToQuestion: (
+    sessionId: string,
+    questionId: string,
+    answer: string | string[]
+  ) => Promise<void>;
+  setStreaming: (streaming: boolean) => void;
+  clearStreamingContent: () => void;
+  reset: () => void;
+}
+
+const initialState: ChatState = {
+  messages: [],
+  isStreaming: false,
+  streamingContent: '',
+  streamingToolCalls: [],
+  pendingPermissions: [],
+  pendingQuestions: [],
+  currentTool: null,
+  error: null,
+  isLoadingMessages: false,
+};
+
+export const useChatStore = create<ChatState & ChatActions>((set) => ({
+  ...initialState,
+
+  loadMessages: async (sessionId: string) => {
+    set({ isLoadingMessages: true, error: null });
+    try {
+      const session = await invoke<{
+        id: string;
+        messages: Message[];
+      }>('agent_get_session', { sessionId });
+
+      set({
+        messages: session.messages || [],
+        isLoadingMessages: false,
+      });
+    } catch (error) {
+      set({
+        isLoadingMessages: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  sendMessage: async (
+    sessionId: string,
+    content: string,
+    attachments?: Attachment[]
+  ) => {
+    // Add user message optimistically
+    const userMessage: Message = {
+      id: `temp-${Date.now()}`,
+      role: 'user',
+      content,
+      createdAt: Date.now(),
+    };
+
+    set((state) => ({
+      messages: [...state.messages, userMessage],
+      isStreaming: true,
+      streamingContent: '',
+      error: null,
+    }));
+
+    try {
+      await invoke('agent_send_message', {
+        sessionId,
+        content,
+        attachments,
+      });
+      // The response will come through events
+    } catch (error) {
+      set({
+        isStreaming: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  respondToPermission: async (
+    sessionId: string,
+    permissionId: string,
+    decision: 'allow' | 'deny' | 'always_allow'
+  ) => {
+    try {
+      await invoke('agent_respond_permission', {
+        sessionId,
+        permissionId,
+        decision: {
+          allow: decision !== 'deny',
+          remember: decision === 'always_allow',
+          scope: decision === 'always_allow' ? 'always' : 'once',
+        },
+      });
+
+      // Remove from pending
+      set((state) => ({
+        pendingPermissions: state.pendingPermissions.filter(
+          (p) => p.id !== permissionId
+        ),
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  stopGeneration: async (sessionId: string) => {
+    try {
+      await invoke('agent_stop_generation', { sessionId });
+      set({ isStreaming: false });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  clearError: () => {
+    set({ error: null });
+  },
+
+  // Internal actions
+  appendStreamChunk: (chunk: string) => {
+    set((state) => ({
+      streamingContent: state.streamingContent + chunk,
+    }));
+  },
+
+  setStreamingTool: (tool: ToolExecution | null) => {
+    set({ currentTool: tool });
+  },
+
+  addMessage: (message: Message) => {
+    set((state) => ({
+      messages: [...state.messages, message],
+      streamingContent: '',
+    }));
+  },
+
+  updateToolExecution: (toolId: string, updates: Partial<ToolExecution>) => {
+    set((state) => ({
+      streamingToolCalls: state.streamingToolCalls.map((t) =>
+        t.id === toolId ? { ...t, ...updates } : t
+      ),
+      currentTool:
+        state.currentTool?.id === toolId
+          ? { ...state.currentTool, ...updates }
+          : state.currentTool,
+    }));
+  },
+
+  addPermissionRequest: (request: ExtendedPermissionRequest) => {
+    set((state) => ({
+      pendingPermissions: [...state.pendingPermissions, request],
+    }));
+  },
+
+  removePermissionRequest: (id: string) => {
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((p) => p.id !== id),
+    }));
+  },
+
+  addQuestion: (question: UserQuestion) => {
+    set((state) => ({
+      pendingQuestions: [...state.pendingQuestions, question],
+    }));
+  },
+
+  removeQuestion: (id: string) => {
+    set((state) => ({
+      pendingQuestions: state.pendingQuestions.filter((q) => q.id !== id),
+    }));
+  },
+
+  respondToQuestion: async (
+    sessionId: string,
+    questionId: string,
+    answer: string | string[]
+  ) => {
+    try {
+      await invoke('agent_respond_question', {
+        sessionId,
+        questionId,
+        answer,
+      });
+
+      // Remove from pending
+      set((state) => ({
+        pendingQuestions: state.pendingQuestions.filter(
+          (q) => q.id !== questionId
+        ),
+      }));
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  },
+
+  setStreaming: (streaming: boolean) => {
+    set({ isStreaming: streaming });
+  },
+
+  clearStreamingContent: () => {
+    set({ streamingContent: '' });
+  },
+
+  reset: () => {
+    set(initialState);
+  },
+}));
+
+// Selector hooks
+export const useMessages = () => useChatStore((state) => state.messages);
+export const useIsStreaming = () => useChatStore((state) => state.isStreaming);
+export const useStreamingContent = () =>
+  useChatStore((state) => state.streamingContent);
+export const usePendingPermissions = () =>
+  useChatStore((state) => state.pendingPermissions);
+export const usePendingQuestions = () =>
+  useChatStore((state) => state.pendingQuestions);
+export const useCurrentTool = () => useChatStore((state) => state.currentTool);
+export const useChatError = () => useChatStore((state) => state.error);

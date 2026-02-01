@@ -1,0 +1,394 @@
+import { useState } from 'react';
+import {
+  Terminal,
+  FileEdit,
+  FileSearch,
+  FolderOpen,
+  Globe,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Loader2,
+  Copy,
+  Check,
+} from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { CodeBlock } from './CodeBlock';
+import type { ToolExecution } from '../../stores/chat-store';
+
+// Tool type icons
+const TOOL_ICONS: Record<string, typeof Terminal> = {
+  bash: Terminal,
+  shell: Terminal,
+  execute_command: Terminal,
+  read_file: FileSearch,
+  write_file: FileEdit,
+  edit_file: FileEdit,
+  list_directory: FolderOpen,
+  search_files: FileSearch,
+  glob: FileSearch,
+  grep: FileSearch,
+  fetch: Globe,
+  http: Globe,
+  default: Wrench,
+};
+
+// Tool display names
+const TOOL_NAMES: Record<string, string> = {
+  bash: 'Shell Command',
+  shell: 'Shell Command',
+  execute_command: 'Execute Command',
+  read_file: 'Read File',
+  write_file: 'Write File',
+  edit_file: 'Edit File',
+  list_directory: 'List Directory',
+  search_files: 'Search Files',
+  glob: 'Find Files',
+  grep: 'Search Content',
+  fetch: 'HTTP Request',
+  http: 'HTTP Request',
+};
+
+interface ToolExecutionCardProps {
+  execution: ToolExecution;
+  className?: string;
+}
+
+export function ToolExecutionCard({ execution, className }: ToolExecutionCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [copiedArgs, setCopiedArgs] = useState(false);
+  const [copiedResult, setCopiedResult] = useState(false);
+
+  const Icon = TOOL_ICONS[execution.name.toLowerCase()] || TOOL_ICONS.default;
+  const displayName = TOOL_NAMES[execution.name.toLowerCase()] || execution.name;
+
+  const statusConfig = getStatusConfig(execution.status);
+  const duration = execution.completedAt
+    ? formatDuration(execution.completedAt - execution.startedAt)
+    : null;
+
+  const handleCopyArgs = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(execution.args, null, 2));
+      setCopiedArgs(true);
+      setTimeout(() => setCopiedArgs(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy args:', error);
+    }
+  };
+
+  const handleCopyResult = async () => {
+    if (!execution.result) return;
+    try {
+      const resultText = typeof execution.result === 'string'
+        ? execution.result
+        : JSON.stringify(execution.result, null, 2);
+      await navigator.clipboard.writeText(resultText);
+      setCopiedResult(true);
+      setTimeout(() => setCopiedResult(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy result:', error);
+    }
+  };
+
+  // Get primary arg to display (like file path or command)
+  const primaryArg = getPrimaryArg(execution.name, execution.args);
+
+  return (
+    <div
+      className={cn(
+        'rounded-xl border overflow-hidden transition-all duration-200',
+        execution.status === 'running'
+          ? 'bg-blue-500/5 border-blue-500/20'
+          : execution.status === 'error'
+            ? 'bg-red-500/5 border-red-500/20'
+            : execution.status === 'success'
+              ? 'bg-green-500/5 border-green-500/20'
+              : 'bg-gray-800/30 border-gray-700/50',
+        className
+      )}
+    >
+      {/* Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center gap-3 p-3 text-left"
+      >
+        {/* Icon */}
+        <div
+          className={cn(
+            'p-2 rounded-lg flex-shrink-0',
+            execution.status === 'running'
+              ? 'bg-blue-500/20'
+              : execution.status === 'error'
+                ? 'bg-red-500/20'
+                : execution.status === 'success'
+                  ? 'bg-green-500/20'
+                  : 'bg-gray-700/50'
+          )}
+        >
+          <Icon className={cn('w-4 h-4', statusConfig.color)} />
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-white">{displayName}</span>
+            <StatusBadge status={execution.status} />
+          </div>
+          {primaryArg && (
+            <p className="text-xs text-gray-500 font-mono truncate mt-0.5">
+              {primaryArg}
+            </p>
+          )}
+        </div>
+
+        {/* Meta */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {duration && (
+            <span className="flex items-center gap-1 text-xs text-gray-500">
+              <Clock className="w-3 h-3" />
+              {duration}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4 text-gray-500" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-gray-500" />
+          )}
+        </div>
+      </button>
+
+      {/* Expanded content */}
+      {isExpanded && (
+        <div className="border-t border-gray-700/30 p-3 space-y-3">
+          {/* Arguments */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                Arguments
+              </span>
+              <button
+                onClick={handleCopyArgs}
+                className={cn(
+                  'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
+                  'transition-colors',
+                  copiedArgs
+                    ? 'text-green-400'
+                    : 'text-gray-500 hover:text-gray-300'
+                )}
+              >
+                {copiedArgs ? (
+                  <Check className="w-3 h-3" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+              </button>
+            </div>
+            <CodeBlock
+              code={JSON.stringify(execution.args, null, 2)}
+              language="json"
+              showLineNumbers={false}
+              maxHeight={200}
+            />
+          </div>
+
+          {/* Result */}
+          {(execution.result !== undefined || execution.error) && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                  {execution.error ? 'Error' : 'Result'}
+                </span>
+                {!execution.error && execution.result !== undefined && (
+                  <button
+                    onClick={handleCopyResult}
+                    className={cn(
+                      'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
+                      'transition-colors',
+                      copiedResult
+                        ? 'text-green-400'
+                        : 'text-gray-500 hover:text-gray-300'
+                    )}
+                  >
+                    {copiedResult ? (
+                      <Check className="w-3 h-3" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                  </button>
+                )}
+              </div>
+              {execution.error ? (
+                <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 font-mono whitespace-pre-wrap">
+                  {execution.error}
+                </div>
+              ) : (
+                <CodeBlock
+                  code={formatResult(execution.result)}
+                  language={getResultLanguage(execution.result)}
+                  showLineNumbers={false}
+                  maxHeight={300}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Compact inline version for streaming
+interface ToolExecutionInlineProps {
+  execution: ToolExecution;
+  className?: string;
+}
+
+export function ToolExecutionInline({ execution, className }: ToolExecutionInlineProps) {
+  const Icon = TOOL_ICONS[execution.name.toLowerCase()] || TOOL_ICONS.default;
+  const displayName = TOOL_NAMES[execution.name.toLowerCase()] || execution.name;
+  const statusConfig = getStatusConfig(execution.status);
+  const primaryArg = getPrimaryArg(execution.name, execution.args);
+
+  return (
+    <div
+      className={cn(
+        'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg',
+        'bg-gray-800/50 border border-gray-700/50',
+        className
+      )}
+    >
+      <div className={cn('p-1 rounded', statusConfig.bgColor)}>
+        {execution.status === 'running' ? (
+          <Loader2 className={cn('w-3.5 h-3.5 animate-spin', statusConfig.color)} />
+        ) : (
+          <Icon className={cn('w-3.5 h-3.5', statusConfig.color)} />
+        )}
+      </div>
+      <span className="text-sm text-white">{displayName}</span>
+      {primaryArg && (
+        <span className="text-xs text-gray-500 font-mono truncate max-w-[200px]">
+          {primaryArg}
+        </span>
+      )}
+      {execution.status === 'success' && (
+        <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+      )}
+      {execution.status === 'error' && (
+        <XCircle className="w-3.5 h-3.5 text-red-400" />
+      )}
+    </div>
+  );
+}
+
+// Status badge component
+function StatusBadge({ status }: { status: ToolExecution['status'] }) {
+  const config = getStatusConfig(status);
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium',
+        config.bgColor,
+        config.color
+      )}
+    >
+      {status === 'running' && <Loader2 className="w-3 h-3 animate-spin" />}
+      {status === 'success' && <CheckCircle2 className="w-3 h-3" />}
+      {status === 'error' && <XCircle className="w-3 h-3" />}
+      {status === 'pending' && <Clock className="w-3 h-3" />}
+      {config.label}
+    </span>
+  );
+}
+
+// Helper functions
+function getStatusConfig(status: ToolExecution['status']) {
+  switch (status) {
+    case 'running':
+      return { color: 'text-blue-400', bgColor: 'bg-blue-500/10', label: 'Running' };
+    case 'success':
+      return { color: 'text-green-400', bgColor: 'bg-green-500/10', label: 'Success' };
+    case 'error':
+      return { color: 'text-red-400', bgColor: 'bg-red-500/10', label: 'Error' };
+    case 'pending':
+    default:
+      return { color: 'text-gray-400', bgColor: 'bg-gray-500/10', label: 'Pending' };
+  }
+}
+
+function getPrimaryArg(toolName: string, args: Record<string, unknown>): string | null {
+  const lowerName = toolName.toLowerCase();
+
+  if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {
+    return (args.path || args.file_path || args.filePath || args.file) as string || null;
+  }
+
+  if (lowerName.includes('bash') || lowerName.includes('shell') || lowerName.includes('command')) {
+    return (args.command || args.cmd) as string || null;
+  }
+
+  if (lowerName.includes('directory') || lowerName.includes('list')) {
+    return (args.path || args.directory || args.dir) as string || null;
+  }
+
+  if (lowerName.includes('search') || lowerName.includes('grep')) {
+    return (args.pattern || args.query || args.search) as string || null;
+  }
+
+  if (lowerName.includes('glob')) {
+    return (args.pattern || args.glob) as string || null;
+  }
+
+  if (lowerName.includes('http') || lowerName.includes('fetch')) {
+    return (args.url || args.endpoint) as string || null;
+  }
+
+  return null;
+}
+
+function formatResult(result: unknown): string {
+  if (result === null || result === undefined) {
+    return 'null';
+  }
+
+  if (typeof result === 'string') {
+    return result;
+  }
+
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
+function getResultLanguage(result: unknown): string {
+  if (typeof result === 'string') {
+    // Try to detect language from content
+    if (result.trim().startsWith('{') || result.trim().startsWith('[')) {
+      return 'json';
+    }
+    if (result.includes('<!DOCTYPE') || result.includes('<html')) {
+      return 'html';
+    }
+    return 'text';
+  }
+
+  return 'json';
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  if (ms < 60000) {
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}

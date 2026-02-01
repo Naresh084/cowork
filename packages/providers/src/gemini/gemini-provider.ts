@@ -1,0 +1,392 @@
+import {
+  GoogleGenerativeAI,
+  SchemaType,
+  type GenerativeModel,
+  type Content,
+  type Part,
+  type FunctionDeclaration,
+  type Tool,
+  type GenerationConfig as GeminiGenerationConfig,
+} from '@google/generative-ai';
+import type {
+  AIProvider,
+  ProviderConfig,
+  ModelInfo,
+  GenerateRequest,
+  GenerateResponse,
+  StreamGenerateRequest,
+} from '../types.js';
+import type { Message, ToolDefinition, StreamChunk, MessageContentPart } from '@gemini-cowork/shared';
+import {
+  generateMessageId,
+  now,
+  ProviderError,
+  AuthenticationError,
+} from '@gemini-cowork/shared';
+import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel } from './models.js';
+
+// ============================================================================
+// Gemini Provider
+// ============================================================================
+
+export class GeminiProvider implements AIProvider {
+  readonly id = 'gemini' as const;
+  readonly name = 'Google Gemini';
+
+  private client: GoogleGenerativeAI | null = null;
+  private config: ProviderConfig;
+
+  constructor(config: ProviderConfig) {
+    this.config = config;
+    this.initializeClient();
+  }
+
+  private initializeClient(): void {
+    if (this.config.credentials.type === 'api_key' && this.config.credentials.apiKey) {
+      this.client = new GoogleGenerativeAI(this.config.credentials.apiKey);
+    }
+    // OAuth tokens are handled differently - we'll use fetch directly
+  }
+
+  /**
+   * Update credentials (e.g., after token refresh).
+   */
+  updateCredentials(credentials: ProviderConfig['credentials']): void {
+    this.config.credentials = credentials;
+    this.initializeClient();
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return GEMINI_MODELS;
+  }
+
+  async getModel(modelId: string): Promise<ModelInfo | null> {
+    return getGeminiModel(modelId) || null;
+  }
+
+  async generate(request: GenerateRequest): Promise<GenerateResponse> {
+    const model = await this.getGenerativeModel(request.model);
+    const contents = this.messagesToContents(request.messages);
+    const tools = request.tools ? this.toolsToGeminiTools(request.tools) : undefined;
+
+    const generationConfig = this.buildGenerationConfig(request.config);
+
+    try {
+      const result = await model.generateContent({
+        contents,
+        tools,
+        generationConfig,
+        systemInstruction: request.systemInstruction,
+      });
+
+      const response = result.response;
+      const text = response.text();
+
+      // Check for function calls
+      const functionCalls = response.functionCalls();
+
+      let content: string | MessageContentPart[];
+
+      if (functionCalls && functionCalls.length > 0) {
+        content = functionCalls.map((fc) => ({
+          type: 'tool_call' as const,
+          toolCallId: generateMessageId(),
+          toolName: fc.name,
+          args: fc.args as Record<string, unknown>,
+        }));
+      } else {
+        content = text;
+      }
+
+      const message: Message = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content,
+        createdAt: now(),
+      };
+
+      return {
+        message,
+        usage: response.usageMetadata
+          ? {
+              promptTokens: response.usageMetadata.promptTokenCount || 0,
+              completionTokens: response.usageMetadata.candidatesTokenCount || 0,
+              totalTokens: response.usageMetadata.totalTokenCount || 0,
+            }
+          : undefined,
+        finishReason: functionCalls?.length ? 'tool_calls' : 'stop',
+      };
+    } catch (error) {
+      throw this.handleError(error);
+    }
+  }
+
+  async *stream(request: StreamGenerateRequest): AsyncGenerator<StreamChunk, GenerateResponse> {
+    const model = await this.getGenerativeModel(request.model);
+    const contents = this.messagesToContents(request.messages);
+    const tools = request.tools ? this.toolsToGeminiTools(request.tools) : undefined;
+
+    const generationConfig = this.buildGenerationConfig(request.config);
+
+    try {
+      const result = await model.generateContentStream({
+        contents,
+        tools,
+        generationConfig,
+        systemInstruction: request.systemInstruction,
+      });
+
+      let fullText = '';
+      const toolCalls: MessageContentPart[] = [];
+
+      for await (const chunk of result.stream) {
+        const text = chunk.text();
+        if (text) {
+          fullText += text;
+          const streamChunk: StreamChunk = { type: 'text', text };
+          request.onChunk?.(streamChunk);
+          yield streamChunk;
+        }
+
+        // Check for function calls in chunk
+        const functionCalls = chunk.functionCalls();
+        if (functionCalls) {
+          for (const fc of functionCalls) {
+            const toolCall: MessageContentPart = {
+              type: 'tool_call',
+              toolCallId: generateMessageId(),
+              toolName: fc.name,
+              args: fc.args as Record<string, unknown>,
+            };
+            toolCalls.push(toolCall);
+
+            const streamChunk: StreamChunk = {
+              type: 'tool_call',
+              toolCall: {
+                id: toolCall.toolCallId,
+                name: fc.name,
+                args: fc.args as Record<string, unknown>,
+              },
+            };
+            request.onChunk?.(streamChunk);
+            yield streamChunk;
+          }
+        }
+      }
+
+      // Get final response for usage metadata
+      const response = await result.response;
+
+      const content: string | MessageContentPart[] =
+        toolCalls.length > 0 ? toolCalls : fullText;
+
+      const message: Message = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content,
+        createdAt: now(),
+      };
+
+      const doneChunk: StreamChunk = { type: 'done' };
+      request.onChunk?.(doneChunk);
+      yield doneChunk;
+
+      return {
+        message,
+        usage: response.usageMetadata
+          ? {
+              promptTokens: response.usageMetadata.promptTokenCount || 0,
+              completionTokens: response.usageMetadata.candidatesTokenCount || 0,
+              totalTokens: response.usageMetadata.totalTokenCount || 0,
+            }
+          : undefined,
+        finishReason: toolCalls.length ? 'tool_calls' : 'stop',
+      };
+    } catch (error) {
+      const errorChunk: StreamChunk = {
+        type: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      };
+      request.onChunk?.(errorChunk);
+      yield errorChunk;
+      throw this.handleError(error);
+    }
+  }
+
+  async isReady(): Promise<boolean> {
+    const { credentials } = this.config;
+
+    if (credentials.type === 'api_key') {
+      return !!credentials.apiKey;
+    }
+
+    if (credentials.type === 'oauth') {
+      return !!credentials.accessToken;
+    }
+
+    return false;
+  }
+
+  async validateCredentials(): Promise<boolean> {
+    try {
+      // Try to list models as a validation check
+      if (this.config.credentials.type === 'api_key') {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${this.config.credentials.apiKey}`
+        );
+        return response.ok;
+      }
+
+      if (this.config.credentials.type === 'oauth') {
+        const response = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models',
+          {
+            headers: {
+              Authorization: `Bearer ${this.config.credentials.accessToken}`,
+            },
+          }
+        );
+        return response.ok;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  // ============================================================================
+  // Private Methods
+  // ============================================================================
+
+  private async getGenerativeModel(modelId: string): Promise<GenerativeModel> {
+    if (!this.client) {
+      if (this.config.credentials.type === 'api_key') {
+        throw AuthenticationError.notAuthenticated();
+      }
+      // For OAuth, we'd need to implement a custom client
+      throw new Error('OAuth authentication not yet supported for streaming');
+    }
+
+    const model = modelId || DEFAULT_MODEL;
+    return this.client.getGenerativeModel({ model });
+  }
+
+  private messagesToContents(messages: Message[]): Content[] {
+    return messages
+      .filter((m) => m.role !== 'system') // System instructions handled separately
+      .map((message) => ({
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts: this.messageContentToParts(message.content),
+      }));
+  }
+
+  private messageContentToParts(content: string | MessageContentPart[]): Part[] {
+    if (typeof content === 'string') {
+      return [{ text: content }];
+    }
+
+    return content.map((part) => {
+      switch (part.type) {
+        case 'text':
+          return { text: part.text };
+        case 'image':
+          return {
+            inlineData: {
+              mimeType: part.mimeType,
+              data: part.data,
+            },
+          };
+        case 'tool_call':
+          return {
+            functionCall: {
+              name: part.toolName,
+              args: part.args,
+            },
+          };
+        case 'tool_result':
+          return {
+            functionResponse: {
+              name: '', // Gemini SDK requires this but we don't always have it
+              response: part.result as object,
+            },
+          };
+        default:
+          return { text: '' };
+      }
+    });
+  }
+
+  private toolsToGeminiTools(tools: ToolDefinition[]): Tool[] {
+    const typeMap: Record<string, SchemaType> = {
+      string: SchemaType.STRING,
+      number: SchemaType.NUMBER,
+      boolean: SchemaType.BOOLEAN,
+      array: SchemaType.ARRAY,
+      object: SchemaType.OBJECT,
+    };
+
+    const functionDeclarations: FunctionDeclaration[] = tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: SchemaType.OBJECT,
+        properties: Object.fromEntries(
+          tool.parameters.map((param) => [
+            param.name,
+            {
+              type: typeMap[param.type] || SchemaType.STRING,
+              description: param.description,
+            },
+          ])
+        ),
+        required: tool.parameters.filter((p) => p.required).map((p) => p.name),
+      },
+    }));
+
+    return [{ functionDeclarations }];
+  }
+
+  private buildGenerationConfig(
+    config?: GenerateRequest['config']
+  ): GeminiGenerationConfig | undefined {
+    if (!config) return undefined;
+
+    return {
+      temperature: config.temperature,
+      topP: config.topP,
+      topK: config.topK,
+      maxOutputTokens: config.maxOutputTokens,
+      stopSequences: config.stopSequences,
+    };
+  }
+
+  private handleError(error: unknown): Error {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+
+      if (message.includes('api key') || message.includes('unauthorized')) {
+        return AuthenticationError.invalidApiKey();
+      }
+
+      if (message.includes('quota') || message.includes('rate limit')) {
+        return ProviderError.rateLimit('gemini');
+      }
+
+      if (message.includes('model') && message.includes('not found')) {
+        return ProviderError.modelNotFound('gemini', 'unknown');
+      }
+
+      return ProviderError.requestFailed('gemini', 500, error.message);
+    }
+
+    return ProviderError.requestFailed('gemini', 500, String(error));
+  }
+}
+
+/**
+ * Create a Gemini provider instance.
+ */
+export function createGeminiProvider(config: ProviderConfig): GeminiProvider {
+  return new GeminiProvider(config);
+}
