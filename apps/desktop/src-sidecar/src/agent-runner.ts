@@ -3,7 +3,7 @@ import { GeminiProvider, getModelContextWindow } from '@gemini-cowork/providers'
 import type { Message, PermissionRequest, PermissionDecision, MessageContentPart } from '@gemini-cowork/shared';
 import { generateId } from '@gemini-cowork/shared';
 import { eventEmitter } from './event-emitter.js';
-import { TODO_TOOLS, getSessionTasks, createResearchTools } from './tools/index.js';
+import { TODO_TOOLS, getSessionTasks, createResearchTools, createComputerUseTools } from './tools/index.js';
 import type {
   SessionInfo,
   SessionDetails,
@@ -91,6 +91,7 @@ export class AgentRunner {
     const shellTools = SHELL_TOOLS;
     const todoTools = TODO_TOOLS;
     const researchTools = createResearchTools(() => this.apiKey);
+    const computerUseTools = createComputerUseTools(() => this.apiKey);
 
     // Create permission handler that emits events and waits for response
     const permissionHandler = async (
@@ -137,7 +138,7 @@ export class AgentRunner {
         streaming: true,
       },
       provider: this.provider,
-      tools: [...fileTools, ...shellTools, ...todoTools, ...researchTools],
+      tools: [...fileTools, ...shellTools, ...todoTools, ...researchTools, ...computerUseTools],
       permissionHandler,
       workingDirectory,
       sessionId,

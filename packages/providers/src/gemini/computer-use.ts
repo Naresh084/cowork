@@ -10,11 +10,12 @@ export interface ComputerUseSession {
 export async function createComputerSession(
   _apiKey: string,
   goal: string,
-  startUrl?: string
+  startUrl?: string,
+  headless = false
 ): Promise<ComputerUseSession> {
   void _apiKey;
   const browser = await chromium.launch({
-    headless: false,
+    headless,
     args: ['--disable-blink-features=AutomationControlled'],
   });
 
