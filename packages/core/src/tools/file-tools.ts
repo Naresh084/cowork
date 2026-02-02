@@ -172,6 +172,75 @@ export const writeFileTool: ToolHandler = {
 };
 
 /**
+ * Edit a file by replacing specific text.
+ */
+export const editFileTool: ToolHandler = {
+  name: 'edit_file',
+  description: 'Make surgical edits to a file by replacing specific text. More precise than write_file.',
+  parameters: z.object({
+    path: z.string().describe('Path to the file'),
+    old_string: z.string().describe('Exact text to find and replace'),
+    new_string: z.string().describe('Text to replace with'),
+    replace_all: z.boolean().optional().describe('Replace all occurrences (default: false)'),
+  }),
+
+  requiresPermission: (args): PermissionRequest | null => {
+    const { path } = args as { path: string };
+    return {
+      type: 'file_write',
+      resource: path,
+      reason: `Edit file: ${path}`,
+    };
+  },
+
+  execute: async (args, context: ToolContext): Promise<ToolResult> => {
+    const { path, old_string, new_string, replace_all = false } = args as {
+      path: string;
+      old_string: string;
+      new_string: string;
+      replace_all?: boolean;
+    };
+
+    const { path: validatedPath, error } = await validateAndResolvePath(path, context.workingDirectory);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      const content = await readFile(validatedPath, 'utf-8');
+
+      if (!content.includes(old_string)) {
+        return {
+          success: false,
+          error: 'String not found in file. Make sure old_string matches exactly.',
+        };
+      }
+
+      const occurrences = content.split(old_string).length - 1;
+      if (occurrences > 1 && !replace_all) {
+        return {
+          success: false,
+          error: `Found ${occurrences} occurrences. Set replace_all=true or provide more unique text.`,
+        };
+      }
+
+      const newContent = replace_all
+        ? content.replaceAll(old_string, new_string)
+        : content.replace(old_string, new_string);
+
+      await writeFile(validatedPath, newContent, 'utf-8');
+
+      return {
+        success: true,
+        data: `Replaced ${replace_all ? occurrences : 1} occurrence(s) in ${path}`,
+      };
+    } catch (err) {
+      return { success: false, error: `Edit failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  },
+};
+
+/**
  * List directory contents.
  */
 export const listDirectoryTool: ToolHandler = {
@@ -362,6 +431,7 @@ export const deleteFileTool: ToolHandler = {
 export const FILE_TOOLS: ToolHandler[] = [
   readFileTool,
   writeFileTool,
+  editFileTool,
   listDirectoryTool,
   getFileInfoTool,
   createDirectoryTool,
