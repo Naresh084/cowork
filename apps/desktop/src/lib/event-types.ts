@@ -111,6 +111,12 @@ export type AgentEvent =
       used: number;
       total: number;
     }
+  | {
+      type: 'research:progress';
+      sessionId: string;
+      status: string;
+      progress: number;
+    }
   // Error events
   | {
       type: 'error';
@@ -164,6 +170,7 @@ export const TAURI_EVENT_NAMES = [
   'agent:artifact:updated',
   'agent:artifact:deleted',
   'agent:context:update',
+  'agent:research:progress',
   'agent:error',
   'agent:session:updated',
   'agent:started',

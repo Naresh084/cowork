@@ -169,6 +169,14 @@ function parseTauriEvent(
         total: (data.total as number) ?? 1048576,
       };
 
+    case 'research:progress':
+      return {
+        type: 'research:progress',
+        sessionId,
+        status: (data.status as string) ?? 'running',
+        progress: (data.progress as number) ?? 0,
+      };
+
     case 'error':
       return {
         type: 'error',
@@ -266,6 +274,7 @@ export function subscribeToAgentEvents(
     'agent:artifact:updated',
     'agent:artifact:deleted',
     'agent:context:update',
+    'agent:research:progress',
     'agent:error',
     'agent:session:updated',
     'agent:started',
@@ -337,6 +346,7 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:artifact:updated',
     'agent:artifact:deleted',
     'agent:context:update',
+    'agent:research:progress',
     'agent:error',
     'agent:session:updated',
     'agent:started',

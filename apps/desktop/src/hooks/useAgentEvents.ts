@@ -141,6 +141,10 @@ export function useAgentEvents(sessionId: string | null): void {
           agent.setContextUsage(event.used, event.total);
           break;
 
+        case 'research:progress':
+          agent.setResearchProgress({ status: event.status, progress: event.progress });
+          break;
+
         // Error events
         case 'error': {
           chat.setStreaming(false);
