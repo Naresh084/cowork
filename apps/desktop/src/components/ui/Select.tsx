@@ -172,23 +172,23 @@ export function Select({
             'w-full flex items-center gap-2 px-3 py-2 text-sm',
             'transition-colors',
             option.disabled
-              ? 'text-gray-600 cursor-not-allowed'
-              : 'text-gray-200',
-            globalIndex === highlightedIndex && !option.disabled && 'bg-gray-700/50',
-            option.value === value && 'bg-blue-500/20'
+              ? 'text-white/30 cursor-not-allowed'
+              : 'text-white/90',
+            globalIndex === highlightedIndex && !option.disabled && 'bg-white/[0.06]',
+            option.value === value && 'bg-[#6B6EF0]/20'
           )}
         >
           {option.icon && (
-            <span className="flex-shrink-0 text-gray-400">{option.icon}</span>
+            <span className="flex-shrink-0 text-white/50">{option.icon}</span>
           )}
           <div className="flex-1 text-left">
             <div>{option.label}</div>
             {option.description && (
-              <div className="text-xs text-gray-500">{option.description}</div>
+              <div className="text-xs text-white/50">{option.description}</div>
             )}
           </div>
           {option.value === value && (
-            <Check size={14} className="flex-shrink-0 text-blue-400" />
+            <Check size={14} className="flex-shrink-0 text-[#8B8EFF]" />
           )}
         </button>
       );
@@ -204,11 +204,11 @@ export function Select({
         onKeyDown={handleKeyDown}
         className={cn(
           'w-full flex items-center gap-2 px-3 py-2 rounded-lg',
-          'bg-gray-800/50 border border-gray-700',
+          'bg-[#1A1A1E] border border-white/[0.08]',
           'text-sm text-left',
-          'focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500',
+          'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]',
           'transition-colors',
-          disabled && 'opacity-50 cursor-not-allowed',
+          disabled && 'opacity-50 cursor-not-allowed bg-white/[0.04]',
           error && 'border-red-500 focus:ring-red-500/50 focus:border-red-500'
         )}
         aria-expanded={isOpen}
@@ -217,17 +217,17 @@ export function Select({
         {selectedOption ? (
           <>
             {selectedOption.icon && (
-              <span className="text-gray-400">{selectedOption.icon}</span>
+              <span className="text-white/50">{selectedOption.icon}</span>
             )}
-            <span className="flex-1 text-white">{selectedOption.label}</span>
+            <span className="flex-1 text-white/90">{selectedOption.label}</span>
           </>
         ) : (
-          <span className="flex-1 text-gray-500">{placeholder}</span>
+          <span className="flex-1 text-white/50">{placeholder}</span>
         )}
         <ChevronDown
           size={16}
           className={cn(
-            'text-gray-400 transition-transform',
+            'text-white/50 transition-transform',
             isOpen && 'rotate-180'
           )}
         />
@@ -242,7 +242,7 @@ export function Select({
             role="listbox"
             className={cn(
               'fixed z-50 py-1 max-h-64 overflow-auto',
-              'bg-gray-900 border border-gray-700 rounded-lg shadow-xl',
+              'bg-[#0D0D0F] border border-white/[0.08] rounded-lg shadow-xl',
               'animate-in fade-in-0 zoom-in-95 duration-150'
             )}
             style={{
@@ -253,11 +253,11 @@ export function Select({
             onKeyDown={handleKeyDown}
           >
             {searchable && (
-              <div className="px-2 py-2 border-b border-gray-700/50">
+              <div className="px-2 py-2 border-b border-white/[0.06]">
                 <div className="relative">
                   <Search
                     size={14}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/50"
                   />
                   <input
                     ref={searchRef}
@@ -270,9 +270,9 @@ export function Select({
                     placeholder="Search..."
                     className={cn(
                       'w-full pl-8 pr-3 py-1.5 text-sm',
-                      'bg-gray-800/50 border border-gray-700 rounded',
-                      'text-white placeholder-gray-500',
-                      'focus:outline-none focus:border-gray-600'
+                      'bg-[#1A1A1E] border border-white/[0.08] rounded',
+                      'text-white/90 placeholder-white/30',
+                      'focus:outline-none focus:border-[#6B6EF0]'
                     )}
                   />
                 </div>
@@ -292,9 +292,9 @@ export function Select({
                 return (
                   <div key={groupIndex}>
                     {groupIndex > 0 && (
-                      <div className="my-1 h-px bg-gray-700/50" />
+                      <div className="my-1 h-px bg-white/[0.06]" />
                     )}
-                    <div className="px-3 py-1.5 text-xs font-medium text-gray-500">
+                    <div className="px-3 py-1.5 text-xs font-medium text-white/50">
                       {group.label}
                     </div>
                     {renderOptions(groupOptions)}
@@ -306,7 +306,7 @@ export function Select({
             )}
 
             {filteredOptions.length === 0 && (
-              <div className="px-3 py-6 text-sm text-gray-500 text-center">
+              <div className="px-3 py-6 text-sm text-white/50 text-center">
                 No options found
               </div>
             )}

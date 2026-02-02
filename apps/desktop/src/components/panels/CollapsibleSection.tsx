@@ -25,27 +25,27 @@ export function CollapsibleSection({
   const isExpanded = rightPanelSections[id];
 
   return (
-    <div className="border-b border-stone-800 last:border-0">
+    <div className="border-b border-white/[0.08] last:border-0">
       {/* Header */}
       <button
         onClick={() => toggleRightPanelSection(id)}
         className={cn(
           'w-full flex items-center justify-between px-3 py-2.5',
-          'hover:bg-stone-800/50 transition-colors',
+          'hover:bg-white/[0.04] transition-colors',
           'focus:outline-none'
         )}
       >
         <div className="flex items-center gap-2">
           <ChevronRight
             className={cn(
-              'w-4 h-4 text-stone-500 transition-transform duration-200',
+              'w-4 h-4 text-white/40 transition-transform duration-200',
               isExpanded && 'rotate-90'
             )}
           />
-          <Icon className="w-4 h-4 text-stone-400" />
-          <span className="text-sm font-medium text-stone-300">{title}</span>
+          <Icon className="w-4 h-4 text-white/50" />
+          <span className="text-sm font-medium text-white/70">{title}</span>
           {badge !== undefined && badge !== 0 && (
-            <span className="text-xs text-stone-500 ml-1">{badge}</span>
+            <span className="text-xs text-white/40 ml-1">{badge}</span>
           )}
         </div>
 

@@ -93,7 +93,7 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
         className={cn(
           'w-14 flex flex-col',
-          'bg-stone-950 border-r border-stone-800'
+          'bg-[#0D0D0F] border-r border-white/[0.08]'
         )}
       >
         {/* New Task Button */}
@@ -104,9 +104,9 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
             onClick={handleNewTask}
             className={cn(
               'w-10 h-10 flex items-center justify-center rounded-xl',
-              'bg-gradient-to-r from-orange-600 to-orange-500',
-              'text-white shadow-lg shadow-orange-600/20',
-              'hover:shadow-xl hover:shadow-orange-600/30',
+              'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0]',
+              'text-white shadow-lg shadow-[#6B6EF0]/25',
+              'hover:shadow-xl hover:shadow-[#6B6EF0]/35',
               'transition-all duration-200'
             )}
             title="New task"
@@ -131,8 +131,8 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
                     'w-10 h-10 flex items-center justify-center rounded-xl',
                     'transition-all duration-150',
                     activeSessionId === session.id
-                      ? 'bg-stone-800 text-orange-400'
-                      : 'text-stone-500 hover:text-stone-300 hover:bg-stone-800/50'
+                      ? 'bg-[#1A1A1E] text-[#8B8EFF]'
+                      : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
                   )}
                   title={session.title || 'New task'}
                 >
@@ -144,21 +144,21 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         </div>
 
         {/* Plugins Button */}
-        <div className="p-2 border-t border-stone-800">
+        <div className="p-2 border-t border-white/[0.08]">
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => onNavigate('connectors')}
             className={cn(
               'relative w-10 h-10 flex items-center justify-center rounded-xl',
-              'text-stone-500 hover:text-stone-300 hover:bg-stone-800/50',
+              'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
               'transition-all duration-150'
             )}
             title="Plugins"
           >
             <Puzzle className="w-4 h-4" />
             {enabledMcpCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-orange-500 text-white text-[10px] font-medium">
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-[#6B6EF0] text-white text-[10px] font-medium">
                 {enabledMcpCount}
               </span>
             )}
@@ -166,19 +166,19 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         </div>
 
         {/* Profile Section */}
-        <div className="p-2 border-t border-stone-800" ref={profileMenuRef}>
+        <div className="p-2 border-t border-white/[0.08]" ref={profileMenuRef}>
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setProfileMenuOpen(!profileMenuOpen)}
             className={cn(
               'w-10 h-10 flex items-center justify-center rounded-xl',
-              'hover:bg-stone-800/50 transition-colors',
-              profileMenuOpen && 'bg-stone-800'
+              'hover:bg-white/[0.04] transition-colors',
+              profileMenuOpen && 'bg-white/[0.08]'
             )}
             title="Profile"
           >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center">
               <span className="text-white text-xs font-bold">N</span>
             </div>
           </motion.button>
@@ -208,7 +208,7 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
         'w-64 flex flex-col',
-        'bg-stone-950 border-r border-stone-800'
+        'bg-[#0D0D0F] border-r border-white/[0.08]'
       )}
     >
       {/* New Task Button */}
@@ -220,10 +220,10 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
           disabled={isLoading}
           className={cn(
             'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl',
-            'bg-gradient-to-r from-orange-600 to-orange-500',
+            'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0]',
             'text-white font-medium text-sm',
-            'shadow-lg shadow-orange-600/20',
-            'hover:shadow-xl hover:shadow-orange-600/30',
+            'shadow-lg shadow-[#6B6EF0]/25',
+            'hover:shadow-xl hover:shadow-[#6B6EF0]/35',
             'disabled:opacity-50 disabled:cursor-not-allowed',
             'transition-all duration-200'
           )}
@@ -235,11 +235,11 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
 
       {/* Recents Section */}
       <div className="flex-1 overflow-y-auto px-2">
-        <h3 className="text-xs font-medium text-stone-500 px-2 py-2">Recents</h3>
+        <h3 className="text-xs font-medium text-white/50 px-2 py-2">Recents</h3>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
-            <div className="animate-pulse text-stone-500 text-sm">Loading...</div>
+            <div className="animate-pulse text-white/40 text-sm">Loading...</div>
           </div>
         ) : sessions.length === 0 ? (
           <motion.div
@@ -247,11 +247,11 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center justify-center py-8 text-center px-4"
           >
-            <div className="w-12 h-12 rounded-2xl bg-stone-800/50 flex items-center justify-center mb-3">
-              <MessageSquare className="w-6 h-6 text-stone-600" />
+            <div className="w-12 h-12 rounded-2xl bg-white/[0.04] flex items-center justify-center mb-3">
+              <MessageSquare className="w-6 h-6 text-white/30" />
             </div>
-            <p className="text-sm text-stone-400">No tasks yet</p>
-            <p className="text-xs text-stone-600 mt-1">Create a new task to get started</p>
+            <p className="text-sm text-white/50">No tasks yet</p>
+            <p className="text-xs text-white/30 mt-1">Create a new task to get started</p>
           </motion.div>
         ) : (
           <div className="space-y-0.5">
@@ -274,7 +274,7 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         )}
 
         {/* Helper text */}
-        <p className="text-xs text-stone-600 px-2 py-4">
+        <p className="text-xs text-white/25 px-2 py-4">
           These tasks run locally and aren't synced across devices
         </p>
       </div>
@@ -284,43 +284,43 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         onClick={() => onNavigate('connectors')}
         className={cn(
           'flex items-center gap-3 px-4 py-3 mx-2 mb-2 rounded-xl',
-          'text-stone-400 hover:text-stone-200 hover:bg-stone-800/50',
+          'text-white/50 hover:text-white/80 hover:bg-white/[0.04]',
           'transition-all duration-150'
         )}
       >
         <Puzzle className="w-4 h-4" />
         <span className="text-sm font-medium">Plugins</span>
         {enabledMcpCount > 0 && (
-          <span className="ml-auto px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 text-xs font-medium">
+          <span className="ml-auto px-2 py-0.5 rounded-full bg-[#6B6EF0]/20 text-[#8B8EFF] text-xs font-medium">
             {enabledMcpCount}
           </span>
         )}
       </button>
 
       {/* Profile Section */}
-      <div className="p-3 border-t border-stone-800" ref={profileMenuRef}>
+      <div className="p-3 border-t border-white/[0.08]" ref={profileMenuRef}>
         <motion.button
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
           onClick={() => setProfileMenuOpen(!profileMenuOpen)}
           className={cn(
             'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-stone-800/50 transition-colors',
-            profileMenuOpen && 'bg-stone-800'
+            'hover:bg-white/[0.04] transition-colors',
+            profileMenuOpen && 'bg-white/[0.08]'
           )}
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-bold">N</span>
           </div>
           <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium text-stone-200 truncate">Naresh</div>
-            <div className="text-xs text-stone-500 truncate">
+            <div className="text-sm font-medium text-white/90 truncate">Naresh</div>
+            <div className="text-xs text-white/40 truncate">
               {apiKey ? 'API Connected' : 'Not configured'}
             </div>
           </div>
           <ChevronDown
             className={cn(
-              'w-4 h-4 text-stone-500 transition-transform',
+              'w-4 h-4 text-white/40 transition-transform',
               profileMenuOpen && 'rotate-180'
             )}
           />
@@ -373,8 +373,8 @@ function SessionItem({
         'group relative flex items-center rounded-xl',
         'transition-all duration-150',
         isActive
-          ? 'bg-stone-800/50 border-l-2 border-orange-500'
-          : 'hover:bg-stone-800/30'
+          ? 'bg-white/[0.06] border-l-2 border-[#6B6EF0]'
+          : 'hover:bg-white/[0.03]'
       )}
     >
       <button
@@ -382,13 +382,13 @@ function SessionItem({
         className={cn(
           'flex-1 flex items-center gap-2.5 px-3 py-2',
           'text-left text-sm truncate',
-          isActive ? 'text-stone-200' : 'text-stone-400 hover:text-stone-200'
+          isActive ? 'text-white/90' : 'text-white/50 hover:text-white/80'
         )}
       >
         <MessageSquare
           className={cn(
             'w-4 h-4 flex-shrink-0',
-            isActive ? 'text-orange-400' : 'text-stone-600'
+            isActive ? 'text-[#8B8EFF]' : 'text-white/30'
           )}
         />
         <span className="flex-1 truncate">{title}</span>
@@ -406,9 +406,9 @@ function SessionItem({
           className={cn(
             'p-1.5 rounded-lg',
             'opacity-0 group-hover:opacity-100',
-            'text-stone-500 hover:text-stone-300 hover:bg-stone-700',
+            'text-white/30 hover:text-white/70 hover:bg-white/[0.08]',
             'transition-all duration-150',
-            isMenuOpen && 'opacity-100 bg-stone-700 text-stone-300'
+            isMenuOpen && 'opacity-100 bg-white/[0.08] text-white/70'
           )}
         >
           <MoreHorizontal className="w-4 h-4" />
@@ -420,14 +420,14 @@ function SessionItem({
               initial={{ opacity: 0, scale: 0.95, y: -5 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: -5 }}
-              className="absolute right-0 top-full mt-1 z-50 w-32 py-1 bg-stone-800 rounded-lg border border-stone-700 shadow-xl"
+              className="absolute right-0 top-full mt-1 z-50 w-32 py-1 bg-[#1A1A1E] rounded-lg border border-white/[0.08] shadow-xl"
             >
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete();
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-stone-700/50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#FF5449] hover:bg-white/[0.04] transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
                 Delete
@@ -475,7 +475,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
       transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
         'absolute bottom-full mb-2 z-50',
-        'bg-stone-900 border border-stone-800',
+        'bg-[#151518] border border-white/[0.08]',
         'rounded-xl shadow-2xl shadow-black/40',
         'overflow-hidden',
         position === 'collapsed' ? 'left-0 w-72' : 'left-0 right-0'
@@ -484,16 +484,16 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
       <div className="p-3 space-y-3">
         {/* API Key Section */}
         <div>
-          <label className="text-xs text-stone-500 mb-1.5 block">API Key</label>
+          <label className="text-xs text-white/40 mb-1.5 block">API Key</label>
           <div className="flex items-center gap-2">
-            <div className="flex-1 px-3 py-2 bg-stone-950 rounded-lg text-sm text-stone-400 font-mono truncate border border-stone-800">
+            <div className="flex-1 px-3 py-2 bg-[#0D0D0F] rounded-lg text-sm text-white/50 font-mono truncate border border-white/[0.08]">
               {showApiKey && apiKey ? apiKey : maskedApiKey}
             </div>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               onClick={() => setShowApiKey(!showApiKey)}
-              className="p-2 rounded-lg hover:bg-stone-800 text-stone-500 hover:text-stone-300 transition-colors"
+              className="p-2 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-colors"
             >
               {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </motion.button>
@@ -510,9 +510,9 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
               placeholder="Enter new API key..."
               className={cn(
                 'w-full px-3 py-2.5 rounded-lg text-sm',
-                'bg-stone-950 border border-stone-800',
-                'text-stone-200 placeholder:text-stone-600',
-                'focus:outline-none focus:ring-2 focus:ring-orange-500/50'
+                'bg-[#0D0D0F] border border-white/[0.08]',
+                'text-white/90 placeholder:text-white/30',
+                'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50'
               )}
               autoFocus
             />
@@ -524,7 +524,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
                 disabled={!newApiKey.trim()}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm',
-                  'bg-orange-600 hover:bg-orange-500 text-white',
+                  'bg-[#6B6EF0] hover:bg-[#8B8EFF] text-white',
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
@@ -538,7 +538,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
                   setIsEditingKey(false);
                   setNewApiKey('');
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-stone-800 hover:bg-stone-700 text-stone-300"
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-white/[0.06] hover:bg-white/[0.10] text-white/70"
               >
                 <X className="w-3.5 h-3.5" />
                 Cancel
@@ -552,7 +552,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
             onClick={() => setIsEditingKey(true)}
             className={cn(
               'w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm',
-              'bg-stone-800 hover:bg-stone-700 text-stone-300',
+              'bg-white/[0.06] hover:bg-white/[0.10] text-white/70',
               'transition-colors'
             )}
           >
@@ -568,7 +568,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
           onClick={onOpenConnectors}
           className={cn(
             'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm',
-            'bg-stone-800 hover:bg-stone-700 text-stone-300',
+            'bg-white/[0.06] hover:bg-white/[0.10] text-white/70',
             'transition-colors'
           )}
         >
@@ -576,7 +576,7 @@ function ProfileMenu({ apiKey, onOpenConnectors, position }: ProfileMenuProps) {
             <Puzzle className="w-4 h-4" />
             Manage Connectors
           </span>
-          <ExternalLink className="w-3.5 h-3.5 text-stone-500" />
+          <ExternalLink className="w-3.5 h-3.5 text-white/40" />
         </motion.button>
       </div>
     </motion.div>

@@ -6,6 +6,7 @@ import { StreamingMessage } from './StreamingMessage';
 import { ToolExecutionCard } from './ToolExecutionCard';
 import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { Message, MessageContentPart } from '@gemini-cowork/shared';
 
 // Lazy load react-markdown for better bundle splitting
@@ -53,7 +54,7 @@ export function MessageList() {
   if (isLoadingMessages) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="animate-pulse text-gray-400">Loading messages...</div>
+        <div className="animate-pulse text-white/40">Loading messages...</div>
       </div>
     );
   }
@@ -71,9 +72,19 @@ export function MessageList() {
         onScroll={handleScroll}
       >
         <div className="max-w-3xl mx-auto py-4 px-4 space-y-6">
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          <AnimatePresence>
+            {messages.map((message, index) => (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+              >
+                <MessageBubble message={message} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
 
           {/* Streaming message */}
           {isStreaming && (
@@ -100,22 +111,27 @@ export function MessageList() {
       </div>
 
       {/* Scroll to bottom button */}
-      {showScrollButton && (
-        <button
-          onClick={scrollToBottom}
-          className={cn(
-            'absolute bottom-4 left-1/2 -translate-x-1/2',
-            'flex items-center gap-2 px-3 py-2 rounded-full',
-            'bg-gray-800 border border-gray-700',
-            'text-sm text-gray-300 hover:text-white',
-            'shadow-lg transition-all duration-200',
-            'hover:bg-gray-700'
-          )}
-        >
-          <ChevronDown className="w-4 h-4" />
-          <span>Scroll to bottom</span>
-        </button>
-      )}
+      <AnimatePresence>
+        {showScrollButton && (
+          <motion.button
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            onClick={scrollToBottom}
+            className={cn(
+              'absolute bottom-4 left-1/2 -translate-x-1/2',
+              'flex items-center gap-2 px-3 py-2 rounded-full',
+              'bg-[#1A1A1E] border border-white/[0.08]',
+              'text-sm text-white/70 hover:text-white',
+              'shadow-xl shadow-black/40 transition-all duration-200',
+              'hover:bg-[#242429]'
+            )}
+          >
+            <ChevronDown className="w-4 h-4" />
+            <span>Scroll to bottom</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -130,34 +146,64 @@ function EmptyState() {
 
   return (
     <div className="h-full flex flex-col items-center justify-center text-center px-4">
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mb-6 shadow-lg shadow-blue-500/20">
-        <Bot className="w-8 h-8 text-white" />
-      </div>
-      <h2 className="text-xl font-semibold text-white mb-2">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        className="relative"
+      >
+        {/* Glow effect */}
+        <div className="absolute inset-0 bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] rounded-2xl blur-xl opacity-30" />
+        <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6B6EF0] via-[#8A62C2] to-[#008585] flex items-center justify-center shadow-lg">
+          <Bot className="w-8 h-8 text-white" />
+        </div>
+      </motion.div>
+
+      <motion.h2
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1, duration: 0.4 }}
+        className="text-xl font-semibold text-white/90 mb-2 mt-6"
+      >
         Welcome to Gemini Cowork
-      </h2>
-      <p className="text-gray-400 max-w-md mb-8">
+      </motion.h2>
+
+      <motion.p
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15, duration: 0.4 }}
+        className="text-white/50 max-w-md mb-8"
+      >
         I'm your AI coding assistant. I can help you write code, debug issues,
         explain concepts, and much more.
-      </p>
+      </motion.p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2, duration: 0.4 }}
+        className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md"
+      >
         {suggestions.map((suggestion, index) => (
-          <button
+          <motion.button
             key={index}
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
             className={cn(
               'flex items-center gap-3 px-4 py-3 rounded-xl',
-              'bg-gray-800/50 border border-gray-700',
-              'text-left text-sm text-gray-300',
-              'hover:bg-gray-700/50 hover:border-gray-600',
+              'bg-white/[0.04] border border-white/[0.08]',
+              'text-left text-sm text-white/70',
+              'hover:bg-white/[0.08] hover:border-white/[0.12]',
               'transition-all duration-200'
             )}
           >
-            <suggestion.icon className="w-5 h-5 text-gray-400" />
+            <div className="w-8 h-8 rounded-lg bg-[#6B6EF0]/10 flex items-center justify-center">
+              <suggestion.icon className="w-4 h-4 text-[#8B8EFF]" />
+            </div>
             <span>{suggestion.text}</span>
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -188,7 +234,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
   if (isSystem) {
     return (
       <div className="flex justify-center">
-        <div className="px-4 py-2 rounded-lg bg-gray-800/30 border border-gray-700/50 text-xs text-gray-400 max-w-lg text-center">
+        <div className="px-4 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-white/40 max-w-lg text-center">
           {typeof message.content === 'string' ? message.content : 'System message'}
         </div>
       </div>
@@ -198,17 +244,19 @@ function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex gap-3 animate-in fade-in-0 slide-in-from-bottom-2 duration-300',
+        'flex gap-3',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
       {/* Avatar */}
-      <div
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
         className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
+          'flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center',
           isUser
-            ? 'bg-blue-600'
-            : 'bg-gradient-to-br from-gray-700 to-gray-900'
+            ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0]'
+            : 'bg-gradient-to-br from-[#6B6EF0] via-[#8A62C2] to-[#008585]'
         )}
       >
         {isUser ? (
@@ -216,21 +264,23 @@ function MessageBubble({ message }: MessageBubbleProps) {
         ) : (
           <Bot className="w-4 h-4 text-white" />
         )}
-      </div>
+      </motion.div>
 
       {/* Content */}
       <div className={cn('flex-1 min-w-0', isUser && 'flex justify-end')}>
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
           className={cn(
             'inline-block max-w-full rounded-2xl',
             isUser
-              ? 'bg-blue-600 text-white px-4 py-3'
-              : 'bg-gray-800/50 text-white'
+              ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0] text-white'
+              : 'bg-[#1A1A1E] border border-white/[0.08] text-white/90'
           )}
         >
           {typeof message.content === 'string' ? (
             isUser ? (
-              <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+              <div className="px-4 py-3 whitespace-pre-wrap text-[15px] leading-relaxed">{message.content}</div>
             ) : (
               <MarkdownContent content={message.content} />
             )
@@ -241,23 +291,29 @@ function MessageBubble({ message }: MessageBubbleProps) {
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* Actions */}
         {!isUser && (
-          <div className="flex items-center gap-2 mt-2 pl-1">
-            <button
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center gap-2 mt-2 pl-1"
+          >
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
               onClick={handleCopy}
-              className="p-1 rounded hover:bg-gray-700/50 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
               title="Copy message"
             >
               {copied ? (
-                <Check className="w-3.5 h-3.5 text-green-500" />
+                <Check className="w-3.5 h-3.5 text-[#50956A]" />
               ) : (
-                <Copy className="w-3.5 h-3.5 text-gray-400" />
+                <Copy className="w-3.5 h-3.5 text-white/30" />
               )}
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         )}
       </div>
     </div>
@@ -268,7 +324,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
 function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="px-4 py-3 prose prose-sm prose-invert max-w-none">
-      <Suspense fallback={<div className="text-sm">{content}</div>}>
+      <Suspense fallback={<div className="text-sm text-white/70">{content}</div>}>
         <ReactMarkdown
           components={{
             // Custom code block rendering with syntax highlighting
@@ -279,7 +335,7 @@ function MarkdownContent({ content }: { content: string }) {
               if (isInline) {
                 return (
                   <code
-                    className="px-1.5 py-0.5 bg-gray-700/50 rounded text-pink-400 text-[0.9em]"
+                    className="px-1.5 py-0.5 bg-[#6B6EF0]/10 rounded text-[#ABAEFF] text-[0.9em] border border-[#6B6EF0]/20"
                     {...props}
                   >
                     {children}
@@ -302,29 +358,29 @@ function MarkdownContent({ content }: { content: string }) {
             },
             // Style other elements
             p({ children }) {
-              return <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>;
+              return <p className="mb-3 last:mb-0 leading-relaxed text-white/80">{children}</p>;
             },
             ul({ children }) {
-              return <ul className="list-disc list-inside mb-3 space-y-1">{children}</ul>;
+              return <ul className="list-disc list-inside mb-3 space-y-1 text-white/80">{children}</ul>;
             },
             ol({ children }) {
-              return <ol className="list-decimal list-inside mb-3 space-y-1">{children}</ol>;
+              return <ol className="list-decimal list-inside mb-3 space-y-1 text-white/80">{children}</ol>;
             },
             li({ children }) {
-              return <li className="text-gray-200">{children}</li>;
+              return <li className="text-white/70">{children}</li>;
             },
             h1({ children }) {
-              return <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0">{children}</h1>;
+              return <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0 text-white/90">{children}</h1>;
             },
             h2({ children }) {
-              return <h2 className="text-lg font-bold mb-2 mt-4 first:mt-0">{children}</h2>;
+              return <h2 className="text-lg font-bold mb-2 mt-4 first:mt-0 text-white/90">{children}</h2>;
             },
             h3({ children }) {
-              return <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0">{children}</h3>;
+              return <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-white/90">{children}</h3>;
             },
             blockquote({ children }) {
               return (
-                <blockquote className="border-l-4 border-blue-500/50 pl-4 my-3 text-gray-300 italic">
+                <blockquote className="border-l-4 border-[#6B6EF0]/50 pl-4 my-3 text-white/60 italic bg-white/[0.02] py-2 pr-2 rounded-r-lg">
                   {children}
                 </blockquote>
               );
@@ -335,19 +391,19 @@ function MarkdownContent({ content }: { content: string }) {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 underline"
+                  className="text-[#8B8EFF] hover:text-[#ABAEFF] underline"
                 >
                   {children}
                 </a>
               );
             },
             hr() {
-              return <hr className="border-gray-700 my-4" />;
+              return <hr className="border-white/[0.08] my-4" />;
             },
             table({ children }) {
               return (
                 <div className="overflow-x-auto my-3">
-                  <table className="min-w-full border border-gray-700 rounded-lg overflow-hidden">
+                  <table className="min-w-full border border-white/[0.08] rounded-lg overflow-hidden">
                     {children}
                   </table>
                 </div>
@@ -355,14 +411,14 @@ function MarkdownContent({ content }: { content: string }) {
             },
             th({ children }) {
               return (
-                <th className="px-3 py-2 bg-gray-800 text-left text-sm font-medium text-gray-300 border-b border-gray-700">
+                <th className="px-3 py-2 bg-white/[0.04] text-left text-sm font-medium text-white/80 border-b border-white/[0.08]">
                   {children}
                 </th>
               );
             },
             td({ children }) {
               return (
-                <td className="px-3 py-2 text-sm text-gray-300 border-b border-gray-700/50">
+                <td className="px-3 py-2 text-sm text-white/70 border-b border-white/[0.06]">
                   {children}
                 </td>
               );
@@ -413,7 +469,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     case 'text':
       if (isUser) {
         return (
-          <div className="px-4 py-3 whitespace-pre-wrap text-sm">
+          <div className="px-4 py-3 whitespace-pre-wrap text-[15px] leading-relaxed">
             {part.text}
           </div>
         );
@@ -426,7 +482,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
           <img
             src={`data:${part.mimeType};base64,${part.data}`}
             alt="Attached image"
-            className="max-w-full rounded-lg max-h-80 object-contain"
+            className="max-w-full rounded-xl max-h-80 object-contain border border-white/[0.08]"
           />
         </div>
       );
@@ -439,7 +495,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
               id: part.toolCallId || `tool-${Date.now()}`,
               name: part.toolName,
               args: part.args as Record<string, unknown>,
-              status: 'success', // Tool calls in messages are already completed
+              status: 'success',
               startedAt: Date.now(),
             }}
           />

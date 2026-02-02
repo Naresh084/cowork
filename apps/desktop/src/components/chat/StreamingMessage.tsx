@@ -1,7 +1,7 @@
-import { Bot } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { TypingIndicator } from '../icons/StatusIndicator';
 import type { ToolExecution } from '../../stores/chat-store';
+import { motion } from 'framer-motion';
 
 interface StreamingMessageProps {
   content: string;
@@ -10,10 +10,15 @@ interface StreamingMessageProps {
 
 export function StreamingMessage({ content, currentTool }: StreamingMessageProps) {
   return (
-    <div className="flex gap-3 animate-in fade-in-0 duration-300">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+      className="flex gap-3"
+    >
       {/* Avatar */}
-      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
-        <Bot className="w-4 h-4 text-white" />
+      <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center">
+        <Sparkles className="w-4 h-4 text-white" />
       </div>
 
       {/* Content */}
@@ -21,13 +26,13 @@ export function StreamingMessage({ content, currentTool }: StreamingMessageProps
         <div
           className={cn(
             'inline-block max-w-full rounded-2xl px-4 py-3',
-            'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
+            'bg-[#1A1A1E] border border-white/[0.08]'
           )}
         >
           {/* Text content */}
           {content && (
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <pre className="whitespace-pre-wrap font-sans text-sm">
+            <div className="prose prose-sm prose-invert max-w-none">
+              <pre className="whitespace-pre-wrap font-sans text-sm text-white/80">
                 {content}
               </pre>
             </div>
@@ -38,11 +43,11 @@ export function StreamingMessage({ content, currentTool }: StreamingMessageProps
             <div
               className={cn(
                 'flex items-center gap-2 mt-2 px-3 py-2 rounded-lg',
-                'bg-gray-200/50 dark:bg-gray-700/50',
-                'text-sm text-gray-600 dark:text-gray-300'
+                'bg-[#6B6EF0]/10',
+                'text-sm text-white/70'
               )}
             >
-              <div className="animate-spin h-4 w-4 border-2 border-gray-400 border-t-transparent rounded-full" />
+              <div className="animate-spin h-4 w-4 border-2 border-[#6B6EF0] border-t-transparent rounded-full" />
               <span>
                 {currentTool.status === 'running'
                   ? `Running ${currentTool.name}...`
@@ -53,10 +58,26 @@ export function StreamingMessage({ content, currentTool }: StreamingMessageProps
 
           {/* Typing indicator when no content yet */}
           {!content && !currentTool && (
-            <TypingIndicator className="text-gray-400" />
+            <div className="flex items-center gap-1">
+              <motion.span
+                animate={{ y: [0, -4, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, delay: 0 }}
+                className="w-2 h-2 rounded-full bg-[#6B6EF0]"
+              />
+              <motion.span
+                animate={{ y: [0, -4, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, delay: 0.15 }}
+                className="w-2 h-2 rounded-full bg-[#8A62C2]"
+              />
+              <motion.span
+                animate={{ y: [0, -4, 0] }}
+                transition={{ duration: 0.6, repeat: Infinity, delay: 0.3 }}
+                className="w-2 h-2 rounded-full bg-[#008585]"
+              />
+            </div>
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -2,17 +2,18 @@ import { forwardRef, type HTMLAttributes, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'outlined' | 'elevated' | 'ghost';
+  variant?: 'default' | 'outlined' | 'elevated' | 'ghost' | 'glass';
   padding?: 'none' | 'sm' | 'md' | 'lg';
   hoverable?: boolean;
   selected?: boolean;
 }
 
 const variantStyles = {
-  default: 'bg-gray-800/50 border border-gray-700/50',
-  outlined: 'bg-transparent border border-gray-700',
-  elevated: 'bg-gray-800/80 border border-gray-700/50 shadow-lg shadow-black/20',
+  default: 'bg-[#1A1A1E] border border-white/[0.06]',
+  outlined: 'bg-transparent border border-white/[0.08]',
+  elevated: 'bg-[#1A1A1E] border border-white/[0.06] shadow-lg shadow-black/20',
   ghost: 'bg-transparent border border-transparent',
+  glass: 'bg-white/[0.03] backdrop-blur-xl border border-white/[0.08]',
 };
 
 const paddingStyles = {
@@ -39,11 +40,11 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
       <div
         ref={ref}
         className={cn(
-          'rounded-lg transition-all',
+          'rounded-xl transition-all duration-200',
           variantStyles[variant],
           paddingStyles[padding],
-          hoverable && 'hover:bg-gray-700/50 hover:border-gray-600 cursor-pointer',
-          selected && 'border-blue-500/50 bg-blue-500/10',
+          hoverable && 'hover:bg-[#222228] hover:border-white/[0.10] cursor-pointer',
+          selected && 'border-[#6B6EF0]/50 bg-[#6B6EF0]/10',
           className
         )}
         {...props}
@@ -79,7 +80,7 @@ export function CardTitle({
 }: HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn('text-base font-semibold text-white', className)}
+      className={cn('text-base font-semibold text-white/90', className)}
       {...props}
     >
       {children}
@@ -94,7 +95,7 @@ export function CardDescription({
 }: HTMLAttributes<HTMLParagraphElement>) {
   return (
     <p
-      className={cn('text-sm text-gray-400 mt-1', className)}
+      className={cn('text-sm text-white/50 mt-1', className)}
       {...props}
     >
       {children}
@@ -122,7 +123,7 @@ export function CardFooter({
   return (
     <div
       className={cn(
-        'mt-4 pt-4 border-t border-gray-700/50',
+        'mt-4 pt-4 border-t border-white/[0.06]',
         'flex items-center gap-3',
         className
       )}

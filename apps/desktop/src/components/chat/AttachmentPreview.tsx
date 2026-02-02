@@ -2,6 +2,7 @@ import { X, Image as ImageIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Attachment } from '../../stores/chat-store';
 import { FileTypeIcon } from '../icons/FileTypeIcon';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface AttachmentPreviewProps {
   attachments: Attachment[];
@@ -18,13 +19,22 @@ export function AttachmentPreview({
 
   return (
     <div className={cn('flex flex-wrap gap-2', className)}>
-      {attachments.map((attachment, index) => (
-        <AttachmentItem
-          key={`${attachment.name}-${index}`}
-          attachment={attachment}
-          onRemove={() => onRemove(index)}
-        />
-      ))}
+      <AnimatePresence>
+        {attachments.map((attachment, index) => (
+          <motion.div
+            key={`${attachment.name}-${index}`}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: 0.15 }}
+          >
+            <AttachmentItem
+              attachment={attachment}
+              onRemove={() => onRemove(index)}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -41,9 +51,10 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
     <div
       className={cn(
         'relative group flex items-center gap-2',
-        'px-3 py-2 rounded-lg',
-        'bg-gray-100 dark:bg-gray-800/50',
-        'border border-gray-200 dark:border-gray-700'
+        'px-3 py-2 rounded-xl',
+        'bg-white/[0.04]',
+        'border border-white/[0.08]',
+        'hover:border-white/[0.12]'
       )}
     >
       {/* Preview or icon */}
@@ -51,39 +62,41 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
         <img
           src={`data:${attachment.mimeType};base64,${attachment.data}`}
           alt={attachment.name}
-          className="w-8 h-8 object-cover rounded"
+          className="w-8 h-8 object-cover rounded-lg"
         />
       ) : (
         <FileTypeIcon filename={attachment.name} size={20} />
       )}
 
       {/* Name */}
-      <span className="text-sm text-gray-700 dark:text-gray-300 max-w-[150px] truncate">
+      <span className="text-sm text-white/70 max-w-[150px] truncate">
         {attachment.name}
       </span>
 
       {/* Size */}
       {attachment.size && (
-        <span className="text-xs text-gray-500">
+        <span className="text-xs text-white/40">
           {formatFileSize(attachment.size)}
         </span>
       )}
 
       {/* Remove button */}
-      <button
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
         type="button"
         onClick={onRemove}
         className={cn(
           'absolute -top-1.5 -right-1.5',
           'w-5 h-5 rounded-full',
-          'bg-gray-600 hover:bg-gray-700',
+          'bg-white/[0.1] hover:bg-[#FF5449]',
           'flex items-center justify-center',
           'opacity-0 group-hover:opacity-100',
-          'transition-opacity duration-200'
+          'transition-all duration-200'
         )}
       >
         <X className="w-3 h-3 text-white" />
-      </button>
+      </motion.button>
     </div>
   );
 }
@@ -103,21 +116,24 @@ export function DropZone({ isDragging, className }: DropZoneProps) {
   if (!isDragging) return null;
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       className={cn(
         'absolute inset-0 z-50',
         'flex flex-col items-center justify-center',
-        'bg-blue-500/10 backdrop-blur-sm',
-        'border-2 border-dashed border-blue-500',
+        'bg-[#6B6EF0]/10 backdrop-blur-sm',
+        'border-2 border-dashed border-[#6B6EF0]',
         'rounded-2xl',
         className
       )}
     >
-      <div className="p-4 rounded-full bg-blue-500/20 mb-4">
-        <ImageIcon className="w-8 h-8 text-blue-500" />
+      <div className="p-4 rounded-full bg-[#6B6EF0]/20 mb-4">
+        <ImageIcon className="w-8 h-8 text-[#8B8EFF]" />
       </div>
-      <p className="text-lg font-medium text-blue-500">Drop files here</p>
-      <p className="text-sm text-blue-400 mt-1">Images, documents, and more</p>
-    </div>
+      <p className="text-lg font-medium text-[#8B8EFF]">Drop files here</p>
+      <p className="text-sm text-white/50 mt-1">Images, documents, and more</p>
+    </motion.div>
   );
 }

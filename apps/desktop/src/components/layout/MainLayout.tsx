@@ -14,7 +14,7 @@ export type MainView = 'chat' | 'connectors';
 
 export function MainLayout() {
   const [currentView, setCurrentView] = useState<MainView>('chat');
-  const { sidebarCollapsed, toggleSidebar, toggleRightPanel } = useSettingsStore();
+  const { sidebarCollapsed } = useSettingsStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
 
   const handlePreviewArtifact = (artifact: Artifact) => {
@@ -22,12 +22,9 @@ export function MainLayout() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-stone-950 overflow-hidden">
-      {/* Title Bar */}
-      <TitleBar
-        onToggleSidebar={toggleSidebar}
-        onToggleRightPanel={toggleRightPanel}
-      />
+    <div className="h-screen w-screen flex flex-col bg-[#0D0D0F] overflow-hidden">
+      {/* Title Bar - minimal drag area for macOS */}
+      <TitleBar />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">

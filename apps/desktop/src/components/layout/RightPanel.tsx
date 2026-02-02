@@ -74,21 +74,23 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.2 }}
-        className="flex flex-col h-full w-12 bg-stone-950 border-l border-stone-800"
+        className="flex flex-col h-full w-12 bg-[#0D0D0F] border-l border-white/[0.08]"
       >
         {/* Expand button */}
-        <div className="flex items-center justify-center py-2 border-b border-stone-800">
-          <button
+        <div className="flex items-center justify-center py-2 border-b border-white/[0.08]">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
             onClick={toggleRightPanel}
             className={cn(
               'p-1.5 rounded-lg',
-              'text-stone-500 hover:text-stone-300 hover:bg-stone-800',
+              'text-white/40 hover:text-white/80 hover:bg-white/[0.06]',
               'transition-colors'
             )}
             title="Expand panel"
           >
             <ChevronLeft className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
 
         {/* Section icons */}
@@ -143,7 +145,7 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.2 }}
-      className="relative h-full flex flex-col bg-stone-950 border-l border-stone-800"
+      className="relative h-full flex flex-col bg-[#0D0D0F] border-l border-white/[0.08]"
       style={{ width }}
     >
       {/* Resize handle */}
@@ -151,26 +153,28 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
         className={cn(
           'absolute left-0 top-0 bottom-0 w-1 z-10',
           'cursor-col-resize',
-          'hover:bg-orange-500/50',
-          isResizing && 'bg-orange-500'
+          'hover:bg-[#6B6EF0]/50',
+          isResizing && 'bg-[#6B6EF0]'
         )}
         onMouseDown={() => setIsResizing(true)}
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-stone-800">
-        <span className="text-sm font-medium text-stone-400">Panel</span>
-        <button
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08]">
+        <span className="text-sm font-medium text-white/50">Panel</span>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
           onClick={toggleRightPanel}
           className={cn(
             'p-1 rounded-lg',
-            'text-stone-500 hover:text-stone-300 hover:bg-stone-800',
+            'text-white/40 hover:text-white/80 hover:bg-white/[0.06]',
             'transition-colors'
           )}
           title="Collapse panel"
         >
           <ChevronLeft className="w-4 h-4 rotate-180" />
-        </button>
+        </motion.button>
       </div>
 
       {/* Sections */}
@@ -200,22 +204,24 @@ function CollapsedSectionButton({
   title,
 }: CollapsedSectionButtonProps) {
   return (
-    <button
+    <motion.button
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
       onClick={onClick}
       className={cn(
-        'relative p-2 rounded-lg transition-colors',
+        'relative p-2 rounded-xl transition-colors',
         isExpanded
-          ? 'bg-stone-800 text-stone-300'
-          : 'text-stone-500 hover:text-stone-300 hover:bg-stone-800/50'
+          ? 'bg-[#6B6EF0]/20 text-[#8B8EFF]'
+          : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
       )}
       title={title}
     >
       <Icon className="w-4 h-4" />
       {badge !== undefined && badge > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-orange-500 text-white text-[10px] font-medium flex items-center justify-center">
+        <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#6B6EF0] text-white text-[10px] font-medium flex items-center justify-center">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
-    </button>
+    </motion.button>
   );
 }

@@ -18,6 +18,7 @@ import {
 import { cn } from '../../lib/utils';
 import { CodeBlock } from './CodeBlock';
 import type { ToolExecution } from '../../stores/chat-store';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Tool type icons
 const TOOL_ICONS: Record<string, typeof Terminal> = {
@@ -98,16 +99,18 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
   const primaryArg = getPrimaryArg(execution.name, execution.args);
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 5 }}
+      animate={{ opacity: 1, y: 0 }}
       className={cn(
         'rounded-xl border overflow-hidden transition-all duration-200',
         execution.status === 'running'
-          ? 'bg-blue-500/5 border-blue-500/20'
+          ? 'bg-[#6B6EF0]/5 border-[#6B6EF0]/20'
           : execution.status === 'error'
-            ? 'bg-red-500/5 border-red-500/20'
+            ? 'bg-[#FF5449]/5 border-[#FF5449]/20'
             : execution.status === 'success'
-              ? 'bg-green-500/5 border-green-500/20'
-              : 'bg-gray-800/30 border-gray-700/50',
+              ? 'bg-[#50956A]/5 border-[#50956A]/20'
+              : 'bg-white/[0.02] border-white/[0.06]',
         className
       )}
     >
@@ -119,14 +122,14 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
         {/* Icon */}
         <div
           className={cn(
-            'p-2 rounded-lg flex-shrink-0',
+            'p-2 rounded-xl flex-shrink-0',
             execution.status === 'running'
-              ? 'bg-blue-500/20'
+              ? 'bg-[#6B6EF0]/20'
               : execution.status === 'error'
-                ? 'bg-red-500/20'
+                ? 'bg-[#FF5449]/20'
                 : execution.status === 'success'
-                  ? 'bg-green-500/20'
-                  : 'bg-gray-700/50'
+                  ? 'bg-[#50956A]/20'
+                  : 'bg-white/[0.06]'
           )}
         >
           <Icon className={cn('w-4 h-4', statusConfig.color)} />
@@ -135,11 +138,11 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-white">{displayName}</span>
+            <span className="text-sm font-medium text-white/90">{displayName}</span>
             <StatusBadge status={execution.status} />
           </div>
           {primaryArg && (
-            <p className="text-xs text-gray-500 font-mono truncate mt-0.5">
+            <p className="text-xs text-white/40 font-mono truncate mt-0.5">
               {primaryArg}
             </p>
           )}
@@ -148,96 +151,106 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
         {/* Meta */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {duration && (
-            <span className="flex items-center gap-1 text-xs text-gray-500">
+            <span className="flex items-center gap-1 text-xs text-white/30">
               <Clock className="w-3 h-3" />
               {duration}
             </span>
           )}
           {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-500" />
+            <ChevronDown className="w-4 h-4 text-white/30" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-500" />
+            <ChevronRight className="w-4 h-4 text-white/30" />
           )}
         </div>
       </button>
 
       {/* Expanded content */}
-      {isExpanded && (
-        <div className="border-t border-gray-700/30 p-3 space-y-3">
-          {/* Arguments */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-                Arguments
-              </span>
-              <button
-                onClick={handleCopyArgs}
-                className={cn(
-                  'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
-                  'transition-colors',
-                  copiedArgs
-                    ? 'text-green-400'
-                    : 'text-gray-500 hover:text-gray-300'
-                )}
-              >
-                {copiedArgs ? (
-                  <Check className="w-3 h-3" />
-                ) : (
-                  <Copy className="w-3 h-3" />
-                )}
-              </button>
-            </div>
-            <CodeBlock
-              code={JSON.stringify(execution.args, null, 2)}
-              language="json"
-              showLineNumbers={false}
-              maxHeight={200}
-            />
-          </div>
-
-          {/* Result */}
-          {(execution.result !== undefined || execution.error) && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-                  {execution.error ? 'Error' : 'Result'}
-                </span>
-                {!execution.error && execution.result !== undefined && (
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="border-t border-white/[0.06] overflow-hidden"
+          >
+            <div className="p-3 space-y-3">
+              {/* Arguments */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-white/40 uppercase tracking-wide">
+                    Arguments
+                  </span>
                   <button
-                    onClick={handleCopyResult}
+                    onClick={handleCopyArgs}
                     className={cn(
                       'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
                       'transition-colors',
-                      copiedResult
-                        ? 'text-green-400'
-                        : 'text-gray-500 hover:text-gray-300'
+                      copiedArgs
+                        ? 'text-[#50956A]'
+                        : 'text-white/30 hover:text-white/60'
                     )}
                   >
-                    {copiedResult ? (
+                    {copiedArgs ? (
                       <Check className="w-3 h-3" />
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
                   </button>
-                )}
-              </div>
-              {execution.error ? (
-                <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 font-mono whitespace-pre-wrap">
-                  {execution.error}
                 </div>
-              ) : (
                 <CodeBlock
-                  code={formatResult(execution.result)}
-                  language={getResultLanguage(execution.result)}
+                  code={JSON.stringify(execution.args, null, 2)}
+                  language="json"
                   showLineNumbers={false}
-                  maxHeight={300}
+                  maxHeight={200}
                 />
+              </div>
+
+              {/* Result */}
+              {(execution.result !== undefined || execution.error) && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-white/40 uppercase tracking-wide">
+                      {execution.error ? 'Error' : 'Result'}
+                    </span>
+                    {!execution.error && execution.result !== undefined && (
+                      <button
+                        onClick={handleCopyResult}
+                        className={cn(
+                          'flex items-center gap-1 px-1.5 py-0.5 rounded text-xs',
+                          'transition-colors',
+                          copiedResult
+                            ? 'text-[#50956A]'
+                            : 'text-white/30 hover:text-white/60'
+                        )}
+                      >
+                        {copiedResult ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  {execution.error ? (
+                    <div className="px-3 py-2 rounded-lg bg-[#FF5449]/10 border border-[#FF5449]/20 text-sm text-[#FF5449] font-mono whitespace-pre-wrap">
+                      {execution.error}
+                    </div>
+                  ) : (
+                    <CodeBlock
+                      code={formatResult(execution.result)}
+                      language={getResultLanguage(execution.result)}
+                      showLineNumbers={false}
+                      maxHeight={300}
+                    />
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-      )}
-    </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
@@ -256,29 +269,29 @@ export function ToolExecutionInline({ execution, className }: ToolExecutionInlin
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg',
-        'bg-gray-800/50 border border-gray-700/50',
+        'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl',
+        'bg-white/[0.04] border border-white/[0.08]',
         className
       )}
     >
-      <div className={cn('p-1 rounded', statusConfig.bgColor)}>
+      <div className={cn('p-1 rounded-lg', statusConfig.bgColor)}>
         {execution.status === 'running' ? (
           <Loader2 className={cn('w-3.5 h-3.5 animate-spin', statusConfig.color)} />
         ) : (
           <Icon className={cn('w-3.5 h-3.5', statusConfig.color)} />
         )}
       </div>
-      <span className="text-sm text-white">{displayName}</span>
+      <span className="text-sm text-white/90">{displayName}</span>
       {primaryArg && (
-        <span className="text-xs text-gray-500 font-mono truncate max-w-[200px]">
+        <span className="text-xs text-white/40 font-mono truncate max-w-[200px]">
           {primaryArg}
         </span>
       )}
       {execution.status === 'success' && (
-        <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+        <CheckCircle2 className="w-3.5 h-3.5 text-[#50956A]" />
       )}
       {execution.status === 'error' && (
-        <XCircle className="w-3.5 h-3.5 text-red-400" />
+        <XCircle className="w-3.5 h-3.5 text-[#FF5449]" />
       )}
     </div>
   );
@@ -309,14 +322,14 @@ function StatusBadge({ status }: { status: ToolExecution['status'] }) {
 function getStatusConfig(status: ToolExecution['status']) {
   switch (status) {
     case 'running':
-      return { color: 'text-blue-400', bgColor: 'bg-blue-500/10', label: 'Running' };
+      return { color: 'text-[#8B8EFF]', bgColor: 'bg-[#6B6EF0]/10', label: 'Running' };
     case 'success':
-      return { color: 'text-green-400', bgColor: 'bg-green-500/10', label: 'Success' };
+      return { color: 'text-[#50956A]', bgColor: 'bg-[#50956A]/10', label: 'Success' };
     case 'error':
-      return { color: 'text-red-400', bgColor: 'bg-red-500/10', label: 'Error' };
+      return { color: 'text-[#FF5449]', bgColor: 'bg-[#FF5449]/10', label: 'Error' };
     case 'pending':
     default:
-      return { color: 'text-gray-400', bgColor: 'bg-gray-500/10', label: 'Pending' };
+      return { color: 'text-white/40', bgColor: 'bg-white/[0.06]', label: 'Pending' };
   }
 }
 

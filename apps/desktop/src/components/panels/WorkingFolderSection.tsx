@@ -35,7 +35,7 @@ export function WorkingFolderSection() {
   const actions = (
     <button
       onClick={handleOpenFolder}
-      className="p-1 rounded hover:bg-stone-700 text-stone-500 hover:text-stone-300 transition-colors"
+      className="p-1 rounded hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-colors"
       title="Open in file manager"
     >
       <ExternalLink className="w-3.5 h-3.5" />
@@ -65,11 +65,11 @@ export function WorkingFolderSection() {
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-6 text-center">
-      <div className="w-10 h-10 rounded-xl bg-stone-800/50 flex items-center justify-center mb-2">
-        <FolderOpen className="w-5 h-5 text-stone-600" />
+      <div className="w-10 h-10 rounded-xl bg-white/[0.04] flex items-center justify-center mb-2">
+        <FolderOpen className="w-5 h-5 text-white/30" />
       </div>
-      <p className="text-xs text-stone-500">No files modified</p>
-      <p className="text-xs text-stone-600 mt-0.5">
+      <p className="text-xs text-white/40">No files modified</p>
+      <p className="text-xs text-white/25 mt-0.5">
         Files will appear as the agent works
       </p>
     </div>
@@ -121,7 +121,7 @@ function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
       onClick={onSelect}
       className={cn(
         'w-full flex items-center gap-2 px-2 py-1.5 rounded-lg',
-        'hover:bg-stone-800 transition-colors',
+        'hover:bg-white/[0.04] transition-colors',
         'text-left group',
         artifact.type === 'deleted' && 'opacity-50'
       )}
@@ -137,8 +137,8 @@ function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
       {/* Filename */}
       <span
         className={cn(
-          'text-sm text-stone-300 truncate flex-1',
-          artifact.type === 'deleted' && 'line-through text-stone-500'
+          'text-sm text-white/80 truncate flex-1',
+          artifact.type === 'deleted' && 'line-through text-white/40'
         )}
         title={artifact.path}
       >
@@ -210,39 +210,39 @@ function getIconColor(extension: string): string {
   switch (extension) {
     case 'ts':
     case 'tsx':
-      return 'text-blue-400';
+      return 'text-[#3B82F6]';
     case 'js':
     case 'jsx':
-      return 'text-yellow-400';
+      return 'text-[#F5C400]';
     case 'py':
-      return 'text-green-400';
+      return 'text-[#50956A]';
     case 'go':
-      return 'text-cyan-400';
+      return 'text-[#00A1A3]';
     case 'rs':
-      return 'text-orange-400';
+      return 'text-[#FF5449]';
     case 'json':
-      return 'text-yellow-500';
+      return 'text-[#F5C400]';
     case 'md':
-      return 'text-stone-400';
+      return 'text-white/50';
     case 'css':
     case 'scss':
-      return 'text-pink-400';
+      return 'text-[#EC4899]';
     case 'html':
-      return 'text-orange-500';
+      return 'text-[#FF5449]';
     default:
-      return 'text-stone-400';
+      return 'text-white/50';
   }
 }
 
 function getTypeIndicator(type: Artifact['type']): { color: string; label: string } {
   switch (type) {
     case 'created':
-      return { color: 'bg-green-500', label: 'Created' };
+      return { color: 'bg-[#50956A]', label: 'Created' };
     case 'modified':
-      return { color: 'bg-blue-500', label: 'Modified' };
+      return { color: 'bg-[#6B6EF0]', label: 'Modified' };
     case 'deleted':
-      return { color: 'bg-red-500', label: 'Deleted' };
+      return { color: 'bg-[#FF5449]', label: 'Deleted' };
     default:
-      return { color: 'bg-stone-500', label: 'Unknown' };
+      return { color: 'bg-white/30', label: 'Unknown' };
   }
 }

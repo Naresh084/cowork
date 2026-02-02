@@ -220,12 +220,12 @@ export function PreviewPanel({
 
   if (!file) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center px-4 bg-gray-900/50">
-        <div className="w-16 h-16 rounded-full bg-gray-800/50 flex items-center justify-center mb-4">
-          <Eye className="w-8 h-8 text-gray-500" />
+      <div className="h-full flex flex-col items-center justify-center text-center px-4 bg-[#0D0D0F]/50">
+        <div className="w-16 h-16 rounded-full bg-white/[0.04] flex items-center justify-center mb-4">
+          <Eye className="w-8 h-8 text-white/30" />
         </div>
-        <p className="text-sm font-medium text-gray-400 mb-1">No file selected</p>
-        <p className="text-xs text-gray-500">Select a file to preview its contents</p>
+        <p className="text-sm font-medium text-white/50 mb-1">No file selected</p>
+        <p className="text-xs text-white/30">Select a file to preview its contents</p>
       </div>
     );
   }
@@ -233,16 +233,16 @@ export function PreviewPanel({
   return (
     <div
       className={cn(
-        'h-full flex flex-col bg-gray-900',
+        'h-full flex flex-col bg-[#0D0D0F]',
         isFullscreen && 'fixed inset-0 z-50'
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 bg-gray-800/50">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.08] bg-[#151518]/50">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <FileIcon className="w-4 h-4 text-gray-400 flex-shrink-0" />
-          <span className="text-sm font-medium text-white truncate">{file.name}</span>
-          <span className="text-xs text-gray-500 px-1.5 py-0.5 bg-gray-700/50 rounded">
+          <FileIcon className="w-4 h-4 text-white/50 flex-shrink-0" />
+          <span className="text-sm font-medium text-white/90 truncate">{file.name}</span>
+          <span className="text-xs text-white/40 px-1.5 py-0.5 bg-white/[0.06] rounded">
             {fileType}
           </span>
         </div>
@@ -250,7 +250,7 @@ export function PreviewPanel({
           {onToggleFullscreen && (
             <button
               onClick={onToggleFullscreen}
-              className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+              className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
               title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             >
               {isFullscreen ? (
@@ -262,7 +262,7 @@ export function PreviewPanel({
           )}
           <button
             onClick={onClose}
-            className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+            className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
             title="Close preview"
           >
             <X className="w-4 h-4" />
@@ -284,8 +284,8 @@ function PreviewLoading() {
   return (
     <div className="h-full flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm text-gray-400">Loading preview...</p>
+        <div className="w-8 h-8 border-2 border-[#6B6EF0] border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-white/40">Loading preview...</p>
       </div>
     </div>
   );
@@ -342,40 +342,40 @@ function ImagePreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
-      <div className="flex items-center justify-center gap-2 px-3 py-2 border-b border-gray-700/30 bg-gray-800/30">
+      <div className="flex items-center justify-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <button
           onClick={handleZoomOut}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
           title="Zoom out"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
-        <span className="text-xs text-gray-400 min-w-[4rem] text-center">{zoom}%</span>
+        <span className="text-xs text-white/40 min-w-[4rem] text-center">{zoom}%</span>
         <button
           onClick={handleZoomIn}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
           title="Zoom in"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
-        <div className="w-px h-4 bg-gray-700 mx-1" />
+        <div className="w-px h-4 bg-white/[0.08] mx-1" />
         <button
           onClick={handleRotate}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
           title="Rotate"
         >
           <RotateCw className="w-4 h-4" />
         </button>
         <button
           onClick={handleReset}
-          className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="px-2 py-1 rounded text-xs text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
         >
           Reset
         </button>
       </div>
 
       {/* Image container */}
-      <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#1a1a1a]">
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4 bg-[#0a0a0a]">
         <img
           src={src}
           alt={file.name}
@@ -417,11 +417,11 @@ function AudioPreview({ file }: { file: PreviewFile }) {
   const audioSrc = file.url || file.path || '';
 
   return (
-    <div className="h-full flex flex-col items-center justify-center p-8 bg-gradient-to-b from-gray-800 to-gray-900">
-      <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center mb-6 shadow-lg shadow-purple-500/20">
+    <div className="h-full flex flex-col items-center justify-center p-8 bg-gradient-to-b from-[#1A1A1E] to-[#0D0D0F]">
+      <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center mb-6 shadow-lg shadow-[#6B6EF0]/20">
         <FileAudio className="w-16 h-16 text-white" />
       </div>
-      <p className="text-lg font-medium text-white mb-6">{file.name}</p>
+      <p className="text-lg font-medium text-white/90 mb-6">{file.name}</p>
       <audio
         src={audioSrc}
         controls
@@ -450,51 +450,51 @@ function PDFPreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
-      <div className="flex items-center justify-center gap-2 px-3 py-2 border-b border-gray-700/30 bg-gray-800/30">
+      <div className="flex items-center justify-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <button
           onClick={goToPrevPage}
           disabled={currentPage <= 1}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <span className="text-xs text-gray-400 min-w-[6rem] text-center">
+        <span className="text-xs text-white/40 min-w-[6rem] text-center">
           Page {currentPage} of {numPages}
         </span>
         <button
           onClick={goToNextPage}
           disabled={currentPage >= numPages}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
-        <div className="w-px h-4 bg-gray-700 mx-1" />
+        <div className="w-px h-4 bg-white/[0.08] mx-1" />
         <button
           onClick={() => setScale((s) => Math.max(0.5, s - 0.25))}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
         >
           <ZoomOut className="w-4 h-4" />
         </button>
-        <span className="text-xs text-gray-400 min-w-[3rem] text-center">
+        <span className="text-xs text-white/40 min-w-[3rem] text-center">
           {Math.round(scale * 100)}%
         </span>
         <button
           onClick={() => setScale((s) => Math.min(3, s + 0.25))}
-          className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700/50 transition-colors"
+          className="p-1.5 rounded text-white/40 hover:text-white/80 hover:bg-white/[0.06] transition-colors"
         >
           <ZoomIn className="w-4 h-4" />
         </button>
       </div>
 
       {/* PDF container */}
-      <div className="flex-1 overflow-auto flex justify-center p-4 bg-gray-800">
+      <div className="flex-1 overflow-auto flex justify-center p-4 bg-[#1A1A1E]">
         <Suspense fallback={<PreviewLoading />}>
           <PDFDocument
             file={src}
             onLoadSuccess={onDocumentLoadSuccess}
             loading={<PreviewLoading />}
             error={
-              <div className="text-red-400 text-sm">Failed to load PDF</div>
+              <div className="text-[#FF5449] text-sm">Failed to load PDF</div>
             }
           >
             <PDFPage
@@ -562,7 +562,7 @@ function SpreadsheetPreview({ file }: { file: PreviewFile }) {
   if (error) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-red-400 text-sm">{error}</div>
+        <div className="text-[#FF5449] text-sm">{error}</div>
       </div>
     );
   }
@@ -570,7 +570,7 @@ function SpreadsheetPreview({ file }: { file: PreviewFile }) {
   if (data.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-gray-400 text-sm">No data to display</div>
+        <div className="text-white/40 text-sm">No data to display</div>
       </div>
     );
   }
@@ -578,15 +578,15 @@ function SpreadsheetPreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full overflow-auto">
       <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 bg-gray-800 z-10">
+        <thead className="sticky top-0 z-10">
           <tr>
-            <th className="px-3 py-2 text-left text-xs font-medium text-gray-400 border-b border-gray-700 bg-gray-800/90">
+            <th className="px-3 py-2 text-left text-xs font-medium text-white/40 border-b border-white/[0.08] bg-[#1A1A1E]/95">
               #
             </th>
             {data[0]?.map((header, i) => (
               <th
                 key={i}
-                className="px-3 py-2 text-left text-xs font-medium text-gray-300 border-b border-gray-700 bg-gray-800/90"
+                className="px-3 py-2 text-left text-xs font-medium text-white/70 border-b border-white/[0.08] bg-[#1A1A1E]/95"
               >
                 {header || `Column ${i + 1}`}
               </th>
@@ -597,15 +597,15 @@ function SpreadsheetPreview({ file }: { file: PreviewFile }) {
           {data.slice(1).map((row, rowIndex) => (
             <tr
               key={rowIndex}
-              className="hover:bg-gray-800/50 transition-colors"
+              className="hover:bg-white/[0.02] transition-colors"
             >
-              <td className="px-3 py-2 text-xs text-gray-500 border-b border-gray-700/50">
+              <td className="px-3 py-2 text-xs text-white/30 border-b border-white/[0.04]">
                 {rowIndex + 1}
               </td>
               {row.map((cell, cellIndex) => (
                 <td
                   key={cellIndex}
-                  className="px-3 py-2 text-sm text-gray-300 border-b border-gray-700/50"
+                  className="px-3 py-2 text-sm text-white/70 border-b border-white/[0.04]"
                 >
                   {cell}
                 </td>
@@ -637,7 +637,7 @@ function MarkdownPreview({ file }: { file: PreviewFile }) {
                 if (isInline) {
                   return (
                     <code
-                      className="px-1.5 py-0.5 bg-gray-800 rounded text-pink-400"
+                      className="px-1.5 py-0.5 bg-white/[0.06] rounded text-[#EC4899]"
                       {...props}
                     >
                       {children}
@@ -673,14 +673,14 @@ function HTMLPreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-700/30 bg-gray-800/30">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <button
           onClick={() => setViewMode('preview')}
           className={cn(
             'px-3 py-1 rounded text-xs font-medium transition-colors',
             viewMode === 'preview'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              ? 'bg-[#6B6EF0] text-white'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
           )}
         >
           Preview
@@ -690,8 +690,8 @@ function HTMLPreview({ file }: { file: PreviewFile }) {
           className={cn(
             'px-3 py-1 rounded text-xs font-medium transition-colors',
             viewMode === 'source'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              ? 'bg-[#6B6EF0] text-white'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
           )}
         >
           Source
@@ -736,15 +736,15 @@ function CodePreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full flex flex-col">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/30 bg-gray-800/30">
-        <span className="text-xs text-gray-400">{language}</span>
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+        <span className="text-xs text-white/40">{language}</span>
         <button
           onClick={handleCopy}
           className={cn(
             'flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors',
             copied
-              ? 'text-green-400'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              ? 'text-[#50956A]'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
           )}
         >
           {copied ? (
@@ -777,7 +777,7 @@ function TextPreview({ file }: { file: PreviewFile }) {
 
   return (
     <div className="h-full overflow-auto p-4">
-      <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">
+      <pre className="text-sm text-white/70 whitespace-pre-wrap font-mono">
         {content}
       </pre>
     </div>
@@ -805,7 +805,7 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
   if (error) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="text-red-400 text-sm">{error}</div>
+        <div className="text-[#FF5449] text-sm">{error}</div>
       </div>
     );
   }
@@ -818,10 +818,10 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
   // In production, this would use @xpert-ai/a2ui-react to render the actual components
   return (
     <div className="h-full flex flex-col">
-      <div className="px-3 py-2 border-b border-gray-700/30 bg-gray-800/30">
+      <div className="px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <div className="flex items-center gap-2">
-          <Eye className="w-4 h-4 text-blue-400" />
-          <span className="text-xs text-gray-400">A2UI Component Preview</span>
+          <Eye className="w-4 h-4 text-[#6B6EF0]" />
+          <span className="text-xs text-white/40">A2UI Component Preview</span>
         </div>
       </div>
       <div className="flex-1 overflow-auto">
@@ -841,18 +841,18 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
 function UnknownPreview({ file }: { file: PreviewFile }) {
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
-      <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mb-4">
-        <File className="w-10 h-10 text-gray-500" />
+      <div className="w-20 h-20 rounded-full bg-white/[0.04] flex items-center justify-center mb-4">
+        <File className="w-10 h-10 text-white/30" />
       </div>
-      <p className="text-lg font-medium text-white mb-2">{file.name}</p>
-      <p className="text-sm text-gray-400 mb-6">
+      <p className="text-lg font-medium text-white/90 mb-2">{file.name}</p>
+      <p className="text-sm text-white/50 mb-6">
         This file type cannot be previewed
       </p>
       {(file.url || file.path) && (
         <a
           href={file.url || file.path}
           download={file.name}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#6B6EF0] text-white text-sm font-medium hover:bg-[#8B8EFF] transition-colors"
         >
           <Download className="w-4 h-4" />
           Download File
@@ -898,7 +898,7 @@ export function PreviewModal({ file, isOpen, onClose }: PreviewModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div
         className={cn(
-          'bg-gray-900 rounded-xl shadow-2xl overflow-hidden',
+          'bg-[#0D0D0F] rounded-xl shadow-2xl overflow-hidden',
           isFullscreen ? 'w-full h-full' : 'w-[90vw] h-[85vh] max-w-6xl'
         )}
       >

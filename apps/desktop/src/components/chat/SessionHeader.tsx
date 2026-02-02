@@ -80,14 +80,14 @@ export function SessionHeader() {
 
   if (!activeSession) {
     return (
-      <div className="flex items-center px-4 py-3 border-b border-stone-800">
-        <span className="text-stone-400 text-base">No active session</span>
+      <div className="flex items-center px-4 py-3 border-b border-white/[0.08]">
+        <span className="text-white/50 text-base">No active session</span>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-stone-800">
+    <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] bg-[#0D0D0F]/50">
       <div className="relative" ref={menuRef}>
         {isEditing ? (
           <div className="flex items-center gap-2">
@@ -99,10 +99,11 @@ export function SessionHeader() {
               onKeyDown={handleKeyDown}
               onBlur={handleSaveTitle}
               className={cn(
-                'px-2 py-1 rounded-lg text-base font-medium',
-                'bg-stone-800 border border-stone-700',
-                'text-stone-200 placeholder:text-stone-500',
-                'focus:outline-none focus:ring-2 focus:ring-orange-500/50'
+                'px-3 py-1.5 rounded-xl text-base font-medium',
+                'bg-[#151518] border border-white/[0.08]',
+                'text-white/90 placeholder:text-white/30',
+                'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50',
+                'transition-all'
               )}
             />
           </div>
@@ -112,16 +113,16 @@ export function SessionHeader() {
             whileTap={{ scale: 0.99 }}
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className={cn(
-              'flex items-center gap-2 px-2 py-1 -mx-2 rounded-lg',
-              'hover:bg-stone-800/50 transition-colors'
+              'flex items-center gap-2 px-2 py-1 -mx-2 rounded-xl',
+              'hover:bg-white/[0.06] transition-colors'
             )}
           >
-            <span className="text-stone-200 font-medium text-base">
+            <span className="text-white/90 font-medium text-base">
               {sessionTitle}
             </span>
             <ChevronDown
               className={cn(
-                'w-4 h-4 text-stone-500 transition-transform',
+                'w-4 h-4 text-white/40 transition-transform',
                 isMenuOpen && 'rotate-180'
               )}
             />
@@ -138,13 +139,13 @@ export function SessionHeader() {
               transition={{ duration: 0.15 }}
               className={cn(
                 'absolute left-0 top-full mt-1 z-50',
-                'w-48 py-1 bg-stone-900 rounded-lg',
-                'border border-stone-800 shadow-xl shadow-black/30'
+                'w-48 py-1 bg-[#1A1A1E] rounded-xl',
+                'border border-white/[0.08] shadow-2xl shadow-black/40'
               )}
             >
               <button
                 onClick={handleStartEdit}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-stone-300 hover:bg-stone-800/50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors"
               >
                 <Edit2 className="w-4 h-4" />
                 Rename
@@ -154,15 +155,15 @@ export function SessionHeader() {
                   // TODO: Implement share functionality
                   setIsMenuOpen(false);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-stone-300 hover:bg-stone-800/50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors"
               >
                 <Share2 className="w-4 h-4" />
                 Share
               </button>
-              <div className="my-1 border-t border-stone-800" />
+              <div className="my-1 border-t border-white/[0.08]" />
               <button
                 onClick={handleDelete}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-400 hover:bg-stone-800/50 transition-colors"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#FF5449] hover:bg-[#FF5449]/10 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
                 Delete

@@ -34,6 +34,7 @@ interface SessionActions {
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => void;
   setActiveSession: (sessionId: string | null) => void;
   clearError: () => void;
 }
@@ -151,6 +152,14 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           });
           throw error;
         }
+      },
+
+      updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => {
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, workingDirectory } : s
+          ),
+        }));
       },
 
       setActiveSession: (sessionId: string | null) => {
