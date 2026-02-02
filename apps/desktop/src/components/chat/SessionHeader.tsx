@@ -3,6 +3,7 @@ import { ChevronDown, Edit2, Trash2, Share2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore } from '../../stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '../ui/Toast';
 
 export function SessionHeader() {
   const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
@@ -13,7 +14,22 @@ export function SessionHeader() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const sessionTitle = activeSession?.title || 'New task';
+
+  // Helper functions
+  const truncate = (str: string, len: number) =>
+    str.length > len ? str.slice(0, len) + '...' : str;
+
+  const formatRelativeDate = (ts: number | undefined) => {
+    if (!ts) return '';
+    const days = Math.floor((Date.now() - ts) / 86400000);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Yesterday';
+    if (days < 7) return `${days} days ago`;
+    return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  const sessionTitle = activeSession?.title ||
+    (activeSession?.firstMessage ? truncate(activeSession.firstMessage, 40) : 'New conversation');
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -48,7 +64,8 @@ export function SessionHeader() {
       try {
         await updateSessionTitle(activeSessionId, editTitle.trim());
       } catch (error) {
-        console.error('Failed to update session title:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        toast.error('Failed to update session title', errorMessage);
       }
     }
     setIsEditing(false);
@@ -72,8 +89,41 @@ export function SessionHeader() {
       try {
         await deleteSession(activeSessionId);
       } catch (error) {
-        console.error('Failed to delete session:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        toast.error('Failed to delete session', errorMessage);
       }
+    }
+    setIsMenuOpen(false);
+  };
+
+  const handleShare = async () => {
+    if (!activeSession) {
+      setIsMenuOpen(false);
+      return;
+    }
+
+    try {
+      // Create a shareable session summary
+      const sessionInfo = {
+        title: activeSession.title,
+        id: activeSession.id,
+        workingDirectory: activeSession.workingDirectory || 'Not set',
+        model: activeSession.model || 'Default',
+        createdAt: activeSession.createdAt
+          ? new Date(activeSession.createdAt).toLocaleString()
+          : 'Unknown',
+      };
+
+      const shareText = `Session: ${sessionInfo.title}
+Working Directory: ${sessionInfo.workingDirectory}
+Model: ${sessionInfo.model}
+Created: ${sessionInfo.createdAt}`;
+
+      await navigator.clipboard.writeText(shareText);
+      toast.success('Copied to clipboard', 'Session info has been copied');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to copy', errorMessage);
     }
     setIsMenuOpen(false);
   };
@@ -108,25 +158,32 @@ export function SessionHeader() {
             />
           </div>
         ) : (
-          <motion.button
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.99 }}
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className={cn(
-              'flex items-center gap-2 px-2 py-1 -mx-2 rounded-xl',
-              'hover:bg-white/[0.06] transition-colors'
-            )}
-          >
-            <span className="text-white/90 font-medium text-base">
-              {sessionTitle}
-            </span>
-            <ChevronDown
+          <div className="flex flex-col">
+            <motion.button
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
               className={cn(
-                'w-4 h-4 text-white/40 transition-transform',
-                isMenuOpen && 'rotate-180'
+                'flex items-center gap-2 px-2 py-1 -mx-2 rounded-xl',
+                'hover:bg-white/[0.06] transition-colors'
               )}
-            />
-          </motion.button>
+            >
+              <span className="text-white/90 font-medium text-base">
+                {sessionTitle}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'w-4 h-4 text-white/40 transition-transform',
+                  isMenuOpen && 'rotate-180'
+                )}
+              />
+            </motion.button>
+            <div className="flex items-center gap-2 text-xs text-white/40 px-2 -mt-0.5">
+              <span>{activeSession?.model || 'gemini-3-flash-preview'}</span>
+              <span>•</span>
+              <span>{formatRelativeDate(activeSession?.createdAt)}</span>
+            </div>
+          </div>
         )}
 
         {/* Dropdown Menu */}
@@ -151,14 +208,11 @@ export function SessionHeader() {
                 Rename
               </button>
               <button
-                onClick={() => {
-                  // TODO: Implement share functionality
-                  setIsMenuOpen(false);
-                }}
+                onClick={handleShare}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:bg-white/[0.06] hover:text-white transition-colors"
               >
                 <Share2 className="w-4 h-4" />
-                Share
+                Copy Session Info
               </button>
               <div className="my-1 border-t border-white/[0.08]" />
               <button

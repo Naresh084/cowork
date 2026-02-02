@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KeyRound, ArrowRight, Loader2, ExternalLink, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 export function Onboarding() {
   const [apiKey, setApiKey] = useState('');
@@ -17,15 +18,28 @@ export function Onboarding() {
     setIsValidating(true);
 
     try {
-      // Try to validate, but don't block if validation fails
-      const isValid = await validateApiKey(apiKey).catch(() => false);
-      if (!isValid) {
-        console.warn('API key validation failed, saving anyway');
+      // Validate API key format first
+      if (!apiKey.startsWith('AI') || apiKey.length < 30) {
+        setError('Invalid API key format. Key should start with "AI" and be at least 30 characters.');
+        setIsValidating(false);
+        return;
       }
 
+      // Validate with the Gemini API
+      const isValid = await validateApiKey(apiKey).catch(() => false);
+      if (!isValid) {
+        setError('Invalid API key. Please check your key and try again.');
+        setIsValidating(false);
+        return;
+      }
+
+      // Only save if validation succeeded
       await saveApiKey(apiKey);
+
+      // Fetch available models from Google API
+      const { fetchModels } = useSettingsStore.getState();
+      fetchModels(apiKey).catch(console.error); // Non-blocking, don't wait
     } catch (err) {
-      console.error('API key error:', err);
       const message = err instanceof Error ? err.message : String(err);
       setError(`Failed to save: ${message}`);
     } finally {

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Copy, Check, FileCode, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { createHighlighter, type Highlighter, type BundledLanguage } from 'shiki';
+import { toast } from '../ui/Toast';
 
 // Language display names
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -190,7 +191,7 @@ export function CodeBlock({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (error) {
-      console.error('Failed to copy code:', error);
+      toast.error('Failed to copy code');
     }
   };
 
@@ -207,7 +208,7 @@ export function CodeBlock({
       {/* Header */}
       <div
         className={cn(
-          'flex items-center justify-between px-3 py-2',
+          'flex items-center justify-between px-2 py-1.5',
           'bg-white/[0.02] border-b border-white/[0.08]'
         )}
       >
@@ -274,14 +275,14 @@ export function CodeBlock({
           style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
         >
           {isLoading ? (
-            <div className="p-4 flex items-center gap-2 text-white/40">
-              <div className="w-4 h-4 border-2 border-white/20 border-t-[#6B6EF0] rounded-full animate-spin" />
-              <span className="text-sm">Loading...</span>
+            <div className="p-3 flex items-center gap-2 text-white/40">
+              <div className="w-3 h-3 border-2 border-white/20 border-t-[#6B6EF0] rounded-full animate-spin" />
+              <span className="text-xs">Loading...</span>
             </div>
           ) : (
             <div
               className={cn(
-                'shiki-code-block p-4 text-sm',
+                'shiki-code-block p-3 text-xs',
                 showLineNumbers && 'show-line-numbers'
               )}
               dangerouslySetInnerHTML={{ __html: highlightedHtml }}

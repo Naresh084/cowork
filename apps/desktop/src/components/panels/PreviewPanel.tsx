@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { CodeBlock } from '../chat/CodeBlock';
+import { toast } from '../ui/Toast';
 
 // Lazy load heavy components
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -729,7 +730,7 @@ function CodePreview({ file }: { file: PreviewFile }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      toast.error('Failed to copy to clipboard');
     }
   };
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { readFile, writeFile, mkdir, readdir, stat, unlink } from 'fs/promises';
-import { join, dirname, resolve, isAbsolute } from 'path';
+import { readFile, writeFile, mkdir, readdir, stat, unlink, realpath } from 'fs/promises';
+import { join, dirname, resolve, isAbsolute, normalize } from 'path';
 import type { ToolHandler, ToolContext, ToolResult } from '../types.js';
 import type { PermissionRequest } from '@gemini-cowork/shared';
 
@@ -13,9 +13,72 @@ import type { PermissionRequest } from '@gemini-cowork/shared';
  */
 function resolvePath(path: string, cwd: string): string {
   if (isAbsolute(path)) {
-    return path;
+    return normalize(path);
   }
-  return resolve(cwd, path);
+  return normalize(resolve(cwd, path));
+}
+
+/**
+ * Validate that a path is within the allowed working directory.
+ * Prevents path traversal attacks (e.g., ../../etc/passwd)
+ */
+function validatePathSecurity(absolutePath: string, workingDirectory: string): { valid: boolean; error?: string } {
+  const normalizedPath = normalize(absolutePath);
+  const normalizedWorkDir = normalize(workingDirectory);
+
+  // Check for path traversal attempts
+  if (normalizedPath.includes('..')) {
+    // After normalization, '..' should be resolved, but check the relative path
+    const relativePath = normalizedPath.replace(normalizedWorkDir, '');
+    if (relativePath.includes('..')) {
+      return { valid: false, error: 'Path traversal detected: cannot access paths outside working directory' };
+    }
+  }
+
+  // Ensure the path starts with the working directory
+  if (!normalizedPath.startsWith(normalizedWorkDir)) {
+    return { valid: false, error: `Access denied: path must be within working directory (${workingDirectory})` };
+  }
+
+  // Block access to sensitive system directories
+  const blockedPaths = ['/etc', '/System', '/usr', '/var', '/bin', '/sbin', '/private', '/Library'];
+  for (const blocked of blockedPaths) {
+    if (normalizedPath.startsWith(blocked)) {
+      return { valid: false, error: `Access denied: cannot access system directory (${blocked})` };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate path and check for symlink escapes.
+ * Returns the real path after resolving symlinks.
+ */
+async function validateAndResolvePath(path: string, workingDirectory: string): Promise<{ path: string; error?: string }> {
+  const absolutePath = resolvePath(path, workingDirectory);
+
+  // First validation: check the requested path
+  const pathCheck = validatePathSecurity(absolutePath, workingDirectory);
+  if (!pathCheck.valid) {
+    return { path: absolutePath, error: pathCheck.error };
+  }
+
+  try {
+    // Resolve symlinks to get the real path
+    const realPath = await realpath(absolutePath);
+
+    // Second validation: check the resolved real path (prevents symlink escape)
+    const realPathCheck = validatePathSecurity(realPath, workingDirectory);
+    if (!realPathCheck.valid) {
+      return { path: absolutePath, error: 'Symlink escape detected: target is outside working directory' };
+    }
+
+    return { path: realPath };
+  } catch {
+    // File doesn't exist yet, use the normalized absolute path
+    return { path: absolutePath };
+  }
 }
 
 /**
@@ -39,10 +102,15 @@ export const readFileTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path } = args as { path: string };
-    const absolutePath = resolvePath(path, context.workingDirectory);
+
+    // Validate path security
+    const { path: validatedPath, error: validationError } = await validateAndResolvePath(path, context.workingDirectory);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
 
     try {
-      const content = await readFile(absolutePath, 'utf-8');
+      const content = await readFile(validatedPath, 'utf-8');
       return {
         success: true,
         data: content,
@@ -78,7 +146,13 @@ export const writeFileTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path, content } = args as { path: string; content: string };
+
+    // Validate path security (use resolvePath for non-existent files)
     const absolutePath = resolvePath(path, context.workingDirectory);
+    const validationCheck = validatePathSecurity(absolutePath, context.workingDirectory);
+    if (!validationCheck.valid) {
+      return { success: false, error: validationCheck.error };
+    }
 
     try {
       // Ensure directory exists
@@ -118,10 +192,15 @@ export const listDirectoryTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path } = args as { path: string };
-    const absolutePath = resolvePath(path, context.workingDirectory);
+
+    // Validate path security
+    const { path: validatedPath, error: validationError } = await validateAndResolvePath(path, context.workingDirectory);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
 
     try {
-      const entries = await readdir(absolutePath, { withFileTypes: true });
+      const entries = await readdir(validatedPath, { withFileTypes: true });
       const results = entries.map((entry) => ({
         name: entry.name,
         type: entry.isDirectory() ? 'directory' : 'file',
@@ -161,10 +240,15 @@ export const getFileInfoTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path } = args as { path: string };
-    const absolutePath = resolvePath(path, context.workingDirectory);
+
+    // Validate path security
+    const { path: validatedPath, error: validationError } = await validateAndResolvePath(path, context.workingDirectory);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
 
     try {
-      const stats = await stat(absolutePath);
+      const stats = await stat(validatedPath);
       return {
         success: true,
         data: {
@@ -206,7 +290,13 @@ export const createDirectoryTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path } = args as { path: string };
+
+    // Validate path security (use resolvePath for non-existent directories)
     const absolutePath = resolvePath(path, context.workingDirectory);
+    const validationCheck = validatePathSecurity(absolutePath, context.workingDirectory);
+    if (!validationCheck.valid) {
+      return { success: false, error: validationCheck.error };
+    }
 
     try {
       await mkdir(absolutePath, { recursive: true });
@@ -244,10 +334,15 @@ export const deleteFileTool: ToolHandler = {
 
   execute: async (args, context: ToolContext): Promise<ToolResult> => {
     const { path } = args as { path: string };
-    const absolutePath = resolvePath(path, context.workingDirectory);
+
+    // Validate path security
+    const { path: validatedPath, error: validationError } = await validateAndResolvePath(path, context.workingDirectory);
+    if (validationError) {
+      return { success: false, error: validationError };
+    }
 
     try {
-      await unlink(absolutePath);
+      await unlink(validatedPath);
       return {
         success: true,
         data: `Successfully deleted: ${path}`,

@@ -1,8 +1,9 @@
 import { CoworkAgent, createAgent, FILE_TOOLS, SHELL_TOOLS } from '@gemini-cowork/core';
-import { GeminiProvider } from '@gemini-cowork/providers';
+import { GeminiProvider, getModelContextWindow } from '@gemini-cowork/providers';
 import type { Message, PermissionRequest, PermissionDecision } from '@gemini-cowork/shared';
 import { generateId } from '@gemini-cowork/shared';
 import { eventEmitter } from './event-emitter.js';
+import { TODO_TOOLS, getSessionTasks } from './tools/index.js';
 import type {
   SessionInfo,
   SessionDetails,
@@ -10,6 +11,7 @@ import type {
   Task,
   Artifact,
   ExtendedPermissionRequest,
+  QuestionRequest,
 } from './types.js';
 
 // ============================================================================
@@ -28,6 +30,10 @@ interface ActiveSession {
   pendingPermissions: Map<string, {
     request: ExtendedPermissionRequest;
     resolve: (decision: PermissionDecision) => void;
+  }>;
+  pendingQuestions: Map<string, {
+    request: QuestionRequest;
+    resolve: (answer: string | string[]) => void;
   }>;
   createdAt: number;
   updatedAt: number;
@@ -62,19 +68,24 @@ export class AgentRunner {
    */
   async createSession(
     workingDirectory: string,
-    model: string = 'gemini-3.0-flash-preview',
+    model?: string | null,
     title?: string
   ): Promise<SessionInfo> {
     if (!this.provider) {
       throw new Error('Provider not initialized. Set API key first.');
     }
 
+    // Use provided model or fall back to default
+    // This handles both undefined and null cases (null comes from Rust's Option::None)
+    const actualModel = model || 'gemini-3-flash-preview';
+
     const sessionId = generateId('sess');
     const now = Date.now();
 
-    // Tools for this session
+    // Tools for this session - includes file, shell, and todo tools
     const fileTools = FILE_TOOLS;
     const shellTools = SHELL_TOOLS;
+    const todoTools = TODO_TOOLS;
 
     // Create permission handler that emits events and waits for response
     const permissionHandler = async (
@@ -108,12 +119,12 @@ export class AgentRunner {
     // Create agent
     const agent = createAgent({
       config: {
-        model,
+        model: actualModel,
         maxIterations: 20,
         systemPrompt: this.buildSystemPrompt(workingDirectory),
       },
       provider: this.provider,
-      tools: [...fileTools, ...shellTools],
+      tools: [...fileTools, ...shellTools, ...todoTools],
       permissionHandler,
       workingDirectory,
       sessionId,
@@ -123,13 +134,14 @@ export class AgentRunner {
     const session: ActiveSession = {
       id: sessionId,
       workingDirectory,
-      model,
+      model: actualModel,
       title: title || null,
       agent,
       messages: [],
       tasks: [],
       artifacts: [],
       pendingPermissions: new Map(),
+      pendingQuestions: new Map(),
       createdAt: now,
       updatedAt: now,
     };
@@ -142,8 +154,9 @@ export class AgentRunner {
     const sessionInfo: SessionInfo = {
       id: sessionId,
       title: session.title,
+      firstMessage: null,
       workingDirectory,
-      model,
+      model: actualModel,
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
@@ -235,8 +248,36 @@ export class AgentRunner {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      eventEmitter.error(sessionId, errorMessage);
+
+      // Determine error code based on error message
+      let errorCode = 'AGENT_ERROR';
+      if (
+        errorMessage.includes('401') ||
+        errorMessage.toLowerCase().includes('api key') ||
+        errorMessage.toLowerCase().includes('authentication') ||
+        errorMessage.toLowerCase().includes('unauthorized') ||
+        errorMessage.toLowerCase().includes('invalid key')
+      ) {
+        errorCode = 'INVALID_API_KEY';
+      } else if (
+        errorMessage.includes('429') ||
+        errorMessage.toLowerCase().includes('rate limit')
+      ) {
+        errorCode = 'RATE_LIMIT';
+      } else if (
+        errorMessage.includes('500') ||
+        errorMessage.includes('503') ||
+        errorMessage.toLowerCase().includes('service unavailable')
+      ) {
+        errorCode = 'SERVICE_ERROR';
+      }
+
+      eventEmitter.error(sessionId, errorMessage, errorCode);
       throw error;
+    } finally {
+      // CRITICAL: Force flush all pending events before returning
+      // This ensures events are not lost due to buffering when the function exits
+      eventEmitter.flushSync();
     }
   }
 
@@ -279,18 +320,94 @@ export class AgentRunner {
   }
 
   /**
+   * Ask a question to the user and wait for response.
+   * This is used by tools that need user input.
+   */
+  async askQuestion(
+    sessionId: string,
+    question: string,
+    options?: { label: string; description?: string }[],
+    multiSelect?: boolean,
+    header?: string
+  ): Promise<string | string[]> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const questionId = generateId('q');
+
+    const questionRequest: QuestionRequest = {
+      id: questionId,
+      question,
+      options,
+      multiSelect,
+      header,
+      timestamp: Date.now(),
+    };
+
+    return new Promise((resolve) => {
+      // Store pending question
+      session.pendingQuestions.set(questionId, {
+        request: questionRequest,
+        resolve,
+      });
+
+      // Emit question event
+      eventEmitter.questionAsk(sessionId, questionRequest);
+    });
+  }
+
+  /**
+   * Respond to a question from the agent.
+   */
+  respondToQuestion(
+    sessionId: string,
+    questionId: string,
+    answer: string | string[]
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const pending = session.pendingQuestions.get(questionId);
+    if (!pending) {
+      throw new Error(`Question not found: ${questionId}`);
+    }
+
+    // Resolve the promise with the answer
+    pending.resolve(answer);
+    session.pendingQuestions.delete(questionId);
+
+    // Emit answered event
+    eventEmitter.questionAnswered(sessionId, questionId, answer);
+  }
+
+  /**
    * Get all sessions.
    */
   listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map(session => ({
-      id: session.id,
-      title: session.title,
-      workingDirectory: session.workingDirectory,
-      model: session.model,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      messageCount: session.messages.length,
-    }));
+    return Array.from(this.sessions.values()).map(session => {
+      // Extract first user message content for preview
+      const firstUserMsg = session.messages.find(m => m.role === 'user');
+      const firstMessage = firstUserMsg
+        ? (typeof firstUserMsg.content === 'string'
+            ? firstUserMsg.content.slice(0, 100)
+            : this.extractTextContent(firstUserMsg)?.slice(0, 100) || null)
+        : null;
+
+      return {
+        id: session.id,
+        title: session.title,
+        firstMessage,
+        workingDirectory: session.workingDirectory,
+        model: session.model,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        messageCount: session.messages.length,
+      };
+    });
   }
 
   /**
@@ -333,11 +450,86 @@ export class AgentRunner {
   }
 
   /**
+   * Update session title.
+   */
+  updateSessionTitle(sessionId: string, title: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    session.title = title;
+    session.updatedAt = Date.now();
+
+    // Emit session updated event
+    const firstUserMsg = session.messages.find(m => m.role === 'user');
+    const firstMessage = firstUserMsg
+      ? (typeof firstUserMsg.content === 'string'
+          ? firstUserMsg.content.slice(0, 100)
+          : this.extractTextContent(firstUserMsg)?.slice(0, 100) || null)
+      : null;
+
+    const sessionInfo: SessionInfo = {
+      id: session.id,
+      title: session.title,
+      firstMessage,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+    };
+    eventEmitter.sessionUpdated(sessionInfo);
+  }
+
+  /**
+   * Update session working directory.
+   */
+  updateSessionWorkingDirectory(sessionId: string, workingDirectory: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    session.workingDirectory = workingDirectory;
+    session.updatedAt = Date.now();
+
+    // Update the agent's system prompt with new working directory
+    // Note: The agent will use this for future tool operations
+
+    // Emit session updated event
+    const firstUserMsgWd = session.messages.find(m => m.role === 'user');
+    const firstMessageWd = firstUserMsgWd
+      ? (typeof firstUserMsgWd.content === 'string'
+          ? firstUserMsgWd.content.slice(0, 100)
+          : this.extractTextContent(firstUserMsgWd)?.slice(0, 100) || null)
+      : null;
+
+    const sessionInfo: SessionInfo = {
+      id: session.id,
+      title: session.title,
+      firstMessage: firstMessageWd,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+    };
+    eventEmitter.sessionUpdated(sessionInfo);
+  }
+
+  /**
    * Get tasks for a session.
+   * Tasks can come from either the session state or the todo tools module.
    */
   getTasks(sessionId: string): Task[] {
+    // First check session state
     const session = this.sessions.get(sessionId);
-    return session?.tasks || [];
+    if (session?.tasks && session.tasks.length > 0) {
+      return session.tasks;
+    }
+    // Fall back to todo tools storage
+    return getSessionTasks(sessionId);
   }
 
   /**
@@ -346,6 +538,29 @@ export class AgentRunner {
   getArtifacts(sessionId: string): Artifact[] {
     const session = this.sessions.get(sessionId);
     return session?.artifacts || [];
+  }
+
+  /**
+   * Get context usage for a session.
+   * Uses the model's actual context window from the API.
+   */
+  getContextUsage(sessionId: string): { used: number; total: number; percentage: number } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      const defaultContext = getModelContextWindow('gemini-3-flash-preview');
+      return { used: 0, total: defaultContext.input, percentage: 0 };
+    }
+
+    const used = this.estimateTokens(session.messages);
+    // Get context window from model configuration
+    const contextWindow = getModelContextWindow(session.model);
+    const total = contextWindow.input;
+
+    return {
+      used,
+      total,
+      percentage: Math.round((used / total) * 100),
+    };
   }
 
   // ============================================================================
@@ -357,21 +572,48 @@ export class AgentRunner {
 
 Working Directory: ${workingDirectory}
 
-You have access to file and shell tools to help the user. Use them when needed to:
-- Read, write, and modify files
-- Execute shell commands
-- List directory contents
+## Planning & Task Tracking
+For complex tasks, use write_todos to break down work into manageable steps:
+- Mark tasks as 'pending', 'in_progress', or 'completed'
+- Update todos as you progress through multi-step work
+- Use read_todos to check current task state
+- The UI will show task progress in real-time
 
-Always explain what you're doing and ask for confirmation before making significant changes.
-Be concise but thorough in your responses.`;
+Example usage:
+\`\`\`
+write_todos([
+  { status: 'in_progress', content: 'Analyze codebase structure' },
+  { status: 'pending', content: 'Implement new feature' },
+  { status: 'pending', content: 'Write tests' }
+])
+\`\`\`
+
+## File Operations
+You have access to file and shell tools:
+- read_file: Read file contents before editing
+- write_file: Create new files
+- list_directory: Browse directory contents
+- Use exact old_string matches when editing
+
+## Shell Commands
+- execute_command: Run shell commands
+- analyze_command: Check command safety before execution
+
+## Best Practices
+- Explain what you're doing before taking action
+- Ask for confirmation before destructive operations
+- Track progress with todos for multi-step tasks
+- Read files before modifying to understand current content
+- Be concise but thorough in your responses`;
   }
 
   private subscribeToAgentEvents(session: ActiveSession): void {
     // Subscribe to relevant events for task/artifact tracking
     session.agent.on('agent:iteration', () => {
-      // Update context usage estimate
+      // Update context usage estimate using model's actual context window
       const tokenEstimate = this.estimateTokens(session.messages);
-      eventEmitter.contextUpdate(session.id, tokenEstimate, 128000);
+      const contextWindow = getModelContextWindow(session.model);
+      eventEmitter.contextUpdate(session.id, tokenEstimate, contextWindow.input);
     });
   }
 

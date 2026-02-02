@@ -137,10 +137,11 @@ const initialState: SettingsState = {
   showLineNumbers: true,
   autoSave: true,
 
-  // Model - Using Gemini 3.0 models only
-  selectedModel: 'gemini-3.0-flash-preview',
+  // Model - Using Gemini 3 Flash Preview as default
+  // Token limits from: https://ai.google.dev/gemini-api/docs/models
+  selectedModel: 'gemini-3-flash-preview',
   temperature: 0.7,
-  maxOutputTokens: 8192,
+  maxOutputTokens: 65536, // Updated to match Gemini 3.0 output limit
   availableModels: [],
   modelsLoading: false,
 
@@ -405,6 +406,31 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         scratchpadContent: state.scratchpadContent,
         rightPanelSections: state.rightPanelSections,
       }),
+      // Validate persisted state on rehydration
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<SettingsState> | undefined;
+
+        // Ensure selectedModel is valid (not empty, null, or undefined)
+        let validModel = persisted?.selectedModel && typeof persisted.selectedModel === 'string' && persisted.selectedModel.trim()
+          ? persisted.selectedModel
+          : initialState.selectedModel;
+
+        // Migrate old model names to new format (3.0 -> 3)
+        if (validModel.includes('3.0')) {
+          validModel = validModel.replace('3.0', '3');
+        }
+
+        // Ensure valid format (no colons or invalid chars from API URL artifacts)
+        if (!validModel || validModel.includes(':') || !/^[\w.-]+$/.test(validModel)) {
+          validModel = initialState.selectedModel;
+        }
+
+        return {
+          ...currentState,
+          ...persisted,
+          selectedModel: validModel,
+        };
+      },
     }
   )
 );

@@ -4,6 +4,8 @@ import type { AgentEvent } from '../lib/event-types';
 import { useChatStore } from '../stores/chat-store';
 import { useAgentStore } from '../stores/agent-store';
 import { useSessionStore } from '../stores/session-store';
+import { useAppStore } from '../stores/app-store';
+import { toast } from '../components/ui/Toast';
 import type { Message } from '@gemini-cowork/shared';
 
 /**
@@ -91,6 +93,26 @@ export function useAgentEvents(sessionId: string | null): void {
           chat.removePermissionRequest(event.permissionId);
           break;
 
+        // Question events (agent asking user questions)
+        case 'question:ask':
+          chat.addQuestion({
+            id: event.request.id,
+            sessionId: event.sessionId,
+            question: event.request.question,
+            header: event.request.header,
+            options: event.request.options?.map(opt => ({
+              label: opt.label,
+              description: opt.description,
+            })) || [],
+            multiSelect: event.request.multiSelect,
+            createdAt: event.request.timestamp || Date.now(),
+          });
+          break;
+
+        case 'question:answered':
+          chat.removeQuestion(event.questionId);
+          break;
+
         // Task events
         case 'task:create':
           agent.addTask(event.task);
@@ -123,9 +145,22 @@ export function useAgentEvents(sessionId: string | null): void {
         case 'error':
           chat.setStreaming(false);
           agent.setRunning(false);
-          // Note: Error is set in chat store via setError which doesn't exist
-          // We should handle this through a different mechanism
-          console.error('Agent error:', event.error, event.code);
+
+          // Check if it's an auth/API key error
+          const isAuthError =
+            event.code === 'INVALID_API_KEY' ||
+            event.error.toLowerCase().includes('api key') ||
+            event.error.includes('401') ||
+            event.error.toLowerCase().includes('authentication') ||
+            event.error.toLowerCase().includes('unauthorized');
+
+          if (isAuthError) {
+            // Show API key modal for auth errors
+            useAppStore.getState().setShowApiKeyModal(true, event.error);
+          } else {
+            // Show error toast for other errors
+            toast.error('Agent Error', event.error, 8000);
+          }
           break;
 
         // Session events

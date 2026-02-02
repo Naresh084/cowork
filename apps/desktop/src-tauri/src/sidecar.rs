@@ -6,6 +6,14 @@ use std::sync::Arc;
 use tauri::async_runtime::Mutex;
 use tokio::sync::{mpsc, oneshot};
 
+/// Default timeout for sidecar requests in seconds.
+/// This is set high (5 minutes) to accommodate:
+/// - Large context processing (up to 1M+ tokens)
+/// - Complex agent tasks with multiple tool calls
+/// - Network latency for Gemini API calls
+/// Can be overridden per-request if needed.
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 300;
+
 /// IPC Message sent to sidecar
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +59,8 @@ pub struct SidecarManager {
     pending_requests: PendingRequests,
     event_handler: Arc<Mutex<Option<Box<dyn Fn(SidecarEvent) + Send + 'static>>>>,
     request_counter: Arc<Mutex<u64>>,
+    /// Track if stdin writer is healthy (false if write failed)
+    stdin_healthy: Arc<Mutex<bool>>,
 }
 
 impl SidecarManager {
@@ -61,6 +71,7 @@ impl SidecarManager {
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             event_handler: Arc::new(Mutex::new(None)),
             request_counter: Arc::new(Mutex::new(0)),
+            stdin_healthy: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -81,14 +92,39 @@ impl SidecarManager {
             return Ok(()); // Already running
         }
 
-        // Find the sidecar executable
-        // In development, we use npx tsx to run the TypeScript directly
-        // In production, we'd bundle a compiled JS file
-        let sidecar_path = std::path::Path::new(app_data_dir)
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("src-sidecar"))
-            .ok_or("Failed to determine sidecar path")?;
+        // Reset stdin health for new process
+        *self.stdin_healthy.lock().await = true;
+
+        // Find the sidecar directory
+        // In development: relative to the desktop package (CARGO_MANIFEST_DIR points to src-tauri)
+        // In production: sidecar bundled with app
+        let sidecar_path = if cfg!(debug_assertions) {
+            // Development: CARGO_MANIFEST_DIR is src-tauri, go up one level to desktop, then into src-sidecar
+            std::env::var("CARGO_MANIFEST_DIR")
+                .map(|dir| std::path::PathBuf::from(dir).join("../src-sidecar"))
+                .unwrap_or_else(|_| {
+                    // Fallback: try to find it relative to executable
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                        .map(|p| p.join("../../../src-sidecar"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("src-sidecar"))
+                })
+        } else {
+            // Production: sidecar bundled alongside the app
+            std::path::PathBuf::from(app_data_dir).join("sidecar")
+        };
+
+        // Canonicalize path if it exists
+        let sidecar_path = sidecar_path.canonicalize().unwrap_or(sidecar_path);
+
+        // Verify path exists
+        if !sidecar_path.exists() {
+            return Err(format!(
+                "Sidecar not found at: {:?}. App data dir: {}",
+                sidecar_path, app_data_dir
+            ));
+        }
 
         let mut child = Command::new("npx")
             .args(["tsx", "src/index.ts"])
@@ -113,15 +149,29 @@ impl SidecarManager {
 
         // Spawn stdin writer task
         let stdin = stdin.ok_or("Failed to get stdin")?;
+        let stdin_healthy_clone = self.stdin_healthy.clone();
         tauri::async_runtime::spawn(async move {
             let mut stdin = stdin;
             while let Some(msg) = rx.recv().await {
-                if let Err(e) = writeln!(stdin, "{}", msg) {
+                // Perform write operations synchronously to avoid Send issues
+                let write_result = writeln!(stdin, "{}", msg);
+                let flush_result = if write_result.is_ok() {
+                    stdin.flush()
+                } else {
+                    Ok(()) // Skip flush if write failed
+                };
+
+                // Handle errors after synchronous operations
+                if let Err(e) = write_result {
                     eprintln!("Failed to write to sidecar stdin: {}", e);
+                    // Mark stdin as unhealthy so send_command knows to fail
+                    *stdin_healthy_clone.lock().await = false;
                     break;
                 }
-                if let Err(e) = stdin.flush() {
+                if let Err(e) = flush_result {
                     eprintln!("Failed to flush sidecar stdin: {}", e);
+                    // Mark stdin as unhealthy so send_command knows to fail
+                    *stdin_healthy_clone.lock().await = false;
                     break;
                 }
             }
@@ -132,39 +182,50 @@ impl SidecarManager {
         let pending_requests = self.pending_requests.clone();
         let event_handler = self.event_handler.clone();
 
-        tauri::async_runtime::spawn(async move {
+        // Spawn stdout reader in a blocking thread to avoid blocking the async runtime
+        std::thread::spawn(move || {
+            eprintln!("[sidecar-reader] Starting stdout reader thread...");
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
                 match line {
                     Ok(line) if !line.is_empty() => {
+                        eprintln!("[sidecar-reader] Received line: {}", &line[..line.len().min(200)]);
                         // Try to parse as JSON
                         match serde_json::from_str::<SidecarMessage>(&line) {
                             Ok(SidecarMessage::Response(response)) => {
+                                eprintln!("[sidecar-reader] Parsed as Response: id={}, success={}", response.id, response.success);
                                 // Handle response - find pending request
-                                let mut pending = pending_requests.lock().await;
+                                // Use blocking lock since we're in a sync thread
+                                let mut pending = pending_requests.blocking_lock();
                                 if let Some(sender) = pending.remove(&response.id) {
+                                    eprintln!("[sidecar-reader] Found pending request, sending response");
                                     let _ = sender.send(response);
+                                    eprintln!("[sidecar-reader] Response sent via oneshot channel");
+                                } else {
+                                    eprintln!("[sidecar-reader] No pending request found for id={}", response.id);
                                 }
                             }
                             Ok(SidecarMessage::Event(event)) => {
-                                // Handle event
-                                let handler = event_handler.lock().await;
+                                eprintln!("[sidecar-reader] Parsed as Event: type={}", event.event_type);
+                                // Handle event - use blocking lock
+                                let handler = event_handler.blocking_lock();
                                 if let Some(ref handler) = *handler {
                                     handler(event);
                                 }
                             }
                             Err(e) => {
-                                eprintln!("Failed to parse sidecar message: {} - {}", e, line);
+                                eprintln!("[sidecar-reader] Failed to parse message: {} - {}", e, line);
                             }
                         }
                     }
                     Ok(_) => {} // Empty line
                     Err(e) => {
-                        eprintln!("Failed to read from sidecar: {}", e);
+                        eprintln!("[sidecar-reader] Failed to read from sidecar: {}", e);
                         break;
                     }
                 }
             }
+            eprintln!("[sidecar-reader] stdout reader thread ended");
         });
 
         *process_guard = Some(child);
@@ -183,6 +244,9 @@ impl SidecarManager {
         let mut tx_guard = self.tx.lock().await;
         *tx_guard = None;
 
+        // Reset stdin health
+        *self.stdin_healthy.lock().await = true;
+
         Ok(())
     }
 
@@ -192,12 +256,21 @@ impl SidecarManager {
         command: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        eprintln!("[send_command] Starting command: {}", command);
+
+        // Check if stdin is healthy before attempting to send
+        if !*self.stdin_healthy.lock().await {
+            return Err("Sidecar stdin is not healthy - please restart the application".to_string());
+        }
+        eprintln!("[send_command] stdin is healthy");
+
         // Generate unique request ID
         let id = {
             let mut counter = self.request_counter.lock().await;
             *counter += 1;
             format!("req_{}", *counter)
         };
+        eprintln!("[send_command] Generated request id: {}", id);
 
         // Create response channel
         let (response_tx, response_rx) = oneshot::channel();
@@ -206,6 +279,7 @@ impl SidecarManager {
         {
             let mut pending = self.pending_requests.lock().await;
             pending.insert(id.clone(), response_tx);
+            eprintln!("[send_command] Registered pending request, count: {}", pending.len());
         }
 
         // Build request
@@ -222,19 +296,28 @@ impl SidecarManager {
         {
             let tx_guard = self.tx.lock().await;
             if let Some(ref tx) = *tx_guard {
+                eprintln!("[send_command] Sending to sidecar channel...");
                 tx.send(msg)
                     .await
                     .map_err(|e| format!("Failed to send to sidecar: {}", e))?;
+                eprintln!("[send_command] Sent to channel successfully");
             } else {
                 return Err("Sidecar not running".to_string());
             }
         }
 
+        eprintln!("[send_command] Waiting for response...");
         // Wait for response with timeout
-        let response = tokio::time::timeout(std::time::Duration::from_secs(300), response_rx)
+        // Uses DEFAULT_REQUEST_TIMEOUT_SECS (300s) to handle large context operations
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS),
+            response_rx
+        )
             .await
-            .map_err(|_| "Request timed out")?
+            .map_err(|_| format!("Request timed out after {}s", DEFAULT_REQUEST_TIMEOUT_SECS))?
             .map_err(|_| "Response channel closed")?;
+
+        eprintln!("[send_command] Got response: success={}", response.success);
 
         if response.success {
             Ok(response.result.unwrap_or(serde_json::Value::Null))

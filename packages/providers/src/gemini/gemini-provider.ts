@@ -117,7 +117,7 @@ export class GeminiProvider implements AIProvider {
         finishReason: functionCalls?.length ? 'tool_calls' : 'stop',
       };
     } catch (error) {
-      throw this.handleError(error);
+      throw this.handleError(error, request.model);
     }
   }
 
@@ -209,7 +209,7 @@ export class GeminiProvider implements AIProvider {
       };
       request.onChunk?.(errorChunk);
       yield errorChunk;
-      throw this.handleError(error);
+      throw this.handleError(error, request.model);
     }
   }
 
@@ -361,7 +361,7 @@ export class GeminiProvider implements AIProvider {
     };
   }
 
-  private handleError(error: unknown): Error {
+  private handleError(error: unknown, modelId?: string): Error {
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
 
@@ -374,7 +374,11 @@ export class GeminiProvider implements AIProvider {
       }
 
       if (message.includes('model') && message.includes('not found')) {
-        return ProviderError.modelNotFound('gemini', 'unknown');
+        // Extract model ID from error or use provided/unknown
+        // Stop at colon to avoid capturing ":generateContent" from API URLs
+        const modelMatch = error.message.match(/models\/([\w.-]+)/);
+        const actualModel = modelMatch?.[1] || modelId || 'unknown';
+        return ProviderError.modelNotFound('gemini', actualModel);
       }
 
       return ProviderError.requestFailed('gemini', 500, error.message);

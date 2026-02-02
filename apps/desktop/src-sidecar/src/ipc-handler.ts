@@ -5,6 +5,7 @@ import type {
   CreateSessionParams,
   SendMessageParams,
   RespondPermissionParams,
+  RespondQuestionParams,
   StopGenerationParams,
   GetSessionParams,
   DeleteSessionParams,
@@ -111,6 +112,16 @@ registerHandler('stop_generation', async (params) => {
   return { success: true };
 });
 
+// Respond to question
+registerHandler('respond_question', async (params) => {
+  const p = params as unknown as RespondQuestionParams;
+  if (!p.sessionId || !p.questionId) {
+    throw new Error('sessionId and questionId are required');
+  }
+  agentRunner.respondToQuestion(p.sessionId, p.questionId, p.answer);
+  return { success: true };
+});
+
 // List sessions
 registerHandler('list_sessions', async () => {
   return agentRunner.listSessions();
@@ -135,6 +146,22 @@ registerHandler('delete_session', async (params) => {
   return { success };
 });
 
+// Update session title
+registerHandler('update_session_title', async (params) => {
+  const p = params as { sessionId: string; title: string };
+  if (!p.sessionId || !p.title) throw new Error('sessionId and title are required');
+  agentRunner.updateSessionTitle(p.sessionId, p.title);
+  return { success: true };
+});
+
+// Update session working directory
+registerHandler('update_session_working_directory', async (params) => {
+  const p = params as { sessionId: string; workingDirectory: string };
+  if (!p.sessionId || !p.workingDirectory) throw new Error('sessionId and workingDirectory are required');
+  agentRunner.updateSessionWorkingDirectory(p.sessionId, p.workingDirectory);
+  return { success: true };
+});
+
 // Get tasks
 registerHandler('get_tasks', async (params) => {
   const p = params as unknown as GetSessionParams;
@@ -147,6 +174,13 @@ registerHandler('get_artifacts', async (params) => {
   const p = params as unknown as GetSessionParams;
   if (!p.sessionId) throw new Error('sessionId is required');
   return agentRunner.getArtifacts(p.sessionId);
+});
+
+// Get context usage
+registerHandler('get_context_usage', async (params) => {
+  const p = params as unknown as GetSessionParams;
+  if (!p.sessionId) throw new Error('sessionId is required');
+  return agentRunner.getContextUsage(p.sessionId);
 });
 
 // Load memory from GEMINI.md

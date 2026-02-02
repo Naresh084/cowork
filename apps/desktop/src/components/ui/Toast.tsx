@@ -94,7 +94,9 @@ interface ToastItemProps {
 function ToastItem({ toast, onRemove }: ToastItemProps) {
   const [isExiting, setIsExiting] = useState(false);
   const Icon = TOAST_ICONS[toast.type];
-  const duration = toast.duration ?? (toast.type === 'error' ? 6000 : 4000);
+  // Error toasts persist until manually dismissed (duration = 0)
+  // Other toasts auto-dismiss: success/info after 4s, warning after 6s
+  const duration = toast.duration ?? (toast.type === 'error' ? 0 : toast.type === 'warning' ? 6000 : 4000);
 
   const handleRemove = useCallback(() => {
     setIsExiting(true);

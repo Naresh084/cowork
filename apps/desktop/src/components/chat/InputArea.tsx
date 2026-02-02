@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { type Attachment } from '../../stores/chat-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
+import { toast } from '../ui/Toast';
 
 interface InputAreaProps {
   onSend: (message: string, attachments?: Attachment[]) => void;
@@ -25,6 +26,8 @@ interface InputAreaProps {
   attachments: Attachment[];
   onAttachmentAdd: (files: FileList | null) => void;
   onAttachmentRemove: (index: number) => void;
+  initialMessage?: string;
+  onInitialMessageConsumed?: () => void;
 }
 
 export function InputArea({
@@ -35,10 +38,22 @@ export function InputArea({
   attachments,
   onAttachmentAdd,
   onAttachmentRemove,
+  initialMessage,
+  onInitialMessageConsumed,
 }: InputAreaProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle initial message from quick actions
+  useEffect(() => {
+    if (initialMessage && initialMessage.trim()) {
+      setMessage(initialMessage);
+      onInitialMessageConsumed?.();
+      // Focus the textarea after setting initial message
+      textareaRef.current?.focus();
+    }
+  }, [initialMessage, onInitialMessageConsumed]);
 
   const { selectedModel, availableModels, updateSetting, defaultWorkingDirectory, updateSetting: updateSettings } = useSettingsStore();
   const { activeSessionId, sessions, updateSessionWorkingDirectory } = useSessionStore();
@@ -52,7 +67,12 @@ export function InputArea({
 
   // Get user home directory dynamically
   useEffect(() => {
-    homeDir().then(setUserHomeDir).catch(console.error);
+    homeDir()
+      .then(setUserHomeDir)
+      .catch((error) => {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        toast.error('Failed to get home directory', errorMessage);
+      });
   }, []);
 
   // Only show working directory if it's set and valid, otherwise show placeholder
@@ -111,17 +131,22 @@ export function InputArea({
         setFolderSelectorOpen(false);
       }
     } catch (error) {
-      console.error('Failed to select folder:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       setFolderError('Failed to select folder. Please try again.');
+      toast.error('Failed to select folder', errorMessage);
     }
   }, [workingDirectory, userHomeDir, activeSessionId, updateSessionWorkingDirectory, updateSettings, isPathSecure]);
 
-  // Get display models (Gemini 3.0 only)
+  // Get display models (Gemini 3 and newer)
+  // Token limits from Gemini API docs: https://ai.google.dev/gemini-api/docs/models
   const displayModels = availableModels.length > 0
-    ? availableModels.filter((m) => m.id.includes('gemini-3') || m.id.includes('3.0'))
+    ? availableModels.filter((m) => m.id.includes('gemini-3') || m.id.includes('2.5') || m.id.includes('1.5-pro'))
     : [
-        { id: 'gemini-3.0-flash-preview', name: 'Gemini 3.0 Flash', description: 'Fast', inputTokenLimit: 1000000, outputTokenLimit: 65536 },
-        { id: 'gemini-3.0-pro-preview', name: 'Gemini 3.0 Pro', description: 'Advanced', inputTokenLimit: 1000000, outputTokenLimit: 65536 },
+        // Fallback models with accurate token limits from API documentation
+        { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Latest preview', inputTokenLimit: 1048576, outputTokenLimit: 65536 },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Stable, fast', inputTokenLimit: 1048576, outputTokenLimit: 65536 },
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Complex reasoning', inputTokenLimit: 1048576, outputTokenLimit: 65536 },
+        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: '2M context', inputTokenLimit: 2097152, outputTokenLimit: 8192 },
       ];
 
   const currentModel = displayModels.find((m) => m.id === selectedModel) || displayModels[0];
@@ -152,9 +177,9 @@ export function InputArea({
   };
 
   const formatPath = (path: string): string => {
-    const home = '/Users/naresh';
-    if (path.startsWith(home)) {
-      return '~' + path.slice(home.length);
+    // Use dynamically fetched home directory
+    if (userHomeDir && path.startsWith(userHomeDir)) {
+      return '~' + path.slice(userHomeDir.length);
     }
     if (path.length > 30) {
       return '...' + path.slice(-27);

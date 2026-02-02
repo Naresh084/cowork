@@ -30,16 +30,22 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   error: null,
 
   initialize: async () => {
+    console.log('[AuthStore] Starting initialization...');
     set({ isLoading: true, error: null });
     try {
+      console.log('[AuthStore] Getting Tauri invoke...');
       const invoke = await getTauriInvoke();
+      console.log('[AuthStore] Got invoke, calling get_api_key...');
       const apiKey = await invoke<string | null>('get_api_key');
+      console.log('[AuthStore] Got API key:', apiKey ? 'present' : 'not found');
       set({
         isAuthenticated: !!apiKey,
         apiKey,
         isLoading: false,
       });
+      console.log('[AuthStore] Initialization complete');
     } catch (error) {
+      console.error('[AuthStore] Initialization error:', error);
       set({
         isAuthenticated: false,
         apiKey: null,

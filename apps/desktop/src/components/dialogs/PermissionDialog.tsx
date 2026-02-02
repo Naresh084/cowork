@@ -19,6 +19,7 @@ import {
   DialogContent,
 } from '../ui/Dialog';
 import { useChatStore, type ExtendedPermissionRequest } from '../../stores/chat-store';
+import { toast } from '../ui/Toast';
 
 interface PermissionDialogProps {
   request: ExtendedPermissionRequest;
@@ -112,7 +113,8 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       removePermissionRequest(request.id);
       onClose?.();
     } catch (error) {
-      console.error('Failed to respond to permission:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to grant permission', errorMessage);
     } finally {
       setIsProcessing(false);
     }
@@ -125,7 +127,8 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       removePermissionRequest(request.id);
       onClose?.();
     } catch (error) {
-      console.error('Failed to respond to permission:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to deny permission', errorMessage);
     } finally {
       setIsProcessing(false);
     }

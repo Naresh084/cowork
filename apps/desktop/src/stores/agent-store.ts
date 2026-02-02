@@ -70,12 +70,16 @@ interface AgentActions {
   clearPreviewArtifact: () => void;
 }
 
+// Default context window (1M tokens for Gemini 3.0 models)
+// This is updated dynamically when model info is fetched from the API
+const DEFAULT_CONTEXT_WINDOW = 1048576;
+
 const initialState: AgentState = {
   isRunning: false,
   tasks: [],
   artifacts: [],
-  contextUsage: { used: 0, total: 128000, percentage: 0 },
-  currentModel: 'gemini-2.0-flash',
+  contextUsage: { used: 0, total: DEFAULT_CONTEXT_WINDOW, percentage: 0 },
+  currentModel: 'gemini-3.0-flash-preview',
   currentSessionId: null,
   previewArtifact: null,
 };
@@ -89,9 +93,20 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
   },
 
   updateTask: (task: Task) => {
-    set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === task.id ? task : t)),
-    }));
+    set((state) => {
+      const existingIndex = state.tasks.findIndex((t) => t.id === task.id);
+      if (existingIndex >= 0) {
+        // Update existing task
+        return {
+          tasks: state.tasks.map((t) => (t.id === task.id ? task : t)),
+        };
+      } else {
+        // Task doesn't exist, add it (for write_todos style updates)
+        return {
+          tasks: [...state.tasks, task],
+        };
+      }
+    });
   },
 
   addTask: (task: Task) => {
@@ -170,7 +185,10 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
         },
       });
     } catch (error) {
-      console.error('Failed to refresh context usage:', error);
+      // Silent failure for context usage - not critical to user experience
+      // but log for debugging
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn('Failed to refresh context usage:', errorMessage);
     }
   },
 

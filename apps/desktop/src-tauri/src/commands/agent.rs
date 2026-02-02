@@ -96,9 +96,12 @@ async fn ensure_sidecar_started(
     app: &AppHandle,
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {
+    eprintln!("[ensure_sidecar] getting manager lock...");
     let manager = state.manager.lock().await;
+    eprintln!("[ensure_sidecar] got manager lock, checking if running...");
 
     if !manager.is_running().await {
+        eprintln!("[ensure_sidecar] sidecar not running, starting...");
         // Get app data directory
         let app_data_dir = app
             .path()
@@ -110,7 +113,9 @@ async fn ensure_sidecar_started(
             .ok_or("Invalid app data path")?
             .to_string();
 
+        eprintln!("[ensure_sidecar] starting sidecar with app_data_dir: {}", app_data_str);
         manager.start(&app_data_str).await?;
+        eprintln!("[ensure_sidecar] sidecar started");
 
         // Set up event forwarding to frontend
         let app_handle = app.clone();
@@ -118,19 +123,32 @@ async fn ensure_sidecar_started(
             .set_event_handler(move |event: SidecarEvent| {
                 // Forward event to frontend
                 let event_name = format!("agent:{}", event.event_type);
-                let _ = app_handle.emit(&event_name, &event);
+                // CRITICAL: Log errors instead of silently discarding them
+                // Silent errors make debugging impossible when events fail to emit
+                if let Err(e) = app_handle.emit(&event_name, &event) {
+                    eprintln!("[event] Failed to emit {}: {}", event_name, e);
+                }
             })
             .await;
+        eprintln!("[ensure_sidecar] event handler set up");
 
         // Get API key from keychain and set it on the sidecar
+        eprintln!("[ensure_sidecar] getting API key from keychain...");
         if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
+            eprintln!("[ensure_sidecar] got API key, setting on sidecar...");
             let params = serde_json::json!({ "apiKey": api_key });
             if let Err(e) = manager.send_command("set_api_key", params).await {
                 eprintln!("Warning: Failed to set API key on sidecar: {}", e);
             }
+            eprintln!("[ensure_sidecar] API key set on sidecar");
+        } else {
+            eprintln!("[ensure_sidecar] no API key found in keychain");
         }
+    } else {
+        eprintln!("[ensure_sidecar] sidecar already running");
     }
 
+    eprintln!("[ensure_sidecar] done");
     Ok(())
 }
 
@@ -238,12 +256,16 @@ pub async fn agent_list_sessions(
     app: AppHandle,
     state: State<'_, AgentState>,
 ) -> Result<Vec<SessionSummary>, String> {
+    eprintln!("[agent] agent_list_sessions called");
     ensure_sidecar_started(&app, &state).await?;
+    eprintln!("[agent] sidecar started, getting manager lock...");
 
     let manager = state.manager.lock().await;
+    eprintln!("[agent] got manager lock, sending list_sessions command...");
     let result = manager
         .send_command("list_sessions", serde_json::json!({}))
         .await?;
+    eprintln!("[agent] got result from list_sessions: {:?}", result);
 
     serde_json::from_value(result).map_err(|e| format!("Failed to parse sessions: {}", e))
 }
@@ -281,6 +303,46 @@ pub async fn agent_delete_session(
     });
 
     manager.send_command("delete_session", params).await?;
+    Ok(())
+}
+
+/// Update session title
+#[tauri::command]
+pub async fn agent_update_session_title(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    title: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = state.manager.lock().await;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "title": title,
+    });
+
+    manager.send_command("update_session_title", params).await?;
+    Ok(())
+}
+
+/// Update session working directory
+#[tauri::command]
+pub async fn agent_update_session_working_directory(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    working_directory: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = state.manager.lock().await;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "workingDirectory": working_directory,
+    });
+
+    manager.send_command("update_session_working_directory", params).await?;
     Ok(())
 }
 
@@ -336,4 +398,26 @@ pub async fn agent_get_context_usage(
     });
 
     manager.send_command("get_context_usage", params).await
+}
+
+/// Respond to a question from the agent
+#[tauri::command]
+pub async fn agent_respond_question(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    question_id: String,
+    answer: serde_json::Value, // Can be string or array of strings
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = state.manager.lock().await;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "questionId": question_id,
+        "answer": answer,
+    });
+
+    manager.send_command("respond_question", params).await?;
+    Ok(())
 }

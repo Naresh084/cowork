@@ -5,7 +5,6 @@ mod commands;
 mod sidecar;
 
 use commands::agent::AgentState;
-use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
@@ -32,10 +31,13 @@ fn main() {
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,
             commands::agent::agent_respond_permission,
+            commands::agent::agent_respond_question,
             commands::agent::agent_stop_generation,
             commands::agent::agent_list_sessions,
             commands::agent::agent_get_session,
             commands::agent::agent_delete_session,
+            commands::agent::agent_update_session_title,
+            commands::agent::agent_update_session_working_directory,
             commands::agent::agent_load_memory,
             commands::agent::agent_save_memory,
             commands::agent::agent_get_context_usage,

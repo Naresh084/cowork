@@ -8,6 +8,7 @@ import {
 import { cn } from '../../lib/utils';
 import { useChatStore, type UserQuestion, type QuestionOption } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '../ui/Toast';
 
 // Re-export types for convenience
 export type { UserQuestion, QuestionOption };
@@ -70,7 +71,8 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
 
       onAnswer?.(question.id, answer);
     } catch (error) {
-      console.error('Failed to submit answer:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to submit answer', errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -285,7 +287,8 @@ export function InlineQuestion({ question }: InlineQuestionProps) {
     try {
       await respondToQuestion?.(question.sessionId, questionId, answer);
     } catch (error) {
-      console.error('Failed to respond to question:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to respond to question', errorMessage);
     }
   };
 
