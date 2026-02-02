@@ -11,6 +11,7 @@ export interface AgentConfig {
   tools?: ToolDefinition[];
   maxIterations?: number;
   generationConfig?: GenerationConfig;
+  streaming?: boolean;
 }
 
 export interface AgentState {
@@ -75,6 +76,7 @@ export interface PermissionContext {
 // ============================================================================
 
 export type AgentEventType =
+  | 'agent:stream_chunk'
   | 'agent:started'
   | 'agent:stopped'
   | 'agent:iteration'
@@ -106,7 +108,7 @@ export interface Agent {
   /**
    * Run the agent with a user message.
    */
-  run(userMessage: string): AsyncGenerator<AgentEvent>;
+  run(userMessage: string | Message['content']): AsyncGenerator<AgentEvent>;
 
   /**
    * Resume the agent after a permission decision.
