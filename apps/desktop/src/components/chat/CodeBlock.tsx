@@ -200,7 +200,7 @@ export function CodeBlock({
     <div
       className={cn(
         'rounded-xl overflow-hidden border',
-        'bg-[#0d1117] border-gray-700/50',
+        'bg-[#0D0D0F] border-white/[0.08]',
         className
       )}
     >
@@ -208,14 +208,14 @@ export function CodeBlock({
       <div
         className={cn(
           'flex items-center justify-between px-3 py-2',
-          'bg-gray-800/50 border-b border-gray-700/50'
+          'bg-white/[0.02] border-b border-white/[0.08]'
         )}
       >
         <div className="flex items-center gap-2">
           {collapsible && (
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className="p-0.5 rounded hover:bg-gray-700/50 text-gray-400 hover:text-white transition-colors"
+              className="p-0.5 rounded hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors"
             >
               {isCollapsed ? (
                 <ChevronRight className="w-4 h-4" />
@@ -225,16 +225,16 @@ export function CodeBlock({
             </button>
           )}
 
-          <FileCode className="w-4 h-4 text-gray-500" />
+          <FileCode className="w-4 h-4 text-white/40" />
 
           {filename ? (
-            <span className="text-sm text-gray-300 font-mono">{filename}</span>
+            <span className="text-sm text-white/70 font-mono">{filename}</span>
           ) : (
-            <span className="text-xs text-gray-500">{displayName}</span>
+            <span className="text-xs text-white/40">{displayName}</span>
           )}
 
           {showLineNumbers && (
-            <span className="text-xs text-gray-600 ml-2">
+            <span className="text-xs text-white/25 ml-2">
               {lineCount} line{lineCount !== 1 ? 's' : ''}
             </span>
           )}
@@ -246,8 +246,8 @@ export function CodeBlock({
             'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
             'transition-all duration-200',
             copied
-              ? 'bg-green-500/20 text-green-400'
-              : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              ? 'bg-[#50956A]/20 text-[#50956A]'
+              : 'text-white/40 hover:text-white hover:bg-white/[0.06]'
           )}
         >
           {copied ? (
@@ -274,8 +274,8 @@ export function CodeBlock({
           style={{ maxHeight: maxHeight ? `${maxHeight}px` : undefined }}
         >
           {isLoading ? (
-            <div className="p-4 flex items-center gap-2 text-gray-500">
-              <div className="w-4 h-4 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
+            <div className="p-4 flex items-center gap-2 text-white/40">
+              <div className="w-4 h-4 border-2 border-white/20 border-t-[#6B6EF0] rounded-full animate-spin" />
               <span className="text-sm">Loading...</span>
             </div>
           ) : (
@@ -304,7 +304,7 @@ export function InlineCode({ children, className }: InlineCodeProps) {
     <code
       className={cn(
         'px-1.5 py-0.5 rounded-md',
-        'bg-gray-800 text-pink-400',
+        'bg-white/[0.06] text-[#8B8EFF]',
         'font-mono text-sm',
         className
       )}
@@ -390,17 +390,17 @@ export function DiffBlock({
     <div
       className={cn(
         'rounded-xl overflow-hidden border',
-        'bg-[#0d1117] border-gray-700/50',
+        'bg-[#0D0D0F] border-white/[0.08]',
         className
       )}
     >
       {/* Header */}
-      <div className="flex items-center gap-4 px-3 py-2 bg-gray-800/50 border-b border-gray-700/50">
+      <div className="flex items-center gap-4 px-3 py-2 bg-white/[0.02] border-b border-white/[0.08]">
         {oldFilename && (
-          <span className="text-xs text-red-400 font-mono">- {oldFilename}</span>
+          <span className="text-xs text-[#FF5449] font-mono">- {oldFilename}</span>
         )}
         {newFilename && (
-          <span className="text-xs text-green-400 font-mono">+ {newFilename}</span>
+          <span className="text-xs text-[#50956A] font-mono">+ {newFilename}</span>
         )}
       </div>
 
@@ -412,12 +412,12 @@ export function DiffBlock({
               key={index}
               className={cn(
                 'px-2 -mx-2',
-                line.type === 'add' && 'bg-green-500/10 text-green-300',
-                line.type === 'remove' && 'bg-red-500/10 text-red-300',
-                line.type === 'same' && 'text-gray-400'
+                line.type === 'add' && 'bg-[#50956A]/10 text-[#50956A]',
+                line.type === 'remove' && 'bg-[#FF5449]/10 text-[#FF5449]',
+                line.type === 'same' && 'text-white/40'
               )}
             >
-              <span className="select-none mr-2 text-gray-600">
+              <span className="select-none mr-2 text-white/20">
                 {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
               </span>
               {line.content || ' '}

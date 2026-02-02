@@ -69,9 +69,10 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="relative mb-6"
       >
-        <div className="absolute inset-0 bg-orange-500/20 rounded-full blur-xl animate-pulse" />
+        {/* Glow effect */}
+        <div className="absolute inset-0 bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] rounded-full blur-xl opacity-30 animate-pulse" />
         <div className="relative w-16 h-16 flex items-center justify-center">
-          <Sparkles className="w-12 h-12 text-orange-500" />
+          <Sparkles className="w-12 h-12 text-[#6B6EF0]" />
         </div>
       </motion.div>
 
@@ -80,7 +81,7 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.1 }}
-        className="text-2xl font-semibold text-stone-200 mb-8 text-center"
+        className="text-2xl font-semibold text-white/90 mb-8 text-center"
       >
         Let's knock something off your list
       </motion.h1>
@@ -90,9 +91,9 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.2 }}
-        className="w-full max-w-2xl mb-8 p-4 rounded-xl bg-stone-800/30 border border-stone-700/50"
+        className="w-full max-w-2xl mb-8 p-4 rounded-xl bg-white/[0.04] border border-white/[0.08]"
       >
-        <p className="text-sm text-stone-400 text-center">
+        <p className="text-sm text-white/50 text-center">
           Cowork is an early research preview. New improvements ship frequently.
         </p>
       </motion.div>
@@ -119,27 +120,27 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
             onClick={() => onQuickAction(action)}
             className={cn(
               'flex items-center gap-3 p-4 rounded-xl',
-              'bg-stone-800/40 hover:bg-stone-800/60',
-              'border border-stone-700/50 hover:border-stone-600/50',
+              'bg-white/[0.04] hover:bg-white/[0.08]',
+              'border border-white/[0.08] hover:border-white/[0.12]',
               'text-left transition-all duration-200',
               'group'
             )}
           >
             <div
               className={cn(
-                'p-2 rounded-lg',
-                'bg-stone-700/50 group-hover:bg-orange-500/20',
+                'p-2 rounded-xl',
+                'bg-white/[0.06] group-hover:bg-[#6B6EF0]/20',
                 'transition-colors duration-200'
               )}
             >
               <action.icon
                 className={cn(
-                  'w-5 h-5 text-stone-400 group-hover:text-orange-400',
+                  'w-5 h-5 text-white/50 group-hover:text-[#8B8EFF]',
                   'transition-colors duration-200'
                 )}
               />
             </div>
-            <span className="text-sm text-stone-300 group-hover:text-stone-200">
+            <span className="text-sm text-white/70 group-hover:text-white/90">
               {action.label}
             </span>
           </motion.button>
@@ -151,9 +152,9 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.6 }}
-        className="mt-8 text-xs text-stone-600"
+        className="mt-8 text-xs text-white/30"
       >
-        Type <kbd className="px-1.5 py-0.5 rounded bg-stone-800 text-stone-400">/</kbd> for commands
+        Type <kbd className="px-1.5 py-0.5 rounded bg-white/[0.06] text-white/50">/</kbd> for commands
       </motion.p>
     </div>
   );

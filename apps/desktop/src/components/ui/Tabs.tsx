@@ -104,9 +104,9 @@ export function TabsList({ children, className, variant = 'default' }: TabsListP
   }, []);
 
   const variantStyles = {
-    default: 'bg-gray-800/50 p-1 rounded-lg gap-1',
+    default: 'bg-[#1A1A1E]/50 p-1 rounded-lg gap-1',
     pills: 'gap-2',
-    underline: 'border-b border-gray-700 gap-4',
+    underline: 'border-b border-white/[0.08] gap-4',
   };
 
   return (
@@ -145,22 +145,22 @@ export function TabsTrigger({
     default: cn(
       'px-3 py-1.5 rounded-md text-sm font-medium transition-all',
       isActive
-        ? 'bg-gray-700 text-white shadow-sm'
-        : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700/30'
+        ? 'bg-[#1A1A1E] text-white/90 shadow-sm'
+        : 'text-white/50 hover:text-white/70 hover:bg-white/[0.04]'
     ),
     pills: cn(
       'px-4 py-2 rounded-full text-sm font-medium transition-all',
       isActive
-        ? 'bg-blue-600 text-white shadow-sm'
-        : 'text-gray-400 hover:text-gray-200 bg-gray-800/50 hover:bg-gray-700/50'
+        ? 'bg-[#6B6EF0] text-white shadow-sm'
+        : 'text-white/50 hover:text-white/70 bg-[#1A1A1E]/50 hover:bg-white/[0.06]'
     ),
     underline: cn(
       'px-1 py-3 text-sm font-medium transition-all relative',
       'after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5',
       'after:transition-all',
       isActive
-        ? 'text-white after:bg-blue-500'
-        : 'text-gray-400 hover:text-gray-200 after:bg-transparent'
+        ? 'text-white/90 after:bg-[#6B6EF0]'
+        : 'text-white/50 hover:text-white/70 after:bg-transparent'
     ),
   };
 
@@ -175,7 +175,7 @@ export function TabsTrigger({
       onClick={() => !disabled && setActiveTab(value)}
       className={cn(
         'inline-flex items-center gap-2',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6B6EF0]/50',
         disabled && 'opacity-50 cursor-not-allowed',
         variantStyles[variant],
         className

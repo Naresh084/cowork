@@ -24,7 +24,7 @@ export function Skeleton({
   return (
     <div
       className={cn(
-        'bg-gray-700/50',
+        'bg-white/[0.06]',
         animate && 'animate-pulse',
         variantStyles[variant],
         className
@@ -96,7 +96,7 @@ export function SkeletonCard({
   return (
     <div
       className={cn(
-        'p-4 bg-gray-800/30 border border-gray-700/50 rounded-lg',
+        'p-4 bg-[#1A1A1E] border border-white/[0.06] rounded-xl',
         className
       )}
     >
@@ -131,7 +131,7 @@ export function SkeletonList({
         <div
           key={i}
           className={cn(
-            'flex items-center gap-3 p-3 rounded-lg bg-gray-800/20',
+            'flex items-center gap-3 p-3 rounded-xl bg-white/[0.03]',
             itemClassName
           )}
         >

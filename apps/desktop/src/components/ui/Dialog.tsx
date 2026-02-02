@@ -115,7 +115,7 @@ export function Dialog({
         ref={dialogRef}
         className={cn(
           'relative max-h-[90vh] max-w-lg w-full mx-4',
-          'bg-gray-900 border border-gray-700 rounded-xl shadow-2xl',
+          'bg-[#151518] border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/40',
           'animate-in zoom-in-95 slide-in-from-bottom-4 duration-200',
           'overflow-hidden',
           className
@@ -127,8 +127,8 @@ export function Dialog({
             className={cn(
               'absolute top-4 right-4 z-10',
               'p-1.5 rounded-lg',
-              'text-gray-400 hover:text-white',
-              'hover:bg-gray-700/50',
+              'text-white/40 hover:text-white',
+              'hover:bg-white/[0.06]',
               'transition-colors'
             )}
             aria-label="Close dialog"
@@ -163,7 +163,7 @@ interface DialogTitleProps {
 
 export function DialogTitle({ children, className }: DialogTitleProps) {
   return (
-    <h2 className={cn('text-lg font-semibold text-white', className)}>
+    <h2 className={cn('text-lg font-semibold text-white/90', className)}>
       {children}
     </h2>
   );
@@ -176,7 +176,7 @@ interface DialogDescriptionProps {
 
 export function DialogDescription({ children, className }: DialogDescriptionProps) {
   return (
-    <p className={cn('mt-2 text-sm text-gray-400', className)}>
+    <p className={cn('mt-2 text-sm text-white/50', className)}>
       {children}
     </p>
   );
@@ -204,9 +204,9 @@ export function DialogFooter({ children, className }: DialogFooterProps) {
   return (
     <div
       className={cn(
-        'px-6 py-4 border-t border-gray-700/50',
+        'px-6 py-4 border-t border-white/[0.06]',
         'flex items-center justify-end gap-3',
-        'bg-gray-800/30',
+        'bg-white/[0.02]',
         className
       )}
     >

@@ -24,8 +24,8 @@ const strokeWidths = {
 };
 
 const variantColors = {
-  default: 'text-gray-400',
-  primary: 'text-blue-500',
+  default: 'text-white/40',
+  primary: 'text-[#6B6EF0]',
   white: 'text-white',
 };
 
@@ -61,7 +61,7 @@ export function Spinner({
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
         />
       </svg>
-      {label && <span className="text-sm text-gray-400">{label}</span>}
+      {label && <span className="text-sm text-white/50">{label}</span>}
     </div>
   );
 }
@@ -83,12 +83,12 @@ export function SpinnerOverlay({
     <div
       className={cn(
         'absolute inset-0 z-50 flex flex-col items-center justify-center',
-        'bg-gray-900/80 backdrop-blur-sm',
+        'bg-[#0D0D0F]/80 backdrop-blur-sm',
         className
       )}
     >
       <Spinner size="lg" variant="primary" />
-      {label && <p className="mt-3 text-sm text-gray-300">{label}</p>}
+      {label && <p className="mt-3 text-sm text-white/70">{label}</p>}
     </div>
   );
 }

@@ -165,32 +165,32 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#1a1a1e]">
+    <div className="h-full flex flex-col bg-[#0D0D0F]">
       {/* Header */}
-      <div className="flex items-center gap-4 px-6 py-4 border-b border-gray-800">
+      <div className="flex items-center gap-4 px-6 py-4 border-b border-white/[0.08]">
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={onBack}
-          className="p-2 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+          className="p-2 rounded-lg hover:bg-white/[0.06] text-white/50 hover:text-white transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
         </motion.button>
         <div>
-          <h1 className="text-xl font-semibold text-white">Connectors</h1>
-          <p className="text-sm text-gray-500">Extend Gemini Cowork with MCP servers</p>
+          <h1 className="text-xl font-semibold text-white/90">Connectors</h1>
+          <p className="text-sm text-white/50">Extend Gemini Cowork with MCP servers</p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 px-6 py-3 border-b border-gray-800">
+      <div className="flex gap-1 px-6 py-3 border-b border-white/[0.08]">
         <button
           onClick={() => setActiveTab('installed')}
           className={cn(
-            'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            'px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200',
             activeTab === 'installed'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              ? 'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] text-white shadow-lg shadow-[#6B6EF0]/25'
+              : 'text-white/50 hover:text-white hover:bg-white/[0.06]'
           )}
         >
           Installed ({mcpServers.length})
@@ -198,10 +198,10 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
         <button
           onClick={() => setActiveTab('marketplace')}
           className={cn(
-            'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            'px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200',
             activeTab === 'marketplace'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              ? 'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] text-white shadow-lg shadow-[#6B6EF0]/25'
+              : 'text-white/50 hover:text-white hover:bg-white/[0.06]'
           )}
         >
           Marketplace
@@ -226,9 +226,9 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                   onClick={() => setIsAddingCustom(true)}
                   className={cn(
                     'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl',
-                    'bg-gray-800/50 hover:bg-gray-800 text-gray-400 hover:text-white',
-                    'border border-gray-700 border-dashed hover:border-gray-600',
-                    'transition-colors'
+                    'bg-white/[0.03] hover:bg-white/[0.06] text-white/50 hover:text-white',
+                    'border border-white/[0.08] border-dashed hover:border-white/[0.12]',
+                    'transition-all duration-200'
                   )}
                 >
                   <Plus className="w-5 h-5" />
@@ -243,10 +243,10 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     exit={{ opacity: 0, height: 0 }}
-                    className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 space-y-3 overflow-hidden"
+                    className="bg-[#1A1A1E] rounded-xl border border-white/[0.08] p-4 space-y-3 overflow-hidden"
                   >
                     <div>
-                      <label className="text-xs text-gray-400 mb-1.5 block">Name</label>
+                      <label className="text-xs text-white/40 mb-1.5 block">Name</label>
                       <input
                         type="text"
                         value={customName}
@@ -254,15 +254,15 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                         placeholder="My Custom Server"
                         className={cn(
                           'w-full px-3 py-2 rounded-lg text-sm',
-                          'bg-gray-900 border border-gray-700',
-                          'text-white placeholder:text-gray-500',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+                          'bg-[#0D0D0F] border border-white/[0.08]',
+                          'text-white/90 placeholder:text-white/30',
+                          'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
                         )}
                         autoFocus
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-400 mb-1.5 block">Command</label>
+                      <label className="text-xs text-white/40 mb-1.5 block">Command</label>
                       <input
                         type="text"
                         value={customCommand}
@@ -270,14 +270,14 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                         placeholder="npx -y @my/mcp-server"
                         className={cn(
                           'w-full px-3 py-2 rounded-lg text-sm',
-                          'bg-gray-900 border border-gray-700',
-                          'text-white placeholder:text-gray-500',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+                          'bg-[#0D0D0F] border border-white/[0.08]',
+                          'text-white/90 placeholder:text-white/30',
+                          'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
                         )}
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-gray-400 mb-1.5 block">Arguments (optional)</label>
+                      <label className="text-xs text-white/40 mb-1.5 block">Arguments (optional)</label>
                       <input
                         type="text"
                         value={customArgs}
@@ -285,9 +285,9 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                         placeholder="--port 3000 --verbose"
                         className={cn(
                           'w-full px-3 py-2 rounded-lg text-sm',
-                          'bg-gray-900 border border-gray-700',
-                          'text-white placeholder:text-gray-500',
-                          'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+                          'bg-[#0D0D0F] border border-white/[0.08]',
+                          'text-white/90 placeholder:text-white/30',
+                          'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
                         )}
                       />
                     </div>
@@ -297,9 +297,10 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                         disabled={!customName.trim() || !customCommand.trim()}
                         className={cn(
                           'flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium',
-                          'bg-blue-600 hover:bg-blue-700 text-white',
+                          'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] text-white',
+                          'hover:from-[#6B6EF0] hover:to-[#8B8EFF]',
                           'disabled:opacity-50 disabled:cursor-not-allowed',
-                          'transition-colors'
+                          'transition-all duration-200'
                         )}
                       >
                         <Check className="w-4 h-4" />
@@ -312,7 +313,7 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                           setCustomCommand('');
                           setCustomArgs('');
                         }}
-                        className="px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+                        className="px-4 py-2 rounded-lg text-sm bg-white/[0.06] hover:bg-white/[0.10] text-white/70 transition-colors"
                       >
                         Cancel
                       </button>
@@ -324,14 +325,16 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
               {/* Installed Connectors List */}
               {mcpServers.length === 0 ? (
                 <div className="text-center py-12">
-                  <Plug className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-300 mb-2">No connectors installed</h3>
-                  <p className="text-sm text-gray-500 mb-4">
+                  <div className="w-16 h-16 rounded-2xl bg-white/[0.04] flex items-center justify-center mx-auto mb-4">
+                    <Plug className="w-8 h-8 text-white/30" />
+                  </div>
+                  <h3 className="text-lg font-medium text-white/70 mb-2">No connectors installed</h3>
+                  <p className="text-sm text-white/40 mb-4">
                     Browse the marketplace or add a custom connector to get started
                   </p>
                   <button
                     onClick={() => setActiveTab('marketplace')}
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors"
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] hover:from-[#6B6EF0] hover:to-[#8B8EFF] text-white text-sm font-medium transition-all duration-200 shadow-lg shadow-[#6B6EF0]/25"
                   >
                     Browse Marketplace
                   </button>
@@ -368,7 +371,7 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
               {/* Search and Filter */}
               <div className="flex gap-3">
                 <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -376,9 +379,9 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                     placeholder="Search connectors..."
                     className={cn(
                       'w-full pl-10 pr-4 py-2.5 rounded-xl text-sm',
-                      'bg-gray-800 border border-gray-700',
-                      'text-white placeholder:text-gray-500',
-                      'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+                      'bg-[#1A1A1E] border border-white/[0.08]',
+                      'text-white/90 placeholder:text-white/30',
+                      'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
                     )}
                   />
                 </div>
@@ -391,10 +394,10 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
                     key={category}
                     onClick={() => setSelectedCategory(category)}
                     className={cn(
-                      'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors',
+                      'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-200',
                       selectedCategory === category
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+                        ? 'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] text-white'
+                        : 'bg-white/[0.04] text-white/50 hover:text-white hover:bg-white/[0.08]'
                     )}
                   >
                     {category}
@@ -405,9 +408,11 @@ export function ConnectorsScreen({ onBack }: ConnectorsScreenProps) {
               {/* Marketplace Grid */}
               {filteredMarketplace.length === 0 ? (
                 <div className="text-center py-12">
-                  <Search className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-300 mb-2">No connectors found</h3>
-                  <p className="text-sm text-gray-500">Try a different search or category</p>
+                  <div className="w-16 h-16 rounded-2xl bg-white/[0.04] flex items-center justify-center mx-auto mb-4">
+                    <Search className="w-8 h-8 text-white/30" />
+                  </div>
+                  <h3 className="text-lg font-medium text-white/70 mb-2">No connectors found</h3>
+                  <p className="text-sm text-white/40">Try a different search or category</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -463,48 +468,48 @@ function InstalledConnectorCard({
       <motion.div
         initial={{ scale: 0.98 }}
         animate={{ scale: 1 }}
-        className="bg-gray-800/70 rounded-xl border border-blue-500/50 p-4 space-y-3"
+        className="bg-[#1A1A1E] rounded-xl border border-[#6B6EF0]/50 p-4 space-y-3"
       >
         <div>
-          <label className="text-xs text-gray-400 mb-1.5 block">Name</label>
+          <label className="text-xs text-white/40 mb-1.5 block">Name</label>
           <input
             type="text"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             className={cn(
               'w-full px-3 py-2 rounded-lg text-sm',
-              'bg-gray-900 border border-gray-700',
-              'text-white placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+              'bg-[#0D0D0F] border border-white/[0.08]',
+              'text-white/90 placeholder:text-white/30',
+              'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
             )}
             autoFocus
           />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1.5 block">Command</label>
+          <label className="text-xs text-white/40 mb-1.5 block">Command</label>
           <input
             type="text"
             value={editCommand}
             onChange={(e) => setEditCommand(e.target.value)}
             className={cn(
               'w-full px-3 py-2 rounded-lg text-sm',
-              'bg-gray-900 border border-gray-700',
-              'text-white placeholder:text-gray-500',
-              'focus:outline-none focus:ring-2 focus:ring-blue-500/50'
+              'bg-[#0D0D0F] border border-white/[0.08]',
+              'text-white/90 placeholder:text-white/30',
+              'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]'
             )}
           />
         </div>
         <div className="flex gap-2">
           <button
             onClick={handleSave}
-            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] hover:from-[#6B6EF0] hover:to-[#8B8EFF] text-white transition-all duration-200"
           >
             <Check className="w-4 h-4" />
             Save
           </button>
           <button
             onClick={onCancelEdit}
-            className="px-3 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            className="px-3 py-2 rounded-lg text-sm bg-white/[0.06] hover:bg-white/[0.10] text-white/70 transition-colors"
           >
             Cancel
           </button>
@@ -518,34 +523,34 @@ function InstalledConnectorCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        'group bg-gray-800/50 rounded-xl border p-4',
-        server.enabled ? 'border-gray-700' : 'border-gray-700/50 opacity-60'
+        'group bg-[#1A1A1E] rounded-xl border p-4',
+        server.enabled ? 'border-white/[0.08]' : 'border-white/[0.04] opacity-60'
       )}
     >
       <div className="flex items-start gap-4">
         <div
           className={cn(
             'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
-            server.enabled ? 'bg-green-500/20' : 'bg-gray-700'
+            server.enabled ? 'bg-[#50956A]/20' : 'bg-white/[0.06]'
           )}
         >
-          <Plug className={cn('w-5 h-5', server.enabled ? 'text-green-400' : 'text-gray-500')} />
+          <Plug className={cn('w-5 h-5', server.enabled ? 'text-[#6BB88A]' : 'text-white/40')} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="font-medium text-white truncate">{server.name}</h3>
+            <h3 className="font-medium text-white/90 truncate">{server.name}</h3>
             {server.status === 'connected' && (
-              <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-400">
+              <span className="px-2 py-0.5 rounded-full text-xs bg-[#50956A]/20 text-[#6BB88A] font-medium">
                 Connected
               </span>
             )}
             {server.status === 'error' && (
-              <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/20 text-red-400">Error</span>
+              <span className="px-2 py-0.5 rounded-full text-xs bg-[#FF5449]/20 text-[#FF7A72] font-medium">Error</span>
             )}
           </div>
-          <p className="text-sm text-gray-500 truncate font-mono">{server.command}</p>
+          <p className="text-sm text-white/40 truncate font-mono">{server.command}</p>
           {server.error && (
-            <div className="flex items-center gap-1.5 mt-2 text-xs text-red-400">
+            <div className="flex items-center gap-1.5 mt-2 text-xs text-[#FF7A72]">
               <AlertCircle className="w-3.5 h-3.5" />
               {server.error}
             </div>
@@ -554,7 +559,7 @@ function InstalledConnectorCard({
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={onEdit}
-            className="p-2 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+            className="p-2 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors"
             title="Edit"
           >
             <Settings2 className="w-4 h-4" />
@@ -564,8 +569,8 @@ function InstalledConnectorCard({
             className={cn(
               'p-2 rounded-lg transition-colors',
               server.enabled
-                ? 'hover:bg-gray-700 text-green-400 hover:text-green-300'
-                : 'hover:bg-gray-700 text-gray-500 hover:text-white'
+                ? 'hover:bg-white/[0.06] text-[#6BB88A] hover:text-[#7FCCA0]'
+                : 'hover:bg-white/[0.06] text-white/40 hover:text-white'
             )}
             title={server.enabled ? 'Disable' : 'Enable'}
           >
@@ -573,7 +578,7 @@ function InstalledConnectorCard({
           </button>
           <button
             onClick={onRemove}
-            className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 transition-colors"
+            className="p-2 rounded-lg hover:bg-[#FF5449]/10 text-white/40 hover:text-[#FF7A72] transition-colors"
             title="Remove"
           >
             <Trash2 className="w-4 h-4" />
@@ -596,23 +601,23 @@ function MarketplaceCard({ connector, isInstalled, onInstall }: MarketplaceCardP
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.01 }}
-      className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 hover:border-gray-600 transition-colors"
+      className="bg-[#1A1A1E] rounded-xl border border-white/[0.08] p-4 hover:border-white/[0.12] transition-colors"
     >
       <div className="flex items-start gap-4">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center flex-shrink-0">
-          <Plug className="w-6 h-6 text-blue-400" />
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#6B6EF0]/20 to-[#8A62C2]/20 flex items-center justify-center flex-shrink-0">
+          <Plug className="w-6 h-6 text-[#8B8EFF]" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="font-medium text-white">{connector.name}</h3>
+            <h3 className="font-medium text-white/90">{connector.name}</h3>
             {connector.verified && (
-              <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-400 font-medium">
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#6B6EF0]/20 text-[#8B8EFF] font-medium">
                 Verified
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-400 mb-3 line-clamp-2">{connector.description}</p>
-          <div className="flex items-center gap-4 text-xs text-gray-500">
+          <p className="text-sm text-white/50 mb-3 line-clamp-2">{connector.description}</p>
+          <div className="flex items-center gap-4 text-xs text-white/40">
             <span className="flex items-center gap-1">
               <Star className="w-3.5 h-3.5" />
               {connector.stars.toLocaleString()}
@@ -621,7 +626,7 @@ function MarketplaceCard({ connector, isInstalled, onInstall }: MarketplaceCardP
               <Download className="w-3.5 h-3.5" />
               {(connector.downloads / 1000).toFixed(0)}k
             </span>
-            <span className="text-gray-600">{connector.author}</span>
+            <span className="text-white/30">{connector.author}</span>
           </div>
         </div>
       </div>
@@ -630,10 +635,10 @@ function MarketplaceCard({ connector, isInstalled, onInstall }: MarketplaceCardP
           onClick={onInstall}
           disabled={isInstalled}
           className={cn(
-            'flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+            'flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200',
             isInstalled
-              ? 'bg-green-500/20 text-green-400 cursor-default'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
+              ? 'bg-[#50956A]/20 text-[#6BB88A] cursor-default'
+              : 'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] hover:from-[#6B6EF0] hover:to-[#8B8EFF] text-white shadow-lg shadow-[#6B6EF0]/25'
           )}
         >
           {isInstalled ? (
@@ -652,7 +657,7 @@ function MarketplaceCard({ connector, isInstalled, onInstall }: MarketplaceCardP
           href={`https://github.com/modelcontextprotocol/servers/tree/main/src/${connector.id}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-white transition-colors"
+          className="p-2 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] text-white/50 hover:text-white transition-colors"
           title="View on GitHub"
         >
           <ExternalLink className="w-4 h-4" />

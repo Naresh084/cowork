@@ -50,8 +50,8 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
             className={cn(
               'rounded-full transition-colors',
               styles.track,
-              'bg-gray-700 peer-checked:bg-blue-600',
-              'peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-gray-900'
+              'bg-white/[0.10] peer-checked:bg-[#6B6EF0]',
+              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#6B6EF0]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]'
             )}
           />
           <div
@@ -66,10 +66,10 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
         {(label || description) && (
           <div className="flex flex-col">
             {label && (
-              <span className="text-sm font-medium text-gray-200">{label}</span>
+              <span className="text-sm font-medium text-white/90">{label}</span>
             )}
             {description && (
-              <span className="text-xs text-gray-500">{description}</span>
+              <span className="text-xs text-white/50">{description}</span>
             )}
           </div>
         )}

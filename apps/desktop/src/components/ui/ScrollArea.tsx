@@ -58,7 +58,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(
     return (
       <div className={cn('relative', className)}>
         {fadeEdges && !isAtTop && orientation !== 'horizontal' && (
-          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-gray-900 to-transparent z-10 pointer-events-none" />
+          <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-[#0D0D0F] to-transparent z-10 pointer-events-none" />
         )}
 
         <div
@@ -70,8 +70,8 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(
             !hideScrollbar && [
               'scrollbar-thin',
               'scrollbar-track-transparent',
-              'scrollbar-thumb-gray-700',
-              'hover:scrollbar-thumb-gray-600',
+              'scrollbar-thumb-white/10',
+              'hover:scrollbar-thumb-white/20',
             ]
           )}
           onScroll={handleScroll}
@@ -81,7 +81,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(
         </div>
 
         {fadeEdges && !isAtBottom && orientation !== 'horizontal' && (
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-gray-900 to-transparent z-10 pointer-events-none" />
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-[#0D0D0F] to-transparent z-10 pointer-events-none" />
         )}
       </div>
     );

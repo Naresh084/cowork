@@ -30,12 +30,12 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
           <div
             className={cn(
               'w-4 h-4 rounded border-2 transition-all',
-              'bg-gray-800/50 border-gray-600',
-              'peer-checked:bg-blue-600 peer-checked:border-blue-600',
-              'peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-gray-900',
+              'bg-[#0D0D0F] border-white/[0.12]',
+              'peer-checked:bg-[#6B6EF0] peer-checked:border-[#6B6EF0]',
+              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#6B6EF0]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]',
               'peer-disabled:opacity-50',
-              error && 'border-red-500',
-              indeterminate && 'bg-blue-600 border-blue-600'
+              error && 'border-[#FF5449]',
+              indeterminate && 'bg-[#6B6EF0] border-[#6B6EF0]'
             )}
           >
             {indeterminate ? (
@@ -59,12 +59,12 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
         {(label || description) && (
           <div className="flex flex-col">
             {label && (
-              <span className="text-sm font-medium text-gray-200">{label}</span>
+              <span className="text-sm font-medium text-white/90">{label}</span>
             )}
             {description && (
-              <span className="text-xs text-gray-500">{description}</span>
+              <span className="text-xs text-white/50">{description}</span>
             )}
-            {error && <span className="text-xs text-red-400 mt-0.5">{error}</span>}
+            {error && <span className="text-xs text-[#FF7A72] mt-0.5">{error}</span>}
           </div>
         )}
       </label>

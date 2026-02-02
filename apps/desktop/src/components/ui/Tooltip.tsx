@@ -122,7 +122,7 @@ export function Tooltip({
   }, []);
 
   const arrowClasses = cn(
-    'absolute w-2 h-2 bg-gray-800 border-gray-700 rotate-45',
+    'absolute w-2 h-2 bg-[#1A1A1E] border-white/[0.08] rotate-45',
     position === 'top' && 'bottom-[-5px] left-1/2 -translate-x-1/2 border-b border-r',
     position === 'bottom' && 'top-[-5px] left-1/2 -translate-x-1/2 border-t border-l',
     position === 'left' && 'right-[-5px] top-1/2 -translate-y-1/2 border-t border-r',
@@ -148,8 +148,8 @@ export function Tooltip({
             role="tooltip"
             className={cn(
               'fixed z-50 px-2.5 py-1.5 text-xs font-medium',
-              'text-gray-100 bg-gray-800 border border-gray-700',
-              'rounded-md shadow-lg',
+              'text-white/90 bg-[#1A1A1E] border border-white/[0.08]',
+              'rounded-lg shadow-xl shadow-black/40',
               'animate-in fade-in-0 zoom-in-95 duration-150',
               className
             )}

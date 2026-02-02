@@ -54,11 +54,11 @@ export function ScratchpadSection() {
         placeholder="Quick notes..."
         className={cn(
           'w-full h-32 p-2.5 text-sm',
-          'bg-stone-900 rounded-lg',
-          'border border-stone-700',
-          'text-stone-300 placeholder:text-stone-600',
+          'bg-[#151518] rounded-lg',
+          'border border-white/[0.08]',
+          'text-white/80 placeholder:text-white/30',
           'resize-none',
-          'focus:outline-none focus:border-stone-600',
+          'focus:outline-none focus:border-[#6B6EF0]/50',
           'transition-colors'
         )}
       />

@@ -66,17 +66,24 @@ const TOAST_ICONS: Record<ToastType, typeof CheckCircle2> = {
 };
 
 const TOAST_STYLES: Record<ToastType, string> = {
-  success: 'border-green-500/30 bg-green-500/10',
-  error: 'border-red-500/30 bg-red-500/10',
-  warning: 'border-yellow-500/30 bg-yellow-500/10',
-  info: 'border-blue-500/30 bg-blue-500/10',
+  success: 'border-[#50956A]/30 bg-[#50956A]/10',
+  error: 'border-[#FF5449]/30 bg-[#FF5449]/10',
+  warning: 'border-[#F5C400]/30 bg-[#F5C400]/10',
+  info: 'border-[#6B6EF0]/30 bg-[#6B6EF0]/10',
 };
 
 const TOAST_ICON_STYLES: Record<ToastType, string> = {
-  success: 'text-green-400',
-  error: 'text-red-400',
-  warning: 'text-yellow-400',
-  info: 'text-blue-400',
+  success: 'text-[#6BB88A]',
+  error: 'text-[#FF7A72]',
+  warning: 'text-[#FFD700]',
+  info: 'text-[#8B8EFF]',
+};
+
+const PROGRESS_BAR_COLORS: Record<ToastType, string> = {
+  success: 'bg-[#50956A]',
+  error: 'bg-[#FF5449]',
+  warning: 'bg-[#F5C400]',
+  info: 'bg-[#6B6EF0]',
 };
 
 interface ToastItemProps {
@@ -104,8 +111,8 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   return (
     <div
       className={cn(
-        'relative w-80 p-4 rounded-lg border shadow-lg',
-        'bg-gray-900 backdrop-blur-sm',
+        'relative w-80 p-4 rounded-xl border shadow-xl',
+        'bg-[#151518] backdrop-blur-sm',
         TOAST_STYLES[toast.type],
         'animate-in slide-in-from-right-full duration-300',
         isExiting && 'animate-out slide-out-to-right-full duration-200'
@@ -115,9 +122,9 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
       <div className="flex gap-3">
         <Icon className={cn('flex-shrink-0 mt-0.5', TOAST_ICON_STYLES[toast.type])} size={18} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white">{toast.title}</p>
+          <p className="text-sm font-medium text-white/90">{toast.title}</p>
           {toast.description && (
-            <p className="mt-1 text-sm text-gray-400">{toast.description}</p>
+            <p className="mt-1 text-sm text-white/50">{toast.description}</p>
           )}
           {toast.action && (
             <button
@@ -125,7 +132,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
                 toast.action?.onClick();
                 handleRemove();
               }}
-              className="mt-2 text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors"
+              className="mt-2 text-sm font-medium text-[#8B8EFF] hover:text-[#A4A6FF] transition-colors"
             >
               {toast.action.label}
             </button>
@@ -133,7 +140,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
         </div>
         <button
           onClick={handleRemove}
-          className="flex-shrink-0 p-1 text-gray-400 hover:text-white transition-colors rounded"
+          className="flex-shrink-0 p-1 text-white/40 hover:text-white/70 transition-colors rounded"
           aria-label="Dismiss"
         >
           <X size={14} />
@@ -142,15 +149,9 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
 
       {/* Progress bar */}
       {duration > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 overflow-hidden rounded-b-lg">
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 overflow-hidden rounded-b-xl">
           <div
-            className={cn(
-              'h-full',
-              toast.type === 'success' && 'bg-green-500',
-              toast.type === 'error' && 'bg-red-500',
-              toast.type === 'warning' && 'bg-yellow-500',
-              toast.type === 'info' && 'bg-blue-500'
-            )}
+            className={cn('h-full', PROGRESS_BAR_COLORS[toast.type])}
             style={{
               animation: `toast-progress ${duration}ms linear forwards`,
             }}

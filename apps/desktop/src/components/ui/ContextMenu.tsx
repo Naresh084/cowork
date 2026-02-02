@@ -132,7 +132,7 @@ export function ContextMenu({
             role="menu"
             className={cn(
               'fixed z-50 min-w-[180px] py-1',
-              'bg-gray-900 border border-gray-700 rounded-lg shadow-xl',
+              'bg-[#0D0D0F] border border-white/[0.08] rounded-lg shadow-xl',
               'animate-in fade-in-0 zoom-in-95 duration-100'
             )}
             style={{ top: position.y, left: position.x }}
@@ -140,10 +140,10 @@ export function ContextMenu({
             {sections.map((section, sectionIndex) => (
               <div key={sectionIndex}>
                 {sectionIndex > 0 && (
-                  <div className="my-1 h-px bg-gray-700/50" />
+                  <div className="my-1 h-px bg-white/[0.06]" />
                 )}
                 {section.label && (
-                  <div className="px-3 py-1.5 text-xs font-medium text-gray-500">
+                  <div className="px-3 py-1.5 text-xs font-medium text-white/50">
                     {section.label}
                   </div>
                 )}
@@ -162,31 +162,31 @@ export function ContextMenu({
                         'w-full flex items-center gap-2 px-3 py-1.5 text-sm',
                         'transition-colors',
                         item.disabled
-                          ? 'text-gray-600 cursor-not-allowed'
+                          ? 'text-white/50 cursor-not-allowed'
                           : item.danger
                           ? 'text-red-400 hover:bg-red-500/10'
-                          : 'text-gray-200 hover:bg-gray-700/50',
-                        item.checked && 'bg-gray-700/30'
+                          : 'text-white/90 hover:bg-white/[0.06]',
+                        item.checked && 'bg-white/[0.04]'
                       )}
                     >
                       {item.checked !== undefined && (
                         <span className="w-4">
-                          {item.checked && <Check size={14} />}
+                          {item.checked && <Check size={14} className="text-[#8B8EFF]" />}
                         </span>
                       )}
                       {item.icon && (
-                        <span className="flex-shrink-0 text-gray-400">
+                        <span className="flex-shrink-0 text-white/70">
                           {item.icon}
                         </span>
                       )}
                       <span className="flex-1 text-left">{item.label}</span>
                       {item.shortcut && (
-                        <span className="ml-auto text-xs text-gray-500">
+                        <span className="ml-auto text-xs text-white/50">
                           {item.shortcut}
                         </span>
                       )}
                       {item.items && (
-                        <ChevronRight size={14} className="text-gray-500" />
+                        <ChevronRight size={14} className="text-white/50" />
                       )}
                     </button>
 
@@ -195,7 +195,7 @@ export function ContextMenu({
                       <div
                         className={cn(
                           'absolute top-0 left-full ml-1 min-w-[160px] py-1',
-                          'bg-gray-900 border border-gray-700 rounded-lg shadow-xl',
+                          'bg-[#0D0D0F] border border-white/[0.08] rounded-lg shadow-xl',
                           'animate-in fade-in-0 slide-in-from-left-2 duration-100'
                         )}
                       >
@@ -209,14 +209,14 @@ export function ContextMenu({
                               'w-full flex items-center gap-2 px-3 py-1.5 text-sm',
                               'transition-colors',
                               subItem.disabled
-                                ? 'text-gray-600 cursor-not-allowed'
+                                ? 'text-white/50 cursor-not-allowed'
                                 : subItem.danger
                                 ? 'text-red-400 hover:bg-red-500/10'
-                                : 'text-gray-200 hover:bg-gray-700/50'
+                                : 'text-white/90 hover:bg-white/[0.06]'
                             )}
                           >
                             {subItem.icon && (
-                              <span className="text-gray-400">{subItem.icon}</span>
+                              <span className="text-white/70">{subItem.icon}</span>
                             )}
                             <span className="flex-1 text-left">{subItem.label}</span>
                           </button>

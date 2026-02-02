@@ -36,9 +36,9 @@ export function ContextSection() {
       <div className="space-y-4">
         {/* Connectors Subsection */}
         <div>
-          <h4 className="text-xs font-medium text-stone-500 mb-2">Connectors</h4>
+          <h4 className="text-xs font-medium text-white/40 mb-2">Connectors</h4>
           {enabledServers.length === 0 ? (
-            <p className="text-xs text-stone-600 py-2">No connectors enabled</p>
+            <p className="text-xs text-white/25 py-2">No connectors enabled</p>
           ) : (
             <div className="space-y-1">
               {enabledServers.map((server) => (
@@ -50,9 +50,9 @@ export function ContextSection() {
 
         {/* Skills Subsection */}
         <div>
-          <h4 className="text-xs font-medium text-stone-500 mb-2">Skills</h4>
+          <h4 className="text-xs font-medium text-white/40 mb-2">Skills</h4>
           {skills.length === 0 ? (
-            <p className="text-xs text-stone-600 py-2">No skills available</p>
+            <p className="text-xs text-white/25 py-2">No skills available</p>
           ) : (
             <div className="space-y-1">
               {skills.map((skill) => (
@@ -78,10 +78,10 @@ function ConnectorItem({ server }: ConnectorItemProps) {
       <Plug
         className={cn(
           'w-3.5 h-3.5 flex-shrink-0',
-          server.status === 'connected' ? 'text-green-500' : 'text-stone-500'
+          server.status === 'connected' ? 'text-[#50956A]' : 'text-white/40'
         )}
       />
-      <span className="text-sm text-stone-400 flex-1 truncate">
+      <span className="text-sm text-white/50 flex-1 truncate">
         {server.name}
       </span>
       <span title={statusConfig.label}>
@@ -107,8 +107,8 @@ interface SkillItemProps {
 function SkillItem({ skill }: SkillItemProps) {
   return (
     <div className="flex items-center gap-2 py-1.5 px-1">
-      <skill.icon className="w-3.5 h-3.5 text-stone-500 flex-shrink-0" />
-      <span className="text-sm text-stone-400">{skill.name}</span>
+      <skill.icon className="w-3.5 h-3.5 text-white/40 flex-shrink-0" />
+      <span className="text-sm text-white/50">{skill.name}</span>
     </div>
   );
 }
@@ -118,20 +118,20 @@ function getStatusConfig(status: MCPServerConfig['status'] | undefined) {
     case 'connected':
       return {
         icon: CheckCircle2,
-        color: 'text-green-500',
+        color: 'text-[#50956A]',
         label: 'Connected',
       };
     case 'error':
       return {
         icon: XCircle,
-        color: 'text-red-500',
+        color: 'text-[#FF5449]',
         label: 'Error',
       };
     case 'disconnected':
     default:
       return {
         icon: AlertCircle,
-        color: 'text-stone-500',
+        color: 'text-white/40',
         label: 'Disconnected',
       };
   }

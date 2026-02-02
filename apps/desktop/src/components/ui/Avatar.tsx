@@ -29,10 +29,10 @@ const statusSizes = {
 };
 
 const statusColors = {
-  online: 'bg-green-500',
-  offline: 'bg-gray-500',
-  busy: 'bg-red-500',
-  away: 'bg-yellow-500',
+  online: 'bg-[#50956A]',
+  offline: 'bg-white/40',
+  busy: 'bg-[#FF5449]',
+  away: 'bg-[#F5C400]',
 };
 
 function getInitials(name: string): string {
@@ -46,14 +46,12 @@ function getInitials(name: string): string {
 
 function stringToColor(str: string): string {
   const colors = [
-    'bg-blue-600',
-    'bg-green-600',
-    'bg-purple-600',
-    'bg-orange-600',
-    'bg-pink-600',
-    'bg-cyan-600',
-    'bg-indigo-600',
-    'bg-teal-600',
+    'bg-[#4F52D9]',
+    'bg-[#6B6EF0]',
+    'bg-[#8A62C2]',
+    'bg-[#008585]',
+    'bg-[#50956A]',
+    'bg-[#F5C400]',
   ];
 
   let hash = 0;
@@ -77,14 +75,14 @@ export function Avatar({
 
   const showImage = src && !imageError;
   const initials = typeof fallback === 'string' ? getInitials(fallback) : null;
-  const bgColor = typeof fallback === 'string' ? stringToColor(fallback) : 'bg-gray-700';
+  const bgColor = typeof fallback === 'string' ? stringToColor(fallback) : 'bg-white/[0.08]';
 
   return (
     <div
       className={cn(
         'relative inline-flex items-center justify-center flex-shrink-0',
         'overflow-hidden',
-        shape === 'circle' ? 'rounded-full' : 'rounded-lg',
+        shape === 'circle' ? 'rounded-full' : 'rounded-xl',
         sizeStyles[size],
         !showImage && bgColor,
         className
@@ -102,13 +100,13 @@ export function Avatar({
       ) : typeof fallback === 'object' ? (
         fallback
       ) : (
-        <User className="w-1/2 h-1/2 text-gray-400" />
+        <User className="w-1/2 h-1/2 text-white/40" />
       )}
 
       {status && (
         <span
           className={cn(
-            'absolute bottom-0 right-0 rounded-full border-2 border-gray-900',
+            'absolute bottom-0 right-0 rounded-full border-2 border-[#0D0D0F]',
             statusSizes[size],
             statusColors[status]
           )}
@@ -140,7 +138,7 @@ export function AvatarGroup({
       {visibleChildren.map((child, index) => (
         <div
           key={index}
-          className="relative ring-2 ring-gray-900 rounded-full"
+          className="relative ring-2 ring-[#0D0D0F] rounded-full"
           style={{ zIndex: visibleChildren.length - index }}
         >
           {child}
@@ -150,8 +148,8 @@ export function AvatarGroup({
         <div
           className={cn(
             'relative flex items-center justify-center',
-            'bg-gray-700 text-gray-300 font-medium rounded-full',
-            'ring-2 ring-gray-900',
+            'bg-white/[0.08] text-white/70 font-medium rounded-full',
+            'ring-2 ring-[#0D0D0F]',
             sizeStyles[size]
           )}
         >

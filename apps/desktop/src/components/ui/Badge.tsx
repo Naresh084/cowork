@@ -3,7 +3,7 @@ import { cn } from '../../lib/utils';
 
 export interface BadgeProps {
   children: ReactNode;
-  variant?: 'default' | 'success' | 'warning' | 'error' | 'info' | 'outline';
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'info' | 'outline' | 'primary' | 'secondary';
   size?: 'sm' | 'md' | 'lg';
   dot?: boolean;
   removable?: boolean;
@@ -12,27 +12,31 @@ export interface BadgeProps {
 }
 
 const variantStyles = {
-  default: 'bg-gray-700 text-gray-200 border-gray-600',
-  success: 'bg-green-500/20 text-green-400 border-green-500/30',
-  warning: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  error: 'bg-red-500/20 text-red-400 border-red-500/30',
-  info: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  outline: 'bg-transparent text-gray-300 border-gray-600',
+  default: 'bg-white/[0.08] text-white/80 border-white/[0.08]',
+  primary: 'bg-[#6B6EF0]/20 text-[#8B8EFF] border-[#6B6EF0]/30',
+  secondary: 'bg-[#8A62C2]/20 text-[#A47CDE] border-[#8A62C2]/30',
+  success: 'bg-[#50956A]/20 text-[#6BB88A] border-[#50956A]/30',
+  warning: 'bg-[#F5C400]/20 text-[#FFD700] border-[#F5C400]/30',
+  error: 'bg-[#FF5449]/20 text-[#FF7A72] border-[#FF5449]/30',
+  info: 'bg-[#008585]/20 text-[#00A1A3] border-[#008585]/30',
+  outline: 'bg-transparent text-white/70 border-white/[0.12]',
 };
 
 const dotColors = {
-  default: 'bg-gray-400',
-  success: 'bg-green-400',
-  warning: 'bg-yellow-400',
-  error: 'bg-red-400',
-  info: 'bg-blue-400',
-  outline: 'bg-gray-400',
+  default: 'bg-white/60',
+  primary: 'bg-[#8B8EFF]',
+  secondary: 'bg-[#A47CDE]',
+  success: 'bg-[#6BB88A]',
+  warning: 'bg-[#FFD700]',
+  error: 'bg-[#FF7A72]',
+  info: 'bg-[#00A1A3]',
+  outline: 'bg-white/40',
 };
 
 const sizeStyles = {
-  sm: 'text-xs px-1.5 py-0.5',
-  md: 'text-xs px-2 py-1',
-  lg: 'text-sm px-2.5 py-1',
+  sm: 'text-xs px-2 py-0.5 gap-1',
+  md: 'text-xs px-2.5 py-1 gap-1.5',
+  lg: 'text-sm px-3 py-1 gap-1.5',
 };
 
 export function Badge({
@@ -47,7 +51,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 font-medium rounded-full border',
+        'inline-flex items-center font-medium rounded-full border',
         variantStyles[variant],
         sizeStyles[size],
         className
@@ -55,7 +59,7 @@ export function Badge({
     >
       {dot && (
         <span
-          className={cn('w-1.5 h-1.5 rounded-full', dotColors[variant])}
+          className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', dotColors[variant])}
         />
       )}
       {children}
@@ -63,7 +67,7 @@ export function Badge({
         <button
           type="button"
           onClick={onRemove}
-          className="ml-0.5 hover:bg-white/10 rounded-full p-0.5 transition-colors"
+          className="ml-0.5 hover:bg-white/10 rounded-full p-0.5 transition-colors flex-shrink-0"
           aria-label="Remove"
         >
           <svg

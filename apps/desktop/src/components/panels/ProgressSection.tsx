@@ -41,11 +41,11 @@ export function ProgressSection() {
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-6 text-center">
-      <div className="w-10 h-10 rounded-xl bg-stone-800/50 flex items-center justify-center mb-2">
-        <CheckCircle2 className="w-5 h-5 text-stone-600" />
+      <div className="w-10 h-10 rounded-xl bg-white/[0.04] flex items-center justify-center mb-2">
+        <CheckCircle2 className="w-5 h-5 text-white/30" />
       </div>
-      <p className="text-xs text-stone-500">No tasks yet</p>
-      <p className="text-xs text-stone-600 mt-0.5">
+      <p className="text-xs text-white/40">No tasks yet</p>
+      <p className="text-xs text-white/25 mt-0.5">
         Tasks will appear as the agent works
       </p>
     </div>
@@ -79,8 +79,8 @@ function TaskList({ tasks }: TaskListProps) {
             <div key={owner} className="mb-2">
               {owner !== 'main' && (
                 <div className="flex items-center gap-1.5 px-1 py-1 mb-1">
-                  <User className="w-3 h-3 text-stone-500" />
-                  <span className="text-xs text-stone-500 font-medium">
+                  <User className="w-3 h-3 text-white/40" />
+                  <span className="text-xs text-white/40 font-medium">
                     {owner}
                   </span>
                 </div>
@@ -114,17 +114,17 @@ function TaskItem({ task }: TaskItemProps) {
       className={cn(
         'flex items-start gap-2 py-1.5 px-1 rounded-lg',
         'transition-colors duration-150',
-        task.status === 'in_progress' && 'bg-blue-500/5'
+        task.status === 'in_progress' && 'bg-[#6B6EF0]/5'
       )}
     >
       {/* Status Icon */}
       <div className="mt-0.5 flex-shrink-0">
         {task.status === 'completed' ? (
-          <CheckCircle2 className="w-4 h-4 text-green-500" />
+          <CheckCircle2 className="w-4 h-4 text-[#50956A]" />
         ) : task.status === 'in_progress' ? (
-          <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+          <Loader2 className="w-4 h-4 text-[#6B6EF0] animate-spin" />
         ) : (
-          <Circle className="w-4 h-4 text-stone-600" />
+          <Circle className="w-4 h-4 text-white/25" />
         )}
       </div>
 
@@ -134,8 +134,8 @@ function TaskItem({ task }: TaskItemProps) {
           className={cn(
             'text-sm block',
             task.status === 'completed'
-              ? 'text-stone-500 line-through'
-              : 'text-stone-300'
+              ? 'text-white/40 line-through'
+              : 'text-white/80'
           )}
         >
           {task.subject}
@@ -144,14 +144,14 @@ function TaskItem({ task }: TaskItemProps) {
         {/* Active form (shown when in progress) */}
         {task.status === 'in_progress' && task.activeForm && (
           <div className="flex items-center gap-1.5 mt-0.5">
-            <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
-            <span className="text-xs text-blue-400">{task.activeForm}</span>
+            <Loader2 className="w-3 h-3 text-[#8B8EFF] animate-spin" />
+            <span className="text-xs text-[#8B8EFF]">{task.activeForm}</span>
           </div>
         )}
 
         {/* Blocked indicator */}
         {task.blockedBy && task.blockedBy.length > 0 && task.status !== 'completed' && (
-          <span className="text-xs text-amber-500 mt-0.5 block">
+          <span className="text-xs text-[#F5C400] mt-0.5 block">
             Waiting on {task.blockedBy.length} task(s)
           </span>
         )}
@@ -159,4 +159,3 @@ function TaskItem({ task }: TaskItemProps) {
     </motion.div>
   );
 }
-
