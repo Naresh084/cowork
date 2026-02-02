@@ -26,6 +26,7 @@ export const MessageContentPartSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('tool_result'),
     toolCallId: z.string(),
+    toolName: z.string().optional(),
     result: z.unknown(),
     isError: z.boolean().optional(),
   }),

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type {
   Agent,
   AgentConfig,
@@ -246,9 +247,95 @@ export class CoworkAgent implements Agent {
     };
   }
 
-  private zodToParameters(_schema: unknown): ToolDefinition['parameters'] {
-    // Simplified conversion - in production would use zod-to-json-schema
-    return [];
+  private zodToParameters(schema: unknown): ToolDefinition['parameters'] {
+    if (!(schema instanceof z.ZodObject)) {
+      return [];
+    }
+
+    const shape = schema.shape;
+    const parameters: ToolDefinition['parameters'] = [];
+
+    const unwrapSchema = (input: z.ZodTypeAny): z.ZodTypeAny => {
+      let current = input;
+      // Unwrap optional/default/nullable/effects
+      while (true) {
+        if (current instanceof z.ZodOptional || current instanceof z.ZodNullable) {
+          current = current.unwrap();
+          continue;
+        }
+        if (current instanceof z.ZodDefault) {
+          current = current._def.innerType;
+          continue;
+        }
+        if (current instanceof z.ZodEffects) {
+          current = current._def.schema;
+          continue;
+        }
+        break;
+      }
+      return current;
+    };
+
+    const getType = (input: z.ZodTypeAny): ToolDefinition['parameters'][number]['type'] => {
+      const unwrapped = unwrapSchema(input);
+
+      if (unwrapped instanceof z.ZodString) return 'string';
+      if (unwrapped instanceof z.ZodNumber) return 'number';
+      if (unwrapped instanceof z.ZodBoolean) return 'boolean';
+      if (unwrapped instanceof z.ZodArray) return 'array';
+      if (unwrapped instanceof z.ZodObject) return 'object';
+      if (unwrapped instanceof z.ZodRecord) return 'object';
+      if (unwrapped instanceof z.ZodEnum || unwrapped instanceof z.ZodNativeEnum) return 'string';
+      if (unwrapped instanceof z.ZodLiteral) {
+        const literalValue = unwrapped._def.value;
+        const literalType = typeof literalValue;
+        if (literalType === 'number') return 'number';
+        if (literalType === 'boolean') return 'boolean';
+        return 'string';
+      }
+      if (unwrapped instanceof z.ZodUnion) {
+        const unionTypes = unwrapped._def.options.map((option: z.ZodTypeAny) => getType(option));
+        const first = unionTypes[0];
+        if (unionTypes.every((t: string) => t === first)) {
+          return first as ToolDefinition['parameters'][number]['type'];
+        }
+        return 'string';
+      }
+
+      return 'string';
+    };
+
+    const isOptional = (input: z.ZodTypeAny): boolean => {
+      let current = input;
+      while (current instanceof z.ZodEffects) {
+        current = current._def.schema;
+      }
+      if (current instanceof z.ZodOptional || current instanceof z.ZodDefault) return true;
+      if (current instanceof z.ZodNullable) {
+        const inner = current.unwrap();
+        return inner instanceof z.ZodOptional || inner instanceof z.ZodDefault;
+      }
+      return false;
+    };
+
+    for (const [name, fieldSchema] of Object.entries(shape)) {
+      const field = fieldSchema as z.ZodTypeAny;
+      const description = (field.description || field._def.description || '') as string;
+      const type = getType(field);
+      const required = !isOptional(field);
+      const defaultValue =
+        field instanceof z.ZodDefault ? field._def.defaultValue() : undefined;
+
+      parameters.push({
+        name,
+        type,
+        description,
+        required,
+        ...(defaultValue !== undefined ? { default: defaultValue } : {}),
+      });
+    }
+
+    return parameters;
   }
 
   private extractToolCalls(message: Message): ToolCall[] {
@@ -310,6 +397,7 @@ export class CoworkAgent implements Agent {
         {
           type: 'tool_result',
           toolCallId: toolCall.id,
+          toolName: toolCall.name,
           result: toolCall.result ?? { error: toolCall.error },
           isError: toolCall.status === 'error' || toolCall.status === 'denied',
         },

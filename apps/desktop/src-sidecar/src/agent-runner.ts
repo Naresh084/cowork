@@ -27,6 +27,8 @@ interface ActiveSession {
   messages: Message[];
   tasks: Task[];
   artifacts: Artifact[];
+  permissionCache: Map<string, PermissionDecision>;
+  toolStartTimes: Map<string, number>;
   pendingPermissions: Map<string, {
     request: ExtendedPermissionRequest;
     resolve: (decision: PermissionDecision) => void;
@@ -95,6 +97,13 @@ export class AgentRunner {
       request: PermissionRequest,
       _context: unknown
     ): Promise<PermissionDecision> => {
+      const session = this.sessions.get(sessionId);
+      const cacheKey = `${request.type}:${request.resource}`;
+      const cachedDecision = session?.permissionCache.get(cacheKey);
+      if (cachedDecision === 'allow_session') {
+        return cachedDecision;
+      }
+
       const permissionId = generateId('perm');
 
       const extendedRequest: ExtendedPermissionRequest = {
@@ -106,9 +115,9 @@ export class AgentRunner {
 
       return new Promise((resolve) => {
         // Store pending permission
-        const session = this.sessions.get(sessionId);
-        if (session) {
-          session.pendingPermissions.set(permissionId, {
+        const activeSession = this.sessions.get(sessionId);
+        if (activeSession) {
+          activeSession.pendingPermissions.set(permissionId, {
             request: extendedRequest,
             resolve,
           });
@@ -143,6 +152,8 @@ export class AgentRunner {
       messages: [],
       tasks: [],
       artifacts: [],
+      permissionCache: new Map(),
+      toolStartTimes: new Map(),
       pendingPermissions: new Map(),
       pendingQuestions: new Map(),
       createdAt: now,
@@ -223,13 +234,32 @@ export class AgentRunner {
 
           case 'agent:tool_call': {
             const toolCall = event.payload as { toolCall: unknown };
+            const toolCallAny = toolCall.toolCall as { id?: string };
+            if (toolCallAny?.id) {
+              session.toolStartTimes.set(toolCallAny.id, Date.now());
+            }
             eventEmitter.toolStart(sessionId, toolCall.toolCall);
             break;
           }
 
           case 'agent:tool_result': {
-            const result = event.payload as { toolCall: unknown };
-            eventEmitter.toolResult(sessionId, result.toolCall, result);
+            const result = event.payload as { toolCall: { id?: string; status?: string; result?: unknown; error?: string } };
+            const toolCallId = result.toolCall.id ?? '';
+            const startTime = toolCallId ? session.toolStartTimes.get(toolCallId) : undefined;
+            if (toolCallId) {
+              session.toolStartTimes.delete(toolCallId);
+            }
+
+            const success = result.toolCall.status === 'executed' && !result.toolCall.error;
+            const payload = {
+              toolCallId,
+              success,
+              result: result.toolCall.result,
+              error: result.toolCall.error,
+              duration: startTime ? Date.now() - startTime : undefined,
+            };
+
+            eventEmitter.toolResult(sessionId, result.toolCall, payload);
 
             // Check if this creates an artifact
             this.checkForArtifact(session, result);
@@ -237,8 +267,10 @@ export class AgentRunner {
           }
 
           case 'agent:complete': {
-            const lastMessage = session.messages[session.messages.length - 1];
-            eventEmitter.streamDone(sessionId, lastMessage);
+            const lastAssistant = [...session.messages].reverse().find(m => m.role === 'assistant');
+            if (lastAssistant) {
+              eventEmitter.streamDone(sessionId, lastAssistant);
+            }
             break;
           }
 
@@ -306,8 +338,13 @@ export class AgentRunner {
     pending.resolve(decision);
     session.pendingPermissions.delete(permissionId);
 
+    if (decision === 'allow_session') {
+      const cacheKey = `${pending.request.type}:${pending.request.resource}`;
+      session.permissionCache.set(cacheKey, decision);
+    }
+
     // Emit resolved event
-    eventEmitter.permissionResolved(sessionId, permissionId);
+    eventEmitter.permissionResolved(sessionId, permissionId, decision);
   }
 
   /**
@@ -629,26 +666,26 @@ You have access to file and shell tools:
     return content ? content.slice(0, 100) : null;
   }
 
-  private assessRiskLevel(request: PermissionRequest): 'safe' | 'moderate' | 'dangerous' {
+  private assessRiskLevel(request: PermissionRequest): 'low' | 'medium' | 'high' {
     switch (request.type) {
       case 'file_read':
-        return 'safe';
+        return 'low';
       case 'file_write':
       case 'file_delete':
         // Check if writing to system directories
         if (request.resource.startsWith('/System') ||
             request.resource.startsWith('/etc') ||
             request.resource.startsWith('/usr')) {
-          return 'dangerous';
+          return 'high';
         }
-        return 'moderate';
+        return 'medium';
       case 'shell_execute':
         // Shell commands are potentially dangerous
-        return 'moderate';
+        return 'medium';
       case 'network_request':
-        return 'moderate';
+        return 'medium';
       default:
-        return 'moderate';
+        return 'medium';
     }
   }
 

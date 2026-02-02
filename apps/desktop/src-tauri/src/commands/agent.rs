@@ -64,13 +64,6 @@ pub struct Attachment {
     pub size: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecision {
-    pub allow: bool,
-    pub remember: Option<bool>,
-    pub scope: Option<String>, // 'once', 'session', 'always'
-}
 
 /// State wrapper for the sidecar manager
 pub struct AgentState {
@@ -217,7 +210,7 @@ pub async fn agent_respond_permission(
     state: State<'_, AgentState>,
     session_id: String,
     permission_id: String,
-    decision: PermissionDecision,
+    decision: String,
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 

@@ -69,7 +69,7 @@ interface ChatActions {
   respondToPermission: (
     sessionId: string,
     permissionId: string,
-    decision: 'allow' | 'deny' | 'always_allow'
+    decision: 'allow' | 'deny' | 'allow_session'
   ) => Promise<void>;
   stopGeneration: (sessionId: string) => Promise<void>;
   clearError: () => void;
@@ -180,17 +180,13 @@ export const useChatStore = create<ChatState & ChatActions>((set) => ({
   respondToPermission: async (
     sessionId: string,
     permissionId: string,
-    decision: 'allow' | 'deny' | 'always_allow'
+    decision: 'allow' | 'deny' | 'allow_session'
   ) => {
     try {
       await invoke('agent_respond_permission', {
         sessionId,
         permissionId,
-        decision: {
-          allow: decision !== 'deny',
-          remember: decision === 'always_allow',
-          scope: decision === 'always_allow' ? 'always' : 'once',
-        },
+        decision,
       });
 
       // Remove from pending

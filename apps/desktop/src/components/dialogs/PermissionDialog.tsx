@@ -108,7 +108,7 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       await respondToPermission(
         request.sessionId,
         request.id,
-        rememberChoice ? 'always_allow' : 'allow'
+        rememberChoice ? 'allow_session' : 'allow'
       );
       removePermissionRequest(request.id);
       onClose?.();

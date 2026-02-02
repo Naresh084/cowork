@@ -82,7 +82,7 @@ export type AgentEvent =
       type: 'permission:resolved';
       sessionId: string;
       permissionId: string;
-      decision: 'allow' | 'deny';
+      decision: 'allow' | 'deny' | 'allow_once' | 'allow_session';
     }
   // Question events (for agent asking user questions)
   | {

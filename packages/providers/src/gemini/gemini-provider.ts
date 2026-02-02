@@ -321,7 +321,7 @@ export class GeminiProvider implements AIProvider {
         case 'tool_result':
           return {
             functionResponse: {
-              name: '', // Gemini SDK requires this but we don't always have it
+              name: part.toolName || '', // Gemini SDK requires this but we don't always have it
               response: part.result as object,
             },
           };

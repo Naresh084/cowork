@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useChatStore } from './chat-store';
 import { setMockInvokeResponse, clearMockInvokeResponses } from '../test/mocks/tauri-core';
+import { invoke } from '@tauri-apps/api/core';
 
 describe('chat-store', () => {
   beforeEach(() => {
@@ -17,6 +18,7 @@ describe('chat-store', () => {
       isLoadingMessages: false,
     });
     clearMockInvokeResponses();
+    invoke.mockClear();
   });
 
   describe('loadMessages', () => {
@@ -78,6 +80,20 @@ describe('chat-store', () => {
       const state = useChatStore.getState();
       expect(state.error).toBe('Network error');
       expect(state.isStreaming).toBe(false);
+    });
+  });
+
+  describe('respondToPermission', () => {
+    it('should send permission decision string to backend', async () => {
+      setMockInvokeResponse('agent_respond_permission', undefined);
+
+      await useChatStore.getState().respondToPermission('session-1', 'perm-1', 'allow_session');
+
+      expect(invoke).toHaveBeenCalledWith('agent_respond_permission', {
+        sessionId: 'session-1',
+        permissionId: 'perm-1',
+        decision: 'allow_session',
+      });
     });
   });
 
