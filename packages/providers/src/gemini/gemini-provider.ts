@@ -105,6 +105,11 @@ export class GeminiProvider implements AIProvider {
         createdAt: now(),
       };
 
+      const groundingMetadata = this.extractGroundingMetadata(response);
+      if (groundingMetadata) {
+        message.metadata = groundingMetadata;
+      }
+
       return {
         message,
         usage: response.usageMetadata
@@ -186,6 +191,11 @@ export class GeminiProvider implements AIProvider {
         content,
         createdAt: now(),
       };
+
+      const groundingMetadata = this.extractGroundingMetadata(response);
+      if (groundingMetadata) {
+        message.metadata = groundingMetadata;
+      }
 
       const doneChunk: StreamChunk = { type: 'done' };
       request.onChunk?.(doneChunk);
@@ -344,7 +354,12 @@ export class GeminiProvider implements AIProvider {
       },
     }));
 
-    return [{ functionDeclarations }];
+    return [
+      { functionDeclarations },
+      { googleSearch: {} },
+      { urlContext: {} },
+      { codeExecution: {} },
+    ];
   }
 
   private buildGenerationConfig(
@@ -385,6 +400,47 @@ export class GeminiProvider implements AIProvider {
     }
 
     return ProviderError.requestFailed('gemini', 500, String(error));
+  }
+
+  private extractGroundingMetadata(response: unknown): {
+    sources: Array<{ title: string; url: string }>;
+    searchQueries?: string[];
+  } | undefined {
+    const responseWithCandidates = response as {
+      candidates?: Array<{
+        groundingMetadata?: {
+          groundingChunks?: Array<{
+            web?: { title?: string; uri?: string };
+          }>;
+          webSearchQueries?: string[];
+        };
+      }>;
+    };
+
+    const groundingMetadata = responseWithCandidates.candidates?.[0]?.groundingMetadata;
+    if (!groundingMetadata) return undefined;
+
+    const sources = (groundingMetadata.groundingChunks ?? [])
+      .map((chunk) => {
+        const web = chunk.web;
+        if (!web?.uri) return null;
+        return {
+          title: web.title || web.uri,
+          url: web.uri,
+        };
+      })
+      .filter((source): source is { title: string; url: string } => source !== null);
+
+    const searchQueries = groundingMetadata.webSearchQueries ?? [];
+
+    if (sources.length === 0 && searchQueries.length === 0) {
+      return undefined;
+    }
+
+    return {
+      sources,
+      searchQueries: searchQueries.length > 0 ? searchQueries : undefined,
+    };
   }
 }
 
