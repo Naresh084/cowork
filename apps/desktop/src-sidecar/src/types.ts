@@ -176,7 +176,7 @@ export interface ToolExecution {
 
 export interface ExtendedPermissionRequest extends PermissionRequest {
   id: string;
-  riskLevel: 'safe' | 'moderate' | 'dangerous';
+  riskLevel: 'low' | 'medium' | 'high';
   riskAnalysis?: {
     concerns: string[];
     mitigations: string[];

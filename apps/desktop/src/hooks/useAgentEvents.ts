@@ -74,12 +74,15 @@ export function useAgentEvents(sessionId: string | null): void {
 
         case 'tool:result': {
           const result = event.result;
-          chat.updateToolExecution(event.toolCallId, {
-            status: result.success ? 'success' : 'error',
-            result: result.result,
-            error: result.error,
-            completedAt: Date.now(),
-          });
+          const toolCallId = event.toolCallId || (result as { toolCallId?: string })?.toolCallId || '';
+          if (toolCallId) {
+            chat.updateToolExecution(toolCallId, {
+              status: result.success ? 'success' : 'error',
+              result: result.result,
+              error: result.error,
+              completedAt: Date.now(),
+            });
+          }
           chat.setStreamingTool(null);
           break;
         }

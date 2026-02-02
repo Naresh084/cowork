@@ -55,7 +55,7 @@ function parseTauriEvent(
       return {
         type: 'tool:result',
         sessionId,
-        toolCallId: (data.toolCallId as string) ?? '',
+        toolCallId: (data.toolCallId as string) ?? (data.toolCall as { id?: string })?.id ?? '',
         result: data.result as AgentEvent & { type: 'tool:result' } extends {
           result: infer R;
         }
@@ -79,7 +79,7 @@ function parseTauriEvent(
         type: 'permission:resolved',
         sessionId,
         permissionId: (data.permissionId as string) ?? '',
-        decision: (data.decision as 'allow' | 'deny') ?? 'deny',
+        decision: (data.decision as 'allow' | 'deny' | 'allow_once' | 'allow_session') ?? 'deny',
       };
 
     case 'question:ask':
@@ -190,8 +190,8 @@ function parseTauriEvent(
       return {
         type: 'session:updated',
         sessionId,
-        title: data.title as string | undefined,
-        messageCount: data.messageCount as number | undefined,
+        title: (data.title as string | undefined) ?? (data.session as { title?: string })?.title,
+        messageCount: (data.messageCount as number | undefined) ?? (data.session as { messageCount?: number })?.messageCount,
       };
 
     case 'agent:started':

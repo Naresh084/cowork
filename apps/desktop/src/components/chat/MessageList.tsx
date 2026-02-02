@@ -520,7 +520,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
           <ToolExecutionCard
             execution={{
               id: part.toolCallId || `result-${Date.now()}`,
-              name: 'Tool Result',
+              name: part.toolName || 'Tool Result',
               args: {},
               status: part.isError ? 'error' : 'success',
               result: part.result,

@@ -64,7 +64,12 @@ export class EventEmitter {
    * Emit tool result event.
    */
   toolResult(sessionId: string, toolCall: unknown, result: unknown): void {
-    this.emit('tool:result', sessionId, { toolCall, result, endTime: Date.now() });
+    const toolCallAny = toolCall as { id?: string };
+    this.emit('tool:result', sessionId, {
+      toolCallId: toolCallAny?.id ?? '',
+      toolCall,
+      result,
+    });
   }
 
   /**
@@ -77,8 +82,8 @@ export class EventEmitter {
   /**
    * Emit permission resolved event.
    */
-  permissionResolved(sessionId: string, permissionId: string): void {
-    this.emit('permission:resolved', sessionId, { permissionId });
+  permissionResolved(sessionId: string, permissionId: string, decision: string): void {
+    this.emit('permission:resolved', sessionId, { permissionId, decision });
   }
 
   /**
@@ -134,7 +139,12 @@ export class EventEmitter {
    * Emit session updated event.
    */
   sessionUpdated(session: unknown): void {
-    this.emit('session:updated', undefined, { session });
+    const sessionAny = session as { id?: string; title?: string | null; messageCount?: number };
+    this.emit('session:updated', undefined, {
+      session,
+      title: sessionAny.title ?? undefined,
+      messageCount: sessionAny.messageCount ?? undefined,
+    });
   }
 
   /**
