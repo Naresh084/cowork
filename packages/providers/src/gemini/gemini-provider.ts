@@ -67,7 +67,9 @@ export class GeminiProvider implements AIProvider {
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
     const model = await this.getGenerativeModel(request.model);
     const contents = this.messagesToContents(request.messages);
-    const tools = request.tools ? this.toolsToGeminiTools(request.tools) : undefined;
+    const tools = request.tools
+      ? (this.toolsToGeminiTools(request.tools) as unknown as Tool[])
+      : undefined;
 
     const generationConfig = this.buildGenerationConfig(request.config);
 
@@ -129,7 +131,9 @@ export class GeminiProvider implements AIProvider {
   async *stream(request: StreamGenerateRequest): AsyncGenerator<StreamChunk, GenerateResponse> {
     const model = await this.getGenerativeModel(request.model);
     const contents = this.messagesToContents(request.messages);
-    const tools = request.tools ? this.toolsToGeminiTools(request.tools) : undefined;
+    const tools = request.tools
+      ? (this.toolsToGeminiTools(request.tools) as unknown as Tool[])
+      : undefined;
 
     const generationConfig = this.buildGenerationConfig(request.config);
 
@@ -327,7 +331,9 @@ export class GeminiProvider implements AIProvider {
     });
   }
 
-  private toolsToGeminiTools(tools: ToolDefinition[]): Tool[] {
+  private toolsToGeminiTools(tools: ToolDefinition[]): Array<
+    Tool | { googleSearch: Record<string, never> } | { urlContext: Record<string, never> } | { codeExecution: Record<string, never> }
+  > {
     const typeMap: Record<string, SchemaType> = {
       string: SchemaType.STRING,
       number: SchemaType.NUMBER,
