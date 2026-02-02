@@ -2,7 +2,6 @@ import { vi } from 'vitest';
 
 // Use global to share mock responses across module instances
 declare global {
-  // eslint-disable-next-line no-var
   var __mockInvokeResponses: Record<string, unknown>;
 }
 
