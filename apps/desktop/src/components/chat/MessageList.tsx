@@ -6,6 +6,7 @@ import { StreamingMessage } from './StreamingMessage';
 import { ToolExecutionCard } from './ToolExecutionCard';
 import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
+import { SourcesCitation } from './SourcesCitation';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Message, MessageContentPart } from '@gemini-cowork/shared';
 
@@ -216,6 +217,10 @@ function MessageBubble({ message }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const metadata = message.metadata as {
+    sources?: Array<{ title?: string; url: string }>;
+    searchQueries?: string[];
+  } | undefined;
 
   const handleCopy = async () => {
     const textContent = typeof message.content === 'string'
@@ -292,6 +297,13 @@ function MessageBubble({ message }: MessageBubbleProps) {
             </div>
           )}
         </motion.div>
+
+        {!isUser && metadata?.sources?.length ? (
+          <SourcesCitation
+            sources={metadata.sources}
+            searchQueries={metadata.searchQueries}
+          />
+        ) : null}
 
         {/* Actions */}
         {!isUser && (
