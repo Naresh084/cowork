@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, type ReactNode, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useCallback, type ReactNode, type KeyboardEvent, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -88,7 +88,7 @@ export function Dialog({
   );
 
   const handleOverlayClick = useCallback(
-    (e: React.MouseEvent) => {
+    (e: MouseEvent<HTMLDivElement>) => {
       if (e.target === e.currentTarget && closeOnOverlayClick) {
         onClose();
       }

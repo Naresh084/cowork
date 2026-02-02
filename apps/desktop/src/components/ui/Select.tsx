@@ -137,7 +137,7 @@ export function Select({
           e.preventDefault();
           setHighlightedIndex((prev) => Math.max(prev - 1, 0));
           break;
-        case 'Enter':
+        case 'Enter': {
           e.preventDefault();
           const option = filteredOptions[highlightedIndex];
           if (option && !option.disabled) {
@@ -146,6 +146,7 @@ export function Select({
             setSearch('');
           }
           break;
+        }
       }
     },
     [isOpen, filteredOptions, highlightedIndex, onChange]

@@ -37,7 +37,7 @@ export function Tooltip({
   const [tooltipStyle, setTooltipStyle] = useState<TooltipStyle>({});
   const triggerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const calculatePosition = useCallback(() => {
     if (!triggerRef.current || !tooltipRef.current) return;

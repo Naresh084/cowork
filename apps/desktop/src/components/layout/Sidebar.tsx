@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
@@ -470,7 +470,7 @@ interface ProfileMenuProps {
   apiKey: string | null;
   onOpenConnectors: () => void;
   onClose: () => void;
-  buttonRef: React.RefObject<HTMLButtonElement>;
+  buttonRef: RefObject<HTMLButtonElement>;
   isCollapsed: boolean;
 }
 

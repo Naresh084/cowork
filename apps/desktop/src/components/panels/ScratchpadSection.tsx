@@ -15,7 +15,7 @@ import { CollapsibleSection } from './CollapsibleSection';
 export function ScratchpadSection() {
   const { scratchpadContent, setScratchpadContent } = useSettingsStore();
   const [localContent, setLocalContent] = useState(scratchpadContent);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync local state with store on mount
   useEffect(() => {

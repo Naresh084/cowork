@@ -190,8 +190,9 @@ export function CodeBlock({
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      toast.error('Failed to copy code');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to copy code', message);
     }
   };
 

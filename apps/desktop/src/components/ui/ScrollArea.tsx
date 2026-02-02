@@ -1,4 +1,4 @@
-import { forwardRef, type HTMLAttributes, type UIEvent, useCallback, useRef, useState } from 'react';
+import { forwardRef, type HTMLAttributes, type UIEvent, type RefObject, useCallback, useRef, useState } from 'react';
 import { cn } from '../../lib/utils';
 
 interface ScrollAreaProps extends HTMLAttributes<HTMLDivElement> {
@@ -27,7 +27,7 @@ export const ScrollArea = forwardRef<HTMLDivElement, ScrollAreaProps>(
     const [isAtTop, setIsAtTop] = useState(true);
     const [isAtBottom, setIsAtBottom] = useState(false);
     const internalRef = useRef<HTMLDivElement>(null);
-    const scrollRef = (ref as React.RefObject<HTMLDivElement>) || internalRef;
+    const scrollRef = (ref as RefObject<HTMLDivElement>) || internalRef;
 
     const handleScroll = useCallback(
       (e: UIEvent<HTMLDivElement>) => {
