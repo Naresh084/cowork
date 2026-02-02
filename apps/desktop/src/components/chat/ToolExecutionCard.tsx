@@ -77,8 +77,9 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
       await navigator.clipboard.writeText(JSON.stringify(execution.args, null, 2));
       setCopiedArgs(true);
       setTimeout(() => setCopiedArgs(false), 2000);
-    } catch (error) {
-      toast.error('Failed to copy arguments');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to copy arguments', message);
     }
   };
 
@@ -91,8 +92,9 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
       await navigator.clipboard.writeText(resultText);
       setCopiedResult(true);
       setTimeout(() => setCopiedResult(false), 2000);
-    } catch (error) {
-      toast.error('Failed to copy result');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to copy result', message);
     }
   };
 

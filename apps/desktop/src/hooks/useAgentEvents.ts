@@ -142,7 +142,7 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         // Error events
-        case 'error':
+        case 'error': {
           chat.setStreaming(false);
           agent.setRunning(false);
 
@@ -162,6 +162,7 @@ export function useAgentEvents(sessionId: string | null): void {
             toast.error('Agent Error', event.error, 8000);
           }
           break;
+        }
 
         // Session events
         case 'session:updated':

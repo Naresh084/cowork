@@ -730,7 +730,8 @@ function CodePreview({ file }: { file: PreviewFile }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      toast.error('Failed to copy to clipboard');
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to copy to clipboard', message);
     }
   };
 
@@ -799,7 +800,8 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
         setA2uiData(parsed);
       }
     } catch (err) {
-      setError('Invalid A2UI JSON');
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Invalid A2UI JSON: ${message}`);
     }
   }, [file.content]);
 

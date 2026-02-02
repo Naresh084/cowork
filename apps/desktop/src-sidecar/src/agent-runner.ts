@@ -389,13 +389,7 @@ export class AgentRunner {
    */
   listSessions(): SessionInfo[] {
     return Array.from(this.sessions.values()).map(session => {
-      // Extract first user message content for preview
-      const firstUserMsg = session.messages.find(m => m.role === 'user');
-      const firstMessage = firstUserMsg
-        ? (typeof firstUserMsg.content === 'string'
-            ? firstUserMsg.content.slice(0, 100)
-            : this.extractTextContent(firstUserMsg)?.slice(0, 100) || null)
-        : null;
+      const firstMessage = this.getFirstMessagePreview(session);
 
       return {
         id: session.id,
@@ -417,9 +411,12 @@ export class AgentRunner {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
 
+    const firstMessage = this.getFirstMessagePreview(session);
+
     return {
       id: session.id,
       title: session.title,
+      firstMessage,
       workingDirectory: session.workingDirectory,
       model: session.model,
       createdAt: session.createdAt,
@@ -462,12 +459,7 @@ export class AgentRunner {
     session.updatedAt = Date.now();
 
     // Emit session updated event
-    const firstUserMsg = session.messages.find(m => m.role === 'user');
-    const firstMessage = firstUserMsg
-      ? (typeof firstUserMsg.content === 'string'
-          ? firstUserMsg.content.slice(0, 100)
-          : this.extractTextContent(firstUserMsg)?.slice(0, 100) || null)
-      : null;
+    const firstMessage = this.getFirstMessagePreview(session);
 
     const sessionInfo: SessionInfo = {
       id: session.id,
@@ -498,12 +490,7 @@ export class AgentRunner {
     // Note: The agent will use this for future tool operations
 
     // Emit session updated event
-    const firstUserMsgWd = session.messages.find(m => m.role === 'user');
-    const firstMessageWd = firstUserMsgWd
-      ? (typeof firstUserMsgWd.content === 'string'
-          ? firstUserMsgWd.content.slice(0, 100)
-          : this.extractTextContent(firstUserMsgWd)?.slice(0, 100) || null)
-      : null;
+    const firstMessageWd = this.getFirstMessagePreview(session);
 
     const sessionInfo: SessionInfo = {
       id: session.id,
@@ -626,6 +613,17 @@ You have access to file and shell tools:
     if (textParts.length === 0) return null;
 
     return textParts.map(part => (part as { text: string }).text).join('');
+  }
+
+  private getFirstMessagePreview(session: ActiveSession): string | null {
+    const firstUserMsg = session.messages.find(m => m.role === 'user');
+    if (!firstUserMsg) return null;
+
+    const content = typeof firstUserMsg.content === 'string'
+      ? firstUserMsg.content
+      : this.extractTextContent(firstUserMsg);
+
+    return content ? content.slice(0, 100) : null;
   }
 
   private assessRiskLevel(request: PermissionRequest): 'safe' | 'moderate' | 'dangerous' {
