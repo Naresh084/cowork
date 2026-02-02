@@ -1,4 +1,5 @@
-import { resolve, isAbsolute } from 'path';
+import { resolve, isAbsolute, normalize } from 'path';
+import { realpathSync, lstatSync, existsSync } from 'fs';
 import type { CommandAnalysis, CommandRisk, SandboxConfig } from './types.js';
 import { DEFAULT_SANDBOX_CONFIG, BLOCKED_COMMANDS, DANGEROUS_PATTERNS } from './types.js';
 
@@ -180,22 +181,83 @@ export class CommandValidator {
 
   /**
    * Check if a path is in the allowed list.
+   * Also checks for symlink escapes.
    */
   private isAllowedPath(absolutePath: string): boolean {
+    // Check for symlink escape
+    const realPath = this.resolveSymlinks(absolutePath);
+
     return this.config.allowedPaths.some((allowed) => {
       const resolvedAllowed = this.resolvePath(allowed);
-      return absolutePath.startsWith(resolvedAllowed);
+      // Both the requested path and the real path (after symlink resolution) must be within allowed paths
+      return absolutePath.startsWith(resolvedAllowed) && realPath.startsWith(resolvedAllowed);
     });
   }
 
   /**
    * Check if a path is in the denied list.
+   * Also checks for symlink escapes.
    */
   private isDeniedPath(absolutePath: string): boolean {
+    // Check for symlink escape
+    const realPath = this.resolveSymlinks(absolutePath);
+
     return this.config.deniedPaths.some((denied) => {
       const resolvedDenied = this.resolvePath(denied);
-      return absolutePath.startsWith(resolvedDenied);
+      // Block if either the requested path or the real path is in denied list
+      return absolutePath.startsWith(resolvedDenied) || realPath.startsWith(resolvedDenied);
     });
+  }
+
+  /**
+   * Resolve symlinks to get the real path.
+   * Prevents symlink escape attacks where a symlink points outside allowed directories.
+   */
+  private resolveSymlinks(path: string): string {
+    try {
+      // Check if path exists
+      if (!existsSync(path)) {
+        return normalize(path);
+      }
+
+      // Check if it's a symlink
+      const stats = lstatSync(path);
+      if (stats.isSymbolicLink()) {
+        // Resolve the symlink to its real path
+        return realpathSync(path);
+      }
+
+      return normalize(path);
+    } catch {
+      // If we can't check, return the normalized path
+      return normalize(path);
+    }
+  }
+
+  /**
+   * Check if a path is a symlink that escapes allowed directories.
+   */
+  isSymlinkEscape(path: string): boolean {
+    try {
+      if (!existsSync(path)) {
+        return false;
+      }
+
+      const stats = lstatSync(path);
+      if (!stats.isSymbolicLink()) {
+        return false;
+      }
+
+      const realPath = realpathSync(path);
+
+      // Check if the symlink target is in a different directory tree
+      return !this.config.allowedPaths.some((allowed) => {
+        const resolvedAllowed = this.resolvePath(allowed);
+        return realPath.startsWith(resolvedAllowed);
+      });
+    } catch {
+      return false;
+    }
   }
 
   /**

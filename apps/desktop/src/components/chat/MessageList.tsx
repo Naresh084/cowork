@@ -71,7 +71,7 @@ export function MessageList() {
         className="h-full overflow-y-auto"
         onScroll={handleScroll}
       >
-        <div className="max-w-3xl mx-auto py-4 px-4 space-y-6">
+        <div className="max-w-4xl mx-auto py-2 px-3 space-y-3">
           <AnimatePresence>
             {messages.map((message, index) => (
               <motion.div
@@ -244,7 +244,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex gap-3',
+        'flex gap-2',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
@@ -253,16 +253,16 @@ function MessageBubble({ message }: MessageBubbleProps) {
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center',
+          'flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center',
           isUser
             ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0]'
             : 'bg-gradient-to-br from-[#6B6EF0] via-[#8A62C2] to-[#008585]'
         )}
       >
         {isUser ? (
-          <User className="w-4 h-4 text-white" />
+          <User className="w-3 h-3 text-white" />
         ) : (
-          <Bot className="w-4 h-4 text-white" />
+          <Bot className="w-3 h-3 text-white" />
         )}
       </motion.div>
 
@@ -272,20 +272,20 @@ function MessageBubble({ message }: MessageBubbleProps) {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className={cn(
-            'inline-block max-w-full rounded-2xl',
+            'inline-block max-w-full rounded-xl',
             isUser
               ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0] text-white'
-              : 'bg-[#1A1A1E] border border-white/[0.08] text-white/90'
+              : 'bg-transparent text-white/90'
           )}
         >
           {typeof message.content === 'string' ? (
             isUser ? (
-              <div className="px-4 py-3 whitespace-pre-wrap text-[15px] leading-relaxed">{message.content}</div>
+              <div className="px-3 py-2 whitespace-pre-wrap text-[14px] leading-normal">{message.content}</div>
             ) : (
               <MarkdownContent content={message.content} />
             )
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {message.content.map((part, index) => (
                 <ContentPartRenderer key={index} part={part} isUser={isUser} />
               ))}
@@ -323,7 +323,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
 // Markdown content renderer for assistant messages
 function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="px-4 py-3 prose prose-sm prose-invert max-w-none">
+    <div className="px-3 py-2 prose prose-xs prose-invert max-w-none text-[14px]">
       <Suspense fallback={<div className="text-sm text-white/70">{content}</div>}>
         <ReactMarkdown
           components={{
@@ -335,7 +335,7 @@ function MarkdownContent({ content }: { content: string }) {
               if (isInline) {
                 return (
                   <code
-                    className="px-1.5 py-0.5 bg-[#6B6EF0]/10 rounded text-[#ABAEFF] text-[0.9em] border border-[#6B6EF0]/20"
+                    className="px-1 py-0.5 bg-[#6B6EF0]/10 rounded text-[#ABAEFF] text-[0.9em] border border-[#6B6EF0]/20"
                     {...props}
                   >
                     {children}
@@ -347,7 +347,7 @@ function MarkdownContent({ content }: { content: string }) {
               const language = match?.[1] || detectLanguage(codeString);
 
               return (
-                <div className="my-3 -mx-4">
+                <div className="my-2 -mx-3">
                   <CodeBlock
                     code={codeString}
                     language={language}
@@ -358,29 +358,29 @@ function MarkdownContent({ content }: { content: string }) {
             },
             // Style other elements
             p({ children }) {
-              return <p className="mb-3 last:mb-0 leading-relaxed text-white/80">{children}</p>;
+              return <p className="mb-2 last:mb-0 leading-snug text-white/80">{children}</p>;
             },
             ul({ children }) {
-              return <ul className="list-disc list-inside mb-3 space-y-1 text-white/80">{children}</ul>;
+              return <ul className="list-disc list-inside mb-2 space-y-0.5 text-white/80">{children}</ul>;
             },
             ol({ children }) {
-              return <ol className="list-decimal list-inside mb-3 space-y-1 text-white/80">{children}</ol>;
+              return <ol className="list-decimal list-inside mb-2 space-y-0.5 text-white/80">{children}</ol>;
             },
             li({ children }) {
               return <li className="text-white/70">{children}</li>;
             },
             h1({ children }) {
-              return <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0 text-white/90">{children}</h1>;
+              return <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0 text-white/90">{children}</h1>;
             },
             h2({ children }) {
-              return <h2 className="text-lg font-bold mb-2 mt-4 first:mt-0 text-white/90">{children}</h2>;
+              return <h2 className="text-base font-bold mb-1.5 mt-3 first:mt-0 text-white/90">{children}</h2>;
             },
             h3({ children }) {
-              return <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-white/90">{children}</h3>;
+              return <h3 className="text-sm font-semibold mb-1.5 mt-2 first:mt-0 text-white/90">{children}</h3>;
             },
             blockquote({ children }) {
               return (
-                <blockquote className="border-l-4 border-[#6B6EF0]/50 pl-4 my-3 text-white/60 italic bg-white/[0.02] py-2 pr-2 rounded-r-lg">
+                <blockquote className="border-l-3 border-[#6B6EF0]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg">
                   {children}
                 </blockquote>
               );
@@ -398,12 +398,12 @@ function MarkdownContent({ content }: { content: string }) {
               );
             },
             hr() {
-              return <hr className="border-white/[0.08] my-4" />;
+              return <hr className="border-white/[0.08] my-3" />;
             },
             table({ children }) {
               return (
-                <div className="overflow-x-auto my-3">
-                  <table className="min-w-full border border-white/[0.08] rounded-lg overflow-hidden">
+                <div className="overflow-x-auto my-2">
+                  <table className="min-w-full border border-white/[0.08] rounded-lg overflow-hidden text-xs">
                     {children}
                   </table>
                 </div>
@@ -411,14 +411,14 @@ function MarkdownContent({ content }: { content: string }) {
             },
             th({ children }) {
               return (
-                <th className="px-3 py-2 bg-white/[0.04] text-left text-sm font-medium text-white/80 border-b border-white/[0.08]">
+                <th className="px-2 py-1.5 bg-white/[0.04] text-left text-xs font-medium text-white/80 border-b border-white/[0.08]">
                   {children}
                 </th>
               );
             },
             td({ children }) {
               return (
-                <td className="px-3 py-2 text-sm text-white/70 border-b border-white/[0.06]">
+                <td className="px-2 py-1.5 text-xs text-white/70 border-b border-white/[0.06]">
                   {children}
                 </td>
               );
@@ -469,7 +469,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     case 'text':
       if (isUser) {
         return (
-          <div className="px-4 py-3 whitespace-pre-wrap text-[15px] leading-relaxed">
+          <div className="px-3 py-2 whitespace-pre-wrap text-[14px] leading-normal">
             {part.text}
           </div>
         );

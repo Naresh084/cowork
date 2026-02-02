@@ -5,10 +5,12 @@ import { TitleBar } from './TitleBar';
 import { RightPanel } from './RightPanel';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
+import { useAppStore } from '../../stores/app-store';
 import { ToastContainer } from '../ui/Toast';
 import { PermissionDialogContainer } from '../dialogs/PermissionDialog';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ConnectorsScreen } from '../connectors/ConnectorsScreen';
+import { ApiKeyModal } from '../modals/ApiKeyModal';
 
 export type MainView = 'chat' | 'connectors';
 
@@ -16,6 +18,7 @@ export function MainLayout() {
   const [currentView, setCurrentView] = useState<MainView>('chat');
   const { sidebarCollapsed } = useSettingsStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
+  const { showApiKeyModal, apiKeyError, setShowApiKeyModal } = useAppStore();
 
   const handlePreviewArtifact = (artifact: Artifact) => {
     setPreviewArtifact(artifact);
@@ -59,6 +62,13 @@ export function MainLayout() {
         } : null}
         isOpen={!!previewArtifact}
         onClose={clearPreviewArtifact}
+      />
+
+      {/* API Key Modal */}
+      <ApiKeyModal
+        isOpen={showApiKeyModal}
+        onClose={() => setShowApiKeyModal(false)}
+        errorMessage={apiKeyError}
       />
     </div>
   );

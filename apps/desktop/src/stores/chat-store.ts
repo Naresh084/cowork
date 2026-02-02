@@ -121,9 +121,23 @@ export const useChatStore = create<ChatState & ChatActions>((set) => ({
         isLoadingMessages: false,
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Check if it's a "session not found" error - don't show error toast for this
+      // as it's expected when the app restarts and the sidecar has no sessions
+      if (errorMessage.toLowerCase().includes('session not found')) {
+        console.warn('[ChatStore] Session not found, likely stale ID:', sessionId);
+        set({
+          messages: [],
+          isLoadingMessages: false,
+          error: null, // Don't set error for stale sessions
+        });
+        return;
+      }
+
       set({
         isLoadingMessages: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
     }
   },
@@ -219,10 +233,28 @@ export const useChatStore = create<ChatState & ChatActions>((set) => ({
   },
 
   addMessage: (message: Message) => {
-    set((state) => ({
-      messages: [...state.messages, message],
-      streamingContent: '',
-    }));
+    set((state) => {
+      // Don't add duplicate messages (by ID or content for temp messages)
+      const exists = state.messages.some(m =>
+        m.id === message.id ||
+        // Also check for temp messages that match content
+        (m.id.startsWith('temp-') && message.role === 'user' && m.content === message.content)
+      );
+
+      if (exists) {
+        // Message already exists, just clear streaming state
+        return {
+          streamingContent: '',
+          isStreaming: false,
+        };
+      }
+
+      return {
+        messages: [...state.messages, message],
+        streamingContent: '',
+        isStreaming: false,
+      };
+    });
   },
 
   updateToolExecution: (toolId: string, updates: Partial<ToolExecution>) => {

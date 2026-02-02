@@ -49,6 +49,12 @@ export interface StopGenerationParams {
   sessionId: string;
 }
 
+export interface RespondQuestionParams {
+  sessionId: string;
+  questionId: string;
+  answer: string | string[];
+}
+
 export interface GetSessionParams {
   sessionId: string;
 }
@@ -73,6 +79,7 @@ export interface SaveMemoryParams {
 export interface SessionInfo {
   id: string;
   title: string | null;
+  firstMessage: string | null;
   workingDirectory: string;
   model: string;
   createdAt: number;
@@ -112,12 +119,28 @@ export type AgentEventType =
   | 'tool:result'
   | 'permission:request'
   | 'permission:resolved'
+  | 'question:ask'
+  | 'question:answered'
   | 'task:create'
   | 'task:update'
   | 'artifact:created'
   | 'context:update'
   | 'session:updated'
   | 'error';
+
+export interface QuestionRequest {
+  id: string;
+  question: string;
+  options?: QuestionOption[];
+  multiSelect?: boolean;
+  header?: string;
+  timestamp: number;
+}
+
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
 
 export interface Task {
   id: string;

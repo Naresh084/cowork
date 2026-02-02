@@ -2,14 +2,31 @@ import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { Onboarding } from './components/onboarding/Onboarding';
 import { useAuthStore } from './stores/auth-store';
+import { useSessionStore } from './stores/session-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const { isAuthenticated, initialize } = useAuthStore();
+  const { loadSessions } = useSessionStore();
 
   useEffect(() => {
-    initialize().finally(() => setIsLoading(false));
-  }, [initialize]);
+    console.log('[App] Starting initialization...');
+    initialize()
+      .then(() => {
+        console.log('[App] Auth initialized, loading sessions...');
+        return loadSessions();
+      })
+      .then(() => {
+        console.log('[App] Sessions loaded successfully');
+      })
+      .catch((error) => {
+        console.error('[App] Initialization error:', error);
+      })
+      .finally(() => {
+        console.log('[App] Setting isLoading to false');
+        setIsLoading(false);
+      });
+  }, [initialize, loadSessions]);
 
   // Detect system theme
   useEffect(() => {

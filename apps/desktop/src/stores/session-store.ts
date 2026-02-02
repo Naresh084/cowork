@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from '../components/ui/Toast';
 
 export interface SessionSummary {
   id: string;
   title: string | null;
+  firstMessage: string | null;
   workingDirectory: string | null;
   model: string | null;
   messageCount: number;
@@ -15,6 +17,7 @@ export interface SessionSummary {
 export interface SessionInfo {
   id: string;
   title: string | null;
+  firstMessage: string | null;
   workingDirectory: string;
   model: string;
   createdAt: number;
@@ -34,7 +37,7 @@ interface SessionActions {
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
-  updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => void;
+  updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   clearError: () => void;
 }
@@ -48,14 +51,33 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       error: null,
 
       loadSessions: async () => {
+        console.log('[SessionStore] Starting loadSessions...');
         set({ isLoading: true, error: null });
         try {
+          console.log('[SessionStore] Calling agent_list_sessions...');
           const sessions = await invoke<SessionSummary[]>('agent_list_sessions');
-          set({ sessions, isLoading: false });
+          console.log('[SessionStore] Got sessions:', sessions.length);
+
+          // Validate that activeSessionId still exists in the loaded sessions
+          // This handles the case where the sidecar restarted and lost in-memory sessions
+          const currentActiveId = get().activeSessionId;
+          const activeSessionExists = currentActiveId
+            ? sessions.some((s) => s.id === currentActiveId)
+            : false;
+
+          set({
+            sessions,
+            isLoading: false,
+            // Clear stale activeSessionId if session no longer exists
+            activeSessionId: activeSessionExists ? currentActiveId : null,
+          });
         } catch (error) {
+          console.error('[SessionStore] loadSessions error:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to load sessions', errorMessage);
           set({
             isLoading: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           });
         }
       },
@@ -72,6 +94,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           const newSummary: SessionSummary = {
             id: session.id,
             title: session.title,
+            firstMessage: null,
             workingDirectory: session.workingDirectory,
             model: session.model,
             messageCount: 0,
@@ -87,9 +110,11 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
           return session.id;
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to create session', errorMessage);
           set({
             isLoading: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           });
           throw error;
         }
@@ -122,18 +147,29 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           await invoke('agent_delete_session', { sessionId });
         } catch (error) {
           // Rollback on error
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to delete session', errorMessage);
           set({
             sessions: previousSessions,
             activeSessionId: previousActiveId,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           });
           throw error;
         }
       },
 
       updateSessionTitle: async (sessionId: string, title: string) => {
+        // First verify the session exists locally
+        const { sessions } = get();
+        const sessionExists = sessions.some((s) => s.id === sessionId);
+
+        if (!sessionExists) {
+          console.warn('[SessionStore] Attempted to update title of non-existent session:', sessionId);
+          return;
+        }
+
         // Optimistic update
-        const previousSessions = get().sessions;
+        const previousSessions = sessions;
 
         set((state) => ({
           sessions: state.sessions.map((s) =>
@@ -142,24 +178,78 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }));
 
         try {
-          // Note: Backend command for updating title would be needed
-          // For now, just persist locally
+          // Persist to backend
+          await invoke('agent_update_session_title', { sessionId, title });
         } catch (error) {
           // Rollback on error
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          // Check if it's a "session not found" error from the backend
+          if (errorMessage.toLowerCase().includes('session not found')) {
+            console.warn('[SessionStore] Session not found in backend, clearing:', sessionId);
+            set({
+              sessions: previousSessions.filter((s) => s.id !== sessionId),
+              activeSessionId: get().activeSessionId === sessionId ? null : get().activeSessionId,
+            });
+            return;
+          }
+
+          toast.error('Failed to update session title', errorMessage);
           set({
             sessions: previousSessions,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           });
           throw error;
         }
       },
 
-      updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => {
+      updateSessionWorkingDirectory: async (sessionId: string, workingDirectory: string) => {
+        // First verify the session exists locally
+        const { sessions } = get();
+        const sessionExists = sessions.some((s) => s.id === sessionId);
+
+        if (!sessionExists) {
+          // Session doesn't exist locally - likely a stale ID
+          // Just clear the active session and don't throw an error
+          console.warn('[SessionStore] Attempted to update non-existent session:', sessionId);
+          set({ activeSessionId: null });
+          return;
+        }
+
+        // Optimistic update
+        const previousSessions = sessions;
+
         set((state) => ({
           sessions: state.sessions.map((s) =>
             s.id === sessionId ? { ...s, workingDirectory } : s
           ),
         }));
+
+        try {
+          // Persist to backend
+          await invoke('agent_update_session_working_directory', { sessionId, workingDirectory });
+        } catch (error) {
+          // Rollback on error
+          const errorMessage = error instanceof Error ? error.message : String(error);
+
+          // Check if it's a "session not found" error from the backend
+          if (errorMessage.toLowerCase().includes('session not found')) {
+            // Session was removed from backend - clear it locally
+            console.warn('[SessionStore] Session not found in backend, clearing:', sessionId);
+            set({
+              sessions: previousSessions.filter((s) => s.id !== sessionId),
+              activeSessionId: get().activeSessionId === sessionId ? null : get().activeSessionId,
+            });
+            return;
+          }
+
+          toast.error('Failed to update working directory', errorMessage);
+          set({
+            sessions: previousSessions,
+            error: errorMessage,
+          });
+          throw error;
+        }
       },
 
       setActiveSession: (sessionId: string | null) => {

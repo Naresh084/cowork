@@ -2,6 +2,7 @@ use std::process::Command;
 
 #[tauri::command]
 pub async fn keychain_get(service: String, account: String) -> Result<Option<String>, String> {
+    eprintln!("[keychain] Getting key for service: {}, account: {}", service, account);
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("security")
@@ -12,18 +13,25 @@ pub async fn keychain_get(service: String, account: String) -> Result<Option<Str
                 "-w",
             ])
             .output()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                eprintln!("[keychain] Command error: {}", e);
+                e.to_string()
+            })?;
 
+        eprintln!("[keychain] Command completed, success: {}", output.status.success());
         if output.status.success() {
             let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            eprintln!("[keychain] Found key, length: {}", value.len());
             Ok(Some(value))
         } else {
+            eprintln!("[keychain] Key not found");
             Ok(None)
         }
     }
 
     #[cfg(not(target_os = "macos"))]
     {
+        eprintln!("[keychain] Not macOS, returning None");
         // Fallback for non-macOS platforms
         Ok(None)
     }

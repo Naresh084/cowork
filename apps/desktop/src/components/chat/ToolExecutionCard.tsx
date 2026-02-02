@@ -19,6 +19,7 @@ import { cn } from '../../lib/utils';
 import { CodeBlock } from './CodeBlock';
 import type { ToolExecution } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from '../ui/Toast';
 
 // Tool type icons
 const TOOL_ICONS: Record<string, typeof Terminal> = {
@@ -77,7 +78,7 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
       setCopiedArgs(true);
       setTimeout(() => setCopiedArgs(false), 2000);
     } catch (error) {
-      console.error('Failed to copy args:', error);
+      toast.error('Failed to copy arguments');
     }
   };
 
@@ -91,7 +92,7 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
       setCopiedResult(true);
       setTimeout(() => setCopiedResult(false), 2000);
     } catch (error) {
-      console.error('Failed to copy result:', error);
+      toast.error('Failed to copy result');
     }
   };
 

@@ -33,6 +33,26 @@ export interface ExtendedPermissionRequest extends PermissionRequest {
 }
 
 /**
+ * Question option for agent questions
+ */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/**
+ * Question request from the agent
+ */
+export interface QuestionRequest {
+  id: string;
+  question: string;
+  options?: QuestionOption[];
+  multiSelect?: boolean;
+  header?: string;
+  timestamp: number;
+}
+
+/**
  * All possible agent event types
  */
 export type AgentEvent =
@@ -63,6 +83,18 @@ export type AgentEvent =
       sessionId: string;
       permissionId: string;
       decision: 'allow' | 'deny';
+    }
+  // Question events (for agent asking user questions)
+  | {
+      type: 'question:ask';
+      sessionId: string;
+      request: QuestionRequest;
+    }
+  | {
+      type: 'question:answered';
+      sessionId: string;
+      questionId: string;
+      answer: string | string[];
     }
   // Task events
   | { type: 'task:create'; sessionId: string; task: Task }
@@ -123,6 +155,8 @@ export const TAURI_EVENT_NAMES = [
   'agent:tool:result',
   'agent:permission:request',
   'agent:permission:resolved',
+  'agent:question:ask',
+  'agent:question:answered',
   'agent:task:create',
   'agent:task:update',
   'agent:task:delete',

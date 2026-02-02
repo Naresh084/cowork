@@ -82,6 +82,25 @@ function parseTauriEvent(
         decision: (data.decision as 'allow' | 'deny') ?? 'deny',
       };
 
+    case 'question:ask':
+      return {
+        type: 'question:ask',
+        sessionId,
+        request: data.request as AgentEvent & { type: 'question:ask' } extends {
+          request: infer R;
+        }
+          ? R
+          : never,
+      };
+
+    case 'question:answered':
+      return {
+        type: 'question:answered',
+        sessionId,
+        questionId: (data.questionId as string) ?? '',
+        answer: data.answer as string | string[],
+      };
+
     case 'task:create':
       return {
         type: 'task:create',
@@ -141,11 +160,13 @@ function parseTauriEvent(
       };
 
     case 'context:update':
+      // Default to 1M token context window (Gemini 3.0 models)
+      // The actual value comes from the sidecar based on the model's API response
       return {
         type: 'context:update',
         sessionId,
         used: (data.used as number) ?? 0,
-        total: (data.total as number) ?? 128000,
+        total: (data.total as number) ?? 1048576,
       };
 
     case 'error':
@@ -236,6 +257,8 @@ export function subscribeToAgentEvents(
     'agent:tool:result',
     'agent:permission:request',
     'agent:permission:resolved',
+    'agent:question:ask',
+    'agent:question:answered',
     'agent:task:create',
     'agent:task:update',
     'agent:task:delete',
@@ -305,6 +328,8 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:tool:result',
     'agent:permission:request',
     'agent:permission:resolved',
+    'agent:question:ask',
+    'agent:question:answered',
     'agent:task:create',
     'agent:task:update',
     'agent:task:delete',

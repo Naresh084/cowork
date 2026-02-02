@@ -15,7 +15,16 @@ export { ProviderIdSchema } from './types.js';
 
 // Gemini Provider
 export { GeminiProvider, createGeminiProvider } from './gemini/gemini-provider.js';
-export { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel, hasCapability } from './gemini/models.js';
+export {
+  GEMINI_MODELS,
+  DEFAULT_MODEL,
+  getGeminiModel,
+  hasCapability,
+  getModelContextWindow,
+  fetchGeminiModels,
+  MODEL_CONTEXT_WINDOWS,
+  DEFAULT_CONTEXT_WINDOW,
+} from './gemini/models.js';
 
 // Re-export common types from shared
 export type {

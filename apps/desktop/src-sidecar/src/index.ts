@@ -20,9 +20,9 @@ import type { IPCRequest } from './types.js';
 console.error('[sidecar] Starting Gemini Cowork sidecar...');
 
 // Create readline interface for stdin
+// IMPORTANT: Do NOT set output to stdout as it will interfere with our IPC protocol
 const rl = createInterface({
   input: process.stdin,
-  output: process.stdout,
   terminal: false,
 });
 
@@ -44,9 +44,13 @@ async function processLine(line: string): Promise<void> {
     // Handle the request
     const response = await handleRequest(request);
 
+    // Log the response (to stderr)
+    console.error(`[sidecar] Response: ${request.command} (${request.id}) success=${response.success}`);
+
     // Send response directly to stdout (Rust expects flat response, not wrapped)
     const responseLine = JSON.stringify(response) + '\n';
-    process.stdout.write(responseLine);
+    const written = process.stdout.write(responseLine);
+    console.error(`[sidecar] Wrote ${responseLine.length} bytes to stdout, buffered=${!written}`);
 
     // Flush any pending events
     eventEmitter.flushSync();

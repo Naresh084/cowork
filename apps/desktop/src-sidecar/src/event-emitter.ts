@@ -82,6 +82,20 @@ export class EventEmitter {
   }
 
   /**
+   * Emit question ask event.
+   */
+  questionAsk(sessionId: string, request: unknown): void {
+    this.emit('question:ask', sessionId, { request });
+  }
+
+  /**
+   * Emit question answered event.
+   */
+  questionAnswered(sessionId: string, questionId: string, answer: string | string[]): void {
+    this.emit('question:answered', sessionId, { questionId, answer });
+  }
+
+  /**
    * Emit task create event.
    */
   taskCreate(sessionId: string, task: unknown): void {
@@ -157,10 +171,34 @@ export class EventEmitter {
   }
 
   /**
-   * Flush all pending events immediately.
+   * Flush all pending events immediately and synchronously.
+   * This ensures all events are written before the function returns.
+   * CRITICAL: Call this at the end of sendMessage to prevent lost events.
    */
   flushSync(): void {
-    this.flush();
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+
+    if (this.eventBuffer.length === 0) return;
+
+    const events = this.eventBuffer;
+    this.eventBuffer = [];
+
+    for (const event of events) {
+      const line = JSON.stringify(event) + '\n';
+      // Use synchronous write to ensure event is sent before continuing
+      // process.stdout.write returns boolean indicating if more writes can be done
+      // If buffer is full (returns false), the data is still queued by Node.js
+      const written = process.stdout.write(line);
+      if (!written) {
+        // Buffer is full, but data is queued. In a synchronous context,
+        // we can't truly wait, but the data will be written.
+        // For critical scenarios, we log this condition.
+        process.stderr.write(`[event-emitter] stdout buffer full, event queued: ${event.type}\n`);
+      }
+    }
   }
 }
 

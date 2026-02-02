@@ -11,8 +11,12 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
+import { useSessionStore } from '../../stores/session-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { CollapsibleSection } from './CollapsibleSection';
 import { motion, AnimatePresence } from 'framer-motion';
+import { open as shellOpen } from '@tauri-apps/plugin-shell';
+import { toast } from '../ui/Toast';
 
 /**
  * WorkingFolderSection - Displays file artifacts from agent-store
@@ -26,10 +30,26 @@ import { motion, AnimatePresence } from 'framer-motion';
 export function WorkingFolderSection() {
   const artifacts = useAgentStore((state) => state.artifacts);
   const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
+  const { activeSessionId, sessions } = useSessionStore();
+  const { defaultWorkingDirectory } = useSettingsStore();
 
-  const handleOpenFolder = () => {
-    // TODO: Implement opening folder in system file manager
-    console.log('Open folder in file manager');
+  // Get current working directory from active session or default
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const workingDirectory = activeSession?.workingDirectory || defaultWorkingDirectory;
+
+  const handleOpenFolder = async () => {
+    if (!workingDirectory) {
+      toast.info('No folder selected', 'Select a working directory first');
+      return;
+    }
+
+    try {
+      // Open the folder in the system file manager
+      await shellOpen(workingDirectory);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to open folder', errorMessage);
+    }
   };
 
   const actions = (
