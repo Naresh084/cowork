@@ -101,7 +101,7 @@ export class DatabaseConnection {
     const dbPath = options.inMemory ? ':memory:' : (options.path || getDefaultDatabasePath());
 
     this.db = new Database(dbPath, {
-      verbose: process.env.DEBUG_SQL ? console.log : undefined,
+      verbose: process.env.DEBUG_SQL ? (...args) => console.warn(...args) : undefined,
     });
 
     // Enable foreign keys and WAL mode for better performance

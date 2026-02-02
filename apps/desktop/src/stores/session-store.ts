@@ -51,12 +51,9 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       error: null,
 
       loadSessions: async () => {
-        console.log('[SessionStore] Starting loadSessions...');
         set({ isLoading: true, error: null });
         try {
-          console.log('[SessionStore] Calling agent_list_sessions...');
           const sessions = await invoke<SessionSummary[]>('agent_list_sessions');
-          console.log('[SessionStore] Got sessions:', sessions.length);
 
           // Validate that activeSessionId still exists in the loaded sessions
           // This handles the case where the sidecar restarted and lost in-memory sessions

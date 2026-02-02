@@ -10,20 +10,14 @@ export function App() {
   const { loadSessions } = useSessionStore();
 
   useEffect(() => {
-    console.log('[App] Starting initialization...');
     initialize()
       .then(() => {
-        console.log('[App] Auth initialized, loading sessions...');
         return loadSessions();
-      })
-      .then(() => {
-        console.log('[App] Sessions loaded successfully');
       })
       .catch((error) => {
         console.error('[App] Initialization error:', error);
       })
       .finally(() => {
-        console.log('[App] Setting isLoading to false');
         setIsLoading(false);
       });
   }, [initialize, loadSessions]);
