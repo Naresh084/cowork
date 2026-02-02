@@ -72,7 +72,7 @@ export class CoworkAgent implements Agent {
     };
   }
 
-  async *run(userMessage: string): AsyncGenerator<AgentEvent> {
+  async *run(userMessage: string | Message['content']): AsyncGenerator<AgentEvent> {
     // Add user message
     const userMsg: Message = {
       id: generateMessageId(),
@@ -173,9 +173,28 @@ export class CoworkAgent implements Agent {
         break;
       }
 
-      // Generate response
+      // Generate response (streaming or non-streaming)
       const request = this.buildRequest();
-      const response = await this.provider.generate(request);
+      const streamingEnabled = this.config.streaming ?? false;
+
+      let response: Awaited<ReturnType<typeof this.provider.generate>>;
+
+      if (streamingEnabled) {
+        const stream = this.provider.stream(request);
+        let streamResult = await stream.next();
+
+        while (!streamResult.done) {
+          const chunk = streamResult.value;
+          if (chunk.type === 'text' && chunk.text) {
+            yield this.emit('agent:stream_chunk', { text: chunk.text });
+          }
+          streamResult = await stream.next();
+        }
+
+        response = streamResult.value;
+      } else {
+        response = await this.provider.generate(request);
+      }
 
       // Add assistant message
       this.state.messages.push(response.message);

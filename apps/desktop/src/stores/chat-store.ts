@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { Message, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
 
 export interface Attachment {
-  type: 'file' | 'image';
+  type: 'file' | 'image' | 'text';
   name: string;
   path?: string;
   mimeType?: string;
@@ -148,10 +148,44 @@ export const useChatStore = create<ChatState & ChatActions>((set) => ({
     attachments?: Attachment[]
   ) => {
     // Add user message optimistically
+    let userContent: Message['content'] = content;
+
+    if (attachments && attachments.length > 0) {
+      const parts: MessageContentPart[] = [];
+
+      if (content.trim()) {
+        parts.push({
+          type: 'text',
+          text: content,
+        });
+      }
+
+      for (const attachment of attachments) {
+        if (attachment.type === 'image' && attachment.data) {
+          parts.push({
+            type: 'image',
+            mimeType: attachment.mimeType || 'image/png',
+            data: attachment.data,
+          });
+        }
+
+        if (attachment.type === 'text' && attachment.data) {
+          parts.push({
+            type: 'text',
+            text: `File: ${attachment.name}\n${attachment.data}`,
+          });
+        }
+      }
+
+      if (parts.length > 0) {
+        userContent = parts;
+      }
+    }
+
     const userMessage: Message = {
       id: `temp-${Date.now()}`,
       role: 'user',
-      content,
+      content: userContent,
       createdAt: Date.now(),
     };
 

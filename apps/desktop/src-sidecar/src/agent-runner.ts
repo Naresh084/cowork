@@ -1,6 +1,6 @@
 import { CoworkAgent, createAgent, FILE_TOOLS, SHELL_TOOLS } from '@gemini-cowork/core';
 import { GeminiProvider, getModelContextWindow } from '@gemini-cowork/providers';
-import type { Message, PermissionRequest, PermissionDecision } from '@gemini-cowork/shared';
+import type { Message, PermissionRequest, PermissionDecision, MessageContentPart } from '@gemini-cowork/shared';
 import { generateId } from '@gemini-cowork/shared';
 import { eventEmitter } from './event-emitter.js';
 import { TODO_TOOLS, getSessionTasks, createResearchTools } from './tools/index.js';
@@ -134,6 +134,7 @@ export class AgentRunner {
         model: actualModel,
         maxIterations: 20,
         systemPrompt: this.buildSystemPrompt(workingDirectory),
+        streaming: true,
       },
       provider: this.provider,
       tools: [...fileTools, ...shellTools, ...todoTools, ...researchTools],
@@ -198,14 +199,30 @@ export class AgentRunner {
     let messageContent: string | Message['content'] = content;
 
     if (attachments && attachments.length > 0) {
-      messageContent = [
-        { type: 'text' as const, text: content },
-        ...attachments.map(att => ({
-          type: 'image' as const,
-          mimeType: att.mimeType,
-          data: att.data,
-        })),
-      ];
+      const parts: MessageContentPart[] = [];
+
+      if (content.trim()) {
+        parts.push({ type: 'text' as const, text: content });
+      }
+
+      for (const attachment of attachments) {
+        if (attachment.type === 'image' && attachment.data) {
+          parts.push({
+            type: 'image' as const,
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          });
+        } else if (attachment.type === 'text' && attachment.data) {
+          parts.push({
+            type: 'text' as const,
+            text: `File: ${attachment.name}\n${attachment.data}`,
+          });
+        }
+      }
+
+      if (parts.length > 0) {
+        messageContent = parts;
+      }
     }
 
     // Emit stream start
@@ -213,10 +230,16 @@ export class AgentRunner {
 
     try {
       // Run agent
-      for await (const event of session.agent.run(
-        typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent)
-      )) {
+      for await (const event of session.agent.run(messageContent)) {
         switch (event.type) {
+          case 'agent:stream_chunk': {
+            const chunk = event.payload as { text?: string };
+            if (chunk.text) {
+              eventEmitter.streamChunk(sessionId, chunk.text);
+            }
+            break;
+          }
+
           case 'agent:message': {
             const msg = event.payload as { message: Message };
             session.messages.push(msg.message);
@@ -224,9 +247,12 @@ export class AgentRunner {
 
             if (msg.message.role === 'assistant') {
               // Extract text content for streaming
-              const textContent = this.extractTextContent(msg.message);
-              if (textContent) {
-                eventEmitter.streamChunk(sessionId, textContent);
+              const streamingEnabled = session.agent.config.streaming ?? false;
+              if (!streamingEnabled) {
+                const textContent = this.extractTextContent(msg.message);
+                if (textContent) {
+                  eventEmitter.streamChunk(sessionId, textContent);
+                }
               }
             }
             break;

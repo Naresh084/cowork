@@ -168,16 +168,24 @@ export function ChatView() {
   const handleFileSelect = useCallback((files: FileList | null) => {
     if (!files) return;
 
+    const maxTextSize = 200 * 1024; // 200KB
+    const isTextFile = (file: File) => {
+      if (file.type.startsWith('text/')) return true;
+      return /\.(md|txt|json|js|ts|tsx|jsx|py|go|rs|java|c|cpp|h|css|html)$/i.test(file.name);
+    };
+
     Array.from(files).forEach(async (file) => {
+      const isImage = file.type.startsWith('image/');
+      const isText = isTextFile(file);
+
       const attachment: Attachment = {
-        type: file.type.startsWith('image/') ? 'image' : 'file',
+        type: isImage ? 'image' : isText ? 'text' : 'file',
         name: file.name,
         mimeType: file.type,
         size: file.size,
       };
 
-      // Read file as base64 for images
-      if (file.type.startsWith('image/')) {
+      if (isImage) {
         const reader = new FileReader();
         reader.onload = () => {
           const base64 = (reader.result as string).split(',')[1];
@@ -187,9 +195,29 @@ export function ChatView() {
           ]);
         };
         reader.readAsDataURL(file);
-      } else {
-        setAttachments((prev) => [...prev, attachment]);
+        return;
       }
+
+      if (isText) {
+        if (file.size > maxTextSize) {
+          toast.error('File too large', `${file.name} exceeds 200KB and will not be sent to the model.`);
+          setAttachments((prev) => [...prev, { ...attachment, type: 'file' }]);
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const text = reader.result as string;
+          setAttachments((prev) => [
+            ...prev,
+            { ...attachment, data: text, mimeType: attachment.mimeType || 'text/plain' },
+          ]);
+        };
+        reader.readAsText(file);
+        return;
+      }
+
+      setAttachments((prev) => [...prev, attachment]);
     });
   }, []);
 

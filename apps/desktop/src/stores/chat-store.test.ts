@@ -70,6 +70,28 @@ describe('chat-store', () => {
       await promise;
     });
 
+    it('should include attachments in optimistic message content', async () => {
+      setMockInvokeResponse('agent_send_message', undefined);
+
+      const attachments = [
+        { type: 'image' as const, name: 'img.png', mimeType: 'image/png', data: 'abc' },
+        { type: 'text' as const, name: 'notes.txt', mimeType: 'text/plain', data: 'hello' },
+      ];
+
+      const promise = useChatStore.getState().sendMessage('session-1', 'Hello', attachments);
+
+      const state = useChatStore.getState();
+      const message = state.messages[0];
+      expect(Array.isArray(message.content)).toBe(true);
+
+      const parts = message.content as Array<{ type: string; [key: string]: unknown }>;
+      expect(parts[0]).toMatchObject({ type: 'text', text: 'Hello' });
+      expect(parts[1]).toMatchObject({ type: 'image', mimeType: 'image/png', data: 'abc' });
+      expect(parts[2]).toMatchObject({ type: 'text', text: 'File: notes.txt\nhello' });
+
+      await promise;
+    });
+
     it('should handle send errors', async () => {
       setMockInvokeResponse('agent_send_message', () => {
         throw new Error('Network error');
