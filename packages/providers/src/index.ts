@@ -16,6 +16,16 @@ export { ProviderIdSchema } from './types.js';
 // Gemini Provider
 export { GeminiProvider, createGeminiProvider } from './gemini/gemini-provider.js';
 export {
+  runDeepResearch,
+  type DeepResearchOptions,
+  type DeepResearchResult,
+} from './gemini/deep-research.js';
+export {
+  createComputerSession,
+  runComputerUseStep,
+  type ComputerUseSession,
+} from './gemini/computer-use.js';
+export {
   GEMINI_MODELS,
   DEFAULT_MODEL,
   getGeminiModel,

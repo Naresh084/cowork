@@ -124,6 +124,7 @@ export type AgentEventType =
   | 'task:create'
   | 'task:update'
   | 'artifact:created'
+  | 'research:progress'
   | 'context:update'
   | 'session:updated'
   | 'error';

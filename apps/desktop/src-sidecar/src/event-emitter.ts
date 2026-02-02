@@ -124,6 +124,13 @@ export class EventEmitter {
   }
 
   /**
+   * Emit research progress event.
+   */
+  researchProgress(sessionId: string, status: string, progress: number): void {
+    this.emit('research:progress', sessionId, { status, progress, timestamp: Date.now() });
+  }
+
+  /**
    * Emit session updated event.
    */
   sessionUpdated(session: unknown): void {

@@ -31,6 +31,11 @@ export interface ContextUsage {
   percentage: number;
 }
 
+export interface ResearchProgress {
+  status: string;
+  progress: number;
+}
+
 interface AgentState {
   isRunning: boolean;
   tasks: Task[];
@@ -39,6 +44,7 @@ interface AgentState {
   currentModel: string;
   currentSessionId: string | null;
   previewArtifact: Artifact | null;
+  researchProgress: ResearchProgress | null;
 }
 
 interface AgentActions {
@@ -68,6 +74,9 @@ interface AgentActions {
   // Preview management
   setPreviewArtifact: (artifact: Artifact | null) => void;
   clearPreviewArtifact: () => void;
+
+  // Research progress
+  setResearchProgress: (progress: ResearchProgress | null) => void;
 }
 
 // Default context window (1M tokens for Gemini 3.0 models)
@@ -82,6 +91,7 @@ const initialState: AgentState = {
   currentModel: 'gemini-3.0-flash-preview',
   currentSessionId: null,
   previewArtifact: null,
+  researchProgress: null,
 };
 
 export const useAgentStore = create<AgentState & AgentActions>((set) => ({
@@ -217,6 +227,11 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
   clearPreviewArtifact: () => {
     set({ previewArtifact: null });
   },
+
+  // Research progress
+  setResearchProgress: (progress: ResearchProgress | null) => {
+    set({ researchProgress: progress });
+  },
 }));
 
 // Selector hooks
@@ -242,3 +257,6 @@ export const useContextUsage = () =>
 
 export const useCurrentModel = () =>
   useAgentStore((state) => state.currentModel);
+
+export const useResearchProgress = () =>
+  useAgentStore((state) => state.researchProgress);
