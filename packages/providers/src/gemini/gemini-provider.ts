@@ -342,6 +342,31 @@ export class GeminiProvider implements AIProvider {
       object: SchemaType.OBJECT,
     };
 
+    const toGeminiSchema = (param: ToolDefinition['parameters'][number]): Record<string, unknown> => {
+      const schema: Record<string, unknown> = {
+        type: typeMap[param.type] || SchemaType.STRING,
+        description: param.description,
+      };
+
+      if (param.enum && param.enum.length > 0) {
+        schema.enum = param.enum;
+      }
+
+      if (param.type === 'array') {
+        schema.items = param.items ? toGeminiSchema(param.items) : { type: SchemaType.STRING };
+      }
+
+      if (param.type === 'object') {
+        const properties = param.properties ?? [];
+        schema.properties = Object.fromEntries(
+          properties.map((child) => [child.name, toGeminiSchema(child)])
+        );
+        schema.required = properties.filter((child) => child.required).map((child) => child.name);
+      }
+
+      return schema;
+    };
+
     const functionDeclarations: FunctionDeclaration[] = tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
@@ -350,10 +375,7 @@ export class GeminiProvider implements AIProvider {
         properties: Object.fromEntries(
           tool.parameters.map((param) => [
             param.name,
-            {
-              type: typeMap[param.type] || SchemaType.STRING,
-              description: param.description,
-            },
+            toGeminiSchema(param),
           ])
         ),
         required: tool.parameters.filter((p) => p.required).map((p) => p.name),
