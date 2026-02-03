@@ -271,9 +271,6 @@ export class CoworkAgent implements Agent {
       return [];
     }
 
-    const shape = schema.shape;
-    const parameters: ToolDefinition['parameters'] = [];
-
     const unwrapSchema = (input: z.ZodTypeAny): z.ZodTypeAny => {
       let current = input;
       // Unwrap optional/default/nullable/effects
@@ -324,6 +321,42 @@ export class CoworkAgent implements Agent {
       return 'string';
     };
 
+    const getEnumValues = (input: z.ZodTypeAny): Array<string | number | boolean> | undefined => {
+      const unwrapped = unwrapSchema(input);
+
+      if (unwrapped instanceof z.ZodEnum) {
+        return unwrapped._def.values;
+      }
+
+      if (unwrapped instanceof z.ZodNativeEnum) {
+        const values = Object.values(unwrapped._def.values);
+        const filtered = values.filter(
+          (value): value is string | number | boolean =>
+            typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+        );
+        return Array.from(new Set(filtered));
+      }
+
+      if (unwrapped instanceof z.ZodLiteral) {
+        const literalValue = unwrapped._def.value;
+        if (['string', 'number', 'boolean'].includes(typeof literalValue)) {
+          return [literalValue as string | number | boolean];
+        }
+      }
+
+      if (unwrapped instanceof z.ZodUnion) {
+        const values: Array<string | number | boolean> = [];
+        for (const option of unwrapped._def.options) {
+          const optionValues = getEnumValues(option);
+          if (!optionValues) return undefined;
+          values.push(...optionValues);
+        }
+        return Array.from(new Set(values));
+      }
+
+      return undefined;
+    };
+
     const isOptional = (input: z.ZodTypeAny): boolean => {
       let current = input;
       while (current instanceof z.ZodEffects) {
@@ -337,24 +370,43 @@ export class CoworkAgent implements Agent {
       return false;
     };
 
-    for (const [name, fieldSchema] of Object.entries(shape)) {
-      const field = fieldSchema as z.ZodTypeAny;
+    const buildParameter = (name: string, field: z.ZodTypeAny): ToolDefinition['parameters'][number] => {
       const description = (field.description || field._def.description || '') as string;
       const type = getType(field);
       const required = !isOptional(field);
-      const defaultValue =
-        field instanceof z.ZodDefault ? field._def.defaultValue() : undefined;
+      const defaultValue = field instanceof z.ZodDefault ? field._def.defaultValue() : undefined;
 
-      parameters.push({
+      const param: ToolDefinition['parameters'][number] = {
         name,
         type,
         description,
         required,
         ...(defaultValue !== undefined ? { default: defaultValue } : {}),
-      });
-    }
+      };
 
-    return parameters;
+      const unwrapped = unwrapSchema(field);
+      const enumValues = getEnumValues(unwrapped);
+      if (enumValues && enumValues.length > 0) {
+        param.enum = enumValues;
+      }
+
+      if (unwrapped instanceof z.ZodArray) {
+        param.items = buildParameter('items', unwrapped._def.type);
+      } else if (unwrapped instanceof z.ZodObject) {
+        param.properties = buildObjectParameters(unwrapped);
+      }
+
+      return param;
+    };
+
+    const buildObjectParameters = (objSchema: z.ZodObject<z.ZodRawShape>): ToolDefinition['parameters'] => {
+      const shape = objSchema.shape;
+      return Object.entries(shape).map(([name, fieldSchema]) =>
+        buildParameter(name, fieldSchema as z.ZodTypeAny)
+      );
+    };
+
+    return buildObjectParameters(schema);
   }
 
   private extractToolCalls(message: Message): ToolCall[] {

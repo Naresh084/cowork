@@ -65,15 +65,29 @@ export type Session = z.infer<typeof SessionSchema>;
 // Tool Types
 // ============================================================================
 
-export const ToolParameterSchema = z.object({
-  name: z.string(),
-  type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
-  description: z.string(),
-  required: z.boolean().default(false),
-  default: z.unknown().optional(),
-});
+export type ToolParameter = {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  description: string;
+  required?: boolean;
+  default?: unknown;
+  enum?: Array<string | number | boolean>;
+  items?: ToolParameter;
+  properties?: ToolParameter[];
+};
 
-export type ToolParameter = z.infer<typeof ToolParameterSchema>;
+export const ToolParameterSchema: z.ZodType<ToolParameter> = z.lazy(() =>
+  z.object({
+    name: z.string(),
+    type: z.enum(['string', 'number', 'boolean', 'array', 'object']),
+    description: z.string(),
+    required: z.boolean().default(false),
+    default: z.unknown().optional(),
+    enum: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    items: ToolParameterSchema.optional(),
+    properties: z.array(ToolParameterSchema).optional(),
+  })
+);
 
 export const ToolDefinitionSchema = z.object({
   name: z.string(),
