@@ -129,6 +129,10 @@ export function useAgentEvents(sessionId: string | null): void {
           agent.removeTask(event.taskId);
           break;
 
+        case 'task:set':
+          agent.setTasks(event.tasks);
+          break;
+
         // Artifact events
         case 'artifact:created':
         case 'artifact:updated':

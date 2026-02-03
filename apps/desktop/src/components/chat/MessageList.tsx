@@ -499,6 +499,37 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
         </div>
       );
 
+    case 'audio':
+      return (
+        <div className="mt-2 px-4">
+          <audio
+            controls
+            src={`data:${part.mimeType};base64,${part.data}`}
+            className="w-full"
+          />
+        </div>
+      );
+
+    case 'video':
+      return (
+        <div className="mt-2 px-4">
+          <video
+            controls
+            src={`data:${part.mimeType};base64,${part.data}`}
+            className="max-w-full rounded-xl max-h-80 object-contain border border-white/[0.08]"
+          />
+        </div>
+      );
+
+    case 'file':
+      return (
+        <div className="mt-2 px-4">
+          <div className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white/70">
+            {part.name}
+          </div>
+        </div>
+      );
+
     case 'tool_call':
       return (
         <div className="px-4 py-2">

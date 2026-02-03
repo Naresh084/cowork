@@ -100,6 +100,7 @@ export type AgentEvent =
   | { type: 'task:create'; sessionId: string; task: Task }
   | { type: 'task:update'; sessionId: string; task: Task }
   | { type: 'task:delete'; sessionId: string; taskId: string }
+  | { type: 'task:set'; sessionId: string; tasks: Task[] }
   // Artifact events
   | { type: 'artifact:created'; sessionId: string; artifact: Artifact }
   | { type: 'artifact:updated'; sessionId: string; artifact: Artifact }
@@ -166,6 +167,7 @@ export const TAURI_EVENT_NAMES = [
   'agent:task:create',
   'agent:task:update',
   'agent:task:delete',
+  'agent:task:set',
   'agent:artifact:created',
   'agent:artifact:updated',
   'agent:artifact:deleted',

@@ -75,10 +75,8 @@ The UI will update to show task progress in real-time.`,
       // Store tasks for this session
       setSessionTasks(sessionId, tasks);
 
-      // Emit task updates to the frontend
-      for (const task of tasks) {
-        eventEmitter.taskUpdate(sessionId, task);
-      }
+      // Replace the entire task list in the frontend
+      eventEmitter.taskSet(sessionId, tasks);
 
       // Flush to ensure events are sent
       eventEmitter.flushSync();

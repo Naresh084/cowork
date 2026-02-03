@@ -130,6 +130,17 @@ function parseTauriEvent(
         taskId: (data.taskId as string) ?? '',
       };
 
+    case 'task:set':
+      return {
+        type: 'task:set',
+        sessionId,
+        tasks: (data.tasks as AgentEvent & { type: 'task:set' } extends {
+          tasks: infer T;
+        }
+          ? T
+          : never) ?? [],
+      };
+
     case 'artifact:created':
       return {
         type: 'artifact:created',

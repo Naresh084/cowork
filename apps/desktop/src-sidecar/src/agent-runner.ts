@@ -1,9 +1,18 @@
-import { CoworkAgent, createAgent, FILE_TOOLS, SHELL_TOOLS } from '@gemini-cowork/core';
+import { FILE_TOOLS, SHELL_TOOLS, type ToolHandler, type ToolContext } from '@gemini-cowork/core';
 import { GeminiProvider, getModelContextWindow } from '@gemini-cowork/providers';
 import type { Message, PermissionRequest, PermissionDecision, MessageContentPart } from '@gemini-cowork/shared';
-import { generateId } from '@gemini-cowork/shared';
+import { generateId, generateMessageId, now } from '@gemini-cowork/shared';
+import { createDeepAgent } from 'deepagents';
+import { DynamicStructuredTool } from '@langchain/core/tools';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import { z } from 'zod';
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { eventEmitter } from './event-emitter.js';
-import { TODO_TOOLS, getSessionTasks, createResearchTools, createComputerUseTools } from './tools/index.js';
+import { TODO_TOOLS, getSessionTasks, createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
+import { mcpBridge } from './mcp-bridge.js';
+import { chromeBridge } from './chrome-bridge.js';
 import type {
   SessionInfo,
   SessionDetails,
@@ -18,12 +27,19 @@ import type {
 // Session Manager
 // ============================================================================
 
+type DeepAgentInstance = {
+  invoke: (input: unknown, options?: unknown) => Promise<unknown>;
+  stop?: () => void;
+  abort?: () => void;
+  cancel?: () => void;
+};
+
 interface ActiveSession {
   id: string;
   workingDirectory: string;
   model: string;
   title: string | null;
-  agent: CoworkAgent;
+  agent: DeepAgentInstance;
   messages: Message[];
   tasks: Task[];
   artifacts: Artifact[];
@@ -45,6 +61,10 @@ export class AgentRunner {
   private sessions: Map<string, ActiveSession> = new Map();
   private provider: GeminiProvider | null = null;
   private apiKey: string | null = null;
+
+  constructor() {
+    chromeBridge.start();
+  }
 
   /**
    * Initialize the provider with API key.
@@ -68,6 +88,21 @@ export class AgentRunner {
   }
 
   /**
+   * Update MCP servers and refresh tools for all sessions.
+   */
+  async setMcpServers(servers: Array<{ id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean; prompt?: string; contextFileName?: string }>): Promise<void> {
+    await mcpBridge.setServers(servers.map((server) => ({
+      ...server,
+      enabled: server.enabled ?? true,
+    })));
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  /**
    * Create a new session.
    */
   async createSession(
@@ -86,71 +121,13 @@ export class AgentRunner {
     const sessionId = generateId('sess');
     const now = Date.now();
 
-    // Tools for this session - includes file, shell, and todo tools
-    const fileTools = FILE_TOOLS;
-    const shellTools = SHELL_TOOLS;
-    const todoTools = TODO_TOOLS;
-    const researchTools = createResearchTools(() => this.apiKey);
-    const computerUseTools = createComputerUseTools(() => this.apiKey);
-
-    // Create permission handler that emits events and waits for response
-    const permissionHandler = async (
-      request: PermissionRequest,
-      _context: unknown
-    ): Promise<PermissionDecision> => {
-      const session = this.sessions.get(sessionId);
-      const cacheKey = `${request.type}:${request.resource}`;
-      const cachedDecision = session?.permissionCache.get(cacheKey);
-      if (cachedDecision === 'allow_session') {
-        return cachedDecision;
-      }
-
-      const permissionId = generateId('perm');
-
-      const extendedRequest: ExtendedPermissionRequest = {
-        ...request,
-        id: permissionId,
-        riskLevel: this.assessRiskLevel(request),
-        timestamp: Date.now(),
-      };
-
-      return new Promise((resolve) => {
-        // Store pending permission
-        const activeSession = this.sessions.get(sessionId);
-        if (activeSession) {
-          activeSession.pendingPermissions.set(permissionId, {
-            request: extendedRequest,
-            resolve,
-          });
-        }
-
-        // Emit permission request event
-        eventEmitter.permissionRequest(sessionId, extendedRequest);
-      });
-    };
-
-    // Create agent
-    const agent = createAgent({
-      config: {
-        model: actualModel,
-        maxIterations: 20,
-        systemPrompt: this.buildSystemPrompt(workingDirectory),
-        streaming: true,
-      },
-      provider: this.provider,
-      tools: [...fileTools, ...shellTools, ...todoTools, ...researchTools, ...computerUseTools],
-      permissionHandler,
-      workingDirectory,
-      sessionId,
-    });
-
     // Create session
     const session: ActiveSession = {
       id: sessionId,
       workingDirectory,
       model: actualModel,
       title: title || null,
-      agent,
+      agent: {} as DeepAgentInstance,
       messages: [],
       tasks: [],
       artifacts: [],
@@ -161,6 +138,9 @@ export class AgentRunner {
       createdAt: now,
       updatedAt: now,
     };
+
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = this.createDeepAgent(session, toolHandlers);
 
     this.sessions.set(sessionId, session);
 
@@ -213,6 +193,18 @@ export class AgentRunner {
             mimeType: attachment.mimeType,
             data: attachment.data,
           });
+        } else if (attachment.type === 'audio' && attachment.data) {
+          parts.push({
+            type: 'audio' as const,
+            mimeType: attachment.mimeType || 'audio/mpeg',
+            data: attachment.data,
+          });
+        } else if (attachment.type === 'video' && attachment.data) {
+          parts.push({
+            type: 'video' as const,
+            mimeType: attachment.mimeType || 'video/mp4',
+            data: attachment.data,
+          });
         } else if (attachment.type === 'text' && attachment.data) {
           parts.push({
             type: 'text' as const,
@@ -226,88 +218,46 @@ export class AgentRunner {
       }
     }
 
+    // Persist user message
+    const userMessage: Message = {
+      id: generateMessageId(),
+      role: 'user',
+      content: messageContent,
+      createdAt: now(),
+    };
+    session.messages.push(userMessage);
+    session.updatedAt = Date.now();
+
     // Emit stream start
     eventEmitter.streamStart(sessionId);
 
     try {
-      // Run agent
-      for await (const event of session.agent.run(messageContent)) {
-        switch (event.type) {
-          case 'agent:stream_chunk': {
-            const chunk = event.payload as { text?: string };
-            if (chunk.text) {
-              eventEmitter.streamChunk(sessionId, chunk.text);
-            }
-            break;
-          }
+      const lcMessages = this.toLangChainMessages(session.messages);
+      const result = await session.agent.invoke({ messages: lcMessages });
+      const assistantMessage = this.extractAssistantMessage(result);
 
-          case 'agent:message': {
-            const msg = event.payload as { message: Message };
-            session.messages.push(msg.message);
-            session.updatedAt = Date.now();
+      if (assistantMessage) {
+        session.messages.push(assistantMessage);
+        session.updatedAt = Date.now();
 
-            if (msg.message.role === 'assistant') {
-              // Extract text content for streaming
-              const streamingEnabled = session.agent.config.streaming ?? false;
-              if (!streamingEnabled) {
-                const textContent = this.extractTextContent(msg.message);
-                if (textContent) {
-                  eventEmitter.streamChunk(sessionId, textContent);
-                }
-              }
-            }
-            break;
-          }
-
-          case 'agent:tool_call': {
-            const toolCall = event.payload as { toolCall: unknown };
-            const toolCallAny = toolCall.toolCall as { id?: string };
-            if (toolCallAny?.id) {
-              session.toolStartTimes.set(toolCallAny.id, Date.now());
-            }
-            eventEmitter.toolStart(sessionId, toolCall.toolCall);
-            break;
-          }
-
-          case 'agent:tool_result': {
-            const result = event.payload as { toolCall: { id?: string; status?: string; result?: unknown; error?: string } };
-            const toolCallId = result.toolCall.id ?? '';
-            const startTime = toolCallId ? session.toolStartTimes.get(toolCallId) : undefined;
-            if (toolCallId) {
-              session.toolStartTimes.delete(toolCallId);
-            }
-
-            const success = result.toolCall.status === 'executed' && !result.toolCall.error;
-            const payload = {
-              toolCallId,
-              success,
-              result: result.toolCall.result,
-              error: result.toolCall.error,
-              duration: startTime ? Date.now() - startTime : undefined,
-            };
-
-            eventEmitter.toolResult(sessionId, result.toolCall, payload);
-
-            // Check if this creates an artifact
-            this.checkForArtifact(session, result);
-            break;
-          }
-
-          case 'agent:complete': {
-            const lastAssistant = [...session.messages].reverse().find(m => m.role === 'assistant');
-            if (lastAssistant) {
-              eventEmitter.streamDone(sessionId, lastAssistant);
-            }
-            break;
-          }
-
-          case 'agent:error': {
-            const error = event.payload as { error: string };
-            eventEmitter.error(sessionId, error.error);
-            break;
-          }
+        const textContent = this.extractTextContent(assistantMessage);
+        if (textContent) {
+          eventEmitter.streamChunk(sessionId, textContent);
         }
+
+        eventEmitter.streamDone(sessionId, assistantMessage);
+      } else {
+        eventEmitter.streamDone(sessionId, {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: '',
+          createdAt: now(),
+        });
       }
+
+      // Update context usage and compact if needed
+      this.emitContextUsage(session);
+      await this.maybeCompactContext(session);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -337,8 +287,6 @@ export class AgentRunner {
       eventEmitter.error(sessionId, errorMessage, errorCode);
       throw error;
     } finally {
-      // CRITICAL: Force flush all pending events before returning
-      // This ensures events are not lost due to buffering when the function exits
       eventEmitter.flushSync();
     }
   }
@@ -382,8 +330,14 @@ export class AgentRunner {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-
-    session.agent.stop();
+    const agentAny = session.agent as { abort?: () => void; stop?: () => void; cancel?: () => void };
+    if (agentAny.abort) {
+      agentAny.abort();
+    } else if (agentAny.cancel) {
+      agentAny.cancel();
+    } else if (agentAny.stop) {
+      agentAny.stop();
+    }
   }
 
   /**
@@ -501,7 +455,7 @@ export class AgentRunner {
     if (!session) return false;
 
     // Stop agent if running
-    session.agent.stop();
+    session.agent.stop?.();
 
     // Clear pending permissions
     for (const pending of session.pendingPermissions.values()) {
@@ -553,8 +507,9 @@ export class AgentRunner {
     session.workingDirectory = workingDirectory;
     session.updatedAt = Date.now();
 
-    // Update the agent's system prompt with new working directory
-    // Note: The agent will use this for future tool operations
+    // Refresh agent with updated working directory
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = this.createDeepAgent(session, toolHandlers);
 
     // Emit session updated event
     const firstMessageWd = this.getFirstMessagePreview(session);
@@ -662,13 +617,253 @@ You have access to file and shell tools:
   }
 
   private subscribeToAgentEvents(session: ActiveSession): void {
-    // Subscribe to relevant events for task/artifact tracking
-    session.agent.on('agent:iteration', () => {
-      // Update context usage estimate using model's actual context window
-      const tokenEstimate = this.estimateTokens(session.messages);
-      const contextWindow = getModelContextWindow(session.model);
-      eventEmitter.contextUpdate(session.id, tokenEstimate, contextWindow.input);
+    this.emitContextUsage(session);
+  }
+
+  private createDeepAgent(session: ActiveSession, tools: ToolHandler[]): DeepAgentInstance {
+    if (!this.apiKey) {
+      throw new Error('API key not set');
+    }
+
+    const model = new ChatGoogleGenerativeAI({
+      model: session.model,
+      apiKey: this.apiKey,
     });
+
+    const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
+
+    const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
+    const agent = createDeepAgentAny({
+      model,
+      tools: wrappedTools,
+      systemPrompt: this.buildSystemPrompt(session.workingDirectory),
+    });
+
+    return agent;
+  }
+
+  private buildToolHandlers(session: ActiveSession): ToolHandler[] {
+    const fileTools = FILE_TOOLS;
+    const shellTools = SHELL_TOOLS;
+    const todoTools = TODO_TOOLS;
+    const researchTools = createResearchTools(() => this.apiKey);
+    const computerUseTools = createComputerUseTools(() => this.apiKey);
+    const mediaTools = createMediaTools(() => this.apiKey);
+    const groundingTools = createGroundingTools(() => this.apiKey);
+    const mcpTools = this.createMcpTools(session.id);
+
+    return [
+      ...fileTools,
+      ...shellTools,
+      ...todoTools,
+      ...researchTools,
+      ...computerUseTools,
+      ...mediaTools,
+      ...groundingTools,
+      ...mcpTools,
+    ];
+  }
+
+  private wrapTool(tool: ToolHandler, session: ActiveSession): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: tool.name,
+      description: tool.description,
+      schema: tool.parameters,
+      func: async (args: Record<string, unknown>) => {
+        const toolCallId = generateId('tool');
+        const toolCall = { id: toolCallId, name: tool.name, args };
+        session.toolStartTimes.set(toolCallId, Date.now());
+        eventEmitter.toolStart(session.id, toolCall);
+
+        if (tool.requiresPermission) {
+          const request = tool.requiresPermission(args);
+          if (request) {
+            const decision = await this.requestPermission(session, request);
+            if (decision === 'deny') {
+              const payload = {
+                toolCallId,
+                success: false,
+                result: null,
+                error: 'Permission denied',
+                duration: this.consumeToolDuration(session, toolCallId),
+              };
+              eventEmitter.toolResult(session.id, toolCall, payload);
+              return { error: 'Permission denied' };
+            }
+          }
+        }
+
+        try {
+          const result = await tool.execute(args, this.buildToolContext(session));
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const payload = {
+            toolCallId,
+            success: result.success,
+            result: result.data,
+            error: result.error,
+            duration,
+          };
+          eventEmitter.toolResult(session.id, toolCall, payload);
+          this.recordArtifactForTool(session, tool.name, args, result.data);
+          return result.data ?? result;
+        } catch (error) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const payload = {
+            toolCallId,
+            success: false,
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+            duration,
+          };
+          eventEmitter.toolResult(session.id, toolCall, payload);
+          return { error: payload.error };
+        }
+      },
+    });
+  }
+
+  private buildToolContext(session: ActiveSession): ToolContext {
+    return {
+      workingDirectory: session.workingDirectory,
+      sessionId: session.id,
+      agentId: session.id,
+    };
+  }
+
+  private consumeToolDuration(session: ActiveSession, toolCallId: string): number | undefined {
+    const startTime = session.toolStartTimes.get(toolCallId);
+    if (toolCallId) {
+      session.toolStartTimes.delete(toolCallId);
+    }
+    return startTime ? Date.now() - startTime : undefined;
+  }
+
+  private async requestPermission(
+    session: ActiveSession,
+    request: PermissionRequest
+  ): Promise<PermissionDecision> {
+    const cacheKey = `${request.type}:${request.resource}`;
+    const cachedDecision = session.permissionCache.get(cacheKey);
+    if (cachedDecision === 'allow_session') {
+      return cachedDecision;
+    }
+
+    const permissionId = generateId('perm');
+    const extendedRequest: ExtendedPermissionRequest = {
+      ...request,
+      id: permissionId,
+      riskLevel: this.assessRiskLevel(request),
+      timestamp: Date.now(),
+    };
+
+    return new Promise((resolve) => {
+      session.pendingPermissions.set(permissionId, {
+        request: extendedRequest,
+        resolve,
+      });
+      eventEmitter.permissionRequest(session.id, extendedRequest);
+    });
+  }
+
+  private toLangChainMessages(messages: Message[]): Array<{ role: string; content: unknown }> {
+    return messages.map((message) => {
+      if (typeof message.content === 'string') {
+        return { role: message.role, content: message.content };
+      }
+
+      const parts = message.content.map((part) => {
+        if (part.type === 'text') {
+          return { type: 'text', text: part.text };
+        }
+        if (part.type === 'image') {
+          return {
+            type: 'image_url',
+            image_url: {
+              url: `data:${part.mimeType};base64,${part.data}`,
+            },
+          };
+        }
+        if (part.type === 'audio' || part.type === 'video') {
+          return {
+            type: 'media',
+            mimeType: part.mimeType || (part.type === 'audio' ? 'audio/mpeg' : 'video/mp4'),
+            data: part.data,
+          };
+        }
+        if (part.type === 'file' && part.data) {
+          return {
+            type: 'media',
+            mimeType: part.mimeType || 'application/octet-stream',
+            data: part.data,
+          };
+        }
+        return { type: 'text', text: `[${part.type} attachment]` };
+      });
+
+      return { role: message.role, content: parts };
+    });
+  }
+
+  private extractAssistantMessage(result: unknown): Message | null {
+    const resultAny = result as {
+      messages?: Array<{ role?: string; content?: unknown; text?: string }>;
+      output?: unknown;
+    };
+
+    const messages = resultAny.messages;
+    if (messages && messages.length > 0) {
+      const last = [...messages].reverse().find((m) => m.role === 'assistant' || m.role === 'ai' || m.role === 'model');
+      if (last) {
+        return {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: this.normalizeContent(last.content ?? last.text ?? ''),
+          createdAt: now(),
+        };
+      }
+    }
+
+    if (typeof resultAny.output === 'string') {
+      return {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: resultAny.output,
+        createdAt: now(),
+      };
+    }
+
+    return null;
+  }
+
+  private normalizeContent(content: unknown): string | MessageContentPart[] {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        const partAny = part as { type?: string; text?: string; image_url?: { url?: string } };
+        if (partAny.type === 'text') {
+          return { type: 'text', text: partAny.text || '' } as MessageContentPart;
+        }
+        if (partAny.type === 'image_url' && partAny.image_url?.url) {
+          const url = partAny.image_url.url;
+          const match = url.match(/^data:(.+);base64,(.+)$/);
+          if (match) {
+            return {
+              type: 'image',
+              mimeType: match[1],
+              data: match[2],
+            } as MessageContentPart;
+          }
+        }
+        return { type: 'text', text: JSON.stringify(partAny) } as MessageContentPart;
+      });
+    }
+    return String(content);
+  }
+
+  private emitContextUsage(session: ActiveSession): void {
+    const tokenEstimate = this.estimateTokens(session.messages);
+    const contextWindow = getModelContextWindow(session.model);
+    eventEmitter.contextUpdate(session.id, tokenEstimate, contextWindow.input);
   }
 
   private extractTextContent(message: Message): string | null {
@@ -716,24 +911,186 @@ You have access to file and shell tools:
     }
   }
 
-  private checkForArtifact(session: ActiveSession, result: unknown): void {
-    // Check if the tool result indicates a file was created/modified
-    const payload = result as { toolCall?: { name: string; args: Record<string, unknown> } };
-    if (!payload.toolCall) return;
+  private createMcpTools(_sessionId: string): ToolHandler[] {
+    const tools = mcpBridge.getTools();
+    return tools.map((tool) => ({
+      name: `mcp_${tool.serverId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+      description: `[MCP:${tool.serverId}] ${tool.description || tool.name}`,
+      parameters: z.record(z.unknown()),
+      execute: async (args: unknown) => {
+        const result = await mcpBridge.callTool(
+          tool.serverId,
+          tool.name,
+          (args as Record<string, unknown>) || {}
+        );
+        return { success: true, data: result };
+      },
+    }));
+  }
 
-    const { name, args } = payload.toolCall;
+  private recordArtifactForTool(
+    session: ActiveSession,
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown
+  ): void {
+    const name = toolName.toLowerCase();
+    const artifacts: Artifact[] = [];
 
-    if (name === 'write_file' && args.path) {
-      const artifact: Artifact = {
-        id: generateId('art'),
-        path: args.path as string,
-        type: 'created', // Could check if file existed before
-        content: args.content as string | undefined,
-        timestamp: Date.now(),
-      };
-
+    const addArtifact = (artifact: Artifact) => {
       session.artifacts.push(artifact);
       eventEmitter.artifactCreated(session.id, artifact);
+    };
+
+    if ((name === 'read_file' || name === 'read') && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'touched',
+        content: typeof result === 'string' ? result : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'write_file' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'created',
+        content: typeof args.content === 'string' ? args.content : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'edit_file' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'modified',
+        content: typeof args.new_string === 'string' ? args.new_string : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'delete_file' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'deleted',
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'create_directory' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'created',
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'generate_image' || name === 'edit_image' || name === 'generate_video') {
+      const resultAny = result as { images?: Array<{ path?: string; url?: string; data?: string }>; videos?: Array<{ path?: string; url?: string; data?: string }> };
+      const files = [...(resultAny?.images || []), ...(resultAny?.videos || [])];
+      for (const file of files) {
+        if (!file.path && !file.url) continue;
+        artifacts.push({
+          id: generateId('art'),
+          path: file.path || file.url || '',
+          type: 'created',
+          content: file.data,
+          url: file.url,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    for (const artifact of artifacts) {
+      addArtifact(artifact);
+    }
+  }
+
+  private async maybeCompactContext(session: ActiveSession): Promise<void> {
+    if (!this.provider) return;
+    const contextWindow = getModelContextWindow(session.model);
+    const used = this.estimateTokens(session.messages);
+    const ratio = contextWindow.input > 0 ? used / contextWindow.input : 0;
+    if (ratio < 0.7) return;
+
+    const keepLast = 6;
+    if (session.messages.length <= keepLast + 2) return;
+
+    const toSummarize = session.messages.slice(0, -keepLast);
+    const summary = await this.summarizeMessages(toSummarize, session.model);
+    if (!summary) return;
+
+    const summaryMessage: Message = {
+      id: generateMessageId(),
+      role: 'system',
+      content: `Summary of earlier conversation:\n${summary}`,
+      createdAt: now(),
+    };
+
+    session.messages = [summaryMessage, ...session.messages.slice(-keepLast)];
+    await this.persistSummary(session.workingDirectory, summary);
+    this.emitContextUsage(session);
+  }
+
+  private async summarizeMessages(messages: Message[], model: string): Promise<string> {
+    if (!this.provider) return '';
+    const transcript = messages
+      .map((msg) => {
+        const content = typeof msg.content === 'string'
+          ? msg.content
+          : this.extractTextContent(msg) || '[non-text content]';
+        return `${msg.role.toUpperCase()}: ${content}`;
+      })
+      .join('\n\n');
+
+    const response = await this.provider.generate({
+      model,
+      messages: [
+        {
+          id: generateMessageId(),
+          role: 'system',
+          content: 'Summarize the conversation so far into compact project memory. Focus on decisions, plans, files, and open questions.',
+          createdAt: now(),
+        },
+        {
+          id: generateMessageId(),
+          role: 'user',
+          content: transcript,
+          createdAt: now(),
+        },
+      ],
+    });
+
+    return typeof response.message.content === 'string'
+      ? response.message.content
+      : this.extractTextContent(response.message) || '';
+  }
+
+  private async persistSummary(workingDirectory: string, summary: string): Promise<void> {
+    const memoryPath = join(workingDirectory, 'GEMINI.md');
+    const header = '# GEMINI.md - Project Memory';
+    const section = '## Additional Context';
+    const entry = `- ${new Date().toISOString()}: ${summary.replace(/\n/g, ' ')}`;
+
+    if (!existsSync(memoryPath)) {
+      const content = [header, '', section, entry, ''].join('\n');
+      await mkdir(workingDirectory, { recursive: true });
+      await writeFile(memoryPath, content, 'utf-8');
+      return;
+    }
+
+    const existing = await readFile(memoryPath, 'utf-8');
+    if (existing.includes(section)) {
+      const updated = existing.replace(section, `${section}\n${entry}`);
+      await writeFile(memoryPath, updated, 'utf-8');
+    } else {
+      const updated = `${existing.trim()}\n\n${section}\n${entry}\n`;
+      await writeFile(memoryPath, updated, 'utf-8');
     }
   }
 

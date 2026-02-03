@@ -16,10 +16,18 @@
     "@gemini-cowork/storage": "workspace:*",
     "@gemini-cowork/shared": "workspace:*",
     "@gemini-cowork/mcp": "workspace:*",
-    "@gemini-cowork/sandbox": "workspace:*"
+    "@gemini-cowork/sandbox": "workspace:*",
+    "deepagents": "^1.6.1",
+    "@langchain/core": "^1.1.17",
+    "@langchain/google-genai": "^2.1.14",
+    "@google/generative-ai": "^0.24.0",
+    "@google/genai": "^1.33.0",
+    "playwright": "^1.40.0",
+    "ws": "^8.17.1"
   },
   "devDependencies": {
     "typescript": "^5.7.2",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.10"
   }
 }

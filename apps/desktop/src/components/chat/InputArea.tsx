@@ -194,7 +194,7 @@ export function InputArea({
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,.pdf,.txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html"
+        accept="image/*,audio/*,video/*,.pdf,.txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html"
         className="hidden"
         onChange={(e) => onAttachmentAdd(e.target.files)}
       />

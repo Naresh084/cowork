@@ -10,6 +10,8 @@ export const MCPServerConfigSchema = z.object({
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
   enabled: z.boolean().default(true),
+  prompt: z.string().optional(),
+  contextFileName: z.string().optional(),
 });
 
 export type MCPServerConfig = z.infer<typeof MCPServerConfigSchema>;

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Cowork Bridge",
+  "version": "0.1.0",
+  "description": "Connects Gemini Cowork to Chrome for computer-use actions.",
+  "permissions": ["tabs", "activeTab", "scripting", "storage", "tabCapture"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Gemini Cowork",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

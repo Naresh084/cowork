@@ -1,0 +1,299 @@
+import { z } from 'zod';
+import { join } from 'path';
+import { mkdir, writeFile } from 'fs/promises';
+import { GoogleGenAI, RawReferenceImage } from '@google/genai';
+import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+
+function getExtension(mimeType?: string, fallback = 'bin'): string {
+  if (!mimeType) return fallback;
+  if (mimeType.includes('png')) return 'png';
+  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+  if (mimeType.includes('webp')) return 'webp';
+  if (mimeType.includes('gif')) return 'gif';
+  if (mimeType.includes('mp4')) return 'mp4';
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('mov')) return 'mov';
+  return fallback;
+}
+
+async function saveGeneratedFile(
+  workingDirectory: string,
+  base64: string,
+  mimeType: string | undefined,
+  prefix: string
+): Promise<string> {
+  const dir = join(workingDirectory, 'generated');
+  await mkdir(dir, { recursive: true });
+  const ext = getExtension(mimeType);
+  const filename = `${prefix}-${Date.now()}.${ext}`;
+  const filePath = join(dir, filename);
+  const buffer = Buffer.from(base64, 'base64');
+  await writeFile(filePath, buffer);
+  return filePath;
+}
+
+export function createMediaTools(getApiKey: () => string | null): ToolHandler[] {
+  const generateImageTool: ToolHandler = {
+    name: 'generate_image',
+    description: 'Generate an image from a prompt using Gemini image generation models.',
+    parameters: z.object({
+      prompt: z.string().describe('Prompt describing the image'),
+      model: z.string().optional().describe('Image generation model id'),
+      numberOfImages: z.number().optional().describe('Number of images to generate'),
+      aspectRatio: z.string().optional().describe('Aspect ratio (e.g., 1:1, 16:9)'),
+      imageSize: z.string().optional().describe('Image size (e.g., 1K, 2K)'),
+    }),
+    execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return { success: false, error: 'API key not set. Please configure an API key first.' };
+      }
+
+      const { prompt, model, numberOfImages, aspectRatio, imageSize } = args as {
+        prompt: string;
+        model?: string;
+        numberOfImages?: number;
+        aspectRatio?: string;
+        imageSize?: string;
+      };
+
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateImages({
+        model: model || 'imagen-4.0-generate-001',
+        prompt,
+        config: {
+          numberOfImages: numberOfImages ?? 1,
+          aspectRatio,
+          imageSize,
+        },
+      });
+
+      const images = (response.generatedImages || [])
+        .map((img) => img.image)
+        .filter((img): img is { imageBytes?: string; mimeType?: string } => !!img?.imageBytes)
+        .slice(0, numberOfImages ?? 1);
+
+      const files = [];
+      for (const img of images) {
+        const filePath = await saveGeneratedFile(
+          context.workingDirectory,
+          img.imageBytes || '',
+          img.mimeType,
+          'image'
+        );
+        files.push({
+          path: filePath,
+          mimeType: img.mimeType || 'image/png',
+          data: img.imageBytes,
+        });
+      }
+
+      return {
+        success: true,
+        data: {
+          prompt,
+          images: files,
+        },
+      };
+    },
+  };
+
+  const editImageTool: ToolHandler = {
+    name: 'edit_image',
+    description: 'Edit an image based on a prompt.',
+    parameters: z.object({
+      prompt: z.string().describe('Prompt describing the edit'),
+      image: z.string().describe('Base64 encoded image data'),
+      imageMimeType: z.string().optional().describe('Image mime type'),
+      model: z.string().optional().describe('Image edit model id'),
+      numberOfImages: z.number().optional().describe('Number of images to generate'),
+    }),
+    execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return { success: false, error: 'API key not set. Please configure an API key first.' };
+      }
+
+      const { prompt, image, imageMimeType, model, numberOfImages } = args as {
+        prompt: string;
+        image: string;
+        imageMimeType?: string;
+        model?: string;
+        numberOfImages?: number;
+      };
+
+      const ai = new GoogleGenAI({ apiKey });
+      const reference = new RawReferenceImage();
+      reference.referenceImage = {
+        imageBytes: image,
+        mimeType: imageMimeType || 'image/png',
+      };
+
+      const response = await ai.models.editImage({
+        model: model || 'imagen-3.0-capability-001',
+        prompt,
+        referenceImages: [reference],
+        config: {
+          numberOfImages: numberOfImages ?? 1,
+        },
+      });
+
+      const images = (response.generatedImages || [])
+        .map((img) => img.image)
+        .filter((img): img is { imageBytes?: string; mimeType?: string } => !!img?.imageBytes)
+        .slice(0, numberOfImages ?? 1);
+
+      const files = [];
+      for (const img of images) {
+        const filePath = await saveGeneratedFile(
+          context.workingDirectory,
+          img.imageBytes || '',
+          img.mimeType,
+          'image-edit'
+        );
+        files.push({
+          path: filePath,
+          mimeType: img.mimeType || 'image/png',
+          data: img.imageBytes,
+        });
+      }
+
+      return {
+        success: true,
+        data: {
+          prompt,
+          images: files,
+        },
+      };
+    },
+  };
+
+  const generateVideoTool: ToolHandler = {
+    name: 'generate_video',
+    description: 'Generate a video from a prompt using Veo.',
+    parameters: z.object({
+      prompt: z.string().describe('Prompt describing the video'),
+      model: z.string().optional().describe('Video generation model id'),
+      numberOfVideos: z.number().optional().describe('Number of videos'),
+      durationSeconds: z.number().optional().describe('Duration of the video in seconds'),
+      aspectRatio: z.string().optional().describe('Aspect ratio (e.g., 16:9)'),
+      resolution: z.string().optional().describe('Resolution (e.g., 720p, 1080p)'),
+    }),
+    execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return { success: false, error: 'API key not set. Please configure an API key first.' };
+      }
+
+      const { prompt, model, numberOfVideos, durationSeconds, aspectRatio, resolution } = args as {
+        prompt: string;
+        model?: string;
+        numberOfVideos?: number;
+        durationSeconds?: number;
+        aspectRatio?: string;
+        resolution?: string;
+      };
+
+      const ai = new GoogleGenAI({ apiKey });
+      let operation = await ai.models.generateVideos({
+        model: model || 'veo-2.0-generate-001',
+        source: { prompt },
+        config: {
+          numberOfVideos: numberOfVideos ?? 1,
+          durationSeconds,
+          aspectRatio,
+          resolution,
+        },
+      });
+
+      while (!operation.done) {
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+        operation = await ai.operations.getVideosOperation({ operation });
+      }
+
+      const generated = operation.response?.generatedVideos || [];
+      const files = [];
+      for (const video of generated) {
+        if (video.video?.videoBytes) {
+          const filePath = await saveGeneratedFile(
+            context.workingDirectory,
+            video.video.videoBytes,
+            video.video.mimeType,
+            'video'
+          );
+          files.push({
+            path: filePath,
+            mimeType: video.video.mimeType || 'video/mp4',
+            data: video.video.videoBytes,
+          });
+        } else if (video.video?.uri) {
+          files.push({
+            path: video.video.uri,
+            mimeType: video.video.mimeType || 'video/mp4',
+            url: video.video.uri,
+          });
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          prompt,
+          videos: files,
+        },
+      };
+    },
+  };
+
+  const analyzeVideoTool: ToolHandler = {
+    name: 'analyze_video',
+    description: 'Analyze a video with Gemini video understanding.',
+    parameters: z.object({
+      prompt: z.string().describe('Question or task for the video'),
+      video: z.string().describe('Base64 encoded video data'),
+      videoMimeType: z.string().optional().describe('Video mime type'),
+      model: z.string().optional().describe('Video understanding model id'),
+    }),
+    execute: async (args: unknown): Promise<ToolResult> => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return { success: false, error: 'API key not set. Please configure an API key first.' };
+      }
+
+      const { prompt, video, videoMimeType, model } = args as {
+        prompt: string;
+        video: string;
+        videoMimeType?: string;
+        model?: string;
+      };
+
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: model || 'gemini-2.5-pro',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: videoMimeType || 'video/mp4',
+                  data: video,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      return {
+        success: true,
+        data: {
+          analysis: response.text,
+        },
+      };
+    },
+  };
+
+  return [generateImageTool, editImageTool, generateVideoTool, analyzeVideoTool];
+}
