@@ -41,6 +41,9 @@ fn main() {
             commands::agent::agent_load_memory,
             commands::agent::agent_save_memory,
             commands::agent::agent_get_context_usage,
+            commands::agent::agent_set_mcp_servers,
+            commands::agent::agent_mcp_call_tool,
+            commands::agent::agent_load_gemini_extensions,
         ])
         .setup(|_app| {
             Ok(())

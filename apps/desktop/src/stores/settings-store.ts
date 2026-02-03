@@ -17,6 +17,8 @@ export interface MCPServerConfig {
   args?: string[];
   env?: Record<string, string>;
   enabled: boolean;
+  prompt?: string;
+  contextFileName?: string;
   status?: 'connected' | 'disconnected' | 'error';
   error?: string;
 }
@@ -95,6 +97,8 @@ interface SettingsActions {
   ) => void;
   removeMCPServer: (serverId: string) => void;
   toggleMCPServer: (serverId: string) => void;
+  syncMCPServers: (servers: MCPServerConfig[]) => Promise<void>;
+  loadGeminiExtensions: () => Promise<void>;
 
   // Permission management
   updatePermissionDefaults: (
@@ -180,6 +184,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           // Settings are persisted locally, no backend call needed
           // But we could load additional settings from backend if needed
           set({ isLoading: false });
+          const state = useSettingsStore.getState();
+          await state.syncMCPServers(state.mcpServers);
+          await state.loadGeminiExtensions();
         } catch (error) {
           set({
             isLoading: false,
@@ -247,6 +254,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set((state) => ({
           mcpServers: [...state.mcpServers, newServer],
         }));
+        void useSettingsStore.getState().syncMCPServers([
+          ...useSettingsStore.getState().mcpServers,
+          newServer,
+        ]);
       },
 
       updateMCPServer: (serverId, updates) => {
@@ -255,12 +266,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             s.id === serverId ? { ...s, ...updates } : s
           ),
         }));
+        void useSettingsStore.getState().syncMCPServers(useSettingsStore.getState().mcpServers);
       },
 
       removeMCPServer: (serverId) => {
         set((state) => ({
           mcpServers: state.mcpServers.filter((s) => s.id !== serverId),
         }));
+        void useSettingsStore.getState().syncMCPServers(useSettingsStore.getState().mcpServers);
       },
 
       toggleMCPServer: (serverId) => {
@@ -269,6 +282,44 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             s.id === serverId ? { ...s, enabled: !s.enabled } : s
           ),
         }));
+        void useSettingsStore.getState().syncMCPServers(useSettingsStore.getState().mcpServers);
+      },
+
+      syncMCPServers: async (servers) => {
+        try {
+          await invoke('agent_set_mcp_servers', { servers });
+        } catch (error) {
+          console.warn('Failed to sync MCP servers:', error);
+        }
+      },
+
+      loadGeminiExtensions: async () => {
+        try {
+          const result = await invoke<{ servers: MCPServerConfig[] }>('agent_load_gemini_extensions');
+          if (!result?.servers?.length) return;
+
+          set((state) => {
+            const existing = new Map(state.mcpServers.map((s) => [s.name + s.command, s]));
+            const merged = [...state.mcpServers];
+
+            for (const server of result.servers) {
+              const key = server.name + server.command;
+              if (!existing.has(key)) {
+                merged.push({
+                  ...server,
+                  id: server.id || `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  status: 'disconnected',
+                });
+              }
+            }
+
+            return { mcpServers: merged };
+          });
+
+          await useSettingsStore.getState().syncMCPServers(useSettingsStore.getState().mcpServers);
+        } catch (error) {
+          console.warn('Failed to load Gemini extensions:', error);
+        }
       },
 
       // Permission management

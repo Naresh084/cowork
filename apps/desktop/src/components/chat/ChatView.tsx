@@ -169,6 +169,7 @@ export function ChatView() {
     if (!files) return;
 
     const maxTextSize = 200 * 1024; // 200KB
+    const maxMediaSize = 25 * 1024 * 1024; // 25MB
     const isTextFile = (file: File) => {
       if (file.type.startsWith('text/')) return true;
       return /\.(md|txt|json|js|ts|tsx|jsx|py|go|rs|java|c|cpp|h|css|html)$/i.test(file.name);
@@ -176,16 +177,37 @@ export function ChatView() {
 
     Array.from(files).forEach(async (file) => {
       const isImage = file.type.startsWith('image/');
+      const isAudio = file.type.startsWith('audio/');
+      const isVideo = file.type.startsWith('video/');
       const isText = isTextFile(file);
 
       const attachment: Attachment = {
-        type: isImage ? 'image' : isText ? 'text' : 'file',
+        type: isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : isText ? 'text' : 'file',
         name: file.name,
         mimeType: file.type,
         size: file.size,
       };
 
       if (isImage) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          setAttachments((prev) => [
+            ...prev,
+            { ...attachment, data: base64 },
+          ]);
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      if (isAudio || isVideo) {
+        if (file.size > maxMediaSize) {
+          toast.error('File too large', `${file.name} exceeds 25MB and will not be sent to the model.`);
+          setAttachments((prev) => [...prev, { ...attachment, type: 'file' }]);
+          return;
+        }
+
         const reader = new FileReader();
         reader.onload = () => {
           const base64 = (reader.result as string).split(',')[1];

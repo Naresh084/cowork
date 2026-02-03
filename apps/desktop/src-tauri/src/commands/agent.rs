@@ -64,6 +64,19 @@ pub struct Attachment {
     pub size: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPServerConfig {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub args: Option<Vec<String>>,
+    pub env: Option<std::collections::HashMap<String, String>>,
+    pub enabled: Option<bool>,
+    pub prompt: Option<String>,
+    pub context_file_name: Option<String>,
+}
+
 
 /// State wrapper for the sidecar manager
 pub struct AgentState {
@@ -391,6 +404,55 @@ pub async fn agent_get_context_usage(
     });
 
     manager.send_command("get_context_usage", params).await
+}
+
+/// Sync MCP servers to sidecar
+#[tauri::command]
+pub async fn agent_set_mcp_servers(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    servers: Vec<MCPServerConfig>,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = state.manager.lock().await;
+    let params = serde_json::json!({
+        "servers": servers,
+    });
+    manager.send_command("set_mcp_servers", params).await?;
+    Ok(())
+}
+
+/// Call an MCP tool from the UI
+#[tauri::command]
+pub async fn agent_mcp_call_tool(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    server_id: String,
+    tool_name: String,
+    args: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = state.manager.lock().await;
+    let params = serde_json::json!({
+        "serverId": server_id,
+        "toolName": tool_name,
+        "args": args.unwrap_or(serde_json::json!({})),
+    });
+    manager.send_command("mcp_call_tool", params).await
+}
+
+/// Load Gemini CLI extensions from disk
+#[tauri::command]
+pub async fn agent_load_gemini_extensions(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = state.manager.lock().await;
+    let result = manager
+        .send_command("load_gemini_extensions", serde_json::json!({}))
+        .await?;
+    Ok(result)
 }
 
 /// Respond to a question from the agent

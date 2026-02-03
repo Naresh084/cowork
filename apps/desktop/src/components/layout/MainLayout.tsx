@@ -59,6 +59,7 @@ export function MainLayout() {
           name: previewArtifact.path.split('/').pop() || previewArtifact.path,
           path: previewArtifact.path,
           content: previewArtifact.content,
+          url: previewArtifact.url,
         } : null}
         isOpen={!!previewArtifact}
         onClose={clearPreviewArtifact}

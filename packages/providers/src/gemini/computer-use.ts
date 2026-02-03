@@ -7,6 +7,13 @@ export interface ComputerUseSession {
   goal: string;
 }
 
+export interface ComputerUseStepResult {
+  completed: boolean;
+  actions: string[];
+  blocked?: boolean;
+  blockedReason?: string;
+}
+
 export async function createComputerSession(
   _apiKey: string,
   goal: string,
@@ -33,7 +40,7 @@ export async function createComputerSession(
 export async function runComputerUseStep(
   apiKey: string,
   session: ComputerUseSession
-): Promise<{ completed: boolean; actions: string[] }> {
+): Promise<ComputerUseStepResult> {
   const ai = new GoogleGenAI({ apiKey });
   const screenshot = await session.page.screenshot({ type: 'png' });
 
@@ -62,6 +69,11 @@ export async function runComputerUseStep(
     },
   });
 
+  const finishReason = (response.candidates?.[0]?.finishReason ?? '').toString();
+  if (finishReason.toLowerCase().includes('safety')) {
+    return { completed: true, actions: [], blocked: true, blockedReason: finishReason };
+  }
+
   const functionCalls = (response as { functionCalls?: ComputerUseCall[] }).functionCalls;
   if (!functionCalls?.length) {
     return { completed: true, actions: [] };
@@ -88,8 +100,26 @@ async function executeAction(page: Page, call: ComputerUseCall) {
   const y = denormalize(Number(args.y ?? 0), 900);
 
   switch (name) {
+    case 'open_web_browser': {
+      const url = String(args.url ?? '');
+      if (url) {
+        await page.goto(url);
+      }
+      break;
+    }
+    case 'search': {
+      const query = String(args.query ?? '');
+      if (query) {
+        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        await page.goto(url);
+      }
+      break;
+    }
     case 'click_at':
       await page.mouse.click(x, y);
+      break;
+    case 'hover_at':
+      await page.mouse.move(x, y);
       break;
     case 'type_text_at': {
       await page.mouse.click(x, y);
@@ -102,10 +132,27 @@ async function executeAction(page: Page, call: ComputerUseCall) {
       }
       break;
     }
+    case 'scroll_at': {
+      const direction = String(args.direction ?? 'down');
+      const amount = Number(args.amount ?? 500);
+      const delta = direction === 'down' ? amount : -amount;
+      await page.mouse.move(x, y);
+      await page.mouse.wheel(0, delta);
+      break;
+    }
     case 'scroll_document': {
       const direction = String(args.direction ?? 'down');
       const delta = direction === 'down' ? 500 : -500;
       await page.mouse.wheel(0, delta);
+      break;
+    }
+    case 'drag_and_drop': {
+      const toX = denormalize(Number(args.to_x ?? 0), 1440);
+      const toY = denormalize(Number(args.to_y ?? 0), 900);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(toX, toY);
+      await page.mouse.up();
       break;
     }
     case 'navigate': {
@@ -117,6 +164,9 @@ async function executeAction(page: Page, call: ComputerUseCall) {
     }
     case 'go_back':
       await page.goBack();
+      break;
+    case 'go_forward':
+      await page.goForward();
       break;
     case 'key_combination': {
       const keys = Array.isArray(args.keys) ? args.keys.map(String) : [];

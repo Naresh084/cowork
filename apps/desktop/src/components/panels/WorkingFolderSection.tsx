@@ -158,8 +158,8 @@ function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
       <span
         className={cn(
           'text-sm text-white/80 truncate flex-1',
-          artifact.type === 'deleted' && 'line-through text-white/40'
-        )}
+        artifact.type === 'deleted' && 'line-through text-white/40'
+      )}
         title={artifact.path}
       >
         {filename}
@@ -260,6 +260,8 @@ function getTypeIndicator(type: Artifact['type']): { color: string; label: strin
       return { color: 'bg-[#50956A]', label: 'Created' };
     case 'modified':
       return { color: 'bg-[#6B6EF0]', label: 'Modified' };
+    case 'touched':
+      return { color: 'bg-[#F5C400]', label: 'Touched' };
     case 'deleted':
       return { color: 'bg-[#FF5449]', label: 'Deleted' };
     default:

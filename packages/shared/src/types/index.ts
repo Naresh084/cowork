@@ -18,6 +18,22 @@ export const MessageContentPartSchema = z.discriminatedUnion('type', [
     data: z.string(), // base64
   }),
   z.object({
+    type: z.literal('audio'),
+    mimeType: z.string(),
+    data: z.string(), // base64
+  }),
+  z.object({
+    type: z.literal('video'),
+    mimeType: z.string(),
+    data: z.string(), // base64
+  }),
+  z.object({
+    type: z.literal('file'),
+    name: z.string(),
+    mimeType: z.string().optional(),
+    data: z.string().optional(),
+  }),
+  z.object({
     type: z.literal('tool_call'),
     toolCallId: z.string(),
     toolName: z.string(),

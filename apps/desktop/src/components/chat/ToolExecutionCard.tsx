@@ -5,6 +5,9 @@ import {
   FileSearch,
   FolderOpen,
   Globe,
+  Image,
+  FileVideo,
+  Search,
   Wrench,
   ChevronDown,
   ChevronRight,
@@ -14,12 +17,14 @@ import {
   Loader2,
   Copy,
   Check,
+  Eye,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { CodeBlock } from './CodeBlock';
 import type { ToolExecution } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
+import { useAgentStore } from '../../stores/agent-store';
 
 // Tool type icons
 const TOOL_ICONS: Record<string, typeof Terminal> = {
@@ -35,6 +40,13 @@ const TOOL_ICONS: Record<string, typeof Terminal> = {
   grep: FileSearch,
   fetch: Globe,
   http: Globe,
+  generate_image: Image,
+  edit_image: Image,
+  generate_video: FileVideo,
+  analyze_video: FileVideo,
+  deep_research: Search,
+  google_grounded_search: Globe,
+  computer_use: Globe,
   default: Wrench,
 };
 
@@ -52,6 +64,13 @@ const TOOL_NAMES: Record<string, string> = {
   grep: 'Search Content',
   fetch: 'HTTP Request',
   http: 'HTTP Request',
+  generate_image: 'Generate Image',
+  edit_image: 'Edit Image',
+  generate_video: 'Generate Video',
+  analyze_video: 'Analyze Video',
+  deep_research: 'Deep Research',
+  google_grounded_search: 'Google Grounded Search',
+  computer_use: 'Computer Use',
 };
 
 interface ToolExecutionCardProps {
@@ -66,6 +85,11 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
 
   const Icon = TOOL_ICONS[execution.name.toLowerCase()] || TOOL_ICONS.default;
   const displayName = TOOL_NAMES[execution.name.toLowerCase()] || execution.name;
+  const mediaPreview = renderMediaPreview(execution.result);
+  const sourcesPreview = renderSourcesPreview(execution.result);
+  const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
+  const a2uiPreview = renderA2uiPreview(execution.result, setPreviewArtifact);
+  const safetyBlock = getSafetyBlock(execution.result);
 
   const statusConfig = getStatusConfig(execution.status);
   const duration = execution.completedAt
@@ -240,12 +264,22 @@ export function ToolExecutionCard({ execution, className }: ToolExecutionCardPro
                       {execution.error}
                     </div>
                   ) : (
-                    <CodeBlock
-                      code={formatResult(execution.result)}
-                      language={getResultLanguage(execution.result)}
-                      showLineNumbers={false}
-                      maxHeight={300}
-                    />
+                    <div className="space-y-3">
+                      {safetyBlock && (
+                        <div className="px-3 py-2 rounded-lg bg-[#FF5449]/10 border border-[#FF5449]/20 text-sm text-[#FF5449]">
+                          Safety blocked: {safetyBlock}
+                        </div>
+                      )}
+                      {mediaPreview}
+                      {sourcesPreview}
+                      {a2uiPreview}
+                      <CodeBlock
+                        code={formatResult(execution.result)}
+                        language={getResultLanguage(execution.result)}
+                        showLineNumbers={false}
+                        maxHeight={300}
+                      />
+                    </div>
                   )}
                 </div>
               )}
@@ -382,6 +416,24 @@ function formatResult(result: unknown): string {
   }
 }
 
+function getSafetyBlock(result: unknown): string | null {
+  if (!result || typeof result !== 'object') return null;
+  const resultAny = result as {
+    blocked?: boolean;
+    blockedReason?: string;
+    safetyDecision?: string;
+    safety_decision?: string;
+  };
+  if (resultAny.blocked) {
+    return resultAny.blockedReason || 'Blocked by safety policy';
+  }
+  const decision = resultAny.safetyDecision || resultAny.safety_decision;
+  if (decision && String(decision).toLowerCase().includes('block')) {
+    return String(decision);
+  }
+  return null;
+}
+
 function getResultLanguage(result: unknown): string {
   if (typeof result === 'string') {
     // Try to detect language from content
@@ -395,6 +447,136 @@ function getResultLanguage(result: unknown): string {
   }
 
   return 'json';
+}
+
+function renderMediaPreview(result: unknown) {
+  if (!result || typeof result !== 'object') return null;
+
+  type MediaItem = { data?: string; mimeType?: string; path?: string; url?: string };
+  const resultAny = result as {
+    images?: MediaItem[];
+    generatedImages?: Array<{ image?: { imageBytes?: string; mimeType?: string } }>;
+    videos?: MediaItem[];
+    generatedVideos?: Array<{ video?: { videoBytes?: string; mimeType?: string; uri?: string } }>;
+  };
+
+  const images: MediaItem[] =
+    resultAny.images
+      ?? resultAny.generatedImages?.map((img) => ({
+        data: img.image?.imageBytes,
+        mimeType: img.image?.mimeType || 'image/png',
+      }))
+      ?? [];
+
+  const videos: MediaItem[] =
+    resultAny.videos
+      ?? resultAny.generatedVideos?.map((vid) => ({
+        data: vid.video?.videoBytes,
+        mimeType: vid.video?.mimeType || 'video/mp4',
+        url: vid.video?.uri,
+      }))
+      ?? [];
+
+  if (images.length === 0 && videos.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {images.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {images.slice(0, 4).map((img, idx) => {
+            const src = img.data
+              ? `data:${img.mimeType || 'image/png'};base64,${img.data}`
+              : img.url || img.path || '';
+            if (!src) return null;
+            return (
+              <img
+                key={`img-${idx}`}
+                src={src}
+                alt="Generated"
+                className="w-full rounded-lg border border-white/[0.08] object-cover"
+              />
+            );
+          })}
+        </div>
+      )}
+      {videos.length > 0 && (
+        <div className="space-y-2">
+          {videos.slice(0, 2).map((vid, idx) => {
+            const src = vid.data
+              ? `data:${vid.mimeType || 'video/mp4'};base64,${vid.data}`
+              : vid.url || vid.path || '';
+            if (!src) return null;
+            return (
+              <video
+                key={`vid-${idx}`}
+                src={src}
+                controls
+                className="w-full rounded-lg border border-white/[0.08]"
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderSourcesPreview(result: unknown) {
+  if (!result || typeof result !== 'object') return null;
+  const resultAny = result as { sources?: Array<{ title?: string; url?: string }> };
+  if (!resultAny.sources || resultAny.sources.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium text-white/40 uppercase tracking-wide">Sources</div>
+      <div className="flex flex-wrap gap-2">
+        {resultAny.sources.slice(0, 6).map((source, idx) => (
+          <a
+            key={`src-${idx}`}
+            href={source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-white/[0.04] rounded-md hover:bg-white/[0.08] transition-colors"
+          >
+            <Globe className="w-3 h-3" />
+            {source.title || source.url}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderA2uiPreview(
+  result: unknown,
+  setPreviewArtifact: (artifact: { id: string; path: string; type: 'created' | 'modified' | 'deleted' | 'touched'; content?: string; timestamp: number }) => void
+) {
+  if (!result || typeof result !== 'object') return null;
+  const resultAny = result as { a2ui?: unknown; ui?: unknown };
+  const payload = resultAny.a2ui ?? resultAny.ui;
+  if (!payload) return null;
+
+  const content = JSON.stringify(payload, null, 2);
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() =>
+          setPreviewArtifact({
+            id: `a2ui-${Date.now()}`,
+            path: 'a2ui-preview.json',
+            type: 'created',
+            content,
+            timestamp: Date.now(),
+          })
+        }
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#6B6EF0]/20 text-[#8B8EFF] hover:bg-[#6B6EF0]/30 transition-colors"
+      >
+        <Eye className="w-4 h-4" />
+        Open UI Preview
+      </button>
+    </div>
+  );
 }
 
 function formatDuration(ms: number): string {

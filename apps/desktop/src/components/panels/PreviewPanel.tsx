@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense, useCallback } from 'react';
 import {
   X,
   ZoomIn,
@@ -23,6 +23,7 @@ import {
 import { cn } from '../../lib/utils';
 import { CodeBlock } from '../chat/CodeBlock';
 import { toast } from '../ui/Toast';
+import { invoke } from '@tauri-apps/api/core';
 
 // Lazy load heavy components
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -792,6 +793,7 @@ function TextPreview({ file }: { file: PreviewFile }) {
 function A2UIPreview({ file }: { file: PreviewFile }) {
   const [a2uiData, setA2uiData] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -817,8 +819,25 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
     return <PreviewLoading />;
   }
 
-  // For now, show the JSON structure with syntax highlighting
-  // In production, this would use @xpert-ai/a2ui-react to render the actual components
+  const handleAction = useCallback(async (action: A2UIAction) => {
+    try {
+      setActionStatus('Running action...');
+      const result = await invoke('agent_mcp_call_tool', {
+        serverId: action.serverId,
+        toolName: action.toolName,
+        args: action.args || {},
+      });
+      setActionStatus('Action completed');
+      toast.success('Action completed', JSON.stringify(result).slice(0, 200));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setActionStatus('Action failed');
+      toast.error('Action failed', message);
+    } finally {
+      setTimeout(() => setActionStatus(null), 2000);
+    }
+  }, []);
+
   return (
     <div className="h-full flex flex-col">
       <div className="px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
@@ -827,15 +846,177 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
           <span className="text-xs text-white/40">A2UI Component Preview</span>
         </div>
       </div>
-      <div className="flex-1 overflow-auto">
-        <CodeBlock
-          code={JSON.stringify(a2uiData, null, 2)}
-          language="json"
-          showLineNumbers
-        />
+      <div className="flex-1 overflow-auto p-4">
+        {actionStatus && (
+          <div className="mb-3 text-xs text-white/50">{actionStatus}</div>
+        )}
+        <div className="space-y-3">
+          {renderA2UINode(a2uiData, handleAction)}
+        </div>
       </div>
     </div>
   );
+}
+
+type A2UIAction = {
+  serverId: string;
+  toolName: string;
+  args?: Record<string, unknown>;
+};
+
+type A2UINode =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | A2UIObject
+  | A2UINode[];
+
+interface A2UIObject {
+  type?: string;
+  component?: string;
+  kind?: string;
+  tag?: string;
+  text?: string;
+  title?: string;
+  label?: string;
+  content?: string;
+  src?: string;
+  href?: string;
+  props?: Record<string, unknown>;
+  children?: A2UINode;
+  action?: Partial<A2UIAction> & { tool?: string; toolName?: string; server?: string };
+}
+
+function normalizeA2UIAction(action?: A2UIObject['action']): A2UIAction | null {
+  if (!action) return null;
+  const toolName = action.toolName || action.tool;
+  const serverId = action.serverId || action.server;
+  if (!toolName || !serverId) return null;
+  return {
+    toolName,
+    serverId,
+    args: action.args || {},
+  };
+}
+
+function renderA2UINode(node: A2UINode, onAction: (action: A2UIAction) => void): React.ReactNode {
+  if (node === null || node === undefined || typeof node === 'boolean') return null;
+  if (typeof node === 'string' || typeof node === 'number') {
+    return <p className="text-sm text-white/80">{String(node)}</p>;
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, idx) => (
+      <div key={`a2ui-${idx}`}>{renderA2UINode(child, onAction)}</div>
+    ));
+  }
+
+  const type =
+    node.type ||
+    node.component ||
+    node.kind ||
+    node.tag ||
+    node.props?.type;
+
+  const children = (node.children ?? node.props?.children) as A2UINode | undefined;
+  const label =
+    node.label ||
+    node.title ||
+    node.text ||
+    node.content ||
+    (node.props?.label as string) ||
+    (node.props?.text as string);
+
+  const action = normalizeA2UIAction(node.action);
+
+  switch (String(type).toLowerCase()) {
+    case 'row':
+    case 'inline':
+      return (
+        <div className="flex items-center gap-2 flex-wrap">
+          {renderA2UINode(children, onAction)}
+        </div>
+      );
+    case 'stack':
+    case 'column':
+    case 'container':
+    case 'section':
+    case 'card':
+      return (
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 space-y-2">
+          {label && <div className="text-xs text-white/40">{label}</div>}
+          {renderA2UINode(children, onAction)}
+        </div>
+      );
+    case 'heading':
+    case 'title':
+      return <h3 className="text-base font-semibold text-white/90">{label}</h3>;
+    case 'text':
+    case 'paragraph':
+    case 'label':
+      return <p className="text-sm text-white/80">{label}</p>;
+    case 'code':
+      return (
+        <pre className="text-xs text-white/70 bg-black/40 p-3 rounded-lg overflow-x-auto">
+          {label}
+        </pre>
+      );
+    case 'image': {
+      const src =
+        node.src ||
+        (node.props?.src as string) ||
+        (node.props?.url as string) ||
+        '';
+      if (!src) return null;
+      return (
+        <img
+          src={src}
+          alt={label || 'image'}
+          className="max-w-full rounded-lg border border-white/[0.08]"
+        />
+      );
+    }
+    case 'link': {
+      const href = node.href || (node.props?.href as string) || '#';
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[#8B8EFF] underline"
+        >
+          {label || href}
+        </a>
+      );
+    }
+    case 'button':
+    case 'action': {
+      return (
+        <button
+          onClick={() => action && onAction(action)}
+          className="px-3 py-2 rounded-lg bg-[#6B6EF0]/20 text-[#8B8EFF] hover:bg-[#6B6EF0]/30 transition-colors"
+        >
+          {label || 'Run action'}
+        </button>
+      );
+    }
+    case 'input':
+      return (
+        <input
+          className="w-full rounded-lg bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-sm text-white/80"
+          placeholder={label || 'Input'}
+          disabled
+        />
+      );
+    default:
+      return (
+        <div className="space-y-2">
+          {label && <p className="text-sm text-white/80">{label}</p>}
+          {children && renderA2UINode(children, onAction)}
+        </div>
+      );
+  }
 }
 
 // ============================================

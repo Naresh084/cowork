@@ -115,6 +115,13 @@ export class EventEmitter {
   }
 
   /**
+   * Replace all tasks for a session.
+   */
+  taskSet(sessionId: string, tasks: unknown[]): void {
+    this.emit('task:set', sessionId, { tasks });
+  }
+
+  /**
    * Emit artifact created event.
    */
   artifactCreated(sessionId: string, artifact: unknown): void {

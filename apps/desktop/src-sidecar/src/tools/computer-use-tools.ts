@@ -1,6 +1,197 @@
 import { z } from 'zod';
+import { GoogleGenAI, Environment } from '@google/genai';
+import { chromium, type Browser, type Page } from 'playwright';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
-import { createComputerSession, runComputerUseStep } from '@gemini-cowork/providers';
+import { chromeBridge } from '../chrome-bridge.js';
+
+interface ComputerUseAction extends Record<string, unknown> {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+interface BrowserDriver {
+  getScreenshot(): Promise<{ data: string; mimeType: string; url?: string }>;
+  getUrl(): Promise<string>;
+  performAction(action: ComputerUseAction): Promise<void>;
+  close(): Promise<void>;
+}
+
+class PlaywrightDriver implements BrowserDriver {
+  private browser: Browser;
+  private page: Page;
+
+  private constructor(browser: Browser, page: Page) {
+    this.browser = browser;
+    this.page = page;
+  }
+
+  static async create(startUrl?: string, headless = false): Promise<PlaywrightDriver> {
+    const browser = await chromium.launch({
+      headless,
+      args: ['--disable-blink-features=AutomationControlled'],
+    });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    if (startUrl) {
+      await page.goto(startUrl);
+    }
+    return new PlaywrightDriver(browser, page);
+  }
+
+  async getScreenshot(): Promise<{ data: string; mimeType: string; url?: string }> {
+    const screenshot = await this.page.screenshot({ type: 'png' });
+    return {
+      data: Buffer.from(screenshot).toString('base64'),
+      mimeType: 'image/png',
+      url: this.page.url(),
+    };
+  }
+
+  async getUrl(): Promise<string> {
+    return this.page.url();
+  }
+
+  async performAction(action: ComputerUseAction): Promise<void> {
+    const { name, args } = action;
+    const x = denormalize(Number(args.x ?? 0), 1440);
+    const y = denormalize(Number(args.y ?? 0), 900);
+
+    switch (name) {
+      case 'open_web_browser': {
+        const url = String(args.url ?? '');
+        if (url) {
+          await this.page.goto(url);
+        }
+        break;
+      }
+      case 'navigate': {
+        const url = String(args.url ?? '');
+        if (url) {
+          await this.page.goto(url);
+        }
+        break;
+      }
+      case 'search': {
+        const query = String(args.query ?? '');
+        if (query) {
+          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+          await this.page.goto(url);
+        }
+        break;
+      }
+      case 'click_at':
+        await this.page.mouse.click(x, y);
+        break;
+      case 'hover_at':
+        await this.page.mouse.move(x, y);
+        break;
+      case 'type_text_at': {
+        await this.page.mouse.click(x, y);
+        if (args.clear_text) {
+          await this.page.keyboard.press('Control+a');
+        }
+        await this.page.keyboard.type(String(args.text ?? ''));
+        if (args.press_enter) {
+          await this.page.keyboard.press('Enter');
+        }
+        break;
+      }
+      case 'scroll_document': {
+        const direction = String(args.direction ?? 'down');
+        const delta = direction === 'down' ? 500 : -500;
+        await this.page.mouse.wheel(0, delta);
+        break;
+      }
+      case 'scroll_at': {
+        const direction = String(args.direction ?? 'down');
+        const amount = Number(args.amount ?? 500);
+        const delta = direction === 'down' ? amount : -amount;
+        await this.page.mouse.move(x, y);
+        await this.page.mouse.wheel(0, delta);
+        break;
+      }
+      case 'drag_and_drop': {
+        const toX = denormalize(Number(args.to_x ?? 0), 1440);
+        const toY = denormalize(Number(args.to_y ?? 0), 900);
+        await this.page.mouse.move(x, y);
+        await this.page.mouse.down();
+        await this.page.mouse.move(toX, toY);
+        await this.page.mouse.up();
+        break;
+      }
+      case 'go_back':
+        await this.page.goBack();
+        break;
+      case 'go_forward':
+        await this.page.goForward();
+        break;
+      case 'key_combination': {
+        const keys = Array.isArray(args.keys) ? args.keys.map(String) : [];
+        if (keys.length > 0) {
+          await this.page.keyboard.press(keys.join('+'));
+        }
+        break;
+      }
+      case 'wait_5_seconds':
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        break;
+    }
+
+    await this.page.waitForLoadState('networkidle').catch(() => {});
+  }
+
+  async close(): Promise<void> {
+    await this.browser.close().catch(() => undefined);
+  }
+}
+
+class ChromeExtensionDriver implements BrowserDriver {
+  private lastWidth = 0;
+  private lastHeight = 0;
+
+  async getScreenshot(): Promise<{ data: string; mimeType: string; url?: string }> {
+    const result = await chromeBridge.requestScreenshot();
+    this.lastWidth = result.width ?? this.lastWidth;
+    this.lastHeight = result.height ?? this.lastHeight;
+    return {
+      data: result.data,
+      mimeType: result.mimeType || 'image/png',
+      url: result.url,
+    };
+  }
+
+  async getUrl(): Promise<string> {
+    const result = await chromeBridge.requestScreenshot();
+    return result.url || '';
+  }
+
+  async performAction(action: ComputerUseAction): Promise<void> {
+    const adjusted = this.denormalizeAction(action);
+    await chromeBridge.performAction(adjusted);
+  }
+
+  async close(): Promise<void> {
+    // No-op for extension driver
+  }
+
+  private denormalizeAction(action: ComputerUseAction): ComputerUseAction {
+    const width = this.lastWidth || 1000;
+    const height = this.lastHeight || 1000;
+    const args = { ...action.args };
+
+    const mapCoord = (value: unknown, max: number) => {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return value;
+      return Math.round((num / 1000) * max);
+    };
+
+    if ('x' in args) args.x = mapCoord(args.x, width);
+    if ('y' in args) args.y = mapCoord(args.y, height);
+    if ('to_x' in args) args.to_x = mapCoord(args.to_x, width);
+    if ('to_y' in args) args.to_y = mapCoord(args.to_y, height);
+
+    return { ...action, args };
+  }
+}
 
 export function createComputerUseTool(getApiKey: () => string | null): ToolHandler {
   return {
@@ -32,33 +223,85 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
         return { success: false, error: 'API key not set. Please configure an API key first.' };
       }
 
-      const session = await createComputerSession(apiKey, goal, startUrl, headless);
+      chromeBridge.start();
+      const driver: BrowserDriver = chromeBridge.isConnected()
+        ? new ChromeExtensionDriver()
+        : await PlaywrightDriver.create(startUrl, headless);
+
+      if (chromeBridge.isConnected() && startUrl) {
+        await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      let steps = 0;
+      let completed = false;
+      let blocked = false;
+      let blockedReason: string | undefined;
+      const actions: string[] = [];
 
       try {
-        let steps = 0;
-        let completed = false;
-        const actions: string[] = [];
-
         while (steps < maxSteps) {
-          const stepResult = await runComputerUseStep(apiKey, session);
-          steps += 1;
-          actions.push(...stepResult.actions);
+          const screenshot = await driver.getScreenshot();
+          const response = await ai.models.generateContent({
+            model: 'gemini-2.5-computer-use-preview-10-2025',
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: `Goal: ${goal}\n\nCurrent URL: ${await driver.getUrl()}` },
+                  {
+                    inlineData: {
+                      mimeType: screenshot.mimeType,
+                      data: screenshot.data,
+                    },
+                  },
+                ],
+              },
+            ],
+            config: {
+              tools: [
+                {
+                  computerUse: { environment: Environment.ENVIRONMENT_BROWSER },
+                },
+              ],
+            },
+          });
 
-          if (stepResult.completed) {
+          const finishReason = response.candidates?.[0]?.finishReason;
+          if (finishReason && String(finishReason).toLowerCase().includes('safety')) {
+            blocked = true;
+            blockedReason = String(finishReason);
             completed = true;
             break;
           }
-        }
 
-        const finalUrl = session.page.url();
+          const functionCalls = response.functionCalls;
+          if (!functionCalls?.length) {
+            completed = true;
+            break;
+          }
+
+          for (const call of functionCalls) {
+            const name = call.name || 'unknown';
+            const action = { name, args: call.args || {} };
+            await driver.performAction(action);
+            actions.push(`${name}(${JSON.stringify(call.args || {})})`);
+          }
+
+          steps += 1;
+        }
 
         return {
           success: true,
           data: {
             completed,
+            blocked,
+            blockedReason,
             actions,
-            finalUrl,
+            finalUrl: await driver.getUrl(),
             steps,
+            driver: chromeBridge.isConnected() ? 'chrome' : 'playwright',
+            chromePort: chromeBridge.getPort(),
           },
         };
       } catch (error) {
@@ -67,7 +310,7 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
           error: error instanceof Error ? error.message : String(error),
         };
       } finally {
-        await session.browser.close().catch(() => undefined);
+        await driver.close().catch(() => undefined);
       }
     },
   };
@@ -75,4 +318,8 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
 
 export function createComputerUseTools(getApiKey: () => string | null): ToolHandler[] {
   return [createComputerUseTool(getApiKey)];
+}
+
+function denormalize(coord: number, max: number): number {
+  return Math.round((coord / 1000) * max);
 }

@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gemini Cowork</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Gemini Cowork</h1>
+        <span id="statusBadge" class="badge">Disconnected</span>
+      </header>
+
+      <section class="info">
+        <div class="row">
+          <span class="label">Port</span>
+          <span id="portValue">8765</span>
+        </div>
+        <div class="row">
+          <span class="label">Last Action</span>
+          <span id="lastAction">—</span>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="togglePause">Pause</button>
+        <button id="reconnect">Reconnect</button>
+      </section>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

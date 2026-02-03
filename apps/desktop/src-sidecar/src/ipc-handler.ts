@@ -1,4 +1,6 @@
 import { agentRunner } from './agent-runner.js';
+import { mcpBridge } from './mcp-bridge.js';
+import { loadGeminiExtensions } from './gemini-extensions.js';
 import type {
   IPCRequest,
   IPCResponse,
@@ -120,6 +122,27 @@ registerHandler('respond_question', async (params) => {
   }
   agentRunner.respondToQuestion(p.sessionId, p.questionId, p.answer);
   return { success: true };
+});
+
+// Sync MCP servers
+registerHandler('set_mcp_servers', async (params) => {
+  const p = params as { servers: Array<{ id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean; prompt?: string; contextFileName?: string }> };
+  if (!p.servers) throw new Error('servers are required');
+  await agentRunner.setMcpServers(p.servers);
+  return { success: true };
+});
+
+// Call MCP tool
+registerHandler('mcp_call_tool', async (params) => {
+  const p = params as { serverId: string; toolName: string; args?: Record<string, unknown> };
+  if (!p.serverId || !p.toolName) throw new Error('serverId and toolName are required');
+  const result = await mcpBridge.callTool(p.serverId, p.toolName, p.args || {});
+  return result;
+});
+
+// Load Gemini CLI extensions
+registerHandler('load_gemini_extensions', async () => {
+  return loadGeminiExtensions();
 });
 
 // List sessions

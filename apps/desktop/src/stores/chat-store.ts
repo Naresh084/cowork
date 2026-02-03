@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Message, MessageContentPart, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
 
 export interface Attachment {
-  type: 'file' | 'image' | 'text';
+  type: 'file' | 'image' | 'text' | 'audio' | 'video';
   name: string;
   path?: string;
   mimeType?: string;
@@ -165,6 +165,22 @@ export const useChatStore = create<ChatState & ChatActions>((set) => ({
           parts.push({
             type: 'image',
             mimeType: attachment.mimeType || 'image/png',
+            data: attachment.data,
+          });
+        }
+
+        if (attachment.type === 'audio' && attachment.data) {
+          parts.push({
+            type: 'audio',
+            mimeType: attachment.mimeType || 'audio/mpeg',
+            data: attachment.data,
+          });
+        }
+
+        if (attachment.type === 'video' && attachment.data) {
+          parts.push({
+            type: 'video',
+            mimeType: attachment.mimeType || 'video/mp4',
             data: attachment.data,
           });
         }

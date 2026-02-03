@@ -123,6 +123,7 @@ export type AgentEventType =
   | 'question:answered'
   | 'task:create'
   | 'task:update'
+  | 'task:set'
   | 'artifact:created'
   | 'research:progress'
   | 'context:update'
@@ -156,10 +157,11 @@ export interface Task {
 export interface Artifact {
   id: string;
   path: string;
-  type: 'created' | 'modified' | 'deleted';
+  type: 'created' | 'modified' | 'deleted' | 'touched';
   language?: string;
   content?: string;
   previousContent?: string;
+  url?: string;
   timestamp: number;
 }
 

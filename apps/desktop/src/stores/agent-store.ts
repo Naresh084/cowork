@@ -17,11 +17,12 @@ export interface Task {
 export interface Artifact {
   id: string;
   path: string;
-  type: 'created' | 'modified' | 'deleted';
+  type: 'created' | 'modified' | 'deleted' | 'touched';
   language?: string;
   content?: string;
   diff?: string;
   lineCount?: number;
+  url?: string;
   timestamp: number;
 }
 
@@ -40,6 +41,7 @@ interface AgentState {
   isRunning: boolean;
   tasks: Task[];
   artifacts: Artifact[];
+  contextFiles: Artifact[];
   contextUsage: ContextUsage;
   currentModel: string;
   currentSessionId: string | null;
@@ -60,6 +62,8 @@ interface AgentActions {
   updateArtifact: (id: string, updates: Partial<Artifact>) => void;
   removeArtifact: (id: string) => void;
   clearArtifacts: () => void;
+  setContextFiles: (files: Artifact[]) => void;
+  clearContextFiles: () => void;
 
   // Context management
   setContextUsage: (used: number, total: number) => void;
@@ -87,6 +91,7 @@ const initialState: AgentState = {
   isRunning: false,
   tasks: [],
   artifacts: [],
+  contextFiles: [],
   contextUsage: { used: 0, total: DEFAULT_CONTEXT_WINDOW, percentage: 0 },
   currentModel: 'gemini-3.0-flash-preview',
   currentSessionId: null,
@@ -140,6 +145,14 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
     set((state) => {
       // Update existing artifact for same path or add new
       const existing = state.artifacts.find((a) => a.path === artifact.path);
+      const existingContext = state.contextFiles.find((a) => a.path === artifact.path);
+
+      const contextFiles = existingContext
+        ? state.contextFiles.map((a) =>
+            a.path === artifact.path ? { ...artifact, id: existingContext.id } : a
+          )
+        : [...state.contextFiles, artifact];
+
       if (existing) {
         return {
           artifacts: state.artifacts.map((a) =>
@@ -147,9 +160,10 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
               ? { ...artifact, id: existing.id }
               : a
           ),
+          contextFiles,
         };
       }
-      return { artifacts: [...state.artifacts, artifact] };
+      return { artifacts: [...state.artifacts, artifact], contextFiles };
     });
   },
 
@@ -164,11 +178,20 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
   removeArtifact: (id: string) => {
     set((state) => ({
       artifacts: state.artifacts.filter((a) => a.id !== id),
+      contextFiles: state.contextFiles.filter((a) => a.id !== id),
     }));
   },
 
   clearArtifacts: () => {
-    set({ artifacts: [] });
+    set({ artifacts: [], contextFiles: [] });
+  },
+
+  setContextFiles: (files: Artifact[]) => {
+    set({ contextFiles: files });
+  },
+
+  clearContextFiles: () => {
+    set({ contextFiles: [] });
   },
 
   // Context management
