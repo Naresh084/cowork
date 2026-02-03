@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useChatStore } from './chat-store';
 import { setMockInvokeResponse, clearMockInvokeResponses } from '../test/mocks/tauri-core';
 import { invoke } from '@tauri-apps/api/core';
@@ -18,7 +18,7 @@ describe('chat-store', () => {
       isLoadingMessages: false,
     });
     clearMockInvokeResponses();
-    invoke.mockClear();
+    vi.clearAllMocks();
   });
 
   describe('loadMessages', () => {
