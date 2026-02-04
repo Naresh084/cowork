@@ -195,6 +195,7 @@ function parseTauriEvent(
         error: (data.error as string) ?? 'Unknown error',
         code: data.code as string | undefined,
         recoverable: data.recoverable as boolean | undefined,
+        details: data.details as { retryAfterSeconds?: number; quotaMetric?: string; model?: string; docsUrl?: string } | undefined,
       };
 
     case 'session:updated':
@@ -224,7 +225,7 @@ function parseTauriEvent(
  * @returns Cleanup function to unsubscribe
  */
 export function subscribeToAgentEvents(
-  sessionId: string,
+  sessionId: string | null,
   handler: AgentEventHandler
 ): () => void {
   const unlisteners: UnlistenFn[] = [];
@@ -296,7 +297,7 @@ export function subscribeToAgentEvents(
   for (const eventType of eventTypes) {
     listen<TauriEventPayload>(eventType, (event: Event<TauriEventPayload>) => {
       // Filter by session ID
-      if (event.payload.sessionId && event.payload.sessionId !== sessionId) {
+      if (sessionId && event.payload.sessionId && event.payload.sessionId !== sessionId) {
         return;
       }
 

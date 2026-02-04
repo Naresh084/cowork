@@ -176,7 +176,7 @@ export function Select({
               ? 'text-white/30 cursor-not-allowed'
               : 'text-white/90',
             globalIndex === highlightedIndex && !option.disabled && 'bg-white/[0.06]',
-            option.value === value && 'bg-[#6B6EF0]/20'
+            option.value === value && 'bg-[#4C71FF]/20'
           )}
         >
           {option.icon && (
@@ -189,7 +189,7 @@ export function Select({
             )}
           </div>
           {option.value === value && (
-            <Check size={14} className="flex-shrink-0 text-[#8B8EFF]" />
+            <Check size={14} className="flex-shrink-0 text-[#8CA2FF]" />
           )}
         </button>
       );
@@ -207,7 +207,7 @@ export function Select({
           'w-full flex items-center gap-2 px-3 py-2 rounded-lg',
           'bg-[#1A1A1E] border border-white/[0.08]',
           'text-sm text-left',
-          'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50 focus:border-[#6B6EF0]',
+          'focus:outline-none focus:ring-2 focus:ring-[#4C71FF]/50 focus:border-[#4C71FF]',
           'transition-colors',
           disabled && 'opacity-50 cursor-not-allowed bg-white/[0.04]',
           error && 'border-red-500 focus:ring-red-500/50 focus:border-red-500'
@@ -273,7 +273,7 @@ export function Select({
                       'w-full pl-8 pr-3 py-1.5 text-sm',
                       'bg-[#1A1A1E] border border-white/[0.08] rounded',
                       'text-white/90 placeholder-white/30',
-                      'focus:outline-none focus:border-[#6B6EF0]'
+                      'focus:outline-none focus:border-[#4C71FF]'
                     )}
                   />
                 </div>

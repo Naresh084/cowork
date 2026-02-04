@@ -4,6 +4,10 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Sora', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
       colors: {
         // ==========================================================================
         // CSS VARIABLE BASED COLORS (shadcn-style)
@@ -30,22 +34,22 @@ export default {
         // ==========================================================================
         primary: {
           0: '#000000',
-          10: '#00106B',
-          20: '#002391',
-          30: '#0038B9',
-          40: '#4F52D9',      // Container
-          50: '#6B6EF0',      // Main Primary
-          60: '#8B8EFF',      // Hover
-          70: '#ABAEFF',      // Light text
-          80: '#C6C6FF',      // On container
-          90: '#E2E0FF',
-          95: '#F1EFFF',
-          99: '#FFFBFF',
+          10: '#041033',
+          20: '#091F5C',
+          30: '#14318F',
+          40: '#2B48BE',      // Container
+          50: '#4C71FF',      // Main Primary
+          60: '#6B8AFF',      // Hover
+          70: '#8CA2FF',      // Light text
+          80: '#B0BFFF',      // On container
+          90: '#D6DFFF',
+          95: '#EBEFFF',
+          99: '#FAFBFF',
           100: '#FFFFFF',
-          DEFAULT: '#6B6EF0',
+          DEFAULT: '#4C71FF',
           foreground: '#0D0D0F',
-          container: '#4F52D9',
-          'container-foreground': '#C6C6FF',
+          container: '#2B48BE',
+          'container-foreground': '#B0BFFF',
         },
 
         // ==========================================================================
@@ -53,22 +57,22 @@ export default {
         // ==========================================================================
         secondary: {
           0: '#000000',
-          10: '#230046',
-          20: '#3D0E6A',
-          30: '#562D8A',
-          40: '#7049A6',      // Container
-          50: '#8A62C2',      // Main Secondary
-          60: '#A47CDE',      // Hover
-          70: '#BF97FB',      // Light text
-          80: '#D8BAFF',      // On container
-          90: '#EDDCFF',
-          95: '#F7EDFF',
-          99: '#FFFBFF',
+          10: '#121721',
+          20: '#1F2634',
+          30: '#2B3448',
+          40: '#373F4E',      // Container
+          50: '#555F73',      // Main Secondary
+          60: '#6E7B94',      // Hover
+          70: '#8899B4',      // Light text
+          80: '#AABAD3',      // On container
+          90: '#CDD8EB',
+          95: '#E4EBF8',
+          99: '#F9FBFF',
           100: '#FFFFFF',
-          DEFAULT: '#8A62C2',
+          DEFAULT: '#555F73',
           foreground: '#0D0D0F',
-          container: '#7049A6',
-          'container-foreground': '#D8BAFF',
+          container: '#373F4E',
+          'container-foreground': '#AABAD3',
         },
 
         // ==========================================================================

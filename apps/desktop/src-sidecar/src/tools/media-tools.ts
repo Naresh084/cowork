@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { join } from 'path';
+import { homedir } from 'os';
 import { mkdir, writeFile } from 'fs/promises';
 import { GoogleGenAI, RawReferenceImage } from '@google/genai';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
@@ -16,13 +17,24 @@ function getExtension(mimeType?: string, fallback = 'bin'): string {
   return fallback;
 }
 
+/**
+ * Get the generated media directory for a session.
+ * Uses appDataDir if available, otherwise falls back to ~/.geminicowork
+ */
+function getGeneratedDir(appDataDir: string | undefined, sessionId: string): string {
+  const baseDir = appDataDir || join(homedir(), '.geminicowork');
+  return join(baseDir, 'sessions', sessionId, 'generated');
+}
+
 async function saveGeneratedFile(
-  workingDirectory: string,
+  appDataDir: string | undefined,
+  sessionId: string,
   base64: string,
   mimeType: string | undefined,
   prefix: string
 ): Promise<string> {
-  const dir = join(workingDirectory, 'generated');
+  // Store in ~/.geminicowork/sessions/<session-id>/generated/
+  const dir = getGeneratedDir(appDataDir, sessionId);
   await mkdir(dir, { recursive: true });
   const ext = getExtension(mimeType);
   const filename = `${prefix}-${Date.now()}.${ext}`;
@@ -32,7 +44,16 @@ async function saveGeneratedFile(
   return filePath;
 }
 
-export function createMediaTools(getApiKey: () => string | null): ToolHandler[] {
+interface SpecializedMediaModels {
+  imageGeneration: string;
+  videoGeneration: string;
+}
+
+export function createMediaTools(
+  getApiKey: () => string | null,
+  getSpecializedModels: () => SpecializedMediaModels,
+  getSessionModel: () => string
+): ToolHandler[] {
   const generateImageTool: ToolHandler = {
     name: 'generate_image',
     description: 'Generate an image from a prompt using Gemini image generation models.',
@@ -59,7 +80,7 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
 
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateImages({
-        model: model || 'imagen-4.0-generate-001',
+        model: model || getSpecializedModels().imageGeneration,
         prompt,
         config: {
           numberOfImages: numberOfImages ?? 1,
@@ -76,7 +97,8 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
       const files = [];
       for (const img of images) {
         const filePath = await saveGeneratedFile(
-          context.workingDirectory,
+          context.appDataDir,
+          context.sessionId,
           img.imageBytes || '',
           img.mimeType,
           'image'
@@ -84,6 +106,7 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
         files.push({
           path: filePath,
           mimeType: img.mimeType || 'image/png',
+          // Include base64 data for immediate display in UI
           data: img.imageBytes,
         });
       }
@@ -130,7 +153,7 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
       };
 
       const response = await ai.models.editImage({
-        model: model || 'imagen-3.0-capability-001',
+        model: model || getSpecializedModels().imageGeneration,
         prompt,
         referenceImages: [reference],
         config: {
@@ -146,7 +169,8 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
       const files = [];
       for (const img of images) {
         const filePath = await saveGeneratedFile(
-          context.workingDirectory,
+          context.appDataDir,
+          context.sessionId,
           img.imageBytes || '',
           img.mimeType,
           'image-edit'
@@ -154,6 +178,7 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
         files.push({
           path: filePath,
           mimeType: img.mimeType || 'image/png',
+          // Include base64 data for immediate display in UI
           data: img.imageBytes,
         });
       }
@@ -196,7 +221,7 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
 
       const ai = new GoogleGenAI({ apiKey });
       let operation = await ai.models.generateVideos({
-        model: model || 'veo-2.0-generate-001',
+        model: model || getSpecializedModels().videoGeneration,
         source: { prompt },
         config: {
           numberOfVideos: numberOfVideos ?? 1,
@@ -216,7 +241,8 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
       for (const video of generated) {
         if (video.video?.videoBytes) {
           const filePath = await saveGeneratedFile(
-            context.workingDirectory,
+            context.appDataDir,
+            context.sessionId,
             video.video.videoBytes,
             video.video.mimeType,
             'video'
@@ -224,14 +250,41 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
           files.push({
             path: filePath,
             mimeType: video.video.mimeType || 'video/mp4',
-            data: video.video.videoBytes,
           });
         } else if (video.video?.uri) {
-          files.push({
-            path: video.video.uri,
-            mimeType: video.video.mimeType || 'video/mp4',
-            url: video.video.uri,
-          });
+          // Download video from URI to local file (URI requires API key auth)
+          try {
+            const response = await fetch(video.video.uri, {
+              headers: { 'x-goog-api-key': apiKey },
+            });
+            if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer();
+              const base64 = Buffer.from(arrayBuffer).toString('base64');
+              const filePath = await saveGeneratedFile(
+                context.appDataDir,
+                context.sessionId,
+                base64,
+                video.video.mimeType,
+                'video'
+              );
+              files.push({
+                path: filePath,
+                mimeType: video.video.mimeType || 'video/mp4',
+              });
+            } else {
+              // Fallback: return URL if download fails
+              files.push({
+                mimeType: video.video.mimeType || 'video/mp4',
+                url: video.video.uri,
+              });
+            }
+          } catch {
+            // Fallback on error
+            files.push({
+              mimeType: video.video.mimeType || 'video/mp4',
+              url: video.video.uri,
+            });
+          }
         }
       }
 
@@ -268,8 +321,10 @@ export function createMediaTools(getApiKey: () => string | null): ToolHandler[] 
       };
 
       const ai = new GoogleGenAI({ apiKey });
+      // Use provided model or fall back to session model for video analysis
+      const modelId = model || getSessionModel() || 'gemini-2.5-pro';
       const response = await ai.models.generateContent({
-        model: model || 'gemini-2.5-pro',
+        model: modelId,
         contents: [
           {
             role: 'user',

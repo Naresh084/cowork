@@ -1,58 +1,76 @@
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { Bot, User, Copy, Check, ChevronDown, Sparkles, Code } from 'lucide-react';
-import { useChatStore } from '../../stores/chat-store';
+import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2 } from 'lucide-react';
+import { useChatStore, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem } from '../../stores/chat-store';
+import { useSessionStore } from '../../stores/session-store';
+import { useAgentStore, type Artifact } from '../../stores/agent-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { StreamingMessage } from './StreamingMessage';
-import { ToolExecutionCard } from './ToolExecutionCard';
 import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
 import { SourcesCitation } from './SourcesCitation';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+import { BrandMark } from '../icons/BrandMark';
+import { getToolMeta } from './tool-metadata';
+import { TaskToolCard } from './TaskToolCard';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
 
+type ErrorMessageMetadata = {
+  kind: 'error';
+  code?: string;
+  details?: {
+    retryAfterSeconds?: number;
+    quotaMetric?: string;
+    model?: string;
+    docsUrl?: string;
+  };
+  raw?: string;
+};
+
 export function MessageList() {
-  const messages = useChatStore((state) => state.messages);
-  const isStreaming = useChatStore((state) => state.isStreaming);
-  const streamingContent = useChatStore((state) => state.streamingContent);
-  const currentTool = useChatStore((state) => state.currentTool);
-  const isLoadingMessages = useChatStore((state) => state.isLoadingMessages);
-  const pendingQuestions = useChatStore((state) => state.pendingQuestions);
-  const { respondToQuestion } = useChatStore();
+  const { activeSessionId } = useSessionStore();
+  const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
+  const agentState = useAgentStore((state) => state.getSessionState(activeSessionId));
+  const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
+  const {
+    messages,
+    isStreaming,
+    isThinking,
+    thinkingContent,
+    streamingContent,
+    isLoadingMessages,
+    pendingQuestions,
+    pendingPermissions,
+    streamingToolCalls,
+    turnActivities,
+    activeTurnId,
+  } = sessionState;
+  const artifacts = agentState.artifacts;
+  const { respondToQuestion, respondToPermission } = useChatStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [showScrollButton, setShowScrollButton] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
 
   // Auto-scroll when new messages arrive or streaming
   useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, streamingContent, autoScroll]);
-
-  // Handle scroll to detect if user scrolled up
-  const handleScroll = () => {
-    if (!scrollRef.current) return;
-
-    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-
-    setAutoScroll(isNearBottom);
-    setShowScrollButton(!isNearBottom);
-  };
-
-  const scrollToBottom = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    setAutoScroll(true);
-    setShowScrollButton(false);
-  };
+  }, [
+    messages.length,
+    streamingContent,
+    isStreaming,
+    streamingToolCalls.length,
+    pendingPermissions.length,
+    pendingQuestions.length,
+    sessionState.lastUpdatedAt,
+  ]);
 
-  // Show loading state
-  if (isLoadingMessages) {
+  // Show loading state only when loading AND no messages exist yet
+  // If messages already exist, show them instead of blocking the UI
+  if (isLoadingMessages && messages.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="animate-pulse text-white/40">Loading messages...</div>
@@ -61,20 +79,154 @@ export function MessageList() {
   }
 
   // Show empty state when no messages and no active session
-  if (messages.length === 0 && !isStreaming) {
+  if (messages.length === 0 && !isStreaming && !isLoadingMessages) {
     return <EmptyState />;
   }
 
+  const toolMap = new Map(streamingToolCalls.map((tool) => [tool.id, tool]));
+  const messageById = new Map(messages.map((message) => [message.id, message]));
+  const assistantMessageIds = new Set<string>();
+  Object.values(turnActivities || {}).forEach((activities) => {
+    activities.forEach((activity) => {
+      if (activity.type === 'assistant' && activity.messageId) {
+        assistantMessageIds.add(activity.messageId);
+      }
+    });
+  });
+
+  const renderTurnActivities = (turnId: string) => {
+    const activities = turnActivities?.[turnId] ?? [];
+    if (activities.length === 0 && (!isStreaming || activeTurnId !== turnId)) {
+      return null;
+    }
+
+    return (
+      <div className="mt-2 space-y-2">
+        {activities.map((activity) => {
+          if (activity.type === 'thinking') {
+            // Don't render thinking from activities - we'll render it dynamically at the end
+            return null;
+          }
+
+          if (activity.type === 'tool') {
+            if (!activity.toolId) return null;
+            const tool = toolMap.get(activity.toolId);
+            if (!tool) return null;
+            return <ToolActivityRow key={activity.id} tool={tool} isActive={tool.status === 'running'} />;
+          }
+
+          if (activity.type === 'media') {
+            if (!activity.mediaItems || activity.mediaItems.length === 0) return null;
+            return (
+              <MediaActivityRow
+                key={activity.id}
+                items={activity.mediaItems}
+                onOpen={(artifact) => setPreviewArtifact(artifact)}
+              />
+            );
+          }
+
+          if (activity.type === 'report') {
+            if (!activity.report) return null;
+            return (
+              <ReportActivityRow
+                key={activity.id}
+                report={activity.report}
+                artifacts={artifacts}
+                onOpen={(artifact) => setPreviewArtifact(artifact)}
+              />
+            );
+          }
+
+          if (activity.type === 'design') {
+            if (!activity.design) return null;
+            return (
+              <DesignActivityRow
+                key={activity.id}
+                design={activity.design}
+                onOpen={(artifact) => setPreviewArtifact(artifact)}
+              />
+            );
+          }
+
+          if (activity.type === 'permission') {
+            const permission = pendingPermissions.find((p) => p.id === activity.permissionId);
+            if (!permission) return null;
+            return (
+              <PermissionInlineCard
+                key={activity.id}
+                request={permission}
+                onDecision={(decision) => {
+                  respondToPermission(permission.sessionId, permission.id, decision);
+                }}
+              />
+            );
+          }
+
+          if (activity.type === 'question') {
+            const question = pendingQuestions.find((q) => q.id === activity.questionId);
+            if (!question) return null;
+            return (
+              <AskUserQuestion
+                key={activity.id}
+                question={question}
+                onAnswer={(questionId, answer) => {
+                  respondToQuestion(question.sessionId, questionId, answer);
+                }}
+              />
+            );
+          }
+
+          if (activity.type === 'assistant') {
+            if (!activity.messageId) return null;
+            const message = messageById.get(activity.messageId);
+            if (!message) return null;
+            return <MessageBubble key={activity.id} message={message} />;
+          }
+
+          return null;
+        })}
+
+        {isStreaming && activeTurnId === turnId && streamingContent && (
+          <StreamingMessage content={streamingContent} />
+        )}
+
+        {/* Show thinking block when processing */}
+        {(() => {
+          if (!isStreaming || activeTurnId !== turnId) return null;
+          if (streamingContent) return null;
+          // Check if any tool is currently running
+          const hasRunningTool = streamingToolCalls.some(t => t.status === 'running');
+          if (hasRunningTool) return null;
+          return <ThinkingBlock content={thinkingContent} isActive={isThinking} />;
+        })()}
+      </div>
+    );
+  };
+
   return (
-    <div className="relative h-full">
+    <div className="relative h-full min-h-0">
       <div
         ref={scrollRef}
-        className="h-full overflow-y-auto"
-        onScroll={handleScroll}
+        className="h-full min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth"
       >
-        <div className="max-w-4xl mx-auto py-2 px-3 space-y-3">
+        <div className="max-w-[720px] mx-auto py-3 px-4 space-y-2">
           <AnimatePresence>
-            {messages.map((message, index) => (
+            {messages.map((message, index) => {
+              // Only skip assistant messages if they're properly tracked in turn activities
+              if (message.role === 'assistant') {
+                const hasActivity = assistantMessageIds.has(message.id);
+                // Verify the activity actually exists and will render
+                const activityExists = Object.values(turnActivities || {}).some(
+                  acts => acts.some(a => a.type === 'assistant' && a.messageId === message.id)
+                );
+                // Only hide if both conditions are true - prevents message loss
+                if (hasActivity && activityExists) {
+                  return null; // Will be rendered in turn activities
+                }
+                // Otherwise, render normally to prevent message disappearance
+              }
+              return (
               <motion.div
                 key={message.id}
                 initial={{ opacity: 0, y: 20 }}
@@ -83,56 +235,20 @@ export function MessageList() {
                 transition={{ duration: 0.3, delay: index * 0.05 }}
               >
                 <MessageBubble message={message} />
+                {message.role === 'user' && renderTurnActivities(message.id)}
               </motion.div>
-            ))}
+              );
+            })}
           </AnimatePresence>
-
-          {/* Streaming message */}
-          {isStreaming && (
-            <StreamingMessage
-              content={streamingContent}
-              currentTool={currentTool}
-            />
-          )}
-
-          {/* Pending questions from agent */}
-          {pendingQuestions.map((question) => (
-            <AskUserQuestion
-              key={question.id}
-              question={question}
-              onAnswer={(questionId, answer) => {
-                respondToQuestion(question.sessionId, questionId, answer);
-              }}
-            />
-          ))}
-
           {/* Scroll anchor */}
           <div ref={bottomRef} />
         </div>
       </div>
 
-      {/* Scroll to bottom button */}
-      <AnimatePresence>
-        {showScrollButton && (
-          <motion.button
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            onClick={scrollToBottom}
-            className={cn(
-              'absolute bottom-4 left-1/2 -translate-x-1/2',
-              'flex items-center gap-2 px-3 py-2 rounded-full',
-              'bg-[#1A1A1E] border border-white/[0.08]',
-              'text-sm text-white/70 hover:text-white',
-              'shadow-xl shadow-black/40 transition-all duration-200',
-              'hover:bg-[#242429]'
-            )}
-          >
-            <ChevronDown className="w-4 h-4" />
-            <span>Scroll to bottom</span>
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {/* Scroll fade overlays */}
+      <div className="pointer-events-none absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-[#0B0C10] to-transparent z-10" />
+      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0B0C10] to-transparent z-10" />
+
     </div>
   );
 }
@@ -153,10 +269,8 @@ function EmptyState() {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="relative"
       >
-        {/* Glow effect */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] rounded-2xl blur-xl opacity-30" />
-        <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6B6EF0] via-[#8A62C2] to-[#008585] flex items-center justify-center shadow-lg">
-          <Bot className="w-8 h-8 text-white" />
+        <div className="relative w-16 h-16 rounded-2xl bg-[#111218] flex items-center justify-center border border-white/[0.08]">
+          <BrandMark className="w-10 h-10" />
         </div>
       </motion.div>
 
@@ -198,8 +312,8 @@ function EmptyState() {
               'transition-all duration-200'
             )}
           >
-            <div className="w-8 h-8 rounded-lg bg-[#6B6EF0]/10 flex items-center justify-center">
-              <suggestion.icon className="w-4 h-4 text-[#8B8EFF]" />
+            <div className="w-8 h-8 rounded-lg bg-[#4C71FF]/10 flex items-center justify-center">
+              <suggestion.icon className="w-4 h-4 text-[#8CA2FF]" />
             </div>
             <span>{suggestion.text}</span>
           </motion.button>
@@ -213,6 +327,1193 @@ interface MessageBubbleProps {
   message: Message;
 }
 
+interface PermissionInlineCardProps {
+  request: ExtendedPermissionRequest;
+  onDecision: (decision: 'allow' | 'deny' | 'allow_once' | 'allow_session') => void;
+}
+
+function PermissionInlineCard({ request, onDecision }: PermissionInlineCardProps) {
+  const { rightPanelPinned, rightPanelCollapsed, toggleRightPanelPinned, toggleRightPanel } = useSettingsStore();
+  const riskLevel = request.riskLevel || 'medium';
+  const riskIcon = riskLevel === 'high' ? ShieldAlert : Shield;
+  const RiskIcon = riskIcon;
+  const toolMeta = request.toolName ? getToolMeta(request.toolName) : null;
+
+  const typeLabel = request.type.startsWith('file_')
+    ? 'File access'
+    : request.type === 'shell_execute'
+      ? 'Command execution'
+      : request.type === 'network_request'
+        ? 'Network request'
+        : 'Permission request';
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      className={cn('rounded-xl border p-3', 'bg-[#111218] border-white/[0.08]')}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            'p-2 rounded-lg',
+            riskLevel === 'high' ? 'bg-[#FF5449]/10' : 'bg-[#4C71FF]/10'
+          )}
+        >
+          <RiskIcon
+            className={cn(
+              'w-4 h-4',
+              riskLevel === 'high' ? 'text-[#FF5449]' : 'text-[#8CA2FF]'
+            )}
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            {toolMeta ? (
+              <>
+                <span className="text-[11px] uppercase tracking-wide text-white/40">
+                  {toolMeta.category}
+                </span>
+                <span className="text-white/20">•</span>
+                <span className="text-sm font-medium text-white/90">{toolMeta.title}</span>
+              </>
+            ) : (
+              <span className="text-sm font-medium text-white/90">{typeLabel}</span>
+            )}
+            <span
+              className={cn(
+                'text-[11px] px-2 py-0.5 rounded-full',
+                riskLevel === 'high'
+                  ? 'bg-[#FF5449]/15 text-[#FF5449]'
+                  : 'bg-white/[0.06] text-white/50'
+              )}
+            >
+              {riskLevel === 'high' ? 'High risk' : riskLevel === 'low' ? 'Low risk' : 'Review'}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              if (!rightPanelPinned) toggleRightPanelPinned();
+              if (rightPanelCollapsed) toggleRightPanel();
+            }}
+            className="mt-2 inline-flex items-center gap-1 text-[11px] text-white/50 hover:text-white/80"
+          >
+            Details
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+
+          <div className="mt-2 text-xs text-white/40">Resource</div>
+          <div className="mt-1 text-xs text-white/80 font-mono break-all bg-[#0B0C10] border border-white/[0.06] rounded-lg px-2 py-1">
+            {request.resource}
+          </div>
+
+          {request.reason && (
+            <div className="mt-2 text-xs text-white/50">{request.reason}</div>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <button
+          onClick={() => onDecision('deny')}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-[#FF5449] bg-[#FF5449]/10 border border-[#FF5449]/20 hover:bg-[#FF5449]/20"
+        >
+          <XCircle className="w-3.5 h-3.5" />
+          Deny
+        </button>
+        <button
+          onClick={() => onDecision('allow_once')}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white/80 bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.10]"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Allow once
+        </button>
+        <button
+          onClick={() => onDecision('allow_session')}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white bg-[#4C71FF] hover:bg-[#3D64FF]"
+        >
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Allow session
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function formatObject(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function truncateText(text: string, max = 2000): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+function extractFileEntries(result: unknown): Array<{ name: string; path?: string; isDir?: boolean; size?: number }> {
+  if (!result) return [];
+  if (Array.isArray(result)) {
+    const entries: Array<{ name: string; path?: string; isDir?: boolean; size?: number }> = [];
+    for (const entry of result) {
+      if (typeof entry === 'string') {
+        entries.push({ name: entry, path: entry });
+        continue;
+      }
+      if (entry && typeof entry === 'object') {
+        const entryAny = entry as {
+          name?: string;
+          path?: string;
+          is_dir?: boolean;
+          isDir?: boolean;
+          size?: number;
+        };
+        entries.push({
+          name: entryAny.name || entryAny.path || 'item',
+          path: entryAny.path,
+          isDir: entryAny.is_dir ?? entryAny.isDir,
+          size: entryAny.size,
+        });
+      }
+    }
+    return entries;
+  }
+
+  if (typeof result === 'object') {
+    const resultAny = result as {
+      files?: unknown;
+      entries?: unknown;
+      items?: unknown;
+    };
+    const list = resultAny.files ?? resultAny.entries ?? resultAny.items;
+    if (Array.isArray(list)) {
+      return extractFileEntries(list);
+    }
+  }
+
+  if (typeof result === 'string') {
+    return result
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => ({ name: line.trim(), path: line.trim() }));
+  }
+
+  return [];
+}
+
+function extractSearchMatches(result: unknown): Array<{ path: string; line?: number; text?: string }> {
+  if (!result) return [];
+  if (Array.isArray(result)) {
+    const matches: Array<{ path: string; line?: number; text?: string }> = [];
+    for (const entry of result) {
+      if (!entry || typeof entry !== 'object') continue;
+      const entryAny = entry as { path?: string; file?: string; line?: number; text?: string; match?: string };
+      const path = entryAny.path || entryAny.file;
+      if (!path) continue;
+      matches.push({
+        path,
+        line: entryAny.line,
+        text: entryAny.text || entryAny.match,
+      });
+    }
+    return matches;
+  }
+
+  if (typeof result === 'object') {
+    const resultAny = result as { matches?: unknown; results?: unknown; items?: unknown };
+    const list = resultAny.matches ?? resultAny.results ?? resultAny.items;
+    if (Array.isArray(list)) {
+      return extractSearchMatches(list);
+    }
+  }
+
+  return [];
+}
+
+function extractHttpPayload(result: unknown): { status?: string; body?: string } {
+  if (!result) return {};
+  if (typeof result === 'string') {
+    return { body: result };
+  }
+  if (typeof result === 'object') {
+    const resultAny = result as Record<string, unknown>;
+    const status =
+      (typeof resultAny.status === 'string' ? resultAny.status : undefined) ??
+      (typeof resultAny.statusCode === 'number' ? `HTTP ${resultAny.statusCode}` : undefined) ??
+      (typeof resultAny.code === 'number' ? `HTTP ${resultAny.code}` : undefined) ??
+      (typeof resultAny.ok === 'boolean' ? (resultAny.ok ? 'OK' : 'Error') : undefined);
+    const body =
+      (typeof resultAny.body === 'string' ? resultAny.body : undefined) ??
+      (typeof resultAny.text === 'string' ? resultAny.text : undefined) ??
+      (typeof resultAny.data === 'string' ? resultAny.data : undefined) ??
+      (typeof resultAny.response === 'string' ? resultAny.response : undefined);
+    return { status, body };
+  }
+  return {};
+}
+
+function getToolKind(
+  name: string
+): 'command' | 'file_edit' | 'file_write' | 'file_read' | 'file_list' | 'file_search' | 'web_search' | 'http' | 'media' | 'research' | 'design' | 'todos' | 'task' | 'other' {
+  const lower = name.toLowerCase();
+  // Task/subagent detection - check first
+  if (lower === 'task' || lower.includes('spawn_task') || lower.includes('subagent')) {
+    return 'task';
+  }
+  if (lower.includes('write_todos') || lower.includes('todo')) {
+    return 'todos';
+  }
+  if (lower.includes('google_grounded_search') || lower.includes('grounded')) {
+    return 'web_search';
+  }
+  if (lower.includes('generate_image') || lower.includes('edit_image') || lower.includes('generate_video')) {
+    return 'media';
+  }
+  if (lower.includes('deep_research')) {
+    return 'research';
+  }
+  if (lower.includes('stitch') || lower.startsWith('mcp_')) {
+    return 'design';
+  }
+  if (lower.includes('execute') || lower.includes('bash') || lower.includes('shell') || lower.includes('command')) {
+    return 'command';
+  }
+  if (lower.includes('edit_file')) return 'file_edit';
+  if (lower.includes('write_file')) return 'file_write';
+  if (lower.includes('read_file') || lower === 'read') return 'file_read';
+  if (lower.includes('list_directory') || lower === 'ls') return 'file_list';
+  if (lower.includes('glob') || lower.includes('grep') || lower.includes('search_files')) return 'file_search';
+  if (lower.includes('fetch') || lower.includes('http')) return 'http';
+  return 'other';
+}
+
+function normalizeTodoStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
+  const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'done' || normalized === 'complete' || normalized === 'completed') return 'completed';
+  if (normalized === 'in_progress') return 'in_progress';
+  return 'pending';
+}
+
+function extractTodosFromArgs(args: Record<string, unknown>): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> | null {
+  const raw = args.todos ?? args.todo ?? args.tasks;
+  if (!raw) return null;
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((todo): todo is { content: string; status?: string } => !!todo && typeof (todo as { content?: unknown }).content === 'string')
+      .map((todo) => ({
+        content: String((todo as { content: string }).content),
+        status: normalizeTodoStatus((todo as { status?: string }).status),
+      }));
+  }
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+          return parsed
+            .filter((todo): todo is { content: string; status?: string } => !!todo && typeof (todo as { content?: unknown }).content === 'string')
+            .map((todo) => ({
+              content: String((todo as { content: string }).content),
+              status: normalizeTodoStatus((todo as { status?: string }).status),
+            }));
+        }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getArgValue(args: Record<string, unknown> | undefined, keys: string[]): string | null {
+  if (!args) return null;
+  for (const key of keys) {
+    const value = args[key];
+    if (value !== undefined && value !== null && value !== '') {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function countLines(input: string): number {
+  if (!input) return 0;
+  return input.split('\n').length;
+}
+
+function prefixLines(input: string, prefix: string): string[] {
+  if (!input) return [];
+  return input.split('\n').map((line) => `${prefix}${line}`);
+}
+
+function buildDiffFromEditArgs(args: Record<string, unknown>): string | null {
+  const oldString = typeof args.old_string === 'string'
+    ? args.old_string
+    : typeof args.oldString === 'string'
+      ? args.oldString
+      : '';
+  const newString = typeof args.new_string === 'string'
+    ? args.new_string
+    : typeof args.newString === 'string'
+      ? args.newString
+      : '';
+  if (!oldString && !newString) return null;
+  const lines = [
+    ...prefixLines(oldString, '- '),
+    ...prefixLines(newString, '+ '),
+  ];
+  return lines.join('\n');
+}
+
+function buildDiffFromWriteArgs(args: Record<string, unknown>): string | null {
+  const content = typeof args.content === 'string' ? args.content : '';
+  if (!content) return null;
+  return prefixLines(content, '+ ').join('\n');
+}
+
+function getEditCounts(tool: ToolExecution): { added: number; removed: number } | null {
+  const args = tool.args || {};
+  const oldString = String(args.old_string ?? args.oldString ?? '');
+  const newString = String(args.new_string ?? args.newString ?? '');
+  if (!oldString && !newString) return null;
+
+  const resultAny = tool.result as { occurrences?: number } | undefined;
+  const occurrences = resultAny?.occurrences && Number.isFinite(Number(resultAny.occurrences))
+    ? Number(resultAny.occurrences)
+    : 1;
+
+  const removed = countLines(oldString) * occurrences;
+  const added = countLines(newString) * occurrences;
+  return { added, removed };
+}
+
+function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactNode {
+  const kind = getToolKind(tool.name);
+  const args = tool.args || {};
+
+  if (kind === 'command') {
+    const command = getArgValue(args, ['command', 'cmd']) || 'command';
+    return (
+      <>
+        <span className="text-[11px] text-white/55">{tool.status === 'running' ? 'Running' : 'Ran'}</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[360px]', isActive && 'codex-shimmer-text')}>
+          {command}
+        </span>
+      </>
+    );
+  }
+
+  if (kind === 'file_edit') {
+    const path = getArgValue(args, ['file_path', 'path']) || 'file';
+    const counts = getEditCounts(tool);
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Edited</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'codex-shimmer-text')}>
+          {path}
+        </span>
+        {counts && (
+          <span className="ml-2 text-[10px] text-white/40">
+            (+{counts.added} -{counts.removed})
+          </span>
+        )}
+      </>
+    );
+  }
+
+  if (kind === 'file_write') {
+    const path = getArgValue(args, ['file_path', 'path']) || 'file';
+    const content = String(args.content ?? '');
+    const added = countLines(content);
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Created</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'codex-shimmer-text')}>
+          {path}
+        </span>
+        {added > 0 && <span className="ml-2 text-[10px] text-white/40">(+{added})</span>}
+      </>
+    );
+  }
+
+  if (kind === 'file_read') {
+    const path = getArgValue(args, ['file_path', 'path']) || 'file';
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Read</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {path}
+        </span>
+      </>
+    );
+  }
+
+  if (kind === 'file_list') {
+    const path = getArgValue(args, ['path', 'directory', 'dir']) || '.';
+    const entries = extractFileEntries(tool.result);
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Listed</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {path}
+        </span>
+        {entries.length > 0 && (
+          <span className="ml-2 text-[10px] text-white/40">{entries.length} items</span>
+        )}
+      </>
+    );
+  }
+
+  if (kind === 'file_search') {
+    const pattern = getArgValue(args, ['pattern', 'query', 'search']) || 'pattern';
+    const path = getArgValue(args, ['path']) || '';
+    const matches = extractSearchMatches(tool.result);
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Searched files</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[260px]', isActive && 'codex-shimmer-text')}>
+          {pattern}
+        </span>
+        {path && <span className="ml-2 text-[10px] text-white/40">in {path}</span>}
+        {matches.length > 0 && (
+          <span className="ml-2 text-[10px] text-white/40">{matches.length} matches</span>
+        )}
+      </>
+    );
+  }
+
+  if (kind === 'web_search') {
+    const query = getArgValue(args, ['query']) || 'query';
+    const resultAny = tool.result as {
+      sources?: Array<{ title?: string; url?: string }>;
+      results?: Array<{ title?: string; url?: string }>;
+      items?: Array<{ title?: string; url?: string }>;
+    } | undefined;
+    const resultCount =
+      resultAny?.sources?.length ??
+      resultAny?.results?.length ??
+      resultAny?.items?.length ??
+      0;
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Searched the web —</span>
+        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {query}
+        </span>
+        {resultCount > 0 && (
+          <span className="ml-2 text-[10px] text-white/40">{resultCount} results</span>
+        )}
+      </>
+    );
+  }
+
+  if (kind === 'media') {
+    const prompt = getArgValue(args, ['prompt']) || 'prompt';
+    const label = tool.name.toLowerCase().includes('video') ? 'Generated video' : 'Generated image';
+    return (
+      <>
+        <span className="text-[11px] text-white/55 flex-shrink-0">{label}</span>
+        <span
+          className={cn(
+            'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
+            isActive && 'codex-shimmer-text'
+          )}
+          title={prompt}
+        >
+          {prompt}
+        </span>
+      </>
+    );
+  }
+
+  if (kind === 'research') {
+    const query = getArgValue(args, ['query', 'topic']) || 'topic';
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Researched</span>
+        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {query}
+        </span>
+      </>
+    );
+  }
+
+  if (kind === 'design') {
+    const prompt = getArgValue(args, ['prompt', 'query', 'title', 'name']) || tool.name;
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Designed</span>
+        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {prompt}
+        </span>
+      </>
+    );
+  }
+
+  if (kind === 'todos') {
+    const todos = extractTodosFromArgs(args) || [];
+    const completed = todos.filter((t) => t.status === 'completed').length;
+    const label = todos.length > 0
+      ? `Updated todos (${completed}/${todos.length})`
+      : 'Updated todos';
+    return (
+      <>
+        <span className="text-[11px] text-white/55">{label}</span>
+      </>
+    );
+  }
+
+  if (kind === 'http') {
+    const url = getArgValue(args, ['url', 'endpoint']) || 'url';
+    return (
+      <>
+        <span className="text-[11px] text-white/55">Fetched</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {url}
+        </span>
+      </>
+    );
+  }
+
+  const primary = getArgValue(args, ['path', 'command', 'query', 'url', 'file', 'pattern']);
+  return (
+    <>
+      <span className="text-[11px] text-white/55">{tool.name}</span>
+      {primary && (
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+          {primary}
+        </span>
+      )}
+    </>
+  );
+}
+
+function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; content: React.ReactNode }> {
+  const kind = getToolKind(tool.name);
+  const args = tool.args || {};
+  const sections: Array<{ title: string; content: React.ReactNode }> = [];
+  const renderCode = (code: string, language: string, maxHeight = 220) => (
+    <CodeBlock
+      code={code}
+      language={language}
+      showLineNumbers={false}
+      collapsible={false}
+      showHeader={false}
+      maxHeight={maxHeight}
+      className="rounded-md border border-white/[0.06] bg-[#0A0B0F]"
+    />
+  );
+
+  if (kind === 'command') {
+    const command = getArgValue(args, ['command', 'cmd']) || '';
+    if (command) {
+      sections.push({
+        title: 'Command',
+        content: renderCode(command, 'bash'),
+      });
+    }
+    const resultAny = tool.result as { output?: string; exitCode?: number | null } | undefined;
+    const output = resultAny?.output ?? (typeof tool.result === 'string' ? tool.result : '');
+    if (output) {
+      sections.push({
+        title: 'Output',
+        content: renderCode(String(output), 'bash'),
+      });
+    }
+    if (resultAny?.exitCode !== undefined && resultAny?.exitCode !== null) {
+      sections.push({
+        title: 'Exit Code',
+        content: <div className="text-[11px] text-white/60">Exit {resultAny.exitCode}</div>,
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'file_read') {
+    const path = getArgValue(args, ['file_path', 'path']) || '';
+    if (path) {
+      sections.push({
+        title: 'File',
+        content: <div className="text-[11px] font-mono text-white/70 break-all">{path}</div>,
+      });
+    }
+    const preview = typeof tool.result === 'string' ? tool.result : formatObject(tool.result);
+    if (preview) {
+      sections.push({
+        title: 'Preview',
+        content: renderCode(truncateText(preview, 2400), 'text'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'file_write') {
+    const path = getArgValue(args, ['file_path', 'path']) || '';
+    if (path) {
+      sections.push({
+        title: 'File',
+        content: <div className="text-[11px] font-mono text-white/70 break-all">{path}</div>,
+      });
+    }
+    const diff = buildDiffFromWriteArgs(args);
+    if (diff) {
+      sections.push({
+        title: 'Changes',
+        content: renderCode(truncateText(diff, 2400), 'diff'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'file_edit') {
+    const path = getArgValue(args, ['file_path', 'path']) || '';
+    const counts = getEditCounts(tool);
+    if (path) {
+      sections.push({
+        title: 'File',
+        content: <div className="text-[11px] font-mono text-white/70 break-all">{path}</div>,
+      });
+    }
+    if (counts) {
+      sections.push({
+        title: 'Changes',
+        content: (
+          <div className="text-[11px] text-white/60">
+            +{counts.added} −{counts.removed}
+          </div>
+        ),
+      });
+    }
+    const diff = buildDiffFromEditArgs(args);
+    if (diff) {
+      sections.push({
+        title: 'Diff',
+        content: renderCode(truncateText(diff, 2400), 'diff'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'file_list') {
+    const path = getArgValue(args, ['path', 'directory', 'dir']) || '.';
+    const entries = extractFileEntries(tool.result);
+    sections.push({
+      title: 'Directory',
+      content: <div className="text-[11px] font-mono text-white/70 break-all">{path}</div>,
+    });
+    if (entries.length) {
+      const shown = entries.slice(0, 24);
+      const listText = shown.map((entry) => entry.name).join('\n');
+      sections.push({
+        title: `Items (${entries.length})`,
+        content: renderCode(listText, 'text'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'file_search') {
+    const pattern = getArgValue(args, ['pattern', 'query', 'search']) || 'pattern';
+    const path = getArgValue(args, ['path']) || '';
+    const matches = extractSearchMatches(tool.result);
+    sections.push({
+      title: 'Query',
+      content: (
+        <div className="text-[11px] text-white/70">
+          <span className="font-mono">{pattern}</span>
+          {path && <span className="ml-2 text-white/40">in {path}</span>}
+        </div>
+      ),
+    });
+    if (matches.length) {
+      const shown = matches.slice(0, 20);
+      const matchText = shown
+        .map((match) => `${match.path}${match.line ? `:${match.line}` : ''}${match.text ? `\n  ${match.text}` : ''}`)
+        .join('\n');
+      sections.push({
+        title: `Matches (${matches.length})`,
+        content: renderCode(matchText, 'text'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'web_search') {
+    const resultAny = tool.result as {
+      summary?: string;
+      sources?: Array<{ title?: string; url?: string; snippet?: string }>;
+      results?: Array<{ title?: string; url?: string; snippet?: string }>;
+      items?: Array<{ title?: string; url?: string; snippet?: string }>;
+      searchQueries?: string[];
+    } | undefined;
+    const results =
+      resultAny?.sources ??
+      resultAny?.results ??
+      resultAny?.items ??
+      [];
+    if (results.length) {
+      sections.push({
+        title: 'Results',
+        content: (
+          <ul className="space-y-1">
+            {results.map((source, index) => {
+              const url = source.url || '';
+              const title = source.title || url;
+              const snippet = source.snippet;
+              return (
+                <li key={`${url}-${index}`} className="text-[11px]">
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[#8CA2FF] hover:text-[#B0BFFF] underline"
+                    >
+                      {title}
+                    </a>
+                  ) : (
+                    <span className="text-white/70">{title}</span>
+                  )}
+                  {url && (
+                    <div className="text-[10px] text-white/35 truncate">{url}</div>
+                  )}
+                  {snippet && (
+                    <div className="text-[10px] text-white/55 mt-0.5 line-clamp-2">
+                      {snippet}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'http') {
+    const url = getArgValue(args, ['url', 'endpoint']) || '';
+    const payload = extractHttpPayload(tool.result);
+    if (url) {
+      sections.push({
+        title: 'Request',
+        content: <div className="text-[11px] font-mono text-white/70 break-all">{url}</div>,
+      });
+    }
+    if (payload.status) {
+      sections.push({
+        title: 'Status',
+        content: <div className="text-[11px] text-white/60">{payload.status}</div>,
+      });
+    }
+    if (payload.body) {
+      sections.push({
+        title: 'Body',
+        content: renderCode(truncateText(payload.body, 2400), 'text'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'media') {
+    const prompt = getArgValue(args, ['prompt']);
+    if (prompt) {
+      sections.push({
+        title: 'Prompt',
+        content: <div className="text-[12px] text-white/70 leading-snug whitespace-pre-wrap">{prompt}</div>,
+      });
+    }
+    const model = getArgValue(args, ['model']);
+    if (model) {
+      sections.push({
+        title: 'Model',
+        content: <div className="text-[11px] text-white/60">{model}</div>,
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'todos') {
+    const todos = extractTodosFromArgs(args);
+    if (todos && todos.length > 0) {
+      sections.push({
+        title: 'Todos',
+        content: (
+          <div className="space-y-1">
+            {todos.map((todo, index) => {
+              const status = todo.status;
+              const Icon = status === 'completed' ? CheckCircle2 : status === 'in_progress' ? Loader2 : Circle;
+              return (
+                <div key={`${todo.content}-${index}`} className="flex items-start gap-2 text-[11px]">
+                  <Icon
+                    className={cn(
+                      'w-3.5 h-3.5 mt-[2px]',
+                      status === 'completed'
+                        ? 'text-[#7FD29A]'
+                        : status === 'in_progress'
+                          ? 'text-[#8CA2FF] animate-spin'
+                          : 'text-white/30'
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      'text-white/70',
+                      status === 'completed' && 'line-through text-white/40'
+                    )}
+                  >
+                    {todo.content}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'research') {
+    const resultAny = tool.result as {
+      report?: string;
+      citations?: Array<{ title?: string; url?: string }>;
+      searchQueries?: string[];
+      reportPath?: string;
+    } | undefined;
+    if (resultAny?.reportPath) {
+      sections.push({
+        title: 'Report',
+        content: <div className="text-[11px] font-mono text-white/60 break-all">{resultAny.reportPath}</div>,
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'design') {
+    const previewUrl = (tool.result as { previewUrl?: string } | undefined)?.previewUrl;
+    if (previewUrl) {
+      sections.push({
+        title: 'Preview',
+        content: (
+          <a
+            href={previewUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[#8CA2FF] hover:text-[#B0BFFF] underline text-[11px]"
+          >
+            {previewUrl}
+          </a>
+        ),
+      });
+    }
+    const formattedArgs = formatObject(args);
+    if (formattedArgs && formattedArgs !== '{}') {
+      sections.push({
+        title: 'Arguments',
+        content: renderCode(formattedArgs, 'json'),
+      });
+    }
+    return sections;
+  }
+
+  if (kind === 'other') {
+    const formattedArgs = formatObject(args);
+    if (formattedArgs && formattedArgs !== '{}') {
+      sections.push({
+        title: 'Arguments',
+        content: renderCode(formattedArgs, 'json'),
+      });
+    }
+    if (tool.result !== undefined) {
+      sections.push({
+        title: 'Result',
+        content: renderCode(formatObject(tool.result), 'json'),
+      });
+    }
+  }
+
+  return sections;
+}
+
+function ToolActivityRow({
+  tool,
+  isActive,
+}: {
+  tool: ToolExecution;
+  isActive?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const meta = getToolMeta(tool.name);
+  const kind = getToolKind(tool.name);
+
+  // Use TaskToolCard for task/subagent tools
+  if (kind === 'task') {
+    return <TaskToolCard execution={tool} isActive={isActive} />;
+  }
+
+  const statusLabel =
+    tool.status === 'running'
+      ? 'Running'
+      : tool.status === 'pending'
+        ? 'Queued'
+        : tool.status === 'error'
+          ? 'Error'
+          : 'Success';
+
+  const sections = buildToolDetailSections(tool);
+  const hasDetails = sections.length > 0;
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={() => hasDetails && setExpanded((prev) => !prev)}
+        className={cn(
+          'w-full flex items-center gap-2 text-left',
+          'codex-tool-row border-b border-white/[0.05]',
+          'transition-colors',
+          isActive ? 'text-white/90' : 'text-white/70 hover:text-white/85'
+        )}
+      >
+        <span className="text-[10px] uppercase tracking-wide text-white/35">
+          {meta?.category ?? 'Tool'}
+        </span>
+        <span className="text-white/20">•</span>
+        <span className="text-[12px] font-medium text-white/80">
+          {meta?.title ?? tool.name}
+        </span>
+        <span className="text-white/20">•</span>
+        <span className="flex-1 min-w-0">{buildToolSummary(tool, isActive)}</span>
+        <span className="ml-auto text-[10px] text-white/45">
+          {statusLabel}
+        </span>
+        {hasDetails && (
+          <ChevronDown
+            className={cn(
+              'w-4 h-4 text-white/40 transition-transform',
+              expanded && 'rotate-180'
+            )}
+          />
+        )}
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded && sections.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="pl-3 py-1 border-l border-white/[0.08]"
+          >
+            {sections.map((section, index) => (
+              <div key={`${section.title}-${index}`} className={index > 0 ? 'mt-2' : ''}>
+                <div className="text-[10px] uppercase tracking-wide text-white/35">{section.title}</div>
+                <div className="mt-1">{section.content}</div>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function getExtensionFromMime(mimeType?: string, fallback = 'bin') {
+  if (!mimeType) return fallback;
+  if (mimeType.includes('png')) return 'png';
+  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+  if (mimeType.includes('webp')) return 'webp';
+  if (mimeType.includes('gif')) return 'gif';
+  if (mimeType.includes('mp4')) return 'mp4';
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('mov')) return 'mov';
+  return fallback;
+}
+
+function buildMediaArtifact(item: MediaActivityItem, index: number): Artifact {
+  const extension = getExtensionFromMime(item.mimeType, item.kind === 'image' ? 'png' : 'mp4');
+  const fallbackName = `media-${index}.${extension}`;
+  const path = item.path || fallbackName;
+  return {
+    id: `media-${Date.now()}-${index}`,
+    path,
+    url: item.url,
+    type: 'created',
+    timestamp: Date.now(),
+  };
+}
+
+function MediaActivityRow({
+  items,
+  onOpen,
+}: {
+  items: MediaActivityItem[];
+  onOpen: (artifact: Artifact) => void;
+}) {
+  const getSrc = (item: MediaActivityItem) => {
+    // For images: prefer base64 data (most reliable), then URL, then file path
+    // For videos: prefer file path/URL (base64 would be too large)
+    if (item.kind === 'image') {
+      if (item.data) {
+        const mime = item.mimeType || 'image/png';
+        return `data:${mime};base64,${item.data}`;
+      }
+      if (item.url) return item.url;
+      if (item.path) return convertFileSrc(item.path);
+    } else {
+      // Videos - don't use base64
+      if (item.path) return convertFileSrc(item.path);
+      if (item.url) return item.url;
+    }
+    return '';
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-3">
+        {items.map((item, index) => {
+          const src = getSrc(item);
+          if (!src) return null;
+
+          if (item.kind === 'video') {
+            return (
+              <div key={`${src}-${index}`} className="relative">
+                <video
+                  src={src}
+                  controls
+                  className="w-full rounded-md bg-black"
+                />
+                <button
+                  onClick={() => onOpen(buildMediaArtifact(item, index))}
+                  className="absolute top-2 right-2 px-2 py-1 rounded-md text-[11px] bg-black/70 text-white/80 hover:bg-black/90"
+                >
+                  Open
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <button
+              key={`${src}-${index}`}
+              onClick={() => onOpen(buildMediaArtifact(item, index))}
+              className="group relative rounded-md overflow-hidden bg-black/20"
+            >
+              <img src={src} alt="Generated" className="w-full h-auto object-contain" />
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20" />
+              <div className="absolute top-2 right-2 px-2 py-1 rounded-md text-[11px] bg-black/70 text-white/80 border border-white/20 opacity-0 group-hover:opacity-100 transition-opacity">
+                Open
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ReportActivityRow({
+  report,
+  artifacts,
+  onOpen,
+}: {
+  report: ReportActivityItem;
+  artifacts: Artifact[];
+  onOpen: (artifact: Artifact) => void;
+}) {
+  const handleOpen = async () => {
+    if (!report.path) return;
+    const existing = artifacts.find((artifact) => artifact.path === report.path);
+    if (existing) {
+      onOpen(existing);
+      return;
+    }
+
+    try {
+      const content = await invoke<string>('read_file', { path: report.path });
+      onOpen({
+        id: `report-${Date.now()}`,
+        path: report.path,
+        content,
+        type: 'created',
+        timestamp: Date.now(),
+      });
+    } catch {
+      // fallback: open empty preview if read fails
+      onOpen({
+        id: `report-${Date.now()}`,
+        path: report.path,
+        content: report.snippet || '',
+        type: 'created',
+        timestamp: Date.now(),
+      });
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-1">
+        <div className="min-w-0">
+          <div className="text-[12px] text-white/80 font-medium">{report.title || 'Deep research report'}</div>
+        </div>
+        <button
+          onClick={handleOpen}
+          className="px-2.5 py-1 rounded-md text-[11px] bg-white/[0.06] text-white/70 hover:bg-white/[0.10]"
+        >
+          Open
+        </button>
+    </div>
+  );
+}
+
+function DesignActivityRow({
+  design,
+  onOpen,
+}: {
+  design: DesignActivityItem;
+  onOpen: (artifact: Artifact) => void;
+}) {
+  const handleOpen = () => {
+    const preview = design.preview;
+    if (!preview) return;
+    const name = preview.name || preview.path || 'design-preview.html';
+    onOpen({
+      id: `design-${Date.now()}`,
+      path: name,
+      content: preview.content,
+      url: preview.url,
+      type: 'created',
+      timestamp: Date.now(),
+    });
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-1">
+        <div className="text-[12px] text-white/80 font-medium">
+          {design.title || 'Design preview'}
+        </div>
+        <button
+          onClick={handleOpen}
+          disabled={!design.preview}
+          className={cn(
+            'px-2.5 py-1 rounded-md text-[11px]',
+            design.preview
+              ? 'bg-white/[0.06] text-white/70 hover:bg-white/[0.10]'
+              : 'bg-white/[0.03] text-white/30 cursor-not-allowed'
+          )}
+        >
+          Open
+        </button>
+    </div>
+  );
+}
+
 function MessageBubble({ message }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -221,6 +1522,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
     sources?: Array<{ title?: string; url: string }>;
     searchQueries?: string[];
   } | undefined;
+  const errorMetadata = message.metadata as ErrorMessageMetadata | undefined;
 
   const handleCopy = async () => {
     const textContent = typeof message.content === 'string'
@@ -236,6 +1538,10 @@ function MessageBubble({ message }: MessageBubbleProps) {
   };
 
   // System messages are rendered differently
+  if (isSystem && errorMetadata?.kind === 'error') {
+    return <ErrorMessageCard metadata={errorMetadata} />;
+  }
+
   if (isSystem) {
     return (
       <div className="flex justify-center">
@@ -249,7 +1555,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex gap-2',
+        'flex gap-2 no-select-extend',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
@@ -258,34 +1564,34 @@ function MessageBubble({ message }: MessageBubbleProps) {
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         className={cn(
-          'flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center',
+          'flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center select-none',
           isUser
-            ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0]'
-            : 'bg-gradient-to-br from-[#6B6EF0] via-[#8A62C2] to-[#008585]'
+            ? 'bg-[#1A1D24] border border-[#4C71FF]/30'
+            : 'bg-[#111218] border border-white/[0.08]'
         )}
       >
         {isUser ? (
-          <User className="w-3 h-3 text-white" />
+          <User className="w-3 h-3 text-[#8CA2FF]" />
         ) : (
-          <Bot className="w-3 h-3 text-white" />
+          <BrandMark className="w-3.5 h-3.5" />
         )}
       </motion.div>
 
       {/* Content */}
-      <div className={cn('flex-1 min-w-0', isUser && 'flex justify-end')}>
+      <div className={cn('flex-1 min-w-0 select-none', isUser && 'flex justify-end')}>
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className={cn(
-            'inline-block max-w-full rounded-xl',
+            'rounded-xl message-content',
             isUser
-              ? 'bg-gradient-to-br from-[#4F52D9] to-[#6B6EF0] text-white'
-              : 'bg-transparent text-white/90'
+              ? 'inline-block max-w-[85%] bg-white/[0.06] border border-white/[0.10] text-white/90'
+              : 'w-fit max-w-full bg-transparent text-white/90'
           )}
         >
           {typeof message.content === 'string' ? (
             isUser ? (
-              <div className="px-3 py-2 whitespace-pre-wrap text-[14px] leading-normal">{message.content}</div>
+              <div className="px-3 py-2 whitespace-pre-wrap text-[13px] leading-snug break-words select-text">{message.content}</div>
             ) : (
               <MarkdownContent content={message.content} />
             )
@@ -332,10 +1638,88 @@ function MessageBubble({ message }: MessageBubbleProps) {
   );
 }
 
+function ErrorMessageCard({ metadata }: { metadata: ErrorMessageMetadata }) {
+  const { activeSessionId } = useSessionStore();
+  const sendMessage = useChatStore((state) => state.sendMessage);
+  const lastUserMessage = useChatStore((state) => state.getSessionState(activeSessionId).lastUserMessage);
+  const [remaining, setRemaining] = useState<number | null>(
+    metadata.details?.retryAfterSeconds ? Math.ceil(metadata.details.retryAfterSeconds) : null
+  );
+  const isRateLimit = metadata.code === 'RATE_LIMIT';
+
+  useEffect(() => {
+    if (remaining === null || remaining <= 0) return;
+    const timer = window.setInterval(() => {
+      setRemaining((prev) => (prev && prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [remaining]);
+
+  const canRetry = !!lastUserMessage && (!remaining || remaining <= 0);
+  const title = isRateLimit ? 'Rate limit exceeded' : 'Agent error';
+  const description = isRateLimit
+    ? `You hit the Gemini API request limit${metadata.details?.model ? ` for ${metadata.details.model}` : ''}.`
+    : 'Something went wrong while generating a response.';
+  const docsUrl = metadata.details?.docsUrl || (isRateLimit ? 'https://ai.google.dev/gemini-api/docs/rate-limits' : undefined);
+
+  const handleRetry = () => {
+    if (!activeSessionId || !lastUserMessage || !canRetry) return;
+    sendMessage(activeSessionId, lastUserMessage.content, lastUserMessage.attachments);
+  };
+
+  return (
+    <div className="rounded-xl border border-[#FF5449]/20 bg-[#FF5449]/10 px-4 py-3 text-white/90">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-[#FF7A72]">{title}</div>
+          <div className="text-xs text-white/70 mt-1">{description}</div>
+          {isRateLimit && remaining !== null && (
+            <div className="text-xs text-white/60 mt-2">
+              Retry in {Math.max(0, remaining)}s
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleRetry}
+          disabled={!canRetry}
+          className={cn(
+            'px-3 py-1.5 text-xs rounded-lg border',
+            canRetry
+              ? 'bg-[#4C71FF] text-white border-[#4C71FF]'
+              : 'bg-white/10 text-white/40 border-white/10 cursor-not-allowed'
+          )}
+        >
+          Retry
+        </button>
+      </div>
+
+      {docsUrl && (
+        <div className="mt-2">
+          <a
+            href={docsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-[#8CA2FF] underline"
+          >
+            View Gemini rate-limit docs
+          </a>
+        </div>
+      )}
+
+      {metadata.raw && (
+        <details className="mt-2 text-xs text-white/60">
+          <summary className="cursor-pointer text-white/50">Show raw error</summary>
+          <pre className="whitespace-pre-wrap mt-2 text-[11px]">{metadata.raw}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // Markdown content renderer for assistant messages
 function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="px-3 py-2 prose prose-xs prose-invert max-w-none text-[14px]">
+    <div className="px-3 py-2 text-[13px]">
       <Suspense fallback={<div className="text-sm text-white/70">{content}</div>}>
         <ReactMarkdown
           components={{
@@ -347,7 +1731,7 @@ function MarkdownContent({ content }: { content: string }) {
               if (isInline) {
                 return (
                   <code
-                    className="px-1 py-0.5 bg-[#6B6EF0]/10 rounded text-[#ABAEFF] text-[0.9em] border border-[#6B6EF0]/20"
+                    className="px-1 py-0.5 bg-[#4C71FF]/10 rounded text-[#8CA2FF] text-[0.9em] border border-[#4C71FF]/20 select-text"
                     {...props}
                   >
                     {children}
@@ -368,31 +1752,35 @@ function MarkdownContent({ content }: { content: string }) {
                 </div>
               );
             },
-            // Style other elements
+            // Style elements with inline-block to constrain selection to text width
             p({ children }) {
-              return <p className="mb-2 last:mb-0 leading-snug text-white/80">{children}</p>;
+              return (
+                <p className="mb-2 last:mb-0 leading-snug text-white/80 w-fit max-w-full select-text">
+                  {children}
+                </p>
+              );
             },
             ul({ children }) {
-              return <ul className="list-disc list-inside mb-2 space-y-0.5 text-white/80">{children}</ul>;
+              return <ul className="list-disc list-inside mb-2 space-y-0.5 text-white/80 w-fit max-w-full select-text">{children}</ul>;
             },
             ol({ children }) {
-              return <ol className="list-decimal list-inside mb-2 space-y-0.5 text-white/80">{children}</ol>;
+              return <ol className="list-decimal list-inside mb-2 space-y-0.5 text-white/80 w-fit max-w-full select-text">{children}</ol>;
             },
             li({ children }) {
-              return <li className="text-white/70">{children}</li>;
+              return <li className="text-white/70 select-text">{children}</li>;
             },
             h1({ children }) {
-              return <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0 text-white/90">{children}</h1>;
+              return <h1 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-white/90 w-fit max-w-full select-text">{children}</h1>;
             },
             h2({ children }) {
-              return <h2 className="text-base font-bold mb-1.5 mt-3 first:mt-0 text-white/90">{children}</h2>;
+              return <h2 className="text-sm font-semibold mb-1.5 mt-3 first:mt-0 text-white/90 w-fit max-w-full select-text">{children}</h2>;
             },
             h3({ children }) {
-              return <h3 className="text-sm font-semibold mb-1.5 mt-2 first:mt-0 text-white/90">{children}</h3>;
+              return <h3 className="text-xs font-semibold mb-1.5 mt-2 first:mt-0 text-white/90 w-fit max-w-full select-text">{children}</h3>;
             },
             blockquote({ children }) {
               return (
-                <blockquote className="border-l-3 border-[#6B6EF0]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg">
+                <blockquote className="border-l-3 border-[#4C71FF]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg w-fit max-w-full select-text">
                   {children}
                 </blockquote>
               );
@@ -403,7 +1791,7 @@ function MarkdownContent({ content }: { content: string }) {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[#8B8EFF] hover:text-[#ABAEFF] underline"
+                  className="text-[#8CA2FF] hover:text-[#B0BFFF] underline select-text"
                 >
                   {children}
                 </a>
@@ -414,7 +1802,7 @@ function MarkdownContent({ content }: { content: string }) {
             },
             table({ children }) {
               return (
-                <div className="overflow-x-auto my-2">
+                <div className="overflow-x-auto my-2 select-text">
                   <table className="min-w-full border border-white/[0.08] rounded-lg overflow-hidden text-xs">
                     {children}
                   </table>
@@ -423,14 +1811,14 @@ function MarkdownContent({ content }: { content: string }) {
             },
             th({ children }) {
               return (
-                <th className="px-2 py-1.5 bg-white/[0.04] text-left text-xs font-medium text-white/80 border-b border-white/[0.08]">
+                <th className="px-2 py-1.5 bg-white/[0.04] text-left text-xs font-medium text-white/80 border-b border-white/[0.08] select-text">
                   {children}
                 </th>
               );
             },
             td({ children }) {
               return (
-                <td className="px-2 py-1.5 text-xs text-white/70 border-b border-white/[0.06]">
+                <td className="px-2 py-1.5 text-xs text-white/70 border-b border-white/[0.06] select-text">
                   {children}
                 </td>
               );
@@ -481,7 +1869,7 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     case 'text':
       if (isUser) {
         return (
-          <div className="px-3 py-2 whitespace-pre-wrap text-[14px] leading-normal">
+          <div className="px-3 py-2 whitespace-pre-wrap text-[13px] leading-snug select-text break-words">
             {part.text}
           </div>
         );
@@ -531,39 +1919,93 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
       );
 
     case 'tool_call':
-      return (
-        <div className="px-4 py-2">
-          <ToolExecutionCard
-            execution={{
-              id: part.toolCallId || `tool-${Date.now()}`,
-              name: part.toolName,
-              args: part.args as Record<string, unknown>,
-              status: 'success',
-              startedAt: Date.now(),
-            }}
-          />
-        </div>
-      );
-
     case 'tool_result':
-      return (
-        <div className="px-4 py-2">
-          <ToolExecutionCard
-            execution={{
-              id: part.toolCallId || `result-${Date.now()}`,
-              name: part.toolName || 'Tool Result',
-              args: {},
-              status: part.isError ? 'error' : 'success',
-              result: part.result,
-              error: part.isError ? String(part.result) : undefined,
-              startedAt: Date.now(),
-              completedAt: Date.now(),
-            }}
-          />
-        </div>
-      );
+      // Tool UI is rendered only in the ToolActivitySection.
+      return null;
 
     default:
       return null;
   }
+}
+
+/**
+ * Thinking block component - displays agent's internal reasoning
+ * Shows a one-liner summary with expandable dropdown for full content
+ */
+function ThinkingBlock({ content, isActive }: { content: string; isActive: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Get first line or first 100 chars as summary
+  const getSummary = () => {
+    if (!content) return 'Thinking...';
+    const firstLine = content.split('\n')[0];
+    if (firstLine.length > 100) {
+      return firstLine.substring(0, 100) + '…';
+    }
+    return firstLine || 'Thinking...';
+  };
+
+  const hasContent = content && content.trim().length > 0;
+  const hasMoreContent = content && (content.includes('\n') || content.length > 100);
+
+  return (
+    <div className="rounded-lg bg-[#1A1B20] border border-white/[0.06] overflow-hidden">
+      {/* Header - always visible */}
+      <button
+        onClick={() => hasMoreContent && setIsExpanded(!isExpanded)}
+        disabled={!hasMoreContent}
+        className={cn(
+          'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors',
+          hasMoreContent && 'hover:bg-white/[0.02] cursor-pointer',
+          !hasMoreContent && 'cursor-default'
+        )}
+      >
+        {/* Thinking icon with animation */}
+        <div className={cn(
+          'w-4 h-4 rounded-full flex items-center justify-center',
+          isActive ? 'bg-[#4C71FF]/20' : 'bg-white/[0.06]'
+        )}>
+          <Sparkles className={cn(
+            'w-2.5 h-2.5',
+            isActive ? 'text-[#8CA2FF] animate-pulse' : 'text-white/40'
+          )} />
+        </div>
+
+        {/* Summary text */}
+        <span className={cn(
+          'flex-1 text-[12px] truncate',
+          isActive ? 'codex-thinking' : 'text-white/50'
+        )}>
+          {hasContent ? getSummary() : 'Thinking...'}
+        </span>
+
+        {/* Expand indicator */}
+        {hasMoreContent && (
+          <ChevronDown className={cn(
+            'w-3.5 h-3.5 text-white/30 transition-transform',
+            isExpanded && 'rotate-180'
+          )} />
+        )}
+      </button>
+
+      {/* Expanded content */}
+      <AnimatePresence>
+        {isExpanded && hasContent && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 pt-1 border-t border-white/[0.04]">
+              <pre className="text-[11px] text-white/50 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto">
+                {content}
+              </pre>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }

@@ -61,6 +61,24 @@ export const MessageSchema = z.object({
 export type Message = z.infer<typeof MessageSchema>;
 
 // ============================================================================
+// Error Metadata Types (for structured error rendering)
+// ============================================================================
+
+export interface ErrorMessageDetails {
+  retryAfterSeconds?: number;
+  quotaMetric?: string;
+  model?: string;
+  docsUrl?: string;
+}
+
+export interface ErrorMessageMetadata {
+  kind: 'error';
+  code?: string;
+  details?: ErrorMessageDetails;
+  raw?: string;
+}
+
+// ============================================================================
 // Session Types
 // ============================================================================
 
@@ -145,6 +163,8 @@ export const PermissionRequestSchema = z.object({
   type: PermissionTypeSchema,
   resource: z.string(),
   reason: z.string().optional(),
+  toolCallId: z.string().optional(),
+  toolName: z.string().optional(),
 });
 
 export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;

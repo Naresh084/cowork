@@ -126,8 +126,20 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[sidecar] Unhandled rejection:', reason);
   const message = reason instanceof Error ? reason.message : String(reason);
+
+  // Check if this is an AbortError (expected during stop/cancel operations)
+  const isAbort =
+    (reason instanceof Error && reason.name === 'AbortError') ||
+    message.toLowerCase().includes('abort') ||
+    message.toLowerCase().includes('cancel');
+
+  if (isAbort) {
+    console.warn('[sidecar] AbortError (expected during stop):', message);
+    return; // Don't emit error for expected aborts
+  }
+
+  console.error('[sidecar] Unhandled rejection:', reason);
   eventEmitter.error(undefined, `Unhandled rejection: ${message}`, 'UNHANDLED_REJECTION');
   eventEmitter.flushSync();
 });

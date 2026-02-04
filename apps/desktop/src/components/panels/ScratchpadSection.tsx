@@ -58,7 +58,7 @@ export function ScratchpadSection() {
           'border border-white/[0.08]',
           'text-white/80 placeholder:text-white/30',
           'resize-none',
-          'focus:outline-none focus:border-[#6B6EF0]/50',
+          'focus:outline-none focus:border-[#4C71FF]/50',
           'transition-colors'
         )}
       />

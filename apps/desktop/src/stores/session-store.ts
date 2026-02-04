@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../components/ui/Toast';
+import { useChatStore } from './chat-store';
 
 export interface SessionSummary {
   id: string;
@@ -28,7 +29,9 @@ interface SessionState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   isLoading: boolean;
+  hasLoaded: boolean;
   error: string | null;
+  backendInitialized: boolean;
 }
 
 interface SessionActions {
@@ -40,6 +43,7 @@ interface SessionActions {
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   clearError: () => void;
+  waitForBackend: () => Promise<void>;
 }
 
 export const useSessionStore = create<SessionState & SessionActions>()(
@@ -48,23 +52,85 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       sessions: [],
       activeSessionId: null,
       isLoading: false,
+      hasLoaded: false,
       error: null,
+      backendInitialized: false,
+
+      waitForBackend: async () => {
+        const MAX_WAIT = 30000; // 30 seconds
+        const POLL_INTERVAL = 500; // 500ms
+        let elapsed = 0;
+
+        console.log('[SessionStore] Waiting for backend initialization...');
+
+        while (elapsed < MAX_WAIT) {
+          try {
+            const status = await invoke<{ initialized: boolean; sessionCount: number }>('agent_get_initialization_status');
+            if (status.initialized) {
+              console.log('[SessionStore] Backend ready, session count:', status.sessionCount);
+              set({ backendInitialized: true });
+              return;
+            }
+          } catch {
+            // Sidecar may still be starting, continue polling
+          }
+
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
+          elapsed += POLL_INTERVAL;
+        }
+
+        console.error('[SessionStore] Backend initialization timed out');
+        throw new Error('Backend initialization timed out');
+      },
 
       loadSessions: async () => {
+        // Wait for backend to be initialized first
+        if (!get().backendInitialized) {
+          console.log('[SessionStore] Backend not initialized, waiting...');
+          await get().waitForBackend();
+        }
+
         set({ isLoading: true, error: null });
         try {
+          console.log('[SessionStore] Loading sessions from backend...');
           const sessions = await invoke<SessionSummary[]>('agent_list_sessions');
+          console.log('[SessionStore] Backend returned', sessions.length, 'sessions');
+
+          // SAFETY: If backend returns 0 sessions but we have cached sessions,
+          // this might indicate a timing issue - keep cached sessions
+          const cachedSessions = get().sessions;
+          if (sessions.length === 0 && cachedSessions.length > 0) {
+            console.warn('[SessionStore] Backend returned 0 sessions but cache has', cachedSessions.length);
+            console.warn('[SessionStore] This may indicate a timing issue. Keeping cached sessions.');
+            // Still mark as loaded to prevent infinite retries
+            set({ isLoading: false, hasLoaded: true });
+            return;
+          }
 
           // Validate that activeSessionId still exists in the loaded sessions
-          // This handles the case where the sidecar restarted and lost in-memory sessions
           const currentActiveId = get().activeSessionId;
-          const activeSessionExists = currentActiveId
+          let activeSessionExists = currentActiveId
             ? sessions.some((s) => s.id === currentActiveId)
             : false;
+
+          // If not found in list, double-check with get_session before clearing
+          // This handles race conditions where the session exists but wasn't in the list yet
+          if (!activeSessionExists && currentActiveId) {
+            console.log('[SessionStore] Active session not in list, verifying with get_session:', currentActiveId);
+            try {
+              await invoke('agent_get_session', { sessionId: currentActiveId });
+              activeSessionExists = true; // Session exists, just not in list yet
+              console.log('[SessionStore] Session verified as existing');
+            } catch {
+              console.log('[SessionStore] Session truly does not exist');
+              // Session truly doesn't exist
+            }
+          }
 
           set({
             sessions,
             isLoading: false,
+            hasLoaded: true,
             // Clear stale activeSessionId if session no longer exists
             activeSessionId: activeSessionExists ? currentActiveId : null,
           });
@@ -74,6 +140,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           toast.error('Failed to load sessions', errorMessage);
           set({
             isLoading: false,
+            hasLoaded: true,
             error: errorMessage,
           });
         }
@@ -130,6 +197,9 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       },
 
       deleteSession: async (sessionId: string) => {
+        // Clear from chat store to prevent stale state
+        useChatStore.getState().removeSession(sessionId);
+
         // Optimistic update
         const previousSessions = get().sessions;
         const previousActiveId = get().activeSessionId;
@@ -261,6 +331,17 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       name: 'session-store',
       partialize: (state) => ({
         activeSessionId: state.activeSessionId,
+        // Cache session list for faster startup
+        sessions: state.sessions.map(s => ({
+          id: s.id,
+          title: s.title,
+          firstMessage: s.firstMessage,
+          workingDirectory: s.workingDirectory,
+          model: s.model,
+          messageCount: s.messageCount,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        })),
       }),
     }
   )

@@ -31,6 +31,7 @@ export {
   getGeminiModel,
   hasCapability,
   getModelContextWindow,
+  setModelContextWindows,
   fetchGeminiModels,
   MODEL_CONTEXT_WINDOWS,
   DEFAULT_CONTEXT_WINDOW,

@@ -16,9 +16,11 @@ export function ChatView() {
   const [initialMessage, setInitialMessage] = useState<string | undefined>(undefined);
 
   // Store state
-  const { messages, isStreaming, sendMessage, stopGeneration } = useChatStore();
-  const { activeSessionId, createSession } = useSessionStore();
-  const { defaultWorkingDirectory, selectedModel } = useSettingsStore();
+  const { sendMessage, stopGeneration, ensureSession } = useChatStore();
+  const { activeSessionId, createSession, updateSessionTitle, sessions } = useSessionStore();
+  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
+  const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
+  const { messages, isStreaming } = sessionState;
 
   // Subscribe to agent events
   useAgentEvents(activeSessionId);
@@ -37,62 +39,53 @@ export function ChatView() {
     const sessionStore = useSessionStore.getState();
     const sessionToLoad = activeSessionId;
 
-    // CRITICAL: Don't reset if we're in the middle of sending a message
-    // This prevents the race condition where:
-    // T0: User sends message → optimistic message added to state
-    // T1: createSession() called (no session exists)
-    // T2: activeSessionId changes to new session ID
-    // T3: This useEffect triggers → WITHOUT this guard, reset() WIPES ALL MESSAGES
-    // T4: loadMessages() loads empty session from backend
-    // T5: User's message is gone
+    // Prevent races while a send is in-flight
     if (isSendingRef.current) {
-      // Update the ref but don't reset - the message send is in progress
       currentSessionRef.current = sessionToLoad;
       return;
     }
 
-    // Track which session we're loading
     currentSessionRef.current = sessionToLoad;
 
-    // Reset chat state for new session
-    chatStore.reset();
+    if (!sessionToLoad) return;
 
-    // Load messages if session exists
-    if (sessionToLoad) {
-      chatStore.loadMessages(sessionToLoad)
-        .then(() => {
-          // Verify this is still the active session before accepting results
-          // If user switched sessions during load, ignore stale data
-          if (currentSessionRef.current !== sessionToLoad) {
-            // Session changed during load - data already handled by new session
-            return;
-          }
-        })
-        .catch((error) => {
-          // Only show error if this is still the active session
-          if (currentSessionRef.current !== sessionToLoad) {
-            return; // Ignore errors from stale loads
-          }
-          const errorMessage = error instanceof Error ? error.message : String(error);
-
-          // Handle stale session - clear activeSessionId so user can start fresh
-          if (errorMessage.toLowerCase().includes('session not found')) {
-            console.warn('[ChatView] Stale session detected, clearing:', sessionToLoad);
-            sessionStore.setActiveSession(null);
-            return;
-          }
-
-          toast.error('Failed to load messages', errorMessage);
-        });
+    chatStore.ensureSession(sessionToLoad);
+    const sessionState = chatStore.getSessionState(sessionToLoad);
+    if (sessionState.hasLoaded || sessionState.isLoadingMessages) {
+      return;
     }
 
-    // Cleanup: mark session as stale when effect runs again
+    chatStore.loadMessages(sessionToLoad)
+      .then(() => {
+        if (currentSessionRef.current !== sessionToLoad) return;
+      })
+      .catch((error) => {
+        if (currentSessionRef.current !== sessionToLoad) return;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        if (errorMessage.toLowerCase().includes('session not found')) {
+          console.warn('[ChatView] Stale session detected, clearing:', sessionToLoad);
+          sessionStore.setActiveSession(null);
+          return;
+        }
+
+        toast.error('Failed to load messages', errorMessage);
+      });
+
     return () => {
       currentSessionRef.current = null;
     };
   }, [activeSessionId]);
 
   const hasMessages = messages.length > 0;
+
+  const deriveTitle = (text: string) => {
+    const trimmed = text.trim().replace(/\s+/g, ' ');
+    if (!trimmed) return null;
+    const words = trimmed.split(' ').slice(0, 8).join(' ');
+    const date = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return `${words} — ${date}`;
+  };
 
   // Handle send message
   const handleSend = useCallback(async (message: string, messageAttachments?: Attachment[]) => {
@@ -103,6 +96,7 @@ export function ChatView() {
     isSendingRef.current = true;
 
     let sessionId = activeSessionId;
+    let createdNew = false;
 
     try {
       // Create session if none active
@@ -110,10 +104,20 @@ export function ChatView() {
         try {
           const workingDir = defaultWorkingDirectory || '/';
           // Ensure model is a valid non-empty string, fall back to default if not
-          const modelToUse = selectedModel && typeof selectedModel === 'string' && selectedModel.trim()
+          const selectedIsValid = selectedModel && availableModels.some((m) => m.id === selectedModel);
+          const modelToUse = selectedIsValid
             ? selectedModel
-            : 'gemini-3.0-flash-preview';
+            : availableModels[0]?.id;
+
+          if (!modelToUse) {
+            const message = modelsLoading
+              ? 'Models are still loading. Try again in a moment.'
+              : 'No models available. Check your API key and model access.';
+            toast.error('No model available', message);
+            return;
+          }
           sessionId = await createSession(workingDir, modelToUse);
+          createdNew = true;
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           toast.error('Failed to create session', errorMessage);
@@ -121,9 +125,22 @@ export function ChatView() {
         }
       }
 
+      ensureSession(sessionId);
+
       // Send message
       await sendMessage(sessionId, message, messageAttachments);
       setAttachments([]);
+
+      if (createdNew) {
+        const existingTitle = sessions.find((s) => s.id === sessionId)?.title;
+        if (!existingTitle) {
+          const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+          updateSessionTitle(sessionId, derivedTitle).catch((error) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            toast.error('Failed to update session title', errorMessage);
+          });
+        }
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to send message', errorMessage);
@@ -131,7 +148,17 @@ export function ChatView() {
       // CRITICAL: Clear the flag after send completes (success or failure)
       isSendingRef.current = false;
     }
-  }, [isStreaming, activeSessionId, defaultWorkingDirectory, selectedModel, createSession, sendMessage]);
+  }, [
+    isStreaming,
+    activeSessionId,
+    defaultWorkingDirectory,
+    selectedModel,
+    createSession,
+    sendMessage,
+    ensureSession,
+    updateSessionTitle,
+    sessions,
+  ]);
 
   // Handle stop generation
   const handleStop = useCallback(async () => {
@@ -146,13 +173,6 @@ export function ChatView() {
 
   // Handle quick action from welcome screen
   const handleQuickAction = useCallback((action: QuickAction) => {
-    if (action.id === 'plugins') {
-      // Navigate to connectors - handled by MainLayout via props
-      // For now, show toast informing user
-      toast.info('Plugins', 'Navigate to Settings > Connectors to manage plugins');
-      return;
-    }
-
     // Pre-fill input with action prompt
     if (action.prompt) {
       setInitialMessage(action.prompt);
@@ -180,9 +200,10 @@ export function ChatView() {
       const isAudio = file.type.startsWith('audio/');
       const isVideo = file.type.startsWith('video/');
       const isText = isTextFile(file);
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
       const attachment: Attachment = {
-        type: isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : isText ? 'text' : 'file',
+        type: isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : isPdf ? 'pdf' : isText ? 'text' : 'file',
         name: file.name,
         mimeType: file.type,
         size: file.size,
@@ -201,7 +222,7 @@ export function ChatView() {
         return;
       }
 
-      if (isAudio || isVideo) {
+      if (isAudio || isVideo || isPdf) {
         if (file.size > maxMediaSize) {
           toast.error('File too large', `${file.name} exceeds 25MB and will not be sent to the model.`);
           setAttachments((prev) => [...prev, { ...attachment, type: 'file' }]);
@@ -247,6 +268,10 @@ export function ChatView() {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const handleAttachmentCreate = useCallback((attachment: Attachment) => {
+    setAttachments((prev) => [...prev, attachment]);
+  }, []);
+
   // Drag and drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -278,7 +303,7 @@ export function ChatView() {
 
   return (
     <div
-      className="flex-1 flex flex-col min-w-0 bg-[#0D0D0F] relative"
+      className="flex-1 flex flex-col min-w-0 min-h-0 bg-transparent relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -290,7 +315,7 @@ export function ChatView() {
       <SessionHeader />
 
       {/* Messages or Welcome Screen */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {hasMessages ? (
           <MessageList />
         ) : (
@@ -306,6 +331,7 @@ export function ChatView() {
         isStreaming={isStreaming}
         attachments={attachments}
         onAttachmentAdd={handleFileSelect}
+        onAttachmentCreate={handleAttachmentCreate}
         onAttachmentRemove={handleRemoveAttachment}
         initialMessage={initialMessage}
         onInitialMessageConsumed={handleInitialMessageConsumed}

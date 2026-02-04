@@ -13,8 +13,8 @@ export interface BadgeProps {
 
 const variantStyles = {
   default: 'bg-white/[0.08] text-white/80 border-white/[0.08]',
-  primary: 'bg-[#6B6EF0]/20 text-[#8B8EFF] border-[#6B6EF0]/30',
-  secondary: 'bg-[#8A62C2]/20 text-[#A47CDE] border-[#8A62C2]/30',
+  primary: 'bg-[#4C71FF]/20 text-[#8CA2FF] border-[#4C71FF]/30',
+  secondary: 'bg-[#2B48BE]/20 text-[#8CA2FF] border-[#2B48BE]/30',
   success: 'bg-[#50956A]/20 text-[#6BB88A] border-[#50956A]/30',
   warning: 'bg-[#F5C400]/20 text-[#FFD700] border-[#F5C400]/30',
   error: 'bg-[#FF5449]/20 text-[#FF7A72] border-[#FF5449]/30',
@@ -24,8 +24,8 @@ const variantStyles = {
 
 const dotColors = {
   default: 'bg-white/60',
-  primary: 'bg-[#8B8EFF]',
-  secondary: 'bg-[#A47CDE]',
+  primary: 'bg-[#8CA2FF]',
+  secondary: 'bg-[#8CA2FF]',
   success: 'bg-[#6BB88A]',
   warning: 'bg-[#FFD700]',
   error: 'bg-[#FF7A72]',

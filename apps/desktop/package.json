@@ -22,6 +22,8 @@
   "dependencies": {
     "@assistant-ui/react": "^0.7.0",
     "@cyntler/react-doc-viewer": "^1.17.1",
+    "@fontsource/jetbrains-mono": "^5.0.19",
+    "@fontsource/sora": "^5.0.20",
     "@gemini-cowork/auth": "workspace:*",
     "@gemini-cowork/core": "workspace:*",
     "@gemini-cowork/providers": "workspace:*",

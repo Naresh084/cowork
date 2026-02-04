@@ -19,6 +19,7 @@ import {
   DialogContent,
 } from '../ui/Dialog';
 import { useChatStore, type ExtendedPermissionRequest } from '../../stores/chat-store';
+import { useSessionStore } from '../../stores/session-store';
 import { toast } from '../ui/Toast';
 
 interface PermissionDialogProps {
@@ -110,7 +111,7 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
         request.id,
         rememberChoice ? 'allow_session' : 'allow'
       );
-      removePermissionRequest(request.id);
+      removePermissionRequest(request.sessionId, request.id);
       onClose?.();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -124,7 +125,7 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
     setIsProcessing(true);
     try {
       await respondToPermission(request.sessionId, request.id, 'deny');
-      removePermissionRequest(request.id);
+      removePermissionRequest(request.sessionId, request.id);
       onClose?.();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -307,7 +308,8 @@ function getPermissionType(
 
 // Container that shows all pending permission dialogs
 export function PermissionDialogContainer() {
-  const pendingPermissions = useChatStore((state) => state.pendingPermissions);
+  const { activeSessionId } = useSessionStore();
+  const pendingPermissions = useChatStore((state) => state.getSessionState(activeSessionId).pendingPermissions);
 
   // Show the first pending permission
   const currentRequest = pendingPermissions[0];

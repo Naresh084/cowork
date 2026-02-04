@@ -37,170 +37,269 @@ export interface ResearchProgress {
   progress: number;
 }
 
-interface AgentState {
+export interface SessionAgentState {
   isRunning: boolean;
   tasks: Task[];
   artifacts: Artifact[];
   contextFiles: Artifact[];
   contextUsage: ContextUsage;
-  currentModel: string;
-  currentSessionId: string | null;
-  previewArtifact: Artifact | null;
   researchProgress: ResearchProgress | null;
 }
 
+interface AgentState {
+  sessions: Record<string, SessionAgentState>;
+  previewArtifact: Artifact | null;
+}
+
 interface AgentActions {
+  // Session helpers
+  getSessionState: (sessionId: string | null) => SessionAgentState;
+  ensureSession: (sessionId: string) => void;
+  resetSession: (sessionId: string) => void;
+  removeSession: (sessionId: string) => void;
+
   // Task management
-  setTasks: (tasks: Task[]) => void;
-  updateTask: (task: Task) => void;
-  addTask: (task: Task) => void;
-  removeTask: (id: string) => void;
-  clearTasks: () => void;
+  setTasks: (sessionId: string, tasks: Task[]) => void;
+  updateTask: (sessionId: string, task: Task) => void;
+  addTask: (sessionId: string, task: Task) => void;
+  removeTask: (sessionId: string, id: string) => void;
+  clearTasks: (sessionId: string) => void;
 
   // Artifact management
-  addArtifact: (artifact: Artifact) => void;
-  updateArtifact: (id: string, updates: Partial<Artifact>) => void;
-  removeArtifact: (id: string) => void;
-  clearArtifacts: () => void;
-  setContextFiles: (files: Artifact[]) => void;
-  clearContextFiles: () => void;
+  setArtifacts: (sessionId: string, artifacts: Artifact[]) => void;
+  addArtifact: (sessionId: string, artifact: Artifact) => void;
+  updateArtifact: (sessionId: string, id: string, updates: Partial<Artifact>) => void;
+  removeArtifact: (sessionId: string, id: string) => void;
+  clearArtifacts: (sessionId: string) => void;
+  setContextFiles: (sessionId: string, files: Artifact[]) => void;
+  clearContextFiles: (sessionId: string) => void;
 
   // Context management
-  setContextUsage: (used: number, total: number) => void;
+  setContextUsage: (sessionId: string, used: number, total: number) => void;
   refreshContextUsage: (sessionId: string) => Promise<void>;
 
   // State management
-  setRunning: (running: boolean) => void;
-  setCurrentModel: (model: string) => void;
-  setCurrentSessionId: (sessionId: string | null) => void;
-  reset: () => void;
+  setRunning: (sessionId: string, running: boolean) => void;
 
   // Preview management
   setPreviewArtifact: (artifact: Artifact | null) => void;
   clearPreviewArtifact: () => void;
 
   // Research progress
-  setResearchProgress: (progress: ResearchProgress | null) => void;
+  setResearchProgress: (sessionId: string, progress: ResearchProgress | null) => void;
 }
 
 // Default context window (1M tokens for Gemini 3.0 models)
 // This is updated dynamically when model info is fetched from the API
 const DEFAULT_CONTEXT_WINDOW = 1048576;
 
-const initialState: AgentState = {
+const createSessionState = (): SessionAgentState => ({
   isRunning: false,
   tasks: [],
   artifacts: [],
   contextFiles: [],
   contextUsage: { used: 0, total: DEFAULT_CONTEXT_WINDOW, percentage: 0 },
-  currentModel: 'gemini-3.0-flash-preview',
-  currentSessionId: null,
-  previewArtifact: null,
   researchProgress: null,
+});
+
+const EMPTY_SESSION_STATE = createSessionState();
+
+const updateSession = (
+  state: AgentState,
+  sessionId: string,
+  updater: (session: SessionAgentState) => SessionAgentState
+) => {
+  const existing = state.sessions[sessionId] ?? createSessionState();
+  return {
+    sessions: {
+      ...state.sessions,
+      [sessionId]: updater(existing),
+    },
+  };
 };
 
-export const useAgentStore = create<AgentState & AgentActions>((set) => ({
-  ...initialState,
+export const useAgentStore = create<AgentState & AgentActions>((set, get) => ({
+  sessions: {},
+  previewArtifact: null,
 
-  // Task management
-  setTasks: (tasks: Task[]) => {
-    set({ tasks });
+  getSessionState: (sessionId: string | null) => {
+    if (!sessionId) return EMPTY_SESSION_STATE;
+    return get().sessions[sessionId] ?? EMPTY_SESSION_STATE;
   },
 
-  updateTask: (task: Task) => {
+  ensureSession: (sessionId: string) => {
+    if (!sessionId) return;
     set((state) => {
-      const existingIndex = state.tasks.findIndex((t) => t.id === task.id);
-      if (existingIndex >= 0) {
-        // Update existing task
-        return {
-          tasks: state.tasks.map((t) => (t.id === task.id ? task : t)),
-        };
-      } else {
-        // Task doesn't exist, add it (for write_todos style updates)
-        return {
-          tasks: [...state.tasks, task],
-        };
-      }
+      if (state.sessions[sessionId]) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: createSessionState(),
+        },
+      };
     });
   },
 
-  addTask: (task: Task) => {
+  resetSession: (sessionId: string) => {
+    if (!sessionId) return;
     set((state) => ({
-      tasks: [...state.tasks, task],
+      sessions: {
+        ...state.sessions,
+        [sessionId]: createSessionState(),
+      },
     }));
   },
 
-  removeTask: (id: string) => {
-    set((state) => ({
-      tasks: state.tasks.filter((t) => t.id !== id),
+  removeSession: (sessionId: string) => {
+    set((state) => {
+      if (!state.sessions[sessionId]) return state;
+      const next = { ...state.sessions };
+      delete next[sessionId];
+      return { sessions: next };
+    });
+  },
+
+  // Task management
+  setTasks: (sessionId: string, tasks: Task[]) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      tasks,
+    })));
+  },
+
+  updateTask: (sessionId: string, task: Task) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => {
+      const existingIndex = session.tasks.findIndex((t) => t.id === task.id);
+      if (existingIndex >= 0) {
+        return {
+          ...session,
+          tasks: session.tasks.map((t) => (t.id === task.id ? task : t)),
+        };
+      }
+      return {
+        ...session,
+        tasks: [...session.tasks, task],
+      };
     }));
   },
 
-  clearTasks: () => {
-    set({ tasks: [] });
+  addTask: (sessionId: string, task: Task) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      tasks: [...session.tasks, task],
+    })));
+  },
+
+  removeTask: (sessionId: string, id: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      tasks: session.tasks.filter((t) => t.id !== id),
+    })));
+  },
+
+  clearTasks: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      tasks: [],
+    })));
   },
 
   // Artifact management
-  addArtifact: (artifact: Artifact) => {
-    set((state) => {
-      // Update existing artifact for same path or add new
-      const existing = state.artifacts.find((a) => a.path === artifact.path);
-      const existingContext = state.contextFiles.find((a) => a.path === artifact.path);
+  setArtifacts: (sessionId: string, artifacts: Artifact[]) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      artifacts,
+      contextFiles: artifacts,
+    })));
+  },
+
+  addArtifact: (sessionId: string, artifact: Artifact) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => {
+      const existing = session.artifacts.find((a) => a.path === artifact.path);
+      const existingContext = session.contextFiles.find((a) => a.path === artifact.path);
 
       const contextFiles = existingContext
-        ? state.contextFiles.map((a) =>
+        ? session.contextFiles.map((a) =>
             a.path === artifact.path ? { ...artifact, id: existingContext.id } : a
           )
-        : [...state.contextFiles, artifact];
+        : [...session.contextFiles, artifact];
 
       if (existing) {
         return {
-          artifacts: state.artifacts.map((a) =>
-            a.path === artifact.path
-              ? { ...artifact, id: existing.id }
-              : a
+          ...session,
+          artifacts: session.artifacts.map((a) =>
+            a.path === artifact.path ? { ...artifact, id: existing.id } : a
           ),
           contextFiles,
         };
       }
-      return { artifacts: [...state.artifacts, artifact], contextFiles };
-    });
+      return { ...session, artifacts: [...session.artifacts, artifact], contextFiles };
+    }));
   },
 
-  updateArtifact: (id: string, updates: Partial<Artifact>) => {
-    set((state) => ({
-      artifacts: state.artifacts.map((a) =>
+  updateArtifact: (sessionId: string, id: string, updates: Partial<Artifact>) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      artifacts: session.artifacts.map((a) =>
         a.id === id ? { ...a, ...updates } : a
       ),
-    }));
+    })));
   },
 
-  removeArtifact: (id: string) => {
-    set((state) => ({
-      artifacts: state.artifacts.filter((a) => a.id !== id),
-      contextFiles: state.contextFiles.filter((a) => a.id !== id),
-    }));
+  removeArtifact: (sessionId: string, id: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      artifacts: session.artifacts.filter((a) => a.id !== id),
+      contextFiles: session.contextFiles.filter((a) => a.id !== id),
+    })));
   },
 
-  clearArtifacts: () => {
-    set({ artifacts: [], contextFiles: [] });
+  clearArtifacts: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      artifacts: [],
+      contextFiles: [],
+    })));
   },
 
-  setContextFiles: (files: Artifact[]) => {
-    set({ contextFiles: files });
+  setContextFiles: (sessionId: string, files: Artifact[]) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      contextFiles: files,
+    })));
   },
 
-  clearContextFiles: () => {
-    set({ contextFiles: [] });
+  clearContextFiles: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      contextFiles: [],
+    })));
   },
 
   // Context management
-  setContextUsage: (used: number, total: number) => {
+  setContextUsage: (sessionId: string, used: number, total: number) => {
+    if (!sessionId) return;
     const percentage = total > 0 ? Math.round((used / total) * 100) : 0;
-    set({ contextUsage: { used, total, percentage } });
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      contextUsage: { used, total, percentage },
+    })));
   },
 
   refreshContextUsage: async (sessionId: string) => {
+    if (!sessionId) return;
     try {
       const result = await invoke<{ used: number; total: number }>(
         'agent_get_context_usage',
@@ -210,36 +309,27 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
         result.total > 0
           ? Math.round((result.used / result.total) * 100)
           : 0;
-      set({
+      set((state) => updateSession(state, sessionId, (session) => ({
+        ...session,
         contextUsage: {
           used: result.used,
           total: result.total,
           percentage,
         },
-      });
+      })));
     } catch (error) {
-      // Silent failure for context usage - not critical to user experience
-      // but log for debugging
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.warn('Failed to refresh context usage:', errorMessage);
     }
   },
 
   // State management
-  setRunning: (running: boolean) => {
-    set({ isRunning: running });
-  },
-
-  setCurrentModel: (model: string) => {
-    set({ currentModel: model });
-  },
-
-  setCurrentSessionId: (sessionId: string | null) => {
-    set({ currentSessionId: sessionId });
-  },
-
-  reset: () => {
-    set(initialState);
+  setRunning: (sessionId: string, running: boolean) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      isRunning: running,
+    })));
   },
 
   // Preview management
@@ -252,34 +342,37 @@ export const useAgentStore = create<AgentState & AgentActions>((set) => ({
   },
 
   // Research progress
-  setResearchProgress: (progress: ResearchProgress | null) => {
-    set({ researchProgress: progress });
+  setResearchProgress: (sessionId: string, progress: ResearchProgress | null) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      researchProgress: progress,
+    })));
   },
 }));
 
-// Selector hooks
-export const useIsAgentRunning = () =>
-  useAgentStore((state) => state.isRunning);
+// Selector hooks (session-scoped)
+export const useSessionTasks = (sessionId: string | null) =>
+  useAgentStore((state) => state.getSessionState(sessionId).tasks);
 
-export const useTasks = () => useAgentStore((state) => state.tasks);
-
-export const useActiveTasks = () =>
+export const useActiveTasks = (sessionId: string | null) =>
   useAgentStore((state) =>
-    state.tasks.filter((t) => t.status !== 'completed')
+    state.getSessionState(sessionId).tasks.filter((t) => t.status !== 'completed')
   );
 
-export const useCompletedTasks = () =>
+export const useCompletedTasks = (sessionId: string | null) =>
   useAgentStore((state) =>
-    state.tasks.filter((t) => t.status === 'completed')
+    state.getSessionState(sessionId).tasks.filter((t) => t.status === 'completed')
   );
 
-export const useArtifacts = () => useAgentStore((state) => state.artifacts);
+export const useSessionArtifacts = (sessionId: string | null) =>
+  useAgentStore((state) => state.getSessionState(sessionId).artifacts);
 
-export const useContextUsage = () =>
-  useAgentStore((state) => state.contextUsage);
+export const useSessionContextUsage = (sessionId: string | null) =>
+  useAgentStore((state) => state.getSessionState(sessionId).contextUsage);
 
-export const useCurrentModel = () =>
-  useAgentStore((state) => state.currentModel);
+export const useSessionResearchProgress = (sessionId: string | null) =>
+  useAgentStore((state) => state.getSessionState(sessionId).researchProgress);
 
-export const useResearchProgress = () =>
-  useAgentStore((state) => state.researchProgress);
+export const useSessionIsRunning = (sessionId: string | null) =>
+  useAgentStore((state) => state.getSessionState(sessionId).isRunning);

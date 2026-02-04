@@ -3,24 +3,63 @@ import { MainLayout } from './components/layout/MainLayout';
 import { Onboarding } from './components/onboarding/Onboarding';
 import { useAuthStore } from './stores/auth-store';
 import { useSessionStore } from './stores/session-store';
+import { useSettingsStore } from './stores/settings-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const { isAuthenticated, initialize } = useAuthStore();
-  const { loadSessions } = useSessionStore();
+  const { isAuthenticated, initialize, apiKey } = useAuthStore();
+  const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
+  const { fetchModels, availableModels, modelsLoading } = useSettingsStore();
 
   useEffect(() => {
+    let isMounted = true;
+    const timeoutId = window.setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    }, 4000);
+
     initialize()
-      .then(() => {
-        return loadSessions();
-      })
       .catch((error) => {
         console.error('[App] Initialization error:', error);
       })
       .finally(() => {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
+        clearTimeout(timeoutId);
       });
-  }, [initialize, loadSessions]);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
+  }, [initialize]);
+
+  // Coordinate backend initialization with session loading
+  useEffect(() => {
+    if (!isAuthenticated || hasLoaded) return;
+
+    const initBackend = async () => {
+      try {
+        console.log('[App] Initializing backend and loading sessions...');
+        await waitForBackend();
+        await loadSessions();
+        console.log('[App] Backend initialized and sessions loaded');
+      } catch (error) {
+        console.error('[App] Failed to initialize backend:', error);
+      }
+    };
+
+    initBackend();
+  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions]);
+
+  useEffect(() => {
+    if (!apiKey || modelsLoading || availableModels.length > 0) return;
+    fetchModels(apiKey).catch((error) => {
+      console.warn('[App] Failed to fetch models:', error);
+    });
+  }, [apiKey, availableModels.length, fetchModels, modelsLoading]);
 
   // Detect system theme
   useEffect(() => {
@@ -36,12 +75,12 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
-  if (isLoading) {
+  if (isLoading && !isAuthenticated) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-primary-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <div className="w-10 h-10 border-4 border-white/40 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-white/70">Initializing…</p>
         </div>
       </div>
     );

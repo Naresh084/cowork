@@ -123,16 +123,16 @@ export function DropZone({ isDragging, className }: DropZoneProps) {
       className={cn(
         'absolute inset-0 z-50',
         'flex flex-col items-center justify-center',
-        'bg-[#6B6EF0]/10 backdrop-blur-sm',
-        'border-2 border-dashed border-[#6B6EF0]',
+        'bg-[#4C71FF]/10 backdrop-blur-sm',
+        'border-2 border-dashed border-[#4C71FF]',
         'rounded-2xl',
         className
       )}
     >
-      <div className="p-4 rounded-full bg-[#6B6EF0]/20 mb-4">
-        <ImageIcon className="w-8 h-8 text-[#8B8EFF]" />
+      <div className="p-4 rounded-full bg-[#4C71FF]/20 mb-4">
+        <ImageIcon className="w-8 h-8 text-[#8CA2FF]" />
       </div>
-      <p className="text-lg font-medium text-[#8B8EFF]">Drop files here</p>
+      <p className="text-lg font-medium text-[#8CA2FF]">Drop files here</p>
       <p className="text-sm text-white/50 mt-1">Images, documents, and more</p>
     </motion.div>
   );

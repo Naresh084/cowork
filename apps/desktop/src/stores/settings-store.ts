@@ -23,6 +23,14 @@ export interface MCPServerConfig {
   error?: string;
 }
 
+export interface SkillConfig {
+  id: string;
+  name: string;
+  path: string;
+  description?: string;
+  enabled: boolean;
+}
+
 export interface PermissionDefaults {
   fileRead: 'ask' | 'allow' | 'deny';
   fileWrite: 'ask' | 'allow' | 'deny';
@@ -34,9 +42,23 @@ export interface PermissionDefaults {
   trustedCommands: string[];
 }
 
+export type ApprovalMode = 'auto' | 'read_only' | 'full';
+
 export type Theme = 'light' | 'dark' | 'system';
 export type FontSize = 'small' | 'medium' | 'large';
 export type ViewMode = 'chat' | 'cowork' | 'code';
+
+export interface SpecializedModels {
+  imageGeneration: string;
+  videoGeneration: string;
+  computerUse: string;
+}
+
+export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
+  imageGeneration: 'imagen-4.0-generate-001',
+  videoGeneration: 'veo-2.0-generate-001',
+  computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+};
 
 export interface RightPanelSections {
   progress: boolean;
@@ -60,15 +82,23 @@ interface SettingsState {
   availableModels: ModelInfo[];
   modelsLoading: boolean;
 
+  // Specialized models (for tasks that require specific model types)
+  specializedModels: SpecializedModels;
+
   // Permissions
   permissionDefaults: PermissionDefaults;
+  approvalMode: ApprovalMode;
 
   // MCP Servers
   mcpServers: MCPServerConfig[];
 
+  // Skills
+  skills: SkillConfig[];
+
   // UI State
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
+  rightPanelPinned: boolean;
   rightPanelTab: 'tasks' | 'artifacts' | 'memory';
   viewMode: ViewMode;
   scratchpadContent: string;
@@ -100,6 +130,17 @@ interface SettingsActions {
   syncMCPServers: (servers: MCPServerConfig[]) => Promise<void>;
   loadGeminiExtensions: () => Promise<void>;
 
+  // Skills management
+  addSkill: (config: Omit<SkillConfig, 'id'>) => void;
+  updateSkill: (skillId: string, updates: Partial<SkillConfig>) => void;
+  removeSkill: (skillId: string) => void;
+  toggleSkill: (skillId: string) => void;
+  syncSkills: (skills: SkillConfig[]) => Promise<void>;
+
+  // Specialized models management
+  updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
+  syncSpecializedModels: () => Promise<void>;
+
   // Permission management
   updatePermissionDefaults: (
     updates: Partial<PermissionDefaults>
@@ -114,6 +155,7 @@ interface SettingsActions {
   // UI State
   toggleSidebar: () => void;
   toggleRightPanel: () => void;
+  toggleRightPanelPinned: () => void;
   setRightPanelTab: (tab: 'tasks' | 'artifacts' | 'memory') => void;
   setViewMode: (mode: ViewMode) => void;
   setScratchpadContent: (content: string) => void;
@@ -141,23 +183,30 @@ const initialState: SettingsState = {
   showLineNumbers: true,
   autoSave: true,
 
-  // Model - Using Gemini 3 Flash Preview as default
-  // Token limits from: https://ai.google.dev/gemini-api/docs/models
-  selectedModel: 'gemini-3-flash-preview',
+  // Model - populated from Google Models API
+  selectedModel: '',
   temperature: 0.7,
-  maxOutputTokens: 65536, // Updated to match Gemini 3.0 output limit
+  maxOutputTokens: 0,
   availableModels: [],
   modelsLoading: false,
 
+  // Specialized models
+  specializedModels: { ...DEFAULT_SPECIALIZED_MODELS },
+
   // Permissions
   permissionDefaults: defaultPermissions,
+  approvalMode: 'auto',
 
   // MCP Servers
   mcpServers: [],
 
+  // Skills
+  skills: [],
+
   // UI State
   sidebarCollapsed: false,
   rightPanelCollapsed: true,
+  rightPanelPinned: false,
   rightPanelTab: 'tasks',
   viewMode: 'cowork',
   scratchpadContent: '',
@@ -186,6 +235,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           set({ isLoading: false });
           const state = useSettingsStore.getState();
           await state.syncMCPServers(state.mcpServers);
+          await state.syncSkills(state.skills);
+          await state.syncSpecializedModels();
           await state.loadGeminiExtensions();
         } catch (error) {
           set({
@@ -235,7 +286,21 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             outputTokenLimit: m.output_token_limit,
           }));
 
-          set({ availableModels: mappedModels, modelsLoading: false });
+          const selected = useSettingsStore.getState().selectedModel;
+          const hasSelected = mappedModels.some((model) => model.id === selected);
+          const nextSelected = hasSelected ? selected : (mappedModels[0]?.id ?? selected);
+
+          set({
+            availableModels: mappedModels,
+            modelsLoading: false,
+            selectedModel: nextSelected,
+          });
+
+          try {
+            await invoke('agent_set_models', { models: mappedModels });
+          } catch (error) {
+            console.warn('[SettingsStore] Failed to sync models to sidecar:', error);
+          }
         } catch (error) {
           set({
             modelsLoading: false,
@@ -319,6 +384,71 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           await useSettingsStore.getState().syncMCPServers(useSettingsStore.getState().mcpServers);
         } catch (error) {
           console.warn('Failed to load Gemini extensions:', error);
+        }
+      },
+
+      // Skills management
+      addSkill: (config) => {
+        const newSkill: SkillConfig = {
+          ...config,
+          id: `skill-${Date.now()}`,
+        };
+        set((state) => ({
+          skills: [...state.skills, newSkill],
+        }));
+        void useSettingsStore.getState().syncSkills([
+          ...useSettingsStore.getState().skills,
+          newSkill,
+        ]);
+      },
+
+      updateSkill: (skillId, updates) => {
+        set((state) => ({
+          skills: state.skills.map((s) =>
+            s.id === skillId ? { ...s, ...updates } : s
+          ),
+        }));
+        void useSettingsStore.getState().syncSkills(useSettingsStore.getState().skills);
+      },
+
+      removeSkill: (skillId) => {
+        set((state) => ({
+          skills: state.skills.filter((s) => s.id !== skillId),
+        }));
+        void useSettingsStore.getState().syncSkills(useSettingsStore.getState().skills);
+      },
+
+      toggleSkill: (skillId) => {
+        set((state) => ({
+          skills: state.skills.map((s) =>
+            s.id === skillId ? { ...s, enabled: !s.enabled } : s
+          ),
+        }));
+        void useSettingsStore.getState().syncSkills(useSettingsStore.getState().skills);
+      },
+
+      syncSkills: async (skills) => {
+        try {
+          await invoke('agent_set_skills', { skills });
+        } catch (error) {
+          console.warn('Failed to sync skills:', error);
+        }
+      },
+
+      // Specialized models management
+      updateSpecializedModel: async (key, value) => {
+        set((state) => ({
+          specializedModels: { ...state.specializedModels, [key]: value },
+        }));
+        await useSettingsStore.getState().syncSpecializedModels();
+      },
+
+      syncSpecializedModels: async () => {
+        const { specializedModels } = useSettingsStore.getState();
+        try {
+          await invoke('agent_set_specialized_models', { models: specializedModels });
+        } catch (error) {
+          console.warn('Failed to sync specialized models:', error);
         }
       },
 
@@ -412,6 +542,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set((state) => ({ rightPanelCollapsed: !state.rightPanelCollapsed }));
       },
 
+      toggleRightPanelPinned: () => {
+        set((state) => ({ rightPanelPinned: !state.rightPanelPinned }));
+      },
+
       setRightPanelTab: (tab) => {
         set({ rightPanelTab: tab });
       },
@@ -448,10 +582,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         selectedModel: state.selectedModel,
         temperature: state.temperature,
         maxOutputTokens: state.maxOutputTokens,
+        specializedModels: state.specializedModels,
         permissionDefaults: state.permissionDefaults,
+        approvalMode: state.approvalMode,
         mcpServers: state.mcpServers,
         sidebarCollapsed: state.sidebarCollapsed,
         rightPanelCollapsed: state.rightPanelCollapsed,
+        rightPanelPinned: state.rightPanelPinned,
         rightPanelTab: state.rightPanelTab,
         viewMode: state.viewMode,
         scratchpadContent: state.scratchpadContent,
@@ -476,10 +613,23 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           validModel = initialState.selectedModel;
         }
 
+        const persistedMode = persisted?.approvalMode;
+        const validMode = persistedMode === 'auto' || persistedMode === 'read_only' || persistedMode === 'full'
+          ? persistedMode
+          : initialState.approvalMode;
+
+        // Merge specialized models with defaults (ensure all keys exist)
+        const validSpecializedModels = {
+          ...DEFAULT_SPECIALIZED_MODELS,
+          ...(persisted?.specializedModels || {}),
+        };
+
         return {
           ...currentState,
           ...persisted,
+          approvalMode: validMode,
           selectedModel: validModel,
+          specializedModels: validSpecializedModels,
         };
       },
     }
@@ -499,10 +649,14 @@ export const useMCPServers = () =>
   useSettingsStore((state) => state.mcpServers);
 export const usePermissionDefaults = () =>
   useSettingsStore((state) => state.permissionDefaults);
+export const useApprovalMode = () =>
+  useSettingsStore((state) => state.approvalMode);
 export const useSidebarCollapsed = () =>
   useSettingsStore((state) => state.sidebarCollapsed);
 export const useRightPanelCollapsed = () =>
   useSettingsStore((state) => state.rightPanelCollapsed);
+export const useRightPanelPinned = () =>
+  useSettingsStore((state) => state.rightPanelPinned);
 export const useRightPanelTab = () =>
   useSettingsStore((state) => state.rightPanelTab);
 export const useViewMode = () =>
@@ -511,3 +665,5 @@ export const useScratchpadContent = () =>
   useSettingsStore((state) => state.scratchpadContent);
 export const useRightPanelSections = () =>
   useSettingsStore((state) => state.rightPanelSections);
+export const useSpecializedModels = () =>
+  useSettingsStore((state) => state.specializedModels);

@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname, isAbsolute, resolve } from 'path';
 import { homedir } from 'os';
 import type { MCPServerConfig } from '@gemini-cowork/mcp';
 
@@ -58,8 +58,21 @@ export async function loadGeminiExtensions(): Promise<GeminiExtensionsResult> {
       const extensionPrompt = data.prompt;
       const extensionContext =
         data.contextFileName || data.context_file_name;
+      const manifestDir = dirname(manifestPath);
 
       for (const server of data.mcpServers ?? []) {
+        const contextValue = server.contextFileName || extensionContext;
+        let resolvedContext: string | undefined;
+        if (contextValue) {
+          if (contextValue.startsWith('~')) {
+            resolvedContext = join(homedir(), contextValue.slice(1));
+          } else if (isAbsolute(contextValue)) {
+            resolvedContext = contextValue;
+          } else {
+            resolvedContext = resolve(manifestDir, contextValue);
+          }
+        }
+
         servers.push({
           id: `ext-${server.name}-${Math.random().toString(36).slice(2, 8)}`,
           name: server.name,
@@ -68,7 +81,7 @@ export async function loadGeminiExtensions(): Promise<GeminiExtensionsResult> {
           env: server.env,
           enabled: server.enabled ?? true,
           prompt: server.prompt || extensionPrompt,
-          contextFileName: server.contextFileName || extensionContext,
+          contextFileName: resolvedContext,
         });
       }
     } catch {

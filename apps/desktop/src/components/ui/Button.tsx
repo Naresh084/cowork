@@ -16,10 +16,10 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 
 const variantStyles = {
   primary: [
-    'bg-[#6B6EF0] text-white',
-    'hover:bg-[#8B8EFF]',
-    'focus:ring-[#6B6EF0]/50',
-    'shadow-lg shadow-[#6B6EF0]/25 hover:shadow-xl hover:shadow-[#6B6EF0]/35',
+    'bg-[#4C71FF] text-white',
+    'hover:bg-[#8CA2FF]',
+    'focus:ring-[#4C71FF]/50',
+    'shadow-lg shadow-[#4C71FF]/25 hover:shadow-xl hover:shadow-[#4C71FF]/35',
   ],
   secondary: [
     'bg-white/[0.08] text-white',
@@ -42,10 +42,10 @@ const variantStyles = {
     'focus:ring-white/20',
   ],
   gradient: [
-    'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0] text-white',
-    'hover:from-[#6B6EF0] hover:to-[#8B8EFF]',
-    'focus:ring-[#6B6EF0]/50',
-    'shadow-lg shadow-[#6B6EF0]/25 hover:shadow-xl hover:shadow-[#6B6EF0]/35',
+    'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF] text-white',
+    'hover:from-[#4C71FF] hover:to-[#8CA2FF]',
+    'focus:ring-[#4C71FF]/50',
+    'shadow-lg shadow-[#4C71FF]/25 hover:shadow-xl hover:shadow-[#4C71FF]/35',
   ],
   glass: [
     'bg-white/[0.03] backdrop-blur-xl text-white/80',

@@ -25,45 +25,45 @@
        PRIMARY - Refined Indigo (Material You tonal palette)
        ========================================================================== */
     --primary-0: 0 0 0;
-    --primary-10: 0 16 107;
-    --primary-20: 0 35 145;
-    --primary-30: 0 56 185;
-    --primary-40: 79 82 217;          /* #4F52D9 - Container */
-    --primary-50: 107 110 240;        /* #6B6EF0 - Main Primary */
-    --primary-60: 139 142 255;        /* #8B8EFF - Hover */
-    --primary-70: 171 174 255;        /* #ABAEFF - Light text */
-    --primary-80: 198 198 255;        /* #C6C6FF - On container */
-    --primary-90: 226 224 255;
-    --primary-95: 241 239 255;
-    --primary-99: 255 251 255;
+    --primary-10: 4 16 51;
+    --primary-20: 9 31 92;
+    --primary-30: 20 49 143;
+    --primary-40: 43 72 190;          /* #2B48BE - Container */
+    --primary-50: 76 113 255;         /* #4C71FF - Main Primary */
+    --primary-60: 107 138 255;        /* #6B8AFF - Hover */
+    --primary-70: 140 162 255;        /* #8CA2FF - Light text */
+    --primary-80: 176 191 255;        /* #B0BFFF - On container */
+    --primary-90: 214 223 255;
+    --primary-95: 235 239 255;
+    --primary-99: 250 251 255;
     --primary-100: 255 255 255;
 
-    --primary: 107 110 240;
+    --primary: 76 113 255;
     --primary-foreground: 13 13 15;
-    --primary-container: 79 82 217;
-    --primary-container-foreground: 198 198 255;
+    --primary-container: 43 72 190;
+    --primary-container-foreground: 176 191 255;
 
     /* ==========================================================================
        SECONDARY - Sophisticated Purple (Material You tonal palette)
        ========================================================================== */
     --secondary-0: 0 0 0;
-    --secondary-10: 35 0 70;
-    --secondary-20: 61 14 106;
-    --secondary-30: 86 45 138;
-    --secondary-40: 112 73 166;       /* #7049A6 - Container */
-    --secondary-50: 138 98 194;       /* #8A62C2 - Main Secondary */
-    --secondary-60: 164 124 222;      /* #A47CDE - Hover */
-    --secondary-70: 191 151 251;      /* #BF97FB - Light text */
-    --secondary-80: 216 186 255;      /* #D8BAFF - On container */
-    --secondary-90: 237 220 255;
-    --secondary-95: 247 237 255;
-    --secondary-99: 255 251 255;
+    --secondary-10: 18 23 33;
+    --secondary-20: 31 38 52;
+    --secondary-30: 43 52 72;
+    --secondary-40: 55 63 78;         /* #373F4E - Container */
+    --secondary-50: 85 95 115;        /* #555F73 - Main Secondary */
+    --secondary-60: 110 123 148;      /* #6E7B94 - Hover */
+    --secondary-70: 136 153 180;      /* #8899B4 - Light text */
+    --secondary-80: 170 186 211;      /* #AABAD3 - On container */
+    --secondary-90: 205 216 235;
+    --secondary-95: 228 235 248;
+    --secondary-99: 249 251 255;
     --secondary-100: 255 255 255;
 
-    --secondary: 138 98 194;
+    --secondary: 85 95 115;
     --secondary-foreground: 13 13 15;
-    --secondary-container: 112 73 166;
-    --secondary-container-foreground: 216 186 255;
+    --secondary-container: 55 63 78;
+    --secondary-container-foreground: 170 186 211;
 
     /* ==========================================================================
        TERTIARY - Refined Teal (Complementary accent)
@@ -209,7 +209,7 @@
     /* ==========================================================================
        RING (Focus states)
        ========================================================================== */
-    --ring: 107 110 240;
+    --ring: 76 113 255;
     --ring-opacity: 0.5;
 
     /* ==========================================================================
@@ -237,11 +237,11 @@
   }
 
   html {
-    background-color: #0D0D0F;
+    background-color: #0B0C10;
   }
 
   body {
-    @apply bg-[#0D0D0F] text-white/95 antialiased;
+    @apply bg-[#0B0C10] text-white/95 antialiased font-sans;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "ss02" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -281,6 +281,65 @@
 
   .window-no-drag {
     -webkit-app-region: no-drag;
+  }
+
+  /* =============================================================================
+     TEXT SELECTION - Constrain selection to text content only
+     ============================================================================= */
+
+  /* Custom selection color */
+  ::selection {
+    @apply bg-[#4C71FF]/30 text-white;
+  }
+
+  /* Prevent selection of flex container empty space */
+  .select-text-only {
+    user-select: text;
+  }
+
+  .select-text-only > * {
+    user-select: text;
+  }
+
+  /* Message bubbles - constrain selection to content */
+  .message-content {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Prevent flex containers from extending selection */
+  .no-select-extend {
+    user-select: none;
+  }
+
+  .no-select-extend > .message-content,
+  .no-select-extend .prose,
+  .no-select-extend p,
+  .no-select-extend span,
+  .no-select-extend code,
+  .no-select-extend pre {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Text content - use w-fit pattern to constrain selection to actual text */
+  .text-select-contained {
+    width: fit-content;
+    max-width: 100%;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Prevent double-click selection from extending into padding/margins */
+  .select-text-tight {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .select-text-tight::before,
+  .select-text-tight::after {
+    user-select: none;
+    -webkit-user-select: none;
   }
 }
 
@@ -409,6 +468,32 @@
   }
 
   /* =============================================================================
+     CODEX INSPIRED BACKGROUNDS
+     ============================================================================= */
+  .codex-grid {
+    background-color: #0B0C10;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: -1px -1px;
+  }
+
+  .codex-vignette {
+    position: relative;
+  }
+
+  .codex-vignette::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at top, rgba(0, 0, 0, 0.25) 0%, transparent 60%),
+      radial-gradient(ellipse at bottom, rgba(0, 0, 0, 0.35) 0%, transparent 55%);
+  }
+
+  /* =============================================================================
      ANIMATION KEYFRAMES
      ============================================================================= */
   @keyframes fadeUp {
@@ -474,6 +559,11 @@
     100% { background-position: 200% 0; }
   }
 
+  @keyframes codexGlowSweep {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
   @keyframes typing {
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-4px); }
@@ -522,6 +612,73 @@
     background-size: 200% 100%;
   }
 
+  .codex-shimmer-row {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .codex-shimmer-row::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(76, 113, 255, 0.35) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: codexGlowSweep 2.4s linear infinite;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .codex-shimmer-text {
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  @supports (-webkit-background-clip: text) {
+    .codex-shimmer-text {
+      background-image: linear-gradient(90deg, rgba(255,255,255,0.25) 0%, rgba(76,113,255,0.95) 50%, rgba(255,255,255,0.25) 100%);
+      background-size: 200% 100%;
+      animation: codexGlowSweep 2.4s linear infinite;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+  }
+
+  .codex-tool-row {
+    padding: 6px 0;
+  }
+
+  .codex-thinking {
+    position: relative;
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .codex-thinking::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -4px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(76,113,255,0.5), transparent);
+    background-size: 200% 100%;
+    animation: codexGlowSweep 2.4s linear infinite;
+    opacity: 0.7;
+  }
+
+  @supports (-webkit-background-clip: text) {
+    .codex-thinking {
+      background-image: linear-gradient(90deg, rgba(255,255,255,0.35) 0%, rgba(76,113,255,0.95) 50%, rgba(255,255,255,0.35) 100%);
+      background-size: 200% 100%;
+      animation: codexGlowSweep 2.4s linear infinite;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+  }
+
   .animate-typing {
     animation: typing 1s ease-in-out infinite;
   }
@@ -567,6 +724,20 @@
 
   .hover-lift:hover {
     transform: translateY(-2px);
+  }
+
+  /* =============================================================================
+     TASK PROGRESS BAR SHIMMER ANIMATION
+     ============================================================================= */
+  .task-progress-shimmer {
+    background: linear-gradient(90deg, #4C71FF 0%, #8CA2FF 50%, #4C71FF 100%);
+    background-size: 200% 100%;
+    animation: progress-shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes progress-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 }
 
