@@ -10,7 +10,7 @@ import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
 
 export function MainLayout() {
-  const { sidebarCollapsed, rightPanelPinned } = useSettingsStore();
+  const { sidebarCollapsed } = useSettingsStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
   const { showApiKeyModal, apiKeyError, setShowApiKeyModal } = useAppStore();
 
@@ -31,11 +31,10 @@ export function MainLayout() {
         {/* Main View */}
         <main className="flex-1 flex flex-col min-w-0 min-h-0 relative codex-grid codex-vignette overflow-x-hidden">
           <ChatView />
-          {!rightPanelPinned && <RightPanel onPreviewArtifact={handlePreviewArtifact} />}
         </main>
 
-        {/* Right Panel */}
-        {rightPanelPinned && <RightPanel onPreviewArtifact={handlePreviewArtifact} />}
+        {/* Right Panel - Always connected to layout */}
+        <RightPanel onPreviewArtifact={handlePreviewArtifact} />
       </div>
 
       {/* Toast notifications */}
