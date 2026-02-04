@@ -569,6 +569,7 @@ export class AgentRunner {
             // Extract thinking content (agent's internal reasoning)
             const thinkingText = this.extractThinkingContent(event);
             if (thinkingText) {
+              console.log(`[stream] Thinking content received: ${thinkingText.substring(0, 100)}...`);
               if (!thinkingStarted) {
                 eventEmitter.thinkingStart(sessionId);
                 thinkingStarted = true;
@@ -1431,9 +1432,15 @@ execute({ command: "git status" })
       throw new Error('API key not set');
     }
 
+    console.log(`[createDeepAgent] Model: ${session.model}`);
+
     const model = new ChatGoogleGenerativeAI({
       model: session.model,
       apiKey: this.apiKey,
+      // Enable thinking content to be returned in responses
+      thinkingConfig: {
+        includeThoughts: true,
+      },
     });
 
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));

@@ -832,8 +832,14 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     const query = getArgValue(args, ['query', 'topic']) || 'topic';
     return (
       <>
-        <span className="text-[11px] text-white/55">Researched</span>
-        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className="text-[11px] text-white/55 flex-shrink-0">Researched</span>
+        <span
+          className={cn(
+            'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
+            isActive && 'codex-shimmer-text'
+          )}
+          title={query}
+        >
           {query}
         </span>
       </>
@@ -844,8 +850,14 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     const prompt = getArgValue(args, ['prompt', 'query', 'title', 'name']) || tool.name;
     return (
       <>
-        <span className="text-[11px] text-white/55">Designed</span>
-        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className="text-[11px] text-white/55 flex-shrink-0">Designed</span>
+        <span
+          className={cn(
+            'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
+            isActive && 'codex-shimmer-text'
+          )}
+          title={prompt}
+        >
           {prompt}
         </span>
       </>
@@ -1925,78 +1937,65 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
 
 /**
  * Thinking block component - displays agent's internal reasoning
- * Shows a one-liner summary with expandable dropdown for full content
+ * Shows "Thinking..." with sliding glow effect and optional dropdown for details
  */
 function ThinkingBlock({ content, isActive }: { content: string; isActive: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false);
-
-  // Get first line or first 100 chars as summary
-  const getSummary = () => {
-    if (!content) return 'Thinking...';
-    const firstLine = content.split('\n')[0];
-    if (firstLine.length > 100) {
-      return firstLine.substring(0, 100) + '…';
-    }
-    return firstLine || 'Thinking...';
-  };
-
   const hasContent = content && content.trim().length > 0;
-  const hasMoreContent = content && (content.includes('\n') || content.length > 100);
 
   return (
-    <div className="rounded-lg bg-[#1A1B20] border border-white/[0.06] overflow-hidden">
-      {/* Header - always visible */}
-      <button
-        onClick={() => hasMoreContent && setIsExpanded(!isExpanded)}
-        disabled={!hasMoreContent}
-        className={cn(
-          'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors',
-          hasMoreContent && 'hover:bg-white/[0.02] cursor-pointer',
-          !hasMoreContent && 'cursor-default'
-        )}
-      >
-        {/* Thinking icon with animation */}
-        <div className={cn(
-          'w-4 h-4 rounded-full flex items-center justify-center',
-          isActive ? 'bg-[#4C71FF]/20' : 'bg-white/[0.06]'
-        )}>
-          <Sparkles className={cn(
-            'w-2.5 h-2.5',
-            isActive ? 'text-[#8CA2FF] animate-pulse' : 'text-white/40'
-          )} />
-        </div>
-
-        {/* Summary text */}
+    <div className="space-y-2">
+      {/* Main thinking indicator with glow effect */}
+      <div className="flex items-center gap-2 py-1">
+        <Sparkles className={cn(
+          'w-3 h-3 flex-shrink-0',
+          isActive ? 'text-[#8CA2FF] animate-pulse' : 'text-white/30'
+        )} />
         <span className={cn(
-          'flex-1 text-[12px] truncate',
-          isActive ? 'codex-thinking' : 'text-white/50'
+          'text-[12px]',
+          isActive ? 'codex-thinking' : 'text-white/40'
         )}>
-          {hasContent ? getSummary() : 'Thinking...'}
+          Thinking...
         </span>
 
-        {/* Expand indicator */}
-        {hasMoreContent && (
-          <ChevronDown className={cn(
-            'w-3.5 h-3.5 text-white/30 transition-transform',
-            isExpanded && 'rotate-180'
-          )} />
+        {/* Expand button - only show when there's thinking content */}
+        {hasContent && (
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className={cn(
+              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] transition-colors ml-2',
+              'text-white/30 hover:text-white/50 hover:bg-white/[0.04]'
+            )}
+          >
+            <ChevronDown className={cn(
+              'w-3 h-3 transition-transform',
+              isExpanded && 'rotate-180'
+            )} />
+            {isExpanded ? 'Hide' : 'Show'}
+          </button>
         )}
-      </button>
+      </div>
 
-      {/* Expanded content */}
+      {/* Expanded thinking content dropdown */}
       <AnimatePresence>
         {isExpanded && hasContent && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-3 pb-3 pt-1 border-t border-white/[0.04]">
-              <pre className="text-[11px] text-white/50 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto">
-                {content}
-              </pre>
+            <div className="rounded-lg bg-[#12131A]/80 border border-white/[0.06] overflow-hidden">
+              <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
+                <Sparkles className="w-3 h-3 text-[#8CA2FF]/50" />
+                <span className="text-[10px] text-white/40 uppercase tracking-wide">Agent Reasoning</span>
+              </div>
+              <div className="p-3 max-h-[300px] overflow-y-auto">
+                <pre className="text-[11px] text-white/40 whitespace-pre-wrap font-mono leading-relaxed">
+                  {content}
+                </pre>
+              </div>
             </div>
           </motion.div>
         )}
