@@ -40,6 +40,9 @@ const LANGUAGE_NAMES: Record<string, string> = {
   toml: 'TOML',
   ini: 'INI',
   diff: 'Diff',
+  text: 'Plain Text',
+  plaintext: 'Plain Text',
+  txt: 'Plain Text',
 };
 
 // Common language aliases
@@ -115,6 +118,7 @@ interface CodeBlockProps {
   showLineNumbers?: boolean;
   collapsible?: boolean;
   maxHeight?: number;
+  showHeader?: boolean;
   className?: string;
 }
 
@@ -125,6 +129,7 @@ export function CodeBlock({
   showLineNumbers = true,
   collapsible = false,
   maxHeight,
+  showHeader = true,
   className,
 }: CodeBlockProps) {
   const [highlightedHtml, setHighlightedHtml] = useState<string>('');
@@ -207,64 +212,66 @@ export function CodeBlock({
       )}
     >
       {/* Header */}
-      <div
-        className={cn(
-          'flex items-center justify-between px-2 py-1.5',
-          'bg-white/[0.02] border-b border-white/[0.08]'
-        )}
-      >
-        <div className="flex items-center gap-2">
-          {collapsible && (
-            <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              className="p-0.5 rounded hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-          )}
-
-          <FileCode className="w-4 h-4 text-white/40" />
-
-          {filename ? (
-            <span className="text-sm text-white/70 font-mono">{filename}</span>
-          ) : (
-            <span className="text-xs text-white/40">{displayName}</span>
-          )}
-
-          {showLineNumbers && (
-            <span className="text-xs text-white/25 ml-2">
-              {lineCount} line{lineCount !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-
-        <button
-          onClick={handleCopy}
+      {showHeader && (
+        <div
           className={cn(
-            'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
-            'transition-all duration-200',
-            copied
-              ? 'bg-[#50956A]/20 text-[#50956A]'
-              : 'text-white/40 hover:text-white hover:bg-white/[0.06]'
+            'flex items-center justify-between px-2 py-1.5',
+            'bg-white/[0.02] border-b border-white/[0.08]'
           )}
         >
-          {copied ? (
-            <>
-              <Check className="w-3.5 h-3.5" />
-              Copied
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              Copy
-            </>
-          )}
-        </button>
-      </div>
+          <div className="flex items-center gap-2">
+            {collapsible && (
+              <button
+                onClick={() => setIsCollapsed(!isCollapsed)}
+                className="p-0.5 rounded hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors"
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-4 h-4" />
+                ) : (
+                  <ChevronDown className="w-4 h-4" />
+                )}
+              </button>
+            )}
+
+            <FileCode className="w-4 h-4 text-white/40" />
+
+            {filename ? (
+              <span className="text-sm text-white/70 font-mono">{filename}</span>
+            ) : (
+              <span className="text-xs text-white/40">{displayName}</span>
+            )}
+
+            {showLineNumbers && (
+              <span className="text-xs text-white/25 ml-2">
+                {lineCount} line{lineCount !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={handleCopy}
+            className={cn(
+              'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs',
+              'transition-all duration-200',
+              copied
+                ? 'bg-[#50956A]/20 text-[#50956A]'
+                : 'text-white/40 hover:text-white hover:bg-white/[0.06]'
+            )}
+          >
+            {copied ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                Copy
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Code content */}
       {!isCollapsed && (
@@ -277,7 +284,7 @@ export function CodeBlock({
         >
           {isLoading ? (
             <div className="p-3 flex items-center gap-2 text-white/40">
-              <div className="w-3 h-3 border-2 border-white/20 border-t-[#6B6EF0] rounded-full animate-spin" />
+              <div className="w-3 h-3 border-2 border-white/20 border-t-[#4C71FF] rounded-full animate-spin" />
               <span className="text-xs">Loading...</span>
             </div>
           ) : (
@@ -306,7 +313,7 @@ export function InlineCode({ children, className }: InlineCodeProps) {
     <code
       className={cn(
         'px-1.5 py-0.5 rounded-md',
-        'bg-white/[0.06] text-[#8B8EFF]',
+        'bg-white/[0.06] text-[#8CA2FF]',
         'font-mono text-sm',
         className
       )}

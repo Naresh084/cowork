@@ -12,22 +12,26 @@
   },
   "dependencies": {
     "@gemini-cowork/core": "workspace:*",
-    "@gemini-cowork/providers": "workspace:*",
-    "@gemini-cowork/storage": "workspace:*",
-    "@gemini-cowork/shared": "workspace:*",
     "@gemini-cowork/mcp": "workspace:*",
+    "@gemini-cowork/providers": "workspace:*",
     "@gemini-cowork/sandbox": "workspace:*",
-    "deepagents": "^1.6.1",
+    "@gemini-cowork/shared": "workspace:*",
+    "@gemini-cowork/storage": "workspace:*",
+    "@google/genai": "^1.33.0",
+    "@google/generative-ai": "^0.24.0",
     "@langchain/core": "^1.1.17",
     "@langchain/google-genai": "^2.1.14",
-    "@google/generative-ai": "^0.24.0",
-    "@google/genai": "^1.33.0",
+    "@langchain/openai": "^1.2.4",
+    "chrome-remote-interface": "^0.33.3",
+    "deepagents": "^1.6.1",
+    "micromatch": "^4.0.5",
     "playwright": "^1.40.0",
     "ws": "^8.17.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
+    "@types/chrome-remote-interface": "^0.31.14",
     "@types/node": "^20.0.0",
-    "@types/ws": "^8.5.10"
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.7.2"
   }
 }

@@ -5,6 +5,8 @@ export interface DeepResearchOptions {
   files?: string[];
   outputFormat?: 'markdown' | 'json';
   onProgress?: (status: string, progress: number) => void;
+  /** Override the deep research agent model (default: deep-research-pro-preview-12-2025) */
+  agent?: string;
 }
 
 export interface DeepResearchResult {
@@ -82,8 +84,11 @@ export async function runDeepResearch(
   const ai = new GoogleGenAI({ apiKey });
   const startTime = Date.now();
 
+  // Use provided agent or default
+  const agentModel = options.agent || 'deep-research-pro-preview-12-2025';
+
   const interaction = await ai.interactions.create({
-    agent: 'deep-research-pro-preview-12-2025',
+    agent: agentModel,
     input: buildUserContent(options),
     background: true,
   });

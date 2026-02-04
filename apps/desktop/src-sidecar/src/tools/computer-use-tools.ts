@@ -3,6 +3,7 @@ import { GoogleGenAI, Environment } from '@google/genai';
 import { chromium, type Browser, type Page } from 'playwright';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { chromeBridge } from '../chrome-bridge.js';
+import { ChromeCDPDriver, checkChromeAvailable } from './chrome-cdp-driver.js';
 
 interface ComputerUseAction extends Record<string, unknown> {
   name: string;
@@ -16,7 +17,8 @@ interface BrowserDriver {
   close(): Promise<void>;
 }
 
-class PlaywrightDriver implements BrowserDriver {
+// PlaywrightDriver kept as fallback option - can be enabled via environment variable
+export class PlaywrightDriver implements BrowserDriver {
   private browser: Browser;
   private page: Page;
 
@@ -193,7 +195,10 @@ class ChromeExtensionDriver implements BrowserDriver {
   }
 }
 
-export function createComputerUseTool(getApiKey: () => string | null): ToolHandler {
+export function createComputerUseTool(
+  getApiKey: () => string | null,
+  getComputerUseModel: () => string
+): ToolHandler {
   return {
     name: 'computer_use',
     description: 'Use a browser to complete a multi-step goal. Returns actions taken and final URL.',
@@ -211,7 +216,7 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
     }),
 
     execute: async (args: unknown, _context: ToolContext): Promise<ToolResult> => {
-      const { goal, startUrl, maxSteps = 15, headless = false } = args as {
+      const { goal, startUrl, maxSteps = 15 } = args as {
         goal: string;
         startUrl?: string;
         maxSteps?: number;
@@ -223,13 +228,42 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
         return { success: false, error: 'API key not set. Please configure an API key first.' };
       }
 
-      chromeBridge.start();
-      const driver: BrowserDriver = chromeBridge.isConnected()
-        ? new ChromeExtensionDriver()
-        : await PlaywrightDriver.create(startUrl, headless);
+      let driver: BrowserDriver;
+      let driverType: 'cdp' | 'chrome_extension' | 'playwright' = 'cdp';
 
-      if (chromeBridge.isConnected() && startUrl) {
-        await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+      // Try Chrome CDP first (native Chrome with remote debugging)
+      try {
+        const cdpAvailable = await checkChromeAvailable(9222);
+        if (cdpAvailable) {
+          driver = await ChromeCDPDriver.connect(9222);
+          driverType = 'cdp';
+          if (startUrl) {
+            await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+          }
+        } else {
+          throw new Error('CDP not available');
+        }
+      } catch {
+        // Try Chrome Extension
+        chromeBridge.start();
+        if (chromeBridge.isConnected()) {
+          driver = new ChromeExtensionDriver();
+          driverType = 'chrome_extension';
+          if (startUrl) {
+            await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+          }
+        } else {
+          // Return helpful error instead of falling back to Playwright
+          return {
+            success: false,
+            error: `Chrome not available for browser automation.\n\n` +
+                   `Please start Chrome with remote debugging enabled:\n\n` +
+                   `macOS:\n  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222\n\n` +
+                   `Windows:\n  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222\n\n` +
+                   `Linux:\n  google-chrome --remote-debugging-port=9222\n\n` +
+                   `Or install the Gemini Cowork Chrome extension for browser control.`,
+          };
+        }
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -243,7 +277,7 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
         while (steps < maxSteps) {
           const screenshot = await driver.getScreenshot();
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-computer-use-preview-10-2025',
+            model: getComputerUseModel(),
             contents: [
               {
                 role: 'user',
@@ -300,8 +334,7 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
             actions,
             finalUrl: await driver.getUrl(),
             steps,
-            driver: chromeBridge.isConnected() ? 'chrome' : 'playwright',
-            chromePort: chromeBridge.getPort(),
+            driver: driverType,
           },
         };
       } catch (error) {
@@ -316,8 +349,11 @@ export function createComputerUseTool(getApiKey: () => string | null): ToolHandl
   };
 }
 
-export function createComputerUseTools(getApiKey: () => string | null): ToolHandler[] {
-  return [createComputerUseTool(getApiKey)];
+export function createComputerUseTools(
+  getApiKey: () => string | null,
+  getComputerUseModel: () => string
+): ToolHandler[] {
+  return [createComputerUseTool(getApiKey, getComputerUseModel)];
 }
 
 function denormalize(coord: number, max: number): number {

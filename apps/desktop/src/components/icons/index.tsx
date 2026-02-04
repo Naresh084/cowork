@@ -192,3 +192,4 @@ export { AlertTriangle as WarningIcon } from 'lucide-react';
 export { AlertCircle as ErrorIcon } from 'lucide-react';
 export { Info as InfoIcon } from 'lucide-react';
 export { CheckCircle2 as SuccessIcon } from 'lucide-react';
+export { BrandMark } from './BrandMark';

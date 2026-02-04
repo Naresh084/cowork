@@ -1,14 +1,13 @@
 import {
-  Sparkles,
   FileText,
   BarChart3,
   Palette,
   FolderTree,
   Calendar,
-  Puzzle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
+import { BrandMark } from '../icons/BrandMark';
 
 export interface QuickAction {
   id: string;
@@ -48,11 +47,6 @@ const quickActions: QuickAction[] = [
     label: 'Prep for a meeting',
     prompt: 'I can help you prepare for a meeting. What\'s the meeting about?',
   },
-  {
-    id: 'plugins',
-    icon: Puzzle,
-    label: 'Customize with plugins',
-  },
 ];
 
 interface WelcomeScreenProps {
@@ -69,10 +63,8 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="relative mb-6"
       >
-        {/* Glow effect */}
-        <div className="absolute inset-0 bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] rounded-full blur-xl opacity-30 animate-pulse" />
         <div className="relative w-16 h-16 flex items-center justify-center">
-          <Sparkles className="w-12 h-12 text-[#6B6EF0]" />
+          <BrandMark className="w-12 h-12" />
         </div>
       </motion.div>
 
@@ -86,23 +78,11 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
         Let's knock something off your list
       </motion.h1>
 
-      {/* Info Banner */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-        className="w-full max-w-2xl mb-8 p-4 rounded-xl bg-white/[0.04] border border-white/[0.08]"
-      >
-        <p className="text-sm text-white/50 text-center">
-          Cowork is an early research preview. New improvements ship frequently.
-        </p>
-      </motion.div>
-
       {/* Quick Action Cards */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.3 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
         className="grid grid-cols-2 md:grid-cols-3 gap-3 w-full max-w-2xl"
       >
         {quickActions.map((action, index) => (
@@ -120,7 +100,7 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
             onClick={() => onQuickAction(action)}
             className={cn(
               'flex items-center gap-3 p-4 rounded-xl',
-              'bg-white/[0.04] hover:bg-white/[0.08]',
+              'bg-[#111218] hover:bg-white/[0.06]',
               'border border-white/[0.08] hover:border-white/[0.12]',
               'text-left transition-all duration-200',
               'group'
@@ -129,13 +109,13 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
             <div
               className={cn(
                 'p-2 rounded-xl',
-                'bg-white/[0.06] group-hover:bg-[#6B6EF0]/20',
+                'bg-white/[0.04] group-hover:bg-[#4C71FF]/20',
                 'transition-colors duration-200'
               )}
             >
               <action.icon
                 className={cn(
-                  'w-5 h-5 text-white/50 group-hover:text-[#8B8EFF]',
+                  'w-5 h-5 text-white/50 group-hover:text-[#8CA2FF]',
                   'transition-colors duration-200'
                 )}
               />

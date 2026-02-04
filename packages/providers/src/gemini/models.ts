@@ -37,11 +37,40 @@ export const DEFAULT_CONTEXT_WINDOW = {
   output: 8192,    // 8K tokens
 };
 
+let DYNAMIC_CONTEXT_WINDOWS: Record<string, { input: number; output: number }> = {};
+
+export function setModelContextWindows(models: Array<{
+  id: string;
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
+  contextWindow?: number;
+  maxTokens?: number;
+}>): void {
+  const next: Record<string, { input: number; output: number }> = {};
+  for (const model of models) {
+    const input = model.contextWindow ?? model.inputTokenLimit ?? 0;
+    const output = model.maxTokens ?? model.outputTokenLimit ?? 0;
+    if (!model.id || input <= 0 || output <= 0) continue;
+    next[model.id] = { input, output };
+  }
+  DYNAMIC_CONTEXT_WINDOWS = next;
+}
+
 /**
  * Get context window for a model by ID.
  * Falls back to default if model is not in the known list.
  */
 export function getModelContextWindow(modelId: string): { input: number; output: number } {
+  if (DYNAMIC_CONTEXT_WINDOWS[modelId]) {
+    return DYNAMIC_CONTEXT_WINDOWS[modelId];
+  }
+
+  for (const [key, value] of Object.entries(DYNAMIC_CONTEXT_WINDOWS)) {
+    if (modelId.startsWith(key) || modelId.includes(key)) {
+      return value;
+    }
+  }
+
   // Try exact match first
   if (MODEL_CONTEXT_WINDOWS[modelId]) {
     return MODEL_CONTEXT_WINDOWS[modelId];

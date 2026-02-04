@@ -28,9 +28,9 @@ import { toast } from '../ui/Toast';
  * - Click to preview file content
  */
 export function WorkingFolderSection() {
-  const artifacts = useAgentStore((state) => state.artifacts);
-  const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const { activeSessionId, sessions } = useSessionStore();
+  const artifacts = useAgentStore((state) => state.getSessionState(activeSessionId).artifacts);
+  const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const { defaultWorkingDirectory } = useSettingsStore();
 
   // Get current working directory from active session or default
@@ -259,7 +259,7 @@ function getTypeIndicator(type: Artifact['type']): { color: string; label: strin
     case 'created':
       return { color: 'bg-[#50956A]', label: 'Created' };
     case 'modified':
-      return { color: 'bg-[#6B6EF0]', label: 'Modified' };
+      return { color: 'bg-[#4C71FF]', label: 'Modified' };
     case 'touched':
       return { color: 'bg-[#F5C400]', label: 'Touched' };
     case 'deleted':

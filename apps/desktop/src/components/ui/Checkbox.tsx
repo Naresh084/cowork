@@ -31,11 +31,11 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             className={cn(
               'w-4 h-4 rounded border-2 transition-all',
               'bg-[#0D0D0F] border-white/[0.12]',
-              'peer-checked:bg-[#6B6EF0] peer-checked:border-[#6B6EF0]',
-              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#6B6EF0]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]',
+              'peer-checked:bg-[#4C71FF] peer-checked:border-[#4C71FF]',
+              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#4C71FF]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]',
               'peer-disabled:opacity-50',
               error && 'border-[#FF5449]',
-              indeterminate && 'bg-[#6B6EF0] border-[#6B6EF0]'
+              indeterminate && 'bg-[#4C71FF] border-[#4C71FF]'
             )}
           >
             {indeterminate ? (

@@ -54,21 +54,49 @@ export class EventEmitter {
   }
 
   /**
+   * Emit thinking start event.
+   */
+  thinkingStart(sessionId: string): void {
+    this.emit('thinking:start', sessionId, { timestamp: Date.now() });
+  }
+
+  /**
+   * Emit thinking chunk event (agent's internal reasoning).
+   */
+  thinkingChunk(sessionId: string, content: string): void {
+    this.emit('thinking:chunk', sessionId, { content });
+  }
+
+  /**
+   * Emit thinking done event.
+   */
+  thinkingDone(sessionId: string): void {
+    this.emit('thinking:done', sessionId, { timestamp: Date.now() });
+  }
+
+  /**
    * Emit tool start event.
    */
   toolStart(sessionId: string, toolCall: unknown): void {
-    this.emit('tool:start', sessionId, { toolCall, startTime: Date.now() });
+    const toolCallAny = toolCall as { parentToolId?: string };
+    this.emit('tool:start', sessionId, {
+      toolCall,
+      startTime: Date.now(),
+      parentToolId: toolCallAny?.parentToolId,
+    });
   }
 
   /**
    * Emit tool result event.
    */
   toolResult(sessionId: string, toolCall: unknown, result: unknown): void {
-    const toolCallAny = toolCall as { id?: string };
+    const toolCallAny = toolCall as { id?: string; parentToolId?: string };
+    const resultAny = result as { parentToolId?: string } | null;
     this.emit('tool:result', sessionId, {
       toolCallId: toolCallAny?.id ?? '',
       toolCall,
       result,
+      parentToolId: resultAny?.parentToolId ?? toolCallAny?.parentToolId,
     });
   }
 
@@ -129,6 +157,21 @@ export class EventEmitter {
   }
 
   /**
+   * Emit artifact event for file preview (convenience wrapper).
+   */
+  artifact(sessionId: string, artifact: {
+    id: string;
+    path: string;
+    type: 'touched' | 'created' | 'modified' | 'deleted';
+    url?: string;
+    mimeType?: string;
+    content?: string;
+    timestamp?: number;
+  }): void {
+    this.emit('artifact:created', sessionId, { artifact: { ...artifact, timestamp: artifact.timestamp || Date.now() } });
+  }
+
+  /**
    * Emit context update event.
    */
   contextUpdate(sessionId: string, used: number, total: number): void {
@@ -157,8 +200,8 @@ export class EventEmitter {
   /**
    * Emit error event.
    */
-  error(sessionId: string | undefined, errorMessage: string, code?: string): void {
-    this.emit('error', sessionId, { error: errorMessage, code });
+  error(sessionId: string | undefined, errorMessage: string, code?: string, details?: unknown): void {
+    this.emit('error', sessionId, { error: errorMessage, code, details });
   }
 
   /**

@@ -23,7 +23,7 @@ import {
   ProviderError,
   AuthenticationError,
 } from '@gemini-cowork/shared';
-import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel } from './models.js';
+import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel, fetchGeminiModels, setModelContextWindows } from './models.js';
 
 // ============================================================================
 // Gemini Provider
@@ -57,6 +57,20 @@ export class GeminiProvider implements AIProvider {
   }
 
   async listModels(): Promise<ModelInfo[]> {
+    const apiKey = this.config.credentials.type === 'api_key' ? this.config.credentials.apiKey : undefined;
+    if (apiKey) {
+      try {
+        const models = await fetchGeminiModels(apiKey);
+        setModelContextWindows(models.map((model) => ({
+          id: model.id,
+          contextWindow: model.contextWindow,
+          maxTokens: model.maxTokens,
+        })));
+        return models;
+      } catch (error) {
+        console.warn('[GeminiProvider] Failed to fetch models, falling back to defaults:', error);
+      }
+    }
     return GEMINI_MODELS;
   }
 

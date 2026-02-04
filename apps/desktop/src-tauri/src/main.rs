@@ -10,6 +10,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .manage(AgentState::new())
         .invoke_handler(tauri::generate_handler![
             // Auth commands
@@ -31,6 +32,8 @@ fn main() {
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,
             commands::agent::agent_respond_permission,
+            commands::agent::agent_set_approval_mode,
+            commands::agent::agent_set_models,
             commands::agent::agent_respond_question,
             commands::agent::agent_stop_generation,
             commands::agent::agent_list_sessions,
@@ -42,8 +45,11 @@ fn main() {
             commands::agent::agent_save_memory,
             commands::agent::agent_get_context_usage,
             commands::agent::agent_set_mcp_servers,
+            commands::agent::agent_set_skills,
+            commands::agent::agent_set_specialized_models,
             commands::agent::agent_mcp_call_tool,
             commands::agent::agent_load_gemini_extensions,
+            commands::agent::agent_get_initialization_status,
         ])
         .setup(|_app| {
             Ok(())

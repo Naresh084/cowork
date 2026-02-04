@@ -25,12 +25,12 @@ export function CollapsibleSection({
   const isExpanded = rightPanelSections[id];
 
   return (
-    <div className="border-b border-white/[0.08] last:border-0">
+    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] mb-2 last:mb-0">
       {/* Header */}
       <button
         onClick={() => toggleRightPanelSection(id)}
         className={cn(
-          'w-full flex items-center justify-between px-3 py-2.5',
+          'w-full flex items-center justify-between px-3 py-2',
           'hover:bg-white/[0.04] transition-colors',
           'focus:outline-none'
         )}
@@ -43,9 +43,9 @@ export function CollapsibleSection({
             )}
           />
           <Icon className="w-4 h-4 text-white/50" />
-          <span className="text-sm font-medium text-white/70">{title}</span>
+          <span className="text-xs font-semibold text-white/70 uppercase tracking-wide">{title}</span>
           {badge !== undefined && badge !== 0 && (
-            <span className="text-xs text-white/40 ml-1">{badge}</span>
+            <span className="text-[11px] text-white/40 ml-1">{badge}</span>
           )}
         </div>
 

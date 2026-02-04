@@ -151,7 +151,7 @@ export function TabsTrigger({
     pills: cn(
       'px-4 py-2 rounded-full text-sm font-medium transition-all',
       isActive
-        ? 'bg-[#6B6EF0] text-white shadow-sm'
+        ? 'bg-[#4C71FF] text-white shadow-sm'
         : 'text-white/50 hover:text-white/70 bg-[#1A1A1E]/50 hover:bg-white/[0.06]'
     ),
     underline: cn(
@@ -159,7 +159,7 @@ export function TabsTrigger({
       'after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5',
       'after:transition-all',
       isActive
-        ? 'text-white/90 after:bg-[#6B6EF0]'
+        ? 'text-white/90 after:bg-[#4C71FF]'
         : 'text-white/50 hover:text-white/70 after:bg-transparent'
     ),
   };
@@ -175,7 +175,7 @@ export function TabsTrigger({
       onClick={() => !disabled && setActiveTab(value)}
       className={cn(
         'inline-flex items-center gap-2',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6B6EF0]/50',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4C71FF]/50',
         disabled && 'opacity-50 cursor-not-allowed',
         variantStyles[variant],
         className

@@ -48,6 +48,8 @@ export interface ToolContext {
   workingDirectory: string;
   sessionId: string;
   agentId: string;
+  /** App data directory for session-based storage (e.g., ~/.geminicowork) */
+  appDataDir?: string;
 }
 
 export interface ToolResult {

@@ -2,7 +2,6 @@ use crate::sidecar::{SidecarEvent, SidecarManager};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::Mutex;
 
 // Re-export types from the shared module for frontend use
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +35,9 @@ pub struct SessionDetails {
     pub working_directory: Option<String>,
     pub model: Option<String>,
     pub messages: Vec<Message>,
+    pub tasks: Option<Vec<serde_json::Value>>,
+    pub artifacts: Option<Vec<serde_json::Value>>,
+    pub tool_executions: Option<Vec<serde_json::Value>>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -77,16 +79,34 @@ pub struct MCPServerConfig {
     pub context_file_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillConfig {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub description: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecializedModels {
+    pub image_generation: String,
+    pub video_generation: String,
+    pub computer_use: String,
+}
+
 
 /// State wrapper for the sidecar manager
 pub struct AgentState {
-    pub manager: Arc<Mutex<SidecarManager>>,
+    pub manager: Arc<SidecarManager>,
 }
 
 impl AgentState {
     pub fn new() -> Self {
         Self {
-            manager: Arc::new(Mutex::new(SidecarManager::new())),
+            manager: Arc::new(SidecarManager::new()),
         }
     }
 }
@@ -102,26 +122,41 @@ async fn ensure_sidecar_started(
     app: &AppHandle,
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {
-    eprintln!("[ensure_sidecar] getting manager lock...");
-    let manager = state.manager.lock().await;
-    eprintln!("[ensure_sidecar] got manager lock, checking if running...");
+    eprintln!("[ensure_sidecar] accessing manager...");
+    let manager = &state.manager;
+    eprintln!("[ensure_sidecar] manager ready, checking if running...");
 
     if !manager.is_running().await {
         eprintln!("[ensure_sidecar] sidecar not running, starting...");
-        // Get app data directory
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        // Use home directory for persistence: ~/.geminicowork
+        // This provides consistent, user-accessible storage across platforms
+        let home_dir = dirs::home_dir()
+            .ok_or("Failed to get home directory")?;
+        let gemini_dir = home_dir.join(".geminicowork");
 
-        let app_data_str = app_data_dir
+        // Ensure the directory exists
+        std::fs::create_dir_all(&gemini_dir)
+            .map_err(|e| format!("Failed to create .geminicowork directory: {}", e))?;
+
+        let app_data_str = gemini_dir
             .to_str()
-            .ok_or("Invalid app data path")?
+            .ok_or("Invalid path")?
             .to_string();
 
         eprintln!("[ensure_sidecar] starting sidecar with app_data_dir: {}", app_data_str);
         manager.start(&app_data_str).await?;
         eprintln!("[ensure_sidecar] sidecar started");
+
+        // Initialize persistence in sidecar with app data directory
+        eprintln!("[ensure_sidecar] sending initialize command...");
+        let init_params = serde_json::json!({
+            "appDataDir": app_data_str
+        });
+        if let Err(e) = manager.send_command("initialize", init_params).await {
+            eprintln!("Warning: Failed to initialize sidecar persistence: {}", e);
+        } else {
+            eprintln!("[ensure_sidecar] persistence initialized");
+        }
 
         // Set up event forwarding to frontend
         let app_handle = app.clone();
@@ -167,7 +202,7 @@ pub async fn agent_set_api_key(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({ "apiKey": api_key });
 
     manager.send_command("set_api_key", params).await?;
@@ -184,7 +219,7 @@ pub async fn agent_create_session(
 ) -> Result<SessionInfo, String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "workingDirectory": working_directory,
         "model": model,
@@ -205,7 +240,7 @@ pub async fn agent_send_message(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
         "content": content,
@@ -227,7 +262,7 @@ pub async fn agent_respond_permission(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
         "permissionId": permission_id,
@@ -235,6 +270,44 @@ pub async fn agent_respond_permission(
     });
 
     manager.send_command("respond_permission", params).await?;
+    Ok(())
+}
+
+/// Set approval mode for a session
+#[tauri::command]
+pub async fn agent_set_approval_mode(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "mode": mode,
+    });
+
+    manager.send_command("set_approval_mode", params).await?;
+    Ok(())
+}
+
+/// Update model catalog for context window sizing
+#[tauri::command]
+pub async fn agent_set_models(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    models: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "models": models,
+    });
+
+    manager.send_command("set_models", params).await?;
     Ok(())
 }
 
@@ -247,7 +320,7 @@ pub async fn agent_stop_generation(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
     });
@@ -264,10 +337,8 @@ pub async fn agent_list_sessions(
 ) -> Result<Vec<SessionSummary>, String> {
     eprintln!("[agent] agent_list_sessions called");
     ensure_sidecar_started(&app, &state).await?;
-    eprintln!("[agent] sidecar started, getting manager lock...");
-
-    let manager = state.manager.lock().await;
-    eprintln!("[agent] got manager lock, sending list_sessions command...");
+    let manager = &state.manager;
+    eprintln!("[agent] sidecar started, sending list_sessions command...");
     let result = manager
         .send_command("list_sessions", serde_json::json!({}))
         .await?;
@@ -285,7 +356,7 @@ pub async fn agent_get_session(
 ) -> Result<SessionDetails, String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
     });
@@ -303,7 +374,7 @@ pub async fn agent_delete_session(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
     });
@@ -322,7 +393,7 @@ pub async fn agent_update_session_title(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
         "title": title,
@@ -342,7 +413,7 @@ pub async fn agent_update_session_working_directory(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
         "workingDirectory": working_directory,
@@ -361,7 +432,7 @@ pub async fn agent_load_memory(
 ) -> Result<serde_json::Value, String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "workingDirectory": working_directory,
     });
@@ -379,7 +450,7 @@ pub async fn agent_save_memory(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "workingDirectory": working_directory,
         "entries": entries,
@@ -398,7 +469,7 @@ pub async fn agent_get_context_usage(
 ) -> Result<serde_json::Value, String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
     });
@@ -414,11 +485,47 @@ pub async fn agent_set_mcp_servers(
     servers: Vec<MCPServerConfig>,
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "servers": servers,
     });
     manager.send_command("set_mcp_servers", params).await?;
+    Ok(())
+}
+
+/// Sync skills to sidecar
+#[tauri::command]
+pub async fn agent_set_skills(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    skills: Vec<SkillConfig>,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "skills": skills,
+    });
+    manager.send_command("set_skills", params).await?;
+    Ok(())
+}
+
+/// Set specialized models for image/video generation and computer use
+#[tauri::command]
+pub async fn agent_set_specialized_models(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    models: SpecializedModels,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "models": {
+            "imageGeneration": models.image_generation,
+            "videoGeneration": models.video_generation,
+            "computerUse": models.computer_use,
+        }
+    });
+    manager.send_command("set_specialized_models", params).await?;
     Ok(())
 }
 
@@ -432,7 +539,7 @@ pub async fn agent_mcp_call_tool(
     args: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     ensure_sidecar_started(&app, &state).await?;
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "serverId": server_id,
         "toolName": tool_name,
@@ -448,7 +555,7 @@ pub async fn agent_load_gemini_extensions(
     state: State<'_, AgentState>,
 ) -> Result<serde_json::Value, String> {
     ensure_sidecar_started(&app, &state).await?;
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let result = manager
         .send_command("load_gemini_extensions", serde_json::json!({}))
         .await?;
@@ -466,7 +573,7 @@ pub async fn agent_respond_question(
 ) -> Result<(), String> {
     ensure_sidecar_started(&app, &state).await?;
 
-    let manager = state.manager.lock().await;
+    let manager = &state.manager;
     let params = serde_json::json!({
         "sessionId": session_id,
         "questionId": question_id,
@@ -475,4 +582,15 @@ pub async fn agent_respond_question(
 
     manager.send_command("respond_question", params).await?;
     Ok(())
+}
+
+/// Get initialization status for frontend coordination
+#[tauri::command]
+pub async fn agent_get_initialization_status(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager.send_command("get_initialization_status", serde_json::json!({})).await
 }

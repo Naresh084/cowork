@@ -1,0 +1,160 @@
+import {
+  Terminal,
+  FileEdit,
+  FileSearch,
+  FolderOpen,
+  Globe,
+  Image,
+  FileVideo,
+  Search,
+  Palette,
+  Wrench,
+  ListTodo,
+  Zap,
+} from 'lucide-react';
+
+const TOOL_ICONS: Record<string, typeof Terminal> = {
+  bash: Terminal,
+  shell: Terminal,
+  execute_command: Terminal,
+  execute: Terminal,
+  read_file: FileSearch,
+  write_file: FileEdit,
+  edit_file: FileEdit,
+  list_directory: FolderOpen,
+  ls: FolderOpen,
+  search_files: FileSearch,
+  glob: FileSearch,
+  grep: FileSearch,
+  fetch: Globe,
+  http: Globe,
+  generate_image: Image,
+  edit_image: Image,
+  generate_video: FileVideo,
+  analyze_video: FileVideo,
+  deep_research: Search,
+  google_grounded_search: Globe,
+  computer_use: Globe,
+  stitch: Palette,
+  write_todos: ListTodo,
+  task: Zap,
+  spawn_task: Zap,
+  subagent: Zap,
+  default: Wrench,
+};
+
+const TOOL_NAMES: Record<string, string> = {
+  bash: 'Shell Command',
+  shell: 'Shell Command',
+  execute_command: 'Execute Command',
+  execute: 'Execute Command',
+  read_file: 'Read File',
+  write_file: 'Write File',
+  edit_file: 'Edit File',
+  list_directory: 'List Directory',
+  ls: 'List Directory',
+  search_files: 'Search Files',
+  glob: 'Find Files',
+  grep: 'Search Content',
+  fetch: 'HTTP Request',
+  http: 'HTTP Request',
+  generate_image: 'Generate Image',
+  edit_image: 'Edit Image',
+  generate_video: 'Generate Video',
+  analyze_video: 'Analyze Video',
+  deep_research: 'Deep Research',
+  google_grounded_search: 'Google Search',
+  computer_use: 'Browser Control',
+  stitch: 'Stitch Design',
+  write_todos: 'Task Progress',
+  task: 'Task',
+  spawn_task: 'Task',
+  subagent: 'Task',
+};
+
+const TOOL_CATEGORIES: Record<string, string> = {
+  bash: 'Command',
+  shell: 'Command',
+  execute_command: 'Command',
+  execute: 'Command',
+  read_file: 'File System',
+  write_file: 'File System',
+  edit_file: 'File System',
+  list_directory: 'File System',
+  ls: 'File System',
+  search_files: 'File System',
+  glob: 'File System',
+  grep: 'File System',
+  fetch: 'Network',
+  http: 'Network',
+  generate_image: 'Image',
+  edit_image: 'Image',
+  generate_video: 'Video',
+  analyze_video: 'Video',
+  deep_research: 'Research',
+  google_grounded_search: 'Search',
+  computer_use: 'Browser',
+  stitch: 'Design',
+  write_todos: 'Progress',
+  task: 'Agent',
+  spawn_task: 'Agent',
+  subagent: 'Agent',
+};
+
+export function getToolMeta(name: string) {
+  const lower = name.toLowerCase();
+  const icon =
+    TOOL_ICONS[lower] ||
+    (lower.includes('stitch') ? Palette : TOOL_ICONS.default);
+  const title =
+    TOOL_NAMES[lower] ||
+    (lower.includes('stitch') ? 'Stitch Design' : name);
+  const category =
+    TOOL_CATEGORIES[lower] ||
+    (lower.includes('file') || lower.includes('read') || lower.includes('write')
+      ? 'File System'
+      : lower.includes('search')
+        ? 'Search'
+        : 'Tool');
+
+  return { icon, title, category };
+}
+
+export function getPrimaryArg(toolName: string, args: Record<string, unknown>): string | null {
+  const lowerName = toolName.toLowerCase();
+
+  if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {
+    return (args.path || args.file_path || args.filePath || args.file) as string || null;
+  }
+
+  if (lowerName.includes('bash') || lowerName.includes('shell') || lowerName.includes('command')) {
+    return (args.command || args.cmd) as string || null;
+  }
+
+  if (lowerName.includes('directory') || lowerName.includes('list')) {
+    return (args.path || args.directory || args.dir) as string || null;
+  }
+
+  if (lowerName.includes('search') || lowerName.includes('grep')) {
+    return (args.pattern || args.query || args.search) as string || null;
+  }
+
+  if (lowerName.includes('glob')) {
+    return (args.pattern || args.glob) as string || null;
+  }
+
+  if (lowerName.includes('http') || lowerName.includes('fetch')) {
+    return (args.url || args.endpoint) as string || null;
+  }
+
+  // Media generation tools - show prompt (truncated)
+  if (lowerName.includes('generate_image') || lowerName.includes('edit_image') || lowerName.includes('generate_video')) {
+    const prompt = (args.prompt) as string || null;
+    if (prompt && prompt.length > 60) {
+      return prompt.slice(0, 57) + '...';
+    }
+    return prompt;
+  }
+
+  return null;
+}

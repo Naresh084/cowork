@@ -7,6 +7,7 @@ import type {
   CreateSessionParams,
   SendMessageParams,
   RespondPermissionParams,
+  SetApprovalModeParams,
   RespondQuestionParams,
   StopGenerationParams,
   GetSessionParams,
@@ -14,6 +15,7 @@ import type {
   LoadMemoryParams,
   SaveMemoryParams,
   MemoryEntry,
+  SetModelsParams,
 } from './types.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname, join } from 'path';
@@ -106,6 +108,26 @@ registerHandler('respond_permission', async (params) => {
   return { success: true };
 });
 
+// Set approval mode
+registerHandler('set_approval_mode', async (params) => {
+  const p = params as unknown as SetApprovalModeParams;
+  if (!p.sessionId || !p.mode) {
+    throw new Error('sessionId and mode are required');
+  }
+  agentRunner.setApprovalMode(p.sessionId, p.mode);
+  return { success: true };
+});
+
+// Update model catalog (context window + ordering)
+registerHandler('set_models', async (params) => {
+  const p = params as unknown as SetModelsParams;
+  if (!p.models || !Array.isArray(p.models)) {
+    throw new Error('models are required');
+  }
+  agentRunner.setModelCatalog(p.models);
+  return { success: true };
+});
+
 // Stop generation
 registerHandler('stop_generation', async (params) => {
   const p = params as unknown as StopGenerationParams;
@@ -129,6 +151,28 @@ registerHandler('set_mcp_servers', async (params) => {
   const p = params as { servers: Array<{ id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean; prompt?: string; contextFileName?: string }> };
   if (!p.servers) throw new Error('servers are required');
   await agentRunner.setMcpServers(p.servers);
+  return { success: true };
+});
+
+// Sync skills
+registerHandler('set_skills', async (params) => {
+  const p = params as { skills: Array<{ id: string; name: string; path: string; description?: string; enabled?: boolean }> };
+  if (!p.skills) throw new Error('skills are required');
+  await agentRunner.setSkills(p.skills);
+  return { success: true };
+});
+
+// Set specialized models
+registerHandler('set_specialized_models', async (params) => {
+  const p = params as {
+    models: {
+      imageGeneration: string;
+      videoGeneration: string;
+      computerUse: string;
+    };
+  };
+  if (!p.models) throw new Error('models are required');
+  agentRunner.setSpecializedModels(p.models);
   return { success: true };
 });
 
@@ -165,7 +209,7 @@ registerHandler('get_session', async (params) => {
 registerHandler('delete_session', async (params) => {
   const p = params as unknown as DeleteSessionParams;
   if (!p.sessionId) throw new Error('sessionId is required');
-  const success = agentRunner.deleteSession(p.sessionId);
+  const success = await agentRunner.deleteSession(p.sessionId);
   return { success };
 });
 
@@ -173,7 +217,7 @@ registerHandler('delete_session', async (params) => {
 registerHandler('update_session_title', async (params) => {
   const p = params as { sessionId: string; title: string };
   if (!p.sessionId || !p.title) throw new Error('sessionId and title are required');
-  agentRunner.updateSessionTitle(p.sessionId, p.title);
+  await agentRunner.updateSessionTitle(p.sessionId, p.title);
   return { success: true };
 });
 
@@ -181,7 +225,7 @@ registerHandler('update_session_title', async (params) => {
 registerHandler('update_session_working_directory', async (params) => {
   const p = params as { sessionId: string; workingDirectory: string };
   if (!p.sessionId || !p.workingDirectory) throw new Error('sessionId and workingDirectory are required');
-  agentRunner.updateSessionWorkingDirectory(p.sessionId, p.workingDirectory);
+  await agentRunner.updateSessionWorkingDirectory(p.sessionId, p.workingDirectory);
   return { success: true };
 });
 
@@ -253,6 +297,26 @@ registerHandler('save_memory', async (params) => {
 // Ping (for health checks)
 registerHandler('ping', async () => {
   return { pong: true, timestamp: Date.now() };
+});
+
+// Initialize persistence with app data directory
+registerHandler('initialize', async (params) => {
+  const { appDataDir } = params as { appDataDir: string };
+  if (!appDataDir) {
+    throw new Error('appDataDir is required');
+  }
+  const result = await agentRunner.initialize(appDataDir);
+  return { success: true, sessionsRestored: result.sessionsRestored };
+});
+
+// Get initialization status for frontend coordination
+registerHandler('get_initialization_status', async () => {
+  return agentRunner.getInitializationStatus();
+});
+
+// Verify persistence health
+registerHandler('verify_persistence', async () => {
+  return agentRunner.verifyPersistence();
 });
 
 // ============================================================================

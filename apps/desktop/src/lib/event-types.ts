@@ -8,6 +8,8 @@ export interface ToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  /** If set, this tool is a sub-tool executed within a parent task tool */
+  parentToolId?: string;
 }
 
 /**
@@ -19,6 +21,15 @@ export interface ToolResult {
   result?: unknown;
   error?: string;
   duration?: number;
+  /** If set, this tool is a sub-tool executed within a parent task tool */
+  parentToolId?: string;
+}
+
+export interface ErrorDetails {
+  retryAfterSeconds?: number;
+  quotaMetric?: string;
+  model?: string;
+  docsUrl?: string;
 }
 
 /**
@@ -64,13 +75,18 @@ export type AgentEvent =
       sessionId: string;
       message: Message;
     }
+  // Thinking events (agent's internal reasoning)
+  | { type: 'thinking:start'; sessionId: string }
+  | { type: 'thinking:chunk'; sessionId: string; content: string }
+  | { type: 'thinking:done'; sessionId: string }
   // Tool execution events
-  | { type: 'tool:start'; sessionId: string; toolCall: ToolCall }
+  | { type: 'tool:start'; sessionId: string; toolCall: ToolCall; parentToolId?: string }
   | {
       type: 'tool:result';
       sessionId: string;
       toolCallId: string;
       result: ToolResult;
+      parentToolId?: string;
     }
   // Permission events
   | {
@@ -125,6 +141,7 @@ export type AgentEvent =
       error: string;
       code?: string;
       recoverable?: boolean;
+      details?: ErrorDetails;
     }
   // Session events
   | {
@@ -158,6 +175,9 @@ export const TAURI_EVENT_NAMES = [
   'agent:stream:start',
   'agent:stream:chunk',
   'agent:stream:done',
+  'agent:thinking:start',
+  'agent:thinking:chunk',
+  'agent:thinking:done',
   'agent:tool:start',
   'agent:tool:result',
   'agent:permission:request',

@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect, type RefObject } from 'react';
+import { useState, useRef, useEffect, useCallback, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
   MessageSquare,
   Trash2,
   MoreHorizontal,
-  Puzzle,
   ChevronDown,
   Key,
   Eye,
@@ -15,61 +14,125 @@ import {
   Copy,
   LogOut,
   Settings,
+  Settings2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useSessionStore } from '../../stores/session-store';
+import { useSessionStore, type SessionSummary } from '../../stores/session-store';
+import { useChatStore } from '../../stores/chat-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
-import type { MainView } from './MainLayout';
+import { BrandMark } from '../icons/BrandMark';
+import { ModelSettingsModal } from '../modals/ModelSettingsModal';
 
 interface SidebarProps {
   isCollapsed: boolean;
-  onNavigate: (view: MainView) => void;
 }
 
-export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
+export function Sidebar({ isCollapsed }: SidebarProps) {
   const {
     sessions,
     activeSessionId,
     isLoading,
+    hasLoaded,
     loadSessions,
     createSession,
     selectSession,
     deleteSession,
   } = useSessionStore();
 
-  const { defaultWorkingDirectory, mcpServers } = useSettingsStore();
+  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
   const { apiKey } = useAuthStore();
+  const chatSessions = useChatStore((state) => state.sessions);
+
+  const isLiveSession = (sessionId: string) => {
+    const session = chatSessions[sessionId];
+    if (!session) return false;
+    const hasRunningTool = session.streamingToolCalls.some((tool) => tool.status === 'running');
+    return session.isStreaming || session.pendingPermissions.length > 0 || hasRunningTool;
+  };
 
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
+  const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [isHovering, setIsHovering] = useState(false);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
-
-  const enabledMcpCount = mcpServers.filter((s) => s.enabled).length;
+  const sessionMenuRef = useRef<HTMLDivElement>(null);
+  const sessionMenuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   // Load sessions on mount
   useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
+    if (!hasLoaded) {
+      loadSessions();
+    }
+  }, [hasLoaded, loadSessions]);
 
   // Close session menu when clicking outside
   useEffect(() => {
-    const handleClickOutside = () => {
-      if (sessionMenuId) {
-        setSessionMenuId(null);
+    if (!sessionMenuId) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+
+      // Check if click is inside the menu
+      if (sessionMenuRef.current?.contains(target)) {
+        return;
       }
+
+      // Check if click is on a menu button
+      const buttonRef = sessionMenuButtonRefs.current.get(sessionMenuId);
+      if (buttonRef?.contains(target)) {
+        return;
+      }
+
+      setSessionMenuId(null);
+      setSessionMenuPosition(null);
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    // Use setTimeout to avoid the initial click that opened the menu
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sessionMenuId]);
+
+  const handleSessionMenuToggle = useCallback((sessionId: string, buttonElement: HTMLButtonElement | null) => {
+    if (sessionMenuId === sessionId) {
+      setSessionMenuId(null);
+      setSessionMenuPosition(null);
+    } else {
+      if (buttonElement) {
+        const rect = buttonElement.getBoundingClientRect();
+        setSessionMenuPosition({
+          top: rect.bottom + 4,
+          left: rect.right - 140, // Menu width is ~140px
+        });
+        sessionMenuButtonRefs.current.set(sessionId, buttonElement);
+      }
+      setSessionMenuId(sessionId);
+    }
   }, [sessionMenuId]);
 
   const handleNewTask = async () => {
     try {
       const workingDir = defaultWorkingDirectory || '/';
-      await createSession(workingDir);
+      const selectedIsValid = selectedModel && availableModels.some((m) => m.id === selectedModel);
+      const modelToUse = selectedIsValid ? selectedModel : availableModels[0]?.id;
+
+      if (!modelToUse) {
+        const message = modelsLoading
+          ? 'Models are still loading. Try again in a moment.'
+          : 'No models available. Check your API key and model access.';
+        toast.error('No model available', message);
+        return;
+      }
+
+      await createSession(workingDir, modelToUse);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to create session', errorMessage);
@@ -80,155 +143,289 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
     try {
       await deleteSession(sessionId);
       setSessionMenuId(null);
+      setSessionMenuPosition(null);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to delete session', errorMessage);
     }
   };
 
-  // Collapsed view
-  if (isCollapsed) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className={cn(
-          'w-14 flex flex-col',
-          'bg-[#0D0D0F] border-r border-white/[0.08]'
-        )}
-      >
-        {/* New Task Button */}
-        <div className="p-2">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleNewTask}
-            className={cn(
-              'w-10 h-10 flex items-center justify-center rounded-xl',
-              'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0]',
-              'text-white shadow-lg shadow-[#6B6EF0]/25',
-              'hover:shadow-xl hover:shadow-[#6B6EF0]/35',
-              'transition-all duration-200'
-            )}
-            title="New task"
+  const showExpandedOverlay = isCollapsed && isHovering;
+
+  return (
+    <div
+      className="relative h-full"
+      onMouseEnter={() => isCollapsed && setIsHovering(true)}
+      onMouseLeave={() => isCollapsed && setIsHovering(false)}
+    >
+      {isCollapsed ? (
+        <SidebarRail
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          apiKey={apiKey}
+          onNewTask={handleNewTask}
+          onSelectSession={selectSession}
+          isLiveSession={isLiveSession}
+          onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
+          onCloseProfile={() => setProfileMenuOpen(false)}
+          profileButtonRef={profileButtonRef}
+          profileMenuOpen={profileMenuOpen}
+        />
+      ) : (
+        <SidebarExpanded
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          isLoading={isLoading}
+          apiKey={apiKey}
+          sessionMenuId={sessionMenuId}
+          sessionMenuPosition={sessionMenuPosition}
+          sessionMenuRef={sessionMenuRef}
+          profileButtonRef={profileButtonRef}
+          profileMenuOpen={profileMenuOpen}
+          onNewTask={handleNewTask}
+          onSelectSession={selectSession}
+          isLiveSession={isLiveSession}
+          onToggleSessionMenu={handleSessionMenuToggle}
+          onDeleteSession={handleDeleteSession}
+          onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
+          onCloseProfile={() => setProfileMenuOpen(false)}
+          isOverlay={false}
+        />
+      )}
+
+      <AnimatePresence>
+        {showExpandedOverlay && (
+          <motion.div
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -10 }}
+            className="absolute inset-y-0 left-0 z-40"
           >
-            <Plus className="w-5 h-5" />
-          </motion.button>
-        </div>
-
-        {/* Sessions List (icons only) */}
-        <div className="flex-1 overflow-y-auto px-2 py-1">
-          <div className="space-y-1">
-            <AnimatePresence>
-              {sessions.map((session, index) => (
-                <motion.button
-                  key={session.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  transition={{ duration: 0.2, delay: index * 0.03 }}
-                  onClick={() => selectSession(session.id)}
-                  className={cn(
-                    'w-10 h-10 flex items-center justify-center rounded-xl',
-                    'transition-all duration-150',
-                    activeSessionId === session.id
-                      ? 'bg-[#1A1A1E] text-[#8B8EFF]'
-                      : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
-                  )}
-                  title={session.title || 'New task'}
-                >
-                  <MessageSquare className="w-4 h-4" />
-                </motion.button>
-              ))}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* Plugins Button */}
-        <div className="p-2 border-t border-white/[0.08]">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => onNavigate('connectors')}
-            className={cn(
-              'relative w-10 h-10 flex items-center justify-center rounded-xl',
-              'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-              'transition-all duration-150'
-            )}
-            title="Plugins"
-          >
-            <Puzzle className="w-4 h-4" />
-            {enabledMcpCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 flex items-center justify-center rounded-full bg-[#6B6EF0] text-white text-[10px] font-medium">
-                {enabledMcpCount}
-              </span>
-            )}
-          </motion.button>
-        </div>
-
-        {/* Profile Section */}
-        <div className="p-2 border-t border-white/[0.08]">
-          <motion.button
-            ref={profileButtonRef}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-            className={cn(
-              'w-10 h-10 flex items-center justify-center rounded-xl',
-              'hover:bg-white/[0.04] transition-colors',
-              profileMenuOpen && 'bg-white/[0.08]'
-            )}
-            title="Profile & Settings"
-          >
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center">
-              <span className="text-white text-xs font-bold">N</span>
-            </div>
-          </motion.button>
-        </div>
-
-        <AnimatePresence>
-          {profileMenuOpen && (
-            <ProfileMenu
+            <SidebarExpanded
+              sessions={sessions}
+              activeSessionId={activeSessionId}
+              isLoading={isLoading}
               apiKey={apiKey}
-              onOpenConnectors={() => {
-                setProfileMenuOpen(false);
-                onNavigate('connectors');
-              }}
-              onClose={() => setProfileMenuOpen(false)}
-              buttonRef={profileButtonRef}
-              isCollapsed={true}
+              sessionMenuId={sessionMenuId}
+              sessionMenuPosition={sessionMenuPosition}
+              sessionMenuRef={sessionMenuRef}
+              profileButtonRef={profileButtonRef}
+              profileMenuOpen={profileMenuOpen}
+              onNewTask={handleNewTask}
+              onSelectSession={selectSession}
+              isLiveSession={isLiveSession}
+              onToggleSessionMenu={handleSessionMenuToggle}
+              onDeleteSession={handleDeleteSession}
+              onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
+              onCloseProfile={() => setProfileMenuOpen(false)}
+              isOverlay={true}
             />
-          )}
-        </AnimatePresence>
-      </motion.div>
-    );
-  }
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
-  // Expanded view
+interface SidebarRailProps {
+  sessions: SessionSummary[];
+  activeSessionId: string | null;
+  apiKey: string | null;
+  onNewTask: () => void;
+  onSelectSession: (id: string) => void;
+  isLiveSession: (id: string) => boolean;
+  onOpenProfile: () => void;
+  onCloseProfile: () => void;
+  profileButtonRef: RefObject<HTMLButtonElement>;
+  profileMenuOpen: boolean;
+}
+
+function SidebarRail({
+  sessions,
+  activeSessionId,
+  apiKey,
+  onNewTask,
+  onSelectSession,
+  isLiveSession,
+  onOpenProfile,
+  onCloseProfile,
+  profileButtonRef,
+  profileMenuOpen,
+}: SidebarRailProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+      className={cn(
+        'w-14 flex flex-col h-full',
+        'bg-[#0B0C10] border-r border-white/[0.06]'
+      )}
+    >
+      {/* Brand */}
+      <div className="p-2">
+        <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+          <BrandMark className="w-6 h-6" />
+        </div>
+      </div>
+
+      {/* New Task Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onNewTask}
+          className={cn(
+            'w-10 h-10 flex items-center justify-center rounded-xl',
+            'bg-[#4C71FF] text-white shadow-lg shadow-[#4C71FF]/25',
+            'hover:shadow-xl hover:shadow-[#4C71FF]/35',
+            'transition-all duration-200'
+          )}
+          title="New task"
+        >
+          <Plus className="w-5 h-5" />
+        </motion.button>
+      </div>
+
+      {/* Sessions List (icons only) */}
+      <div className="flex-1 overflow-y-auto px-2 py-1">
+        <div className="space-y-1">
+          <AnimatePresence>
+            {sessions.map((session, index) => (
+              <motion.button
+                key={session.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.2, delay: index * 0.02 }}
+                onClick={() => onSelectSession(session.id)}
+                className={cn(
+                  'relative w-10 h-10 flex items-center justify-center rounded-xl',
+                  'transition-all duration-150',
+                  activeSessionId === session.id
+                    ? 'bg-white/[0.08] text-[#8CA2FF]'
+                    : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
+                )}
+                title={session.title || 'New task'}
+              >
+                <MessageSquare className="w-4 h-4" />
+                {isLiveSession(session.id) && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#4C71FF] animate-pulse" />
+                )}
+              </motion.button>
+            ))}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Profile Section */}
+      <div className="p-2 border-t border-white/[0.06]">
+        <motion.button
+          ref={profileButtonRef}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenProfile}
+          className={cn(
+            'w-10 h-10 flex items-center justify-center rounded-xl',
+            'hover:bg-white/[0.04] transition-colors',
+            profileMenuOpen && 'bg-white/[0.08]'
+          )}
+          title="Profile & Settings"
+        >
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
+            <span className="text-white text-xs font-bold">N</span>
+          </div>
+        </motion.button>
+      </div>
+
+      <AnimatePresence>
+        {profileMenuOpen && (
+          <ProfileMenu
+            apiKey={apiKey}
+            onClose={onCloseProfile}
+            buttonRef={profileButtonRef}
+            isCollapsed={true}
+          />
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
+interface SidebarExpandedProps {
+  sessions: SessionSummary[];
+  activeSessionId: string | null;
+  isLoading: boolean;
+  apiKey: string | null;
+  sessionMenuId: string | null;
+  sessionMenuPosition: { top: number; left: number } | null;
+  sessionMenuRef: RefObject<HTMLDivElement>;
+  profileButtonRef: RefObject<HTMLButtonElement>;
+  profileMenuOpen: boolean;
+  onNewTask: () => void;
+  onSelectSession: (id: string) => void;
+  isLiveSession: (id: string) => boolean;
+  onToggleSessionMenu: (id: string, buttonElement: HTMLButtonElement | null) => void;
+  onDeleteSession: (id: string) => void;
+  onOpenProfile: () => void;
+  onCloseProfile: () => void;
+  isOverlay: boolean;
+}
+
+function SidebarExpanded({
+  sessions,
+  activeSessionId,
+  isLoading,
+  apiKey,
+  sessionMenuId,
+  sessionMenuPosition,
+  sessionMenuRef,
+  profileButtonRef,
+  profileMenuOpen,
+  onNewTask,
+  onSelectSession,
+  isLiveSession,
+  onToggleSessionMenu,
+  onDeleteSession,
+  onOpenProfile,
+  onCloseProfile,
+  isOverlay,
+}: SidebarExpandedProps) {
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
-        'w-64 flex flex-col',
-        'bg-[#0D0D0F] border-r border-white/[0.08]'
+        'w-64 h-full flex flex-col',
+        'bg-[#0E0F13] border-r border-white/[0.06]',
+        isOverlay && 'shadow-2xl shadow-black/50'
       )}
     >
+      {/* Brand */}
+      <div className="px-4 pt-4 pb-2">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
+            <BrandMark className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-white/90">Cowork</div>
+            <div className="text-xs text-white/40">Command center</div>
+          </div>
+        </div>
+      </div>
+
       {/* New Task Button */}
-      <div className="p-3">
+      <div className="px-3 py-2">
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          onClick={handleNewTask}
+          onClick={onNewTask}
           disabled={isLoading}
           className={cn(
             'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl',
-            'bg-gradient-to-r from-[#4F52D9] to-[#6B6EF0]',
-            'text-white font-medium text-sm',
-            'shadow-lg shadow-[#6B6EF0]/25',
-            'hover:shadow-xl hover:shadow-[#6B6EF0]/35',
+            'bg-white/[0.06] border border-white/[0.10] text-white/90 font-medium text-sm',
+            'hover:bg-white/[0.10]',
             'disabled:opacity-50 disabled:cursor-not-allowed',
             'transition-all duration-200'
           )}
@@ -238,9 +435,9 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         </motion.button>
       </div>
 
-      {/* Recents Section */}
+      {/* Recents */}
       <div className="flex-1 overflow-y-auto px-2">
-        <h3 className="text-xs font-medium text-white/50 px-2 py-2">Recents</h3>
+        <h3 className="text-[11px] font-semibold text-white/40 px-2 py-2 uppercase tracking-[0.16em]">Recents</h3>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -269,40 +466,24 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
                   firstMessage={session.firstMessage}
                   createdAt={session.createdAt}
                   isActive={activeSessionId === session.id}
+                  isLive={isLiveSession(session.id)}
                   isMenuOpen={sessionMenuId === session.id}
+                  menuPosition={sessionMenuId === session.id ? sessionMenuPosition : null}
+                  menuRef={sessionMenuRef}
                   index={index}
-                  onSelect={() => selectSession(session.id)}
-                  onMenuToggle={() => setSessionMenuId(sessionMenuId === session.id ? null : session.id)}
-                  onDelete={() => handleDeleteSession(session.id)}
+                  onSelect={() => onSelectSession(session.id)}
+                  onMenuToggle={(buttonEl) => onToggleSessionMenu(session.id, buttonEl)}
+                  onDelete={() => onDeleteSession(session.id)}
                 />
               ))}
             </AnimatePresence>
           </div>
         )}
 
-        {/* Helper text */}
         <p className="text-xs text-white/25 px-2 py-4">
           These tasks run locally and aren't synced across devices
         </p>
       </div>
-
-      {/* Plugins Button */}
-      <button
-        onClick={() => onNavigate('connectors')}
-        className={cn(
-          'flex items-center gap-3 px-4 py-3 mx-2 mb-2 rounded-xl',
-          'text-white/50 hover:text-white/80 hover:bg-white/[0.04]',
-          'transition-all duration-150'
-        )}
-      >
-        <Puzzle className="w-4 h-4" />
-        <span className="text-sm font-medium">Plugins</span>
-        {enabledMcpCount > 0 && (
-          <span className="ml-auto px-2 py-0.5 rounded-full bg-[#6B6EF0]/20 text-[#8B8EFF] text-xs font-medium">
-            {enabledMcpCount}
-          </span>
-        )}
-      </button>
 
       {/* Profile Section */}
       <div className="p-3 border-t border-white/[0.08]">
@@ -310,14 +491,14 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
           ref={profileButtonRef}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
-          onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+          onClick={onOpenProfile}
           className={cn(
             'w-full flex items-center gap-3 p-2 rounded-xl',
             'hover:bg-white/[0.04] transition-colors',
             profileMenuOpen && 'bg-white/[0.08]'
           )}
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-bold">N</span>
           </div>
           <div className="flex-1 text-left min-w-0">
@@ -339,11 +520,7 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
         {profileMenuOpen && (
           <ProfileMenu
             apiKey={apiKey}
-            onOpenConnectors={() => {
-              setProfileMenuOpen(false);
-              onNavigate('connectors');
-            }}
-            onClose={() => setProfileMenuOpen(false)}
+            onClose={onCloseProfile}
             buttonRef={profileButtonRef}
             isCollapsed={false}
           />
@@ -351,10 +528,6 @@ export function Sidebar({ isCollapsed, onNavigate }: SidebarProps) {
       </AnimatePresence>
     </motion.div>
   );
-}
-
-function truncate(str: string, len: number): string {
-  return str.length > len ? str.slice(0, len) + '...' : str;
 }
 
 function formatRelativeDate(ts: number): string {
@@ -371,10 +544,13 @@ interface SessionItemProps {
   firstMessage: string | null;
   createdAt: number;
   isActive: boolean;
+  isLive: boolean;
   isMenuOpen: boolean;
+  menuPosition: { top: number; left: number } | null;
+  menuRef: RefObject<HTMLDivElement>;
   index: number;
   onSelect: () => void;
-  onMenuToggle: () => void;
+  onMenuToggle: (buttonElement: HTMLButtonElement | null) => void;
   onDelete: () => void;
 }
 
@@ -383,16 +559,26 @@ function SessionItem({
   firstMessage,
   createdAt,
   isActive,
+  isLive,
   isMenuOpen,
+  menuPosition,
+  menuRef,
   index,
   onSelect,
   onMenuToggle,
   onDelete,
 }: SessionItemProps) {
-  const displayTitle = title !== 'New task'
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const baseTitle = title !== 'New task'
     ? title
-    : (firstMessage ? truncate(firstMessage, 30) : 'New conversation');
+    : (firstMessage ? firstMessage : 'New conversation');
   const dateStr = formatRelativeDate(createdAt);
+
+  const handleMenuButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onMenuToggle(menuButtonRef.current);
+  };
 
   return (
     <motion.div
@@ -401,34 +587,40 @@ function SessionItem({
       exit={{ opacity: 0, x: -10 }}
       transition={{ duration: 0.2, delay: index * 0.02 }}
       className={cn(
-        'group relative flex items-center rounded-xl',
+        'group relative flex items-center rounded-lg',
         'transition-all duration-150',
         isActive
-          ? 'bg-white/[0.06] border-l-2 border-[#6B6EF0]'
-          : 'hover:bg-white/[0.03]'
+          ? 'bg-white/[0.08] border border-white/[0.10]'
+          : 'hover:bg-white/[0.05]'
       )}
     >
       <button
         onClick={onSelect}
         className={cn(
-          'flex-1 flex flex-col gap-0.5 px-3 py-2',
+          'flex-1 flex flex-col gap-0.5 px-3 py-1.5 min-w-0 overflow-hidden',
           'text-left',
           isActive ? 'text-white/90' : 'text-white/50 hover:text-white/80'
         )}
       >
-        <span className="text-sm truncate">{displayTitle}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="text-sm truncate min-w-0 flex-1">
+            {baseTitle}
+          </span>
+          {isLive && (
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[#8CA2FF] flex-shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#4C71FF] animate-pulse" />
+              Live
+            </span>
+          )}
+        </span>
         <span className="text-xs text-white/40">{dateStr}</span>
       </button>
 
-      {/* Actions menu */}
-      <div className="relative pr-2">
-        <motion.button
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onMenuToggle();
-          }}
+      {/* Actions menu trigger */}
+      <div className="pr-2">
+        <button
+          ref={menuButtonRef}
+          onClick={handleMenuButtonClick}
           className={cn(
             'p-1.5 rounded-lg',
             'opacity-0 group-hover:opacity-100',
@@ -438,47 +630,49 @@ function SessionItem({
           )}
         >
           <MoreHorizontal className="w-4 h-4" />
-        </motion.button>
-
-        <AnimatePresence>
-          {isMenuOpen && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: -5 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: -5 }}
-              className="absolute right-0 top-full mt-1 z-50 w-32 py-1 bg-[#1A1A1E] rounded-lg border border-white/[0.08] shadow-xl"
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#FF5449] hover:bg-white/[0.04] transition-colors"
-              >
-                <Trash2 className="w-4 h-4" />
-                Delete
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </button>
       </div>
+
+      {/* Dropdown menu via portal */}
+      {isMenuOpen && menuPosition && createPortal(
+        <motion.div
+          ref={menuRef}
+          initial={{ opacity: 0, scale: 0.95, y: -5 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.95, y: -5 }}
+          className="fixed z-[100] w-36 py-1 bg-[#111218] rounded-lg border border-white/[0.08] shadow-xl shadow-black/40"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#FF5449] hover:bg-white/[0.04] transition-colors"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </button>
+        </motion.div>,
+        document.body
+      )}
     </motion.div>
   );
 }
 
 interface ProfileMenuProps {
   apiKey: string | null;
-  onOpenConnectors: () => void;
   onClose: () => void;
   buttonRef: RefObject<HTMLButtonElement>;
   isCollapsed: boolean;
 }
 
-function ProfileMenu({ apiKey, onOpenConnectors, onClose, buttonRef, isCollapsed }: ProfileMenuProps) {
+function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isEditingKey, setIsEditingKey] = useState(false);
   const [newApiKey, setNewApiKey] = useState('');
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { setApiKey, clearApiKey } = useAuthStore();
 
@@ -491,15 +685,13 @@ function ProfileMenu({ apiKey, onOpenConnectors, onClose, buttonRef, isCollapsed
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
       if (isCollapsed) {
-        // Position to the right of the button
         setMenuPosition({
-          top: rect.bottom - 300, // Align bottom of menu with bottom of button area
+          top: rect.bottom - 300,
           left: rect.right + 8,
         });
       } else {
-        // Position above the button
         setMenuPosition({
-          top: rect.top - 320, // Menu height approximately
+          top: rect.top - 320,
           left: rect.left,
         });
       }
@@ -553,190 +745,133 @@ function ProfileMenu({ apiKey, onOpenConnectors, onClose, buttonRef, isCollapsed
   const menuContent = (
     <motion.div
       ref={menuRef}
-      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: 'fixed',
-        top: Math.max(10, menuPosition.top),
-        left: menuPosition.left,
-        zIndex: 9999,
-      }}
+      initial={{ opacity: 0, scale: 0.95, y: 10 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95, y: 10 }}
       className={cn(
-        'w-72',
-        'bg-[#1A1A1E] border border-white/[0.12]',
-        'rounded-xl shadow-2xl shadow-black/50',
+        'fixed z-[100] w-80 rounded-2xl overflow-hidden',
+        'bg-[#111218] border border-white/[0.08]',
+        'shadow-2xl shadow-black/60'
       )}
+      style={{ top: menuPosition.top, left: menuPosition.left }}
     >
-        {/* Header */}
-      <div className="px-3 pt-3 pb-2 border-b border-white/[0.08]">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#6B6EF0] to-[#8A62C2] flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-sm font-bold">N</span>
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-white/[0.08]">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
+            <span className="text-white text-xs font-bold">N</span>
           </div>
-          <div className="flex-1 min-w-0">
+          <div>
             <div className="text-sm font-medium text-white/90">Naresh</div>
-            <div className="text-xs text-white/40 flex items-center gap-1">
-              <span className={cn(
-                'w-1.5 h-1.5 rounded-full',
-                apiKey ? 'bg-green-500' : 'bg-yellow-500'
-              )} />
-              {apiKey ? 'API Connected' : 'Not configured'}
-            </div>
+            <div className="text-xs text-white/40">Local account</div>
           </div>
         </div>
       </div>
 
-      <div className="p-2 space-y-1">
-        {/* API Key Section */}
-        <div className="px-2 py-2">
-          <label className="text-xs text-white/40 mb-1.5 block">Gemini API Key</label>
-          <div className="flex items-center gap-1.5">
-            <div className="flex-1 px-2.5 py-1.5 bg-[#0D0D0F] rounded-lg text-xs text-white/50 font-mono truncate border border-white/[0.08]">
-              {showApiKey && apiKey ? apiKey : maskedApiKey}
-            </div>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-colors"
-              title={showApiKey ? 'Hide API Key' : 'Show API Key'}
-            >
-              {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            </motion.button>
-            {apiKey && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleCopyApiKey}
-                className="p-1.5 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-colors"
-                title="Copy API Key"
-              >
-                <Copy className="w-3.5 h-3.5" />
-              </motion.button>
-            )}
+      {/* API Key Section */}
+      <div className="p-4 border-b border-white/[0.08]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Key className="w-4 h-4 text-white/40" />
+            <span className="text-sm text-white/70">API Key</span>
           </div>
+          <button
+            onClick={() => setShowApiKey(!showApiKey)}
+            className="text-white/40 hover:text-white/70"
+          >
+            {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
         </div>
 
-        {/* Divider */}
-        <div className="h-px bg-white/[0.06] mx-2" />
-
-        {/* Edit API Key */}
         {isEditingKey ? (
-          <div className="px-2 py-2 space-y-2">
+          <div className="space-y-2">
             <input
               type="password"
               value={newApiKey}
               onChange={(e) => setNewApiKey(e.target.value)}
-              placeholder="Enter new API key..."
+              placeholder="Enter new API key"
               className={cn(
                 'w-full px-3 py-2 rounded-lg text-sm',
-                'bg-[#0D0D0F] border border-white/[0.08]',
+                'bg-[#0B0C10] border border-white/[0.08]',
                 'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:ring-2 focus:ring-[#6B6EF0]/50'
+                'focus:outline-none focus:border-[#4C71FF]/50'
               )}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSaveApiKey();
-                if (e.key === 'Escape') {
-                  setIsEditingKey(false);
-                  setNewApiKey('');
-                }
-              }}
             />
             <div className="flex gap-2">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+              <button
                 onClick={handleSaveApiKey}
-                disabled={!newApiKey.trim()}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm',
-                  'bg-[#6B6EF0] hover:bg-[#8B8EFF] text-white',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
-                )}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#4C71FF] text-white"
               >
-                <Check className="w-3.5 h-3.5" />
+                <Check className="w-4 h-4" />
                 Save
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => {
-                  setIsEditingKey(false);
-                  setNewApiKey('');
-                }}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] hover:bg-white/[0.10] text-white/70"
+              </button>
+              <button
+                onClick={() => setIsEditingKey(false)}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
                 Cancel
-              </motion.button>
+              </button>
             </div>
           </div>
         ) : (
-          <>
-            {/* Menu Items */}
-            <button
-              onClick={() => setIsEditingKey(true)}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
-                'text-white/70 hover:text-white hover:bg-white/[0.06]',
-                'transition-colors'
-              )}
-            >
-              <Key className="w-4 h-4" />
-              {apiKey ? 'Change API Key' : 'Add API Key'}
-            </button>
-
-            <button
-              onClick={onOpenConnectors}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
-                'text-white/70 hover:text-white hover:bg-white/[0.06]',
-                'transition-colors'
-              )}
-            >
-              <Puzzle className="w-4 h-4" />
-              Plugins & Connectors
-            </button>
-
-            <button
-              onClick={() => toast.info('Settings coming soon')}
-              className={cn(
-                'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
-                'text-white/70 hover:text-white hover:bg-white/[0.06]',
-                'transition-colors'
-              )}
-            >
-              <Settings className="w-4 h-4" />
-              Settings
-            </button>
-
-            {/* Divider */}
-            <div className="h-px bg-white/[0.06] mx-2 my-1" />
-
-            {/* Logout */}
-            {apiKey && (
+          <div className="space-y-2">
+            <div className="px-3 py-2 rounded-lg bg-[#0B0C10] border border-white/[0.08] text-xs text-white/60 font-mono">
+              {showApiKey ? apiKey || 'Not configured' : maskedApiKey}
+            </div>
+            <div className="flex gap-2">
               <button
-                onClick={handleLogout}
-                className={cn(
-                  'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm',
-                  'text-red-400 hover:text-red-300 hover:bg-red-500/10',
-                  'transition-colors'
-                )}
+                onClick={() => setIsEditingKey(true)}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
               >
-                <LogOut className="w-4 h-4" />
-                Logout
+                <Settings className="w-4 h-4" />
+                Update
               </button>
-            )}
-          </>
+              {apiKey && (
+                <button
+                  onClick={handleCopyApiKey}
+                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy
+                </button>
+              )}
+            </div>
+          </div>
         )}
+      </div>
+
+      {/* Model Settings */}
+      <div className="px-4 pb-2">
+        <button
+          onClick={() => setModelSettingsOpen(true)}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/[0.04] transition-colors"
+        >
+          <Settings2 className="w-4 h-4" />
+          Model Settings
+        </button>
+      </div>
+
+      {/* Logout */}
+      <div className="p-4 pt-2">
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20"
+        >
+          <LogOut className="w-4 h-4" />
+          Remove API key
+        </button>
       </div>
     </motion.div>
   );
 
-  // Use portal to render outside sidebar DOM
-  return createPortal(menuContent, document.body);
+  return (
+    <>
+      {createPortal(menuContent, document.body)}
+      <ModelSettingsModal
+        isOpen={modelSettingsOpen}
+        onClose={() => setModelSettingsOpen(false)}
+      />
+    </>
+  );
 }

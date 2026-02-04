@@ -5,17 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 
 describe('chat-store', () => {
   beforeEach(() => {
-    // Reset store state
     useChatStore.setState({
-      messages: [],
-      isStreaming: false,
-      streamingContent: '',
-      streamingToolCalls: [],
-      pendingPermissions: [],
-      pendingQuestions: [],
-      currentTool: null,
+      sessions: {},
       error: null,
-      isLoadingMessages: false,
     });
     clearMockInvokeResponses();
     vi.clearAllMocks();
@@ -35,10 +27,11 @@ describe('chat-store', () => {
 
       await useChatStore.getState().loadMessages('session-1');
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.messages).toEqual(mockMessages);
       expect(state.isLoadingMessages).toBe(false);
       expect(state.error).toBeNull();
+      expect(state.hasLoaded).toBe(true);
     });
 
     it('should handle load errors', async () => {
@@ -48,7 +41,7 @@ describe('chat-store', () => {
 
       await useChatStore.getState().loadMessages('session-1');
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.error).toBe('Failed to load session');
       expect(state.isLoadingMessages).toBe(false);
     });
@@ -60,8 +53,7 @@ describe('chat-store', () => {
 
       const promise = useChatStore.getState().sendMessage('session-1', 'Hello');
 
-      // Check optimistic update
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.messages).toHaveLength(1);
       expect(state.messages[0].role).toBe('user');
       expect(state.messages[0].content).toBe('Hello');
@@ -80,7 +72,7 @@ describe('chat-store', () => {
 
       const promise = useChatStore.getState().sendMessage('session-1', 'Hello', attachments);
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       const message = state.messages[0];
       expect(Array.isArray(message.content)).toBe(true);
 
@@ -99,7 +91,7 @@ describe('chat-store', () => {
 
       await useChatStore.getState().sendMessage('session-1', 'Hello');
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.error).toBe('Network error');
       expect(state.isStreaming).toBe(false);
     });
@@ -121,17 +113,18 @@ describe('chat-store', () => {
 
   describe('appendStreamChunk', () => {
     it('should append content to streaming buffer', () => {
-      useChatStore.getState().appendStreamChunk('Hello');
-      useChatStore.getState().appendStreamChunk(' World');
+      useChatStore.getState().appendStreamChunk('session-1', 'Hello');
+      useChatStore.getState().appendStreamChunk('session-1', ' World');
 
-      expect(useChatStore.getState().streamingContent).toBe('Hello World');
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.streamingContent).toBe('Hello World');
     });
   });
 
   describe('addMessage', () => {
     it('should add message and clear streaming content', () => {
-      // Set up streaming state
-      useChatStore.setState({ streamingContent: 'Partial content' });
+      useChatStore.getState().setStreaming('session-1', true);
+      useChatStore.getState().appendStreamChunk('session-1', 'Partial content');
 
       const newMessage = {
         id: 'msg-1',
@@ -140,9 +133,9 @@ describe('chat-store', () => {
         createdAt: Date.now(),
       };
 
-      useChatStore.getState().addMessage(newMessage);
+      useChatStore.getState().addMessage('session-1', newMessage);
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.messages).toContainEqual(newMessage);
       expect(state.streamingContent).toBe('');
     });
@@ -159,9 +152,10 @@ describe('chat-store', () => {
         createdAt: Date.now(),
       };
 
-      useChatStore.getState().addPermissionRequest(permission);
+      useChatStore.getState().addPermissionRequest('session-1', permission);
 
-      expect(useChatStore.getState().pendingPermissions).toContainEqual(permission);
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.pendingPermissions).toContainEqual(permission);
     });
 
     it('should remove permission requests', () => {
@@ -174,10 +168,11 @@ describe('chat-store', () => {
         createdAt: Date.now(),
       };
 
-      useChatStore.setState({ pendingPermissions: [permission] });
-      useChatStore.getState().removePermissionRequest('perm-1');
+      useChatStore.getState().addPermissionRequest('session-1', permission);
+      useChatStore.getState().removePermissionRequest('session-1', 'perm-1');
 
-      expect(useChatStore.getState().pendingPermissions).toHaveLength(0);
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.pendingPermissions).toHaveLength(0);
     });
   });
 
@@ -194,9 +189,10 @@ describe('chat-store', () => {
         createdAt: Date.now(),
       };
 
-      useChatStore.getState().addQuestion(question);
+      useChatStore.getState().addQuestion('session-1', question);
 
-      expect(useChatStore.getState().pendingQuestions).toContainEqual(question);
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.pendingQuestions).toContainEqual(question);
     });
 
     it('should remove questions', () => {
@@ -208,26 +204,28 @@ describe('chat-store', () => {
         createdAt: Date.now(),
       };
 
-      useChatStore.setState({ pendingQuestions: [question] });
-      useChatStore.getState().removeQuestion('q-1');
+      useChatStore.getState().addQuestion('session-1', question);
+      useChatStore.getState().removeQuestion('session-1', 'q-1');
 
-      expect(useChatStore.getState().pendingQuestions).toHaveLength(0);
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.pendingQuestions).toHaveLength(0);
     });
   });
 
-  describe('reset', () => {
-    it('should reset store to initial state', () => {
-      // Set some state
-      useChatStore.setState({
-        messages: [{ id: '1', role: 'user', content: 'test', createdAt: Date.now() }],
-        isStreaming: true,
-        streamingContent: 'content',
-        error: 'error',
+  describe('resetSession', () => {
+    it('should reset a session to initial state', () => {
+      useChatStore.getState().addMessage('session-1', {
+        id: '1',
+        role: 'user',
+        content: 'test',
+        createdAt: Date.now(),
       });
+      useChatStore.getState().setStreaming('session-1', true);
+      useChatStore.getState().appendStreamChunk('session-1', 'content');
 
-      useChatStore.getState().reset();
+      useChatStore.getState().resetSession('session-1');
 
-      const state = useChatStore.getState();
+      const state = useChatStore.getState().getSessionState('session-1');
       expect(state.messages).toHaveLength(0);
       expect(state.isStreaming).toBe(false);
       expect(state.streamingContent).toBe('');

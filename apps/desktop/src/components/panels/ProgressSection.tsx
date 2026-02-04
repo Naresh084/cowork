@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAgentStore, type Task } from '../../stores/agent-store';
+import { useSessionStore } from '../../stores/session-store';
 import { CollapsibleSection } from './CollapsibleSection';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -20,7 +21,8 @@ import { motion, AnimatePresence } from 'framer-motion';
  * - Supports subagents via task.owner field
  */
 export function ProgressSection() {
-  const tasks = useAgentStore((state) => state.tasks);
+  const { activeSessionId } = useSessionStore();
+  const tasks = useAgentStore((state) => state.getSessionState(activeSessionId).tasks);
 
   // Calculate completion stats
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
@@ -114,7 +116,7 @@ function TaskItem({ task }: TaskItemProps) {
       className={cn(
         'flex items-start gap-2 py-1.5 px-1 rounded-lg',
         'transition-colors duration-150',
-        task.status === 'in_progress' && 'bg-[#6B6EF0]/5'
+        task.status === 'in_progress' && 'bg-[#4C71FF]/5'
       )}
     >
       {/* Status Icon */}
@@ -122,7 +124,7 @@ function TaskItem({ task }: TaskItemProps) {
         {task.status === 'completed' ? (
           <CheckCircle2 className="w-4 h-4 text-[#50956A]" />
         ) : task.status === 'in_progress' ? (
-          <Loader2 className="w-4 h-4 text-[#6B6EF0] animate-spin" />
+          <Loader2 className="w-4 h-4 text-[#4C71FF] animate-spin" />
         ) : (
           <Circle className="w-4 h-4 text-white/25" />
         )}
@@ -134,7 +136,7 @@ function TaskItem({ task }: TaskItemProps) {
           className={cn(
             'text-sm block',
             task.status === 'completed'
-              ? 'text-white/40 line-through'
+              ? 'text-white/50 line-through decoration-white/30'
               : 'text-white/80'
           )}
         >
@@ -144,8 +146,8 @@ function TaskItem({ task }: TaskItemProps) {
         {/* Active form (shown when in progress) */}
         {task.status === 'in_progress' && task.activeForm && (
           <div className="flex items-center gap-1.5 mt-0.5">
-            <Loader2 className="w-3 h-3 text-[#8B8EFF] animate-spin" />
-            <span className="text-xs text-[#8B8EFF]">{task.activeForm}</span>
+            <Loader2 className="w-3 h-3 text-[#8CA2FF] animate-spin" />
+            <span className="text-xs text-[#8CA2FF]">{task.activeForm}</span>
           </div>
         )}
 
