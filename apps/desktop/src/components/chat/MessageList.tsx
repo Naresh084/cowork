@@ -187,19 +187,14 @@ export function MessageList() {
           return null;
         })}
 
+        {/* Show thinking block when there's thinking content or when waiting for response */}
+        {isStreaming && activeTurnId === turnId && (thinkingContent || (!streamingContent && !streamingToolCalls.some(t => t.status === 'running'))) && (
+          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!streamingContent && !streamingToolCalls.some(t => t.status === 'running'))} />
+        )}
+
         {isStreaming && activeTurnId === turnId && streamingContent && (
           <StreamingMessage content={streamingContent} />
         )}
-
-        {/* Show thinking block when processing */}
-        {(() => {
-          if (!isStreaming || activeTurnId !== turnId) return null;
-          if (streamingContent) return null;
-          // Check if any tool is currently running
-          const hasRunningTool = streamingToolCalls.some(t => t.status === 'running');
-          if (hasRunningTool) return null;
-          return <ThinkingBlock content={thinkingContent} isActive={isThinking} />;
-        })()}
       </div>
     );
   };
