@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { Message, MessageContentPart, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
+import type {
+  Message,
+  MessageContentPart,
+  PermissionRequest as BasePermissionRequest,
+  ChatItem,
+  ContextUsage,
+} from '@gemini-cowork/shared';
 import type { Task, Artifact } from './agent-store';
 import { useAgentStore } from './agent-store';
 import { useSessionStore } from './session-store';
@@ -111,18 +117,41 @@ export interface UserQuestion {
 }
 
 export interface SessionChatState {
+  // ============================================================================
+  // V2 Unified Storage (primary)
+  // ============================================================================
+  /** Unified chat items array - the single source of truth for V2 */
+  chatItems: ChatItem[];
+  /** Context usage info (persisted) */
+  contextUsage: ContextUsage | null;
+
+  // ============================================================================
+  // V1 Legacy Storage (for backwards compatibility during transition)
+  // ============================================================================
   messages: Message[];
+  streamingToolCalls: ToolExecution[];
+  turnActivities: Record<string, TurnActivityItem[]>;
+
+  // ============================================================================
+  // Streaming State (temporary, not persisted)
+  // ============================================================================
   isStreaming: boolean;
   isThinking: boolean;
   thinkingStartedAt?: number;
   thinkingContent: string;
   streamingContent: string;
-  streamingToolCalls: ToolExecution[];
-  turnActivities: Record<string, TurnActivityItem[]>;
   activeTurnId?: string;
+  currentTool: ToolExecution | null;
+
+  // ============================================================================
+  // Interactive State (permissions, questions)
+  // ============================================================================
   pendingPermissions: ExtendedPermissionRequest[];
   pendingQuestions: UserQuestion[];
-  currentTool: ToolExecution | null;
+
+  // ============================================================================
+  // UI State
+  // ============================================================================
   error: string | null;
   isLoadingMessages: boolean;
   lastUpdatedAt: number;
@@ -186,6 +215,12 @@ interface ChatActions {
   clearThinkingContent: (sessionId: string) => void;
   clearStreamingContent: (sessionId: string) => void;
 
+  // V2 ChatItem actions
+  appendChatItem: (sessionId: string, item: ChatItem) => void;
+  updateChatItem: (sessionId: string, itemId: string, updates: Partial<ChatItem>) => void;
+  setChatItems: (sessionId: string, items: ChatItem[]) => void;
+  updateContextUsage: (sessionId: string, usage: ContextUsage) => void;
+
   // Browser View (Live View for computer_use)
   isComputerUseRunning: (sessionId: string | null) => boolean;
   updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => void;
@@ -201,18 +236,29 @@ export interface SessionDetails {
 }
 
 const createSessionState = (): SessionChatState => ({
+  // V2 unified storage
+  chatItems: [],
+  contextUsage: null,
+
+  // V1 legacy storage (backwards compatibility)
   messages: [],
+  streamingToolCalls: [],
+  turnActivities: {},
+
+  // Streaming state
   isStreaming: false,
   isThinking: false,
   thinkingStartedAt: undefined,
   thinkingContent: '',
   streamingContent: '',
-  streamingToolCalls: [],
-  turnActivities: {},
   activeTurnId: undefined,
+  currentTool: null,
+
+  // Interactive state
   pendingPermissions: [],
   pendingQuestions: [],
-  currentTool: null,
+
+  // UI state
   error: null,
   isLoadingMessages: false,
   lastUpdatedAt: Date.now(),
@@ -1040,6 +1086,45 @@ ${attachment.data}`,
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
       streamingContent: '',
+    })));
+  },
+
+  // ============================================================================
+  // V2 ChatItem Actions
+  // ============================================================================
+
+  appendChatItem: (sessionId: string, item: ChatItem) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      chatItems: [...session.chatItems, item],
+    })));
+  },
+
+  updateChatItem: (sessionId: string, itemId: string, updates: Partial<ChatItem>) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      chatItems: session.chatItems.map((item) =>
+        item.id === itemId ? { ...item, ...updates } as ChatItem : item
+      ),
+    })));
+  },
+
+  setChatItems: (sessionId: string, items: ChatItem[]) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      chatItems: items,
+      hasLoaded: true,
+    })));
+  },
+
+  updateContextUsage: (sessionId: string, usage: ContextUsage) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      contextUsage: usage,
     })));
   },
 

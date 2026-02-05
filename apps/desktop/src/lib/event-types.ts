@@ -1,4 +1,4 @@
-import type { Message, PermissionRequest } from '@gemini-cowork/shared';
+import type { Message, PermissionRequest, ChatItem } from '@gemini-cowork/shared';
 import type { Task, Artifact } from '../stores/agent-store';
 
 /**
@@ -161,6 +161,30 @@ export type AgentEvent =
       mimeType: string;    // 'image/png'
       url: string;         // current browser URL
       timestamp: number;   // when captured
+    }
+  // V2 Unified ChatItem events
+  | {
+      type: 'chat:item';
+      sessionId: string;
+      item: ChatItem;
+    }
+  | {
+      type: 'chat:update';
+      sessionId: string;
+      itemId: string;
+      updates: Partial<ChatItem>;
+    }
+  | {
+      type: 'chat:items';
+      sessionId: string;
+      items: ChatItem[];
+    }
+  | {
+      type: 'context:usage';
+      sessionId: string;
+      usedTokens: number;
+      maxTokens: number;
+      percentUsed: number;
     };
 
 /**
@@ -201,12 +225,17 @@ export const TAURI_EVENT_NAMES = [
   'agent:artifact:updated',
   'agent:artifact:deleted',
   'agent:context:update',
+  'agent:context:usage',
   'agent:research:progress',
   'agent:error',
   'agent:session:updated',
   'agent:started',
   'agent:stopped',
   'agent:browserView:screenshot',
+  // V2 unified chat events
+  'agent:chat:item',
+  'agent:chat:update',
+  'agent:chat:items',
 ] as const;
 
 export type TauriEventName = (typeof TAURI_EVENT_NAMES)[number];

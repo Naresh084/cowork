@@ -1,7 +1,15 @@
 import type { ToolHandler, ToolContext } from '@gemini-cowork/core';
 import { GeminiProvider, getModelContextWindow, setModelContextWindows } from '@gemini-cowork/providers';
 import type { Message, PermissionRequest, PermissionDecision, MessageContentPart, SessionType } from '@gemini-cowork/shared';
-import { generateId, generateMessageId, now } from '@gemini-cowork/shared';
+import { generateId, generateMessageId, now, generateChatItemId } from '@gemini-cowork/shared';
+import type {
+  ChatItem,
+  UserMessageItem,
+  AssistantMessageItem,
+  ThinkingItem,
+  ToolStartItem,
+  ToolResultItem,
+} from '@gemini-cowork/shared';
 import { createDeepAgent } from 'deepagents';
 import { createMiddleware } from 'langchain';
 import { DynamicStructuredTool } from '@langchain/core/tools';
@@ -33,7 +41,7 @@ import type {
   PersistedMessage,
   PersistedToolExecution,
 } from './types.js';
-import { SessionPersistence, type PersistedSessionData } from './persistence.js';
+import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -62,6 +70,10 @@ interface ActiveSession {
   abortController?: AbortController;
   stopRequested?: boolean;
   messages: Message[];
+  /** Unified chat items array (V2 architecture) */
+  chatItems: ChatItem[];
+  /** Current turn ID for associating items with user message */
+  currentTurnId?: string;
   tasks: Task[];
   lastTodosSignature?: string;
   artifacts: Artifact[];
@@ -226,7 +238,7 @@ export class AgentRunner {
     let restoredCount = 0;
     for (const [sessionId, data] of persistedSessions) {
       try {
-        console.error('[AgentRunner] Recreating session:', sessionId, 'messages:', data.messages.length);
+        console.error('[AgentRunner] Recreating session:', sessionId, 'chatItems:', data.chatItems.length);
         const session = await this.recreateSession(data);
         this.sessions.set(sessionId, session);
 
@@ -246,23 +258,29 @@ export class AgentRunner {
   }
 
   /**
-   * Recreate an ActiveSession from persisted data.
+   * Recreate an ActiveSession from persisted V2 data.
    * Agent will be recreated lazily on first message.
    */
-  private async recreateSession(data: PersistedSessionData): Promise<ActiveSession> {
+  private async recreateSession(data: PersistedSessionDataV2): Promise<ActiveSession> {
+    // Convert chatItems back to legacy messages for backwards compatibility
+    const messages = this.chatItemsToMessages(data.chatItems);
+    const toolExecutions = this.chatItemsToToolExecutions(data.chatItems);
+
     const session: ActiveSession = {
       id: data.metadata.id,
-      type: (data.metadata as { type?: SessionType }).type || 'main', // Default to 'main' for legacy sessions
+      type: (data.metadata as { type?: SessionType }).type || 'main',
       workingDirectory: data.metadata.workingDirectory,
       model: data.metadata.model,
       title: data.metadata.title,
       approvalMode: data.metadata.approvalMode,
       agent: {} as DeepAgentInstance, // Will be recreated on first message
-      messages: data.messages,
+      messages,
+      chatItems: data.chatItems,
+      currentTurnId: undefined,
       tasks: data.tasks,
       lastTodosSignature: undefined,
       artifacts: data.artifacts,
-      toolExecutions: data.toolExecutions,
+      toolExecutions,
       permissionCache: new Map(),
       permissionScopes: new Map(),
       toolStartTimes: new Map(),
@@ -276,6 +294,70 @@ export class AgentRunner {
     };
 
     return session;
+  }
+
+  /**
+   * Convert ChatItems to legacy Message format for backwards compatibility.
+   */
+  private chatItemsToMessages(chatItems: ChatItem[]): Message[] {
+    const messages: Message[] = [];
+    for (const item of chatItems) {
+      if (item.kind === 'user_message') {
+        messages.push({
+          id: item.id.replace('ci-', ''),
+          role: 'user',
+          content: item.content as Message['content'],
+          createdAt: item.timestamp,
+        });
+      } else if (item.kind === 'assistant_message') {
+        messages.push({
+          id: item.id.replace('ci-', ''),
+          role: 'assistant',
+          content: item.content as Message['content'],
+          createdAt: item.timestamp,
+          metadata: item.metadata,
+        });
+      } else if (item.kind === 'system_message') {
+        messages.push({
+          id: item.id.replace('ci-', ''),
+          role: 'system',
+          content: item.content,
+          createdAt: item.timestamp,
+          metadata: item.metadata,
+        });
+      }
+    }
+    return messages;
+  }
+
+  /**
+   * Convert ChatItems to legacy ToolExecution format for backwards compatibility.
+   */
+  private chatItemsToToolExecutions(chatItems: ChatItem[]): ToolExecution[] {
+    const toolMap = new Map<string, ToolExecution>();
+
+    for (const item of chatItems) {
+      if (item.kind === 'tool_start') {
+        toolMap.set(item.toolId, {
+          id: item.toolId,
+          name: item.name,
+          args: item.args,
+          status: item.status === 'running' ? 'running' : item.status === 'error' ? 'error' : 'success',
+          startedAt: item.timestamp,
+          parentToolId: item.parentToolId,
+        });
+      } else if (item.kind === 'tool_result') {
+        const existing = toolMap.get(item.toolId);
+        if (existing) {
+          existing.status = item.status === 'error' ? 'error' : 'success';
+          existing.result = item.result;
+          existing.error = item.error;
+          existing.completedAt = item.timestamp;
+        }
+      }
+    }
+
+    return Array.from(toolMap.values());
   }
 
   /**
@@ -436,6 +518,8 @@ export class AgentRunner {
       approvalMode: 'auto',
       agent: {} as DeepAgentInstance,
       messages: [],
+      chatItems: [],
+      currentTurnId: undefined,
       tasks: [],
       lastTodosSignature: undefined,
       artifacts: [],
@@ -568,6 +652,24 @@ export class AgentRunner {
       toolIds: [],
     });
 
+    // V2: Create and emit UserMessageItem
+    // Filter attachments to only include supported types (exclude 'other')
+    const chatItemAttachments = attachments?.filter(
+      (a): a is typeof a & { type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf' } =>
+        a.type !== 'other'
+    );
+    const userChatItem: UserMessageItem = {
+      id: generateChatItemId(),
+      kind: 'user_message',
+      timestamp: userMessage.createdAt,
+      turnId: userMessage.id,
+      content: messageContent,
+      attachments: chatItemAttachments,
+    };
+    session.chatItems.push(userChatItem);
+    session.currentTurnId = userMessage.id;
+    eventEmitter.chatItem(sessionId, userChatItem);
+
     // Ensure agent is initialized (may be restored from disk without agent)
     if (!session.agent.invoke) {
       const toolHandlers = this.buildToolHandlers(session);
@@ -601,6 +703,8 @@ export class AgentRunner {
 
           let thinkingStarted = false;
           let streamingStarted = false;
+          let thinkingItemId: string | null = null;
+          let accumulatedThinking = '';
 
           for await (const event of stream) {
             if (session.stopRequested) {
@@ -614,7 +718,21 @@ export class AgentRunner {
               if (!thinkingStarted) {
                 eventEmitter.thinkingStart(sessionId);
                 thinkingStarted = true;
+
+                // V2: Create ThinkingItem
+                thinkingItemId = generateChatItemId();
+                const thinkingItem: ThinkingItem = {
+                  id: thinkingItemId,
+                  kind: 'thinking',
+                  timestamp: Date.now(),
+                  turnId: session.currentTurnId,
+                  content: '',
+                  status: 'active',
+                };
+                session.chatItems.push(thinkingItem);
+                eventEmitter.chatItem(sessionId, thinkingItem);
               }
+              accumulatedThinking += thinkingText;
               eventEmitter.thinkingChunk(sessionId, thinkingText);
             }
 
@@ -625,6 +743,16 @@ export class AgentRunner {
               if (thinkingStarted && !streamingStarted) {
                 eventEmitter.thinkingDone(sessionId);
                 streamingStarted = true;
+
+                // V2: Update ThinkingItem to done with full content
+                if (thinkingItemId) {
+                  const thinkingItem = session.chatItems.find(i => i.id === thinkingItemId) as ThinkingItem | undefined;
+                  if (thinkingItem) {
+                    thinkingItem.content = accumulatedThinking;
+                    thinkingItem.status = 'done';
+                    eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
+                  }
+                }
               }
               streamedText += chunkText;
               eventEmitter.streamChunk(sessionId, chunkText);
@@ -644,6 +772,16 @@ export class AgentRunner {
           // Ensure thinking is marked done if it was started
           if (thinkingStarted && !streamingStarted) {
             eventEmitter.thinkingDone(sessionId);
+
+            // V2: Update ThinkingItem to done
+            if (thinkingItemId) {
+              const thinkingItem = session.chatItems.find(i => i.id === thinkingItemId) as ThinkingItem | undefined;
+              if (thinkingItem) {
+                thinkingItem.content = accumulatedThinking;
+                thinkingItem.status = 'done';
+                eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
+              }
+            }
           }
 
           if (session.stopRequested) {
@@ -728,6 +866,18 @@ export class AgentRunner {
         session.messages.push(assistantMessage);
         session.updatedAt = Date.now();
         eventEmitter.streamDone(sessionId, assistantMessage);
+
+        // V2: Create and emit AssistantMessageItem
+        const assistantChatItem: AssistantMessageItem = {
+          id: generateChatItemId(),
+          kind: 'assistant_message',
+          timestamp: assistantMessage.createdAt,
+          turnId: session.currentTurnId,
+          content: assistantMessage.content,
+          metadata: assistantMessage.metadata,
+        };
+        session.chatItems.push(assistantChatItem);
+        eventEmitter.chatItem(sessionId, assistantChatItem);
       } else {
         eventEmitter.streamDone(sessionId, {
           id: generateMessageId(),
@@ -752,6 +902,17 @@ export class AgentRunner {
           session.messages.push(assistantMessage);
           session.updatedAt = Date.now();
           eventEmitter.streamDone(sessionId, assistantMessage);
+
+          // V2: Create and emit AssistantMessageItem for abort case
+          const assistantChatItem: AssistantMessageItem = {
+            id: generateChatItemId(),
+            kind: 'assistant_message',
+            timestamp: assistantMessage.createdAt,
+            turnId: session.currentTurnId,
+            content: assistantMessage.content,
+          };
+          session.chatItems.push(assistantChatItem);
+          eventEmitter.chatItem(sessionId, assistantChatItem);
         } else {
           eventEmitter.streamDone(sessionId, {
             id: generateMessageId(),
@@ -1021,18 +1182,19 @@ export class AgentRunner {
   /**
    * Finalize turn and persist session to disk.
    * Associates tool executions with the user message that initiated them.
+   * Now uses V2 unified chatItems format.
    */
   private async finalizeAndPersistTurn(session: ActiveSession): Promise<void> {
     const turnInfo = this.currentTurnInfo.get(session.id);
     if (!turnInfo) return;
 
-    // Find the user message for this turn
+    // Find the user message for this turn (for legacy compatibility)
     const userMessage = session.messages.find(m => m.id === turnInfo.turnMessageId) as PersistedMessage | undefined;
     if (userMessage) {
       userMessage.toolExecutionIds = [...turnInfo.toolIds];
     }
 
-    // Update tool executions with turn info
+    // Update tool executions with turn info (for legacy compatibility)
     let turnOrder = 0;
     for (const toolId of turnInfo.toolIds) {
       const execution = session.toolExecutions.find(t => t.id === toolId) as PersistedToolExecution | undefined;
@@ -1045,22 +1207,28 @@ export class AgentRunner {
     // Update session timestamp
     session.updatedAt = Date.now();
 
-    // Persist to disk
+    // Clear current turn ID
+    session.currentTurnId = undefined;
+
+    // Persist to disk using V2 format
     if (this.persistence) {
       try {
-        await this.persistence.saveSession({
-          id: session.id,
-          type: session.type,
-          title: session.title,
-          workingDirectory: session.workingDirectory,
-          model: session.model,
-          approvalMode: session.approvalMode,
-          messages: session.messages as PersistedMessage[],
-          toolExecutions: session.toolExecutions as PersistedToolExecution[],
+        // Use new V2 save method that stores chatItems
+        await this.persistence.saveSessionV2({
+          metadata: {
+            version: 2,
+            id: session.id,
+            type: session.type,
+            title: session.title,
+            workingDirectory: session.workingDirectory,
+            model: session.model,
+            approvalMode: session.approvalMode,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+          },
+          chatItems: session.chatItems,
           tasks: session.tasks,
           artifacts: session.artifacts,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
         });
       } catch (error) {
         console.error(`Failed to persist session ${session.id}:`, error);
@@ -1088,22 +1256,24 @@ export class AgentRunner {
     session.updatedAt = Date.now();
     console.error('[AgentRunner] Title updated in memory, persisting...');
 
-    // CRITICAL: Persist to disk
+    // CRITICAL: Persist to disk using V2 format
     if (this.persistence) {
       try {
-        await this.persistence.saveSession({
-          id: session.id,
-          type: session.type,
-          title: session.title,
-          workingDirectory: session.workingDirectory,
-          model: session.model,
-          approvalMode: session.approvalMode,
-          messages: session.messages as PersistedMessage[],
-          toolExecutions: session.toolExecutions as PersistedToolExecution[],
+        await this.persistence.saveSessionV2({
+          metadata: {
+            version: 2,
+            id: session.id,
+            type: session.type,
+            title: session.title,
+            workingDirectory: session.workingDirectory,
+            model: session.model,
+            approvalMode: session.approvalMode,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+          },
+          chatItems: session.chatItems,
           tasks: session.tasks,
           artifacts: session.artifacts,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
         });
         console.error('[AgentRunner] Title persisted to disk successfully');
       } catch (error) {
@@ -1145,26 +1315,28 @@ export class AgentRunner {
     const toolHandlers = this.buildToolHandlers(session);
     session.agent = await this.createDeepAgent(session, toolHandlers);
 
-    // CRITICAL: Persist to disk and update workspace indices
+    // CRITICAL: Persist to disk and update workspace indices using V2 format
     if (this.persistence) {
       try {
         // Remove from old workspace index
         await this.persistence.removeSessionFromWorkspace(sessionId, oldWorkingDirectory);
 
         // Save session with new working directory (also adds to new workspace index)
-        await this.persistence.saveSession({
-          id: session.id,
-          type: session.type,
-          title: session.title,
-          workingDirectory: session.workingDirectory,
-          model: session.model,
-          approvalMode: session.approvalMode,
-          messages: session.messages as PersistedMessage[],
-          toolExecutions: session.toolExecutions as PersistedToolExecution[],
+        await this.persistence.saveSessionV2({
+          metadata: {
+            version: 2,
+            id: session.id,
+            type: session.type,
+            title: session.title,
+            workingDirectory: session.workingDirectory,
+            model: session.model,
+            approvalMode: session.approvalMode,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+          },
+          chatItems: session.chatItems,
           tasks: session.tasks,
           artifacts: session.artifacts,
-          createdAt: session.createdAt,
-          updatedAt: session.updatedAt,
         });
       } catch (error) {
         console.error(`Failed to persist working directory update for ${session.id}:`, error);
@@ -1769,6 +1941,21 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         });
         eventEmitter.toolStart(session.id, toolCall);
 
+        // V2: Create and emit ToolStartItem
+        const toolStartItem: ToolStartItem = {
+          id: generateChatItemId(),
+          kind: 'tool_start',
+          timestamp: startedAt,
+          turnId: session.currentTurnId,
+          toolId: toolCallId,
+          name: tool.name,
+          args,
+          status: 'running',
+          parentToolId,
+        };
+        session.chatItems.push(toolStartItem);
+        eventEmitter.chatItem(session.id, toolStartItem);
+
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
         if (turnInfo) {
@@ -1780,12 +1967,13 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           if (request) {
             const decision = await this.requestPermission(session, request);
             if (decision === 'deny') {
+              const duration = this.consumeToolDuration(session, toolCallId);
               const payload = {
                 toolCallId,
                 success: false,
                 result: null,
                 error: 'Permission denied',
-                duration: this.consumeToolDuration(session, toolCallId),
+                duration,
                 parentToolId,
               };
               eventEmitter.toolResult(session.id, toolCall, payload);
@@ -1794,6 +1982,25 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
                 error: payload.error,
                 completedAt: Date.now(),
               });
+
+              // V2: Update ToolStartItem and emit ToolResultItem
+              toolStartItem.status = 'error';
+              eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
+
+              const toolResultItem: ToolResultItem = {
+                id: generateChatItemId(),
+                kind: 'tool_result',
+                timestamp: Date.now(),
+                turnId: session.currentTurnId,
+                toolId: toolCallId,
+                name: tool.name,
+                status: 'error',
+                error: 'Permission denied',
+                duration,
+              };
+              session.chatItems.push(toolResultItem);
+              eventEmitter.chatItem(session.id, toolResultItem);
+
               return { error: 'Permission denied' };
             }
           }
@@ -1818,6 +2025,26 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
             completedAt: Date.now(),
           });
           this.recordArtifactForTool(session, tool.name, args, result.data);
+
+          // V2: Update ToolStartItem and emit ToolResultItem
+          toolStartItem.status = result.success ? 'completed' : 'error';
+          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: toolStartItem.status });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: result.success ? 'success' : 'error',
+            result: result.data,
+            error: result.error,
+            duration,
+          };
+          session.chatItems.push(toolResultItem);
+          eventEmitter.chatItem(session.id, toolResultItem);
+
           return result.data ?? result;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
@@ -1835,6 +2062,25 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
             error: payload.error,
             completedAt: Date.now(),
           });
+
+          // V2: Update ToolStartItem and emit ToolResultItem
+          toolStartItem.status = 'error';
+          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: 'error',
+            error: payload.error,
+            duration,
+          };
+          session.chatItems.push(toolResultItem);
+          eventEmitter.chatItem(session.id, toolResultItem);
+
           return { error: payload.error };
         }
       },
@@ -1909,11 +2155,47 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         });
         eventEmitter.toolStart(session.id, toolCallPayload);
 
+        // V2: Create and emit ToolStartItem
+        const toolStartItem: ToolStartItem = {
+          id: generateChatItemId(),
+          kind: 'tool_start',
+          timestamp: startedAt,
+          turnId: session.currentTurnId,
+          toolId: toolCallId,
+          name: toolName,
+          args,
+          status: 'running',
+          parentToolId,
+        };
+        session.chatItems.push(toolStartItem);
+        eventEmitter.chatItem(session.id, toolStartItem);
+
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
         if (turnInfo) {
           turnInfo.toolIds.push(toolCallId);
         }
+
+        // Helper to emit V2 tool result
+        const emitToolResult = (status: 'success' | 'error', result?: unknown, error?: string, duration?: number) => {
+          toolStartItem.status = status === 'success' ? 'completed' : 'error';
+          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: toolStartItem.status });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: toolName,
+            status,
+            result,
+            error,
+            duration,
+          };
+          session.chatItems.push(toolResultItem);
+          eventEmitter.chatItem(session.id, toolResultItem);
+        };
 
         // Step 1: Evaluate tool call against policy
         const policyContext: ToolCallContext = {
@@ -1942,6 +2224,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
             error: errorMsg,
             completedAt: Date.now(),
           });
+
+          // V2: Emit tool result
+          emitToolResult('error', null, errorMsg, duration);
+
           return new ToolMessage({
             content: errorMsg,
             tool_call_id: toolCallId,
@@ -1974,6 +2260,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
                 error: payload.error,
                 completedAt: Date.now(),
               });
+
+              // V2: Emit tool result
+              emitToolResult('error', null, 'Permission denied by user', duration);
+
               return new ToolMessage({
                 content: 'Permission denied by user',
                 tool_call_id: toolCallId,
@@ -2008,6 +2298,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
             completedAt: Date.now(),
           });
           this.recordArtifactForTool(session, toolName, args, normalized.output);
+
+          // V2: Emit tool result
+          emitToolResult(normalized.success ? 'success' : 'error', normalized.output, normalized.error, duration);
+
           return result;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
@@ -2025,6 +2319,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
             error: payload.error,
             completedAt: Date.now(),
           });
+
+          // V2: Emit tool result
+          emitToolResult('error', null, payload.error, duration);
+
           throw error;
         } finally {
           // Clear activeParentToolId when task tool completes
@@ -2664,6 +2962,14 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     const tokenEstimate = this.estimateTokens(session.messages);
     const contextWindow = getModelContextWindow(session.model);
     eventEmitter.contextUpdate(session.id, tokenEstimate, contextWindow.input);
+
+    // V2: Emit context usage update with percentage
+    const percentUsed = contextWindow.input > 0 ? (tokenEstimate / contextWindow.input) * 100 : 0;
+    eventEmitter.contextUsageUpdate(session.id, {
+      usedTokens: tokenEstimate,
+      maxTokens: contextWindow.input,
+      percentUsed,
+    });
   }
 
   private extractTextContent(message: Message): string | null {
