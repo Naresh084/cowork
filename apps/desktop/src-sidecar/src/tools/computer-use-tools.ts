@@ -235,18 +235,18 @@ export function createComputerUseTool(
       let usingFallback = false;
 
       // Strategy 1: Try Chrome Extension first (best UX - works with user's existing Chrome)
-      console.log('[computer_use] Attempting to connect to Chrome extension...');
+      console.error('[computer_use] Attempting to connect to Chrome extension...');
       const extensionConnected = await chromeBridge.waitForConnection(2000);
 
       if (extensionConnected) {
-        console.log('[computer_use] Chrome extension connected! Using extension driver.');
+        console.error('[computer_use] Chrome extension connected! Using extension driver.');
         driver = new ChromeExtensionDriver();
         driverType = 'chrome_extension';
         if (startUrl) {
           await driver.performAction({ name: 'navigate', args: { url: startUrl } });
         }
       } else {
-        console.log('[computer_use] Chrome extension not available, falling back to CDP...');
+        console.error('[computer_use] Chrome extension not available, falling back to CDP...');
       }
 
       // Strategy 2: Fallback to Chrome CDP (auto-launch/restart Chrome if needed)
@@ -297,7 +297,7 @@ export function createComputerUseTool(
 
       // Log suggestion to install extension if using fallback (non-blocking)
       if (usingFallback) {
-        console.log('[computer_use] Using CDP fallback. For better experience, install the Gemini Cowork Chrome Extension.');
+        console.error('[computer_use] Using CDP fallback. For better experience, install the Gemini Cowork Chrome Extension.');
       }
 
       const ai = new GoogleGenAI({ apiKey });

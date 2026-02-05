@@ -3,6 +3,13 @@ let status = 'Disconnected';
 let paused = false;
 let lastAction = null;
 let port = 8765;
+let reconnectDelay = 2000; // Start with 2 seconds
+let maxReconnectDelay = 60000; // Max 60 seconds between retries
+let reconnectAttempts = 0;
+
+// Dedicated agent tab - never use user's tabs
+let agentTabId = null;
+let agentWindowId = null;
 
 function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -14,15 +21,22 @@ function connect() {
 
   ws.onopen = () => {
     status = 'Connected';
+    reconnectDelay = 2000; // Reset backoff on successful connection
+    reconnectAttempts = 0;
     ws.send(JSON.stringify({ type: 'hello', version: '0.1.0' }));
   };
 
   ws.onclose = () => {
     status = 'Disconnected';
-    setTimeout(connect, 2000);
+    ws = null;
+    // Exponential backoff: 2s, 4s, 8s, 16s, 32s, 60s, 60s...
+    reconnectAttempts++;
+    const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts - 1), maxReconnectDelay);
+    setTimeout(connect, delay);
   };
 
   ws.onerror = () => {
+    // Error will be followed by onclose, so don't reconnect here
     status = 'Disconnected';
   };
 
@@ -51,19 +65,46 @@ function connect() {
 }
 
 async function captureVisibleTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) {
-    throw new Error('No active tab');
+  try {
+    // First try to get the active tab in the current window
+    let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    // If no active tab in current window, try any window
+    if (!tab) {
+      [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    }
+
+    // Still no tab? Try to get any tab
+    if (!tab) {
+      const tabs = await chrome.tabs.query({});
+      tab = tabs[0];
+    }
+
+    if (!tab || !tab.id) {
+      throw new Error('No tab available to capture');
+    }
+
+    // Make sure the tab is not a chrome:// or extension page (can't capture those)
+    if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://'))) {
+      throw new Error('Cannot capture Chrome internal pages. Please navigate to a regular webpage.');
+    }
+
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    const base64 = dataUrl.split(',')[1];
+    return {
+      data: base64,
+      mimeType: 'image/png',
+      url: tab.url,
+      width: tab.width,
+      height: tab.height,
+    };
+  } catch (err) {
+    // Handle specific permission errors
+    if (err.message && err.message.includes('activeTab')) {
+      throw new Error('Tab capture permission not available. Please click on the extension icon first, or navigate to a regular webpage.');
+    }
+    throw err;
   }
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-  const base64 = dataUrl.split(',')[1];
-  return {
-    data: base64,
-    mimeType: 'image/png',
-    url: tab.url,
-    width: tab.width,
-    height: tab.height,
-  };
 }
 
 async function runAction(action) {

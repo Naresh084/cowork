@@ -1,10 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { AnimatePresence } from 'framer-motion';
 import { MessageList } from './MessageList';
 import { SessionHeader } from './SessionHeader';
 import { WelcomeScreen, type QuickAction } from './WelcomeScreen';
 import { InputArea } from './InputArea';
-import { LiveViewButton } from './LiveViewButton';
 import { DropZone } from './AttachmentPreview';
 import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
@@ -20,24 +18,9 @@ export function ChatView() {
   // Store state
   const { sendMessage, stopGeneration, ensureSession } = useChatStore();
   const { activeSessionId, createSession, updateSessionTitle, sessions } = useSessionStore();
-  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading, liveViewOpen, setLiveViewOpen } = useSettingsStore();
+  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
   const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
   const { messages, isStreaming } = sessionState;
-
-  // Check if computer_use tool is running for live view button
-  const isComputerUseRunning = useChatStore((state) => {
-    if (!activeSessionId) return false;
-    const session = state.sessions[activeSessionId];
-    if (!session) return false;
-    return session.streamingToolCalls.some(
-      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
-    );
-  });
-
-  // Handle opening live view
-  const handleOpenLiveView = useCallback(() => {
-    setLiveViewOpen(true);
-  }, [setLiveViewOpen]);
 
   // Subscribe to agent events
   useAgentEvents(activeSessionId);
@@ -68,10 +51,18 @@ export function ChatView() {
 
     chatStore.ensureSession(sessionToLoad);
     const sessionState = chatStore.getSessionState(sessionToLoad);
+    console.log('[ChatView] Session state check:', {
+      sessionId: sessionToLoad,
+      hasLoaded: sessionState.hasLoaded,
+      isLoadingMessages: sessionState.isLoadingMessages,
+      messageCount: sessionState.messages.length,
+    });
     if (sessionState.hasLoaded || sessionState.isLoadingMessages) {
+      console.log('[ChatView] Skipping loadMessages - already loaded or loading');
       return;
     }
 
+    console.log('[ChatView] Calling loadMessages for session:', sessionToLoad);
     chatStore.loadMessages(sessionToLoad)
       .then(() => {
         if (currentSessionRef.current !== sessionToLoad) return;
@@ -357,12 +348,6 @@ export function ChatView() {
         onInitialMessageConsumed={handleInitialMessageConsumed}
       />
 
-      {/* Live View Button - appears when computer_use is running */}
-      <AnimatePresence>
-        {isComputerUseRunning && !liveViewOpen && (
-          <LiveViewButton onClick={handleOpenLiveView} />
-        )}
-      </AnimatePresence>
     </div>
   );
 }

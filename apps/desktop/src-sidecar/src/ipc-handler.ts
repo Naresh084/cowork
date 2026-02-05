@@ -703,8 +703,9 @@ import { chromeBridge } from './chrome-bridge.js';
 
 // Check if Chrome extension is connected
 registerHandler('chrome_extension_status', async () => {
-  chromeBridge.start();
-  await new Promise(resolve => setTimeout(resolve, 300));
+  await chromeBridge.start();
+  // Wait a bit for extension to connect if it's trying
+  await new Promise(resolve => setTimeout(resolve, 500));
   return {
     connected: chromeBridge.isConnected(),
     port: chromeBridge.getPort(),

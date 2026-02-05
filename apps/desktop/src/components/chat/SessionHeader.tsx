@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Chrome, Check } from 'lucide-react';
+import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Chrome, Check, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { useAppStore } from '../../stores/app-store';
+import { useChatStore } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
@@ -19,9 +20,19 @@ const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: stri
 
 export function SessionHeader() {
   const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
-  const { approvalMode, updateSetting } = useSettingsStore();
+  const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
   const { setShowChromeExtensionModal } = useAppStore();
+
+  // Check if computer_use tool is running
+  const isComputerUseRunning = useChatStore((state) => {
+    if (!activeSessionId) return false;
+    const session = state.sessions[activeSessionId];
+    if (!session) return false;
+    return session.streamingToolCalls.some(
+      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
+    );
+  });
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -324,6 +335,30 @@ export function SessionHeader() {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Live View Button - shows when computer_use is running */}
+        <AnimatePresence>
+          {isComputerUseRunning && !liveViewOpen && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={() => setLiveViewOpen(true)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium',
+                'bg-[#4C71FF] text-white',
+                'hover:bg-[#5C81FF]',
+                'transition-colors',
+                'shadow-sm shadow-[#4C71FF]/30'
+              )}
+              title="Open live browser view"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Live View</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         {/* Chrome Extension Button - only shows if NOT connected */}
         {extensionConnected === false && (
           <motion.button
