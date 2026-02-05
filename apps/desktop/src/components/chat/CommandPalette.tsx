@@ -153,18 +153,6 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
     }
   }, [selectedIndex, filteredCommands.length]);
 
-  // Debug: Log state when palette should be open
-  if (isPaletteOpen) {
-    console.log('[CommandPalette] Debug:', {
-      isPaletteOpen,
-      availableCommandsCount: availableCommands.length,
-      managedCommandsCount: commands.length,
-      managedNames: commands.map(c => c.name),
-      filteredCommandsCount: filteredCommands.length,
-      paletteQuery,
-    });
-  }
-
   if (!isPaletteOpen || filteredCommands.length === 0) {
     return null;
   }

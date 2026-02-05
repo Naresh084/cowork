@@ -48,7 +48,6 @@ export function extractFrontmatter(content: string): { data: Record<string, unkn
     const data = parseYaml(yamlContent);
     return { data, body };
   } catch {
-    console.error('[SkillParser] Failed to parse YAML frontmatter');
     return null;
   }
 }
@@ -207,12 +206,10 @@ export function parseFrontmatter(content: string): SkillFrontmatter | null {
 
   // Check for required fields
   if (!data.name || typeof data.name !== 'string') {
-    console.error('[SkillParser] Missing required field: name');
     return null;
   }
 
   if (!data.description || typeof data.description !== 'string') {
-    console.error('[SkillParser] Missing required field: description');
     return null;
   }
 

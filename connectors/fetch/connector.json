@@ -1,0 +1,26 @@
+{
+  "id": "fetch",
+  "name": "fetch",
+  "displayName": "Fetch",
+  "description": "Fetch web pages and URLs, extract content, and convert HTML to markdown",
+  "version": "1.0.0",
+  "icon": "Globe",
+  "category": "utility",
+  "tags": ["web", "http", "fetch", "scraping", "content"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-fetch"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

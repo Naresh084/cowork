@@ -156,9 +156,7 @@ pub async fn ensure_sidecar_started(
         let init_params = serde_json::json!({
             "appDataDir": app_data_str
         });
-        if let Err(e) = manager.send_command("initialize", init_params).await {
-            eprintln!("Warning: Failed to initialize sidecar persistence: {}", e);
-        }
+        let _ = manager.send_command("initialize", init_params).await;
 
         // Set up event forwarding to frontend
         let app_handle = app.clone();
@@ -166,18 +164,14 @@ pub async fn ensure_sidecar_started(
             .set_event_handler(move |event: SidecarEvent| {
                 // Forward event to frontend
                 let event_name = format!("agent:{}", event.event_type);
-                if let Err(e) = app_handle.emit(&event_name, &event) {
-                    eprintln!("Failed to emit event {}: {}", event_name, e);
-                }
+                let _ = app_handle.emit(&event_name, &event);
             })
             .await;
 
         // Get API key from keychain and set it on the sidecar
         if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
             let params = serde_json::json!({ "apiKey": api_key });
-            if let Err(e) = manager.send_command("set_api_key", params).await {
-                eprintln!("Warning: Failed to set API key on sidecar: {}", e);
-            }
+            let _ = manager.send_command("set_api_key", params).await;
         }
     }
 

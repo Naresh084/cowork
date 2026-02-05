@@ -163,11 +163,8 @@ async fn check_and_install_updates(app: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
 
     loop {
-        eprintln!("[updater] Checking for updates...");
         match app.updater().check().await {
             Ok(Some(update)) => {
-                eprintln!("[updater] New version available: {}", update.version);
-
                 // Emit event to frontend to show update notification
                 let _ = app.emit("update:available", serde_json::json!({
                     "version": update.version,
@@ -182,7 +179,6 @@ async fn check_and_install_updates(app: tauri::AppHandle) {
                         } else {
                             0
                         };
-                        eprintln!("[updater] Download progress: {}%", percent);
                         // Emit progress to frontend
                         let _ = app.emit("update:progress", serde_json::json!({
                             "progress": progress,
@@ -190,14 +186,11 @@ async fn check_and_install_updates(app: tauri::AppHandle) {
                             "percent": percent
                         }));
                     },
-                    || {
-                        eprintln!("[updater] Download complete, installing...");
-                    },
+                    || {},
                 ).await;
 
                 match download_result {
                     Ok(_) => {
-                        eprintln!("[updater] Update installed, restarting...");
                         let _ = app.emit("update:installed", serde_json::json!({}));
 
                         // Small delay to let UI show "Restarting..." message
@@ -207,19 +200,14 @@ async fn check_and_install_updates(app: tauri::AppHandle) {
                         app.restart();
                     }
                     Err(e) => {
-                        eprintln!("[updater] Failed to install update: {}", e);
                         let _ = app.emit("update:error", serde_json::json!({
                             "error": e.to_string()
                         }));
                     }
                 }
             }
-            Ok(None) => {
-                eprintln!("[updater] No updates available");
-            }
-            Err(e) => {
-                eprintln!("[updater] Failed to check for updates: {}", e);
-            }
+            Ok(None) => {}
+            Err(_) => {}
         }
 
         // Check for updates every 30 minutes

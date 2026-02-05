@@ -1,0 +1,34 @@
+{
+  "id": "postgres",
+  "name": "postgres",
+  "displayName": "PostgreSQL",
+  "description": "Query databases, inspect schema, and execute read-only SQL queries against PostgreSQL databases",
+  "version": "1.0.0",
+  "icon": "Database",
+  "category": "database",
+  "tags": ["sql", "database", "query", "postgresql", "relational"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-postgres", "${DATABASE_URL}"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "DATABASE_URL",
+        "description": "PostgreSQL connection URL",
+        "required": true,
+        "placeholder": "postgresql://user:password@host:5432/database"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

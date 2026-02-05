@@ -20,17 +20,14 @@ export function parseCommandFrontmatter(content: string): CommandFrontmatter | n
 
   // Check for required fields
   if (!data.name || typeof data.name !== 'string') {
-    console.error('[CommandParser] Missing required field: name');
     return null;
   }
 
   if (!data.description || typeof data.description !== 'string') {
-    console.error('[CommandParser] Missing required field: description');
     return null;
   }
 
   if (!data.category || typeof data.category !== 'string') {
-    console.error('[CommandParser] Missing required field: category');
     return null;
   }
 

@@ -227,7 +227,6 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         const { installedCommandConfigs, removeInstalledCommandConfig } = useSettingsStore.getState();
         for (const config of installedCommandConfigs) {
           if (!managedCommandNames.has(config.name)) {
-            console.log(`[CommandStore] Removing stale config: ${config.id} (${config.name})`);
             removeInstalledCommandConfig(config.id);
           }
         }
@@ -360,8 +359,6 @@ export const useCommandStore = create<CommandState & CommandActions>()(
             emoji: params.emoji,
           },
         });
-
-        console.log('[CommandStore] Created command:', commandId);
 
         // Auto-install the created command by adding to settings
         const config: InstalledCommandConfig = {

@@ -177,8 +177,7 @@ export class ToolPolicyService {
     try {
       const savedPolicy = await readJsonFile<ToolPolicy>(getPolicyPath(), DEFAULT_POLICY);
       this.policy = { ...DEFAULT_POLICY, ...savedPolicy };
-    } catch (err) {
-      console.error('Failed to load policy, using default:', err);
+    } catch {
       this.policy = { ...DEFAULT_POLICY };
     }
 

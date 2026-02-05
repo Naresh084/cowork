@@ -27,15 +27,6 @@ export function ChatView() {
   const messages = sessionState?.messages ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
 
-  // Debug: log messages on every render
-  console.log('[ChatView] Render with:', {
-    activeSessionId,
-    messageCount: messages.length,
-    hasLoaded: sessionState?.hasLoaded,
-    isStreaming,
-    hasSessionState: !!sessionState,
-  });
-
   // Subscribe to agent events
   useAgentEvents(activeSessionId);
 
@@ -65,18 +56,10 @@ export function ChatView() {
 
     chatStore.ensureSession(sessionToLoad);
     const sessionState = chatStore.getSessionState(sessionToLoad);
-    console.log('[ChatView] Session state check:', {
-      sessionId: sessionToLoad,
-      hasLoaded: sessionState.hasLoaded,
-      isLoadingMessages: sessionState.isLoadingMessages,
-      messageCount: sessionState.messages.length,
-    });
     if (sessionState.hasLoaded || sessionState.isLoadingMessages) {
-      console.log('[ChatView] Skipping loadMessages - already loaded or loading');
       return;
     }
 
-    console.log('[ChatView] Calling loadMessages for session:', sessionToLoad);
     chatStore.loadMessages(sessionToLoad)
       .then(() => {
         if (currentSessionRef.current !== sessionToLoad) return;
@@ -86,7 +69,6 @@ export function ChatView() {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         if (errorMessage.toLowerCase().includes('session not found')) {
-          console.warn('[ChatView] Stale session detected, clearing:', sessionToLoad);
           sessionStore.setActiveSession(null);
           return;
         }
@@ -157,10 +139,8 @@ export function ChatView() {
       // because the sessions closure might be stale
       if (createdNew) {
         const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
-        console.log('[ChatView] Setting title for new session:', sessionId, 'title:', derivedTitle);
         updateSessionTitle(sessionId, derivedTitle).catch((error) => {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[ChatView] Failed to update session title:', errorMessage);
           toast.error('Failed to update session title', errorMessage);
         });
       }

@@ -1,0 +1,47 @@
+{
+  "id": "jira",
+  "name": "jira",
+  "displayName": "Jira",
+  "description": "Create, update, and manage issues, projects, and sprints in Jira and Confluence",
+  "version": "1.0.0",
+  "icon": "Bug",
+  "category": "developer",
+  "tags": ["issues", "project-management", "agile", "sprint", "atlassian", "confluence"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-atlassian"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "JIRA_URL",
+        "description": "Jira instance URL",
+        "required": true,
+        "placeholder": "https://your-domain.atlassian.net"
+      },
+      {
+        "key": "JIRA_EMAIL",
+        "description": "Atlassian account email",
+        "required": true,
+        "placeholder": "your-email@example.com"
+      },
+      {
+        "key": "JIRA_API_TOKEN",
+        "description": "Atlassian API Token",
+        "required": true,
+        "placeholder": "...",
+        "link": "https://id.atlassian.com/manage-profile/security/api-tokens"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/atlassian#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

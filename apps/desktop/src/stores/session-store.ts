@@ -63,13 +63,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         const POLL_INTERVAL = 500; // 500ms
         let elapsed = 0;
 
-        console.log('[SessionStore] Waiting for backend initialization...');
-
         while (elapsed < MAX_WAIT) {
           try {
             const status = await invoke<{ initialized: boolean; sessionCount: number }>('agent_get_initialization_status');
             if (status.initialized) {
-              console.log('[SessionStore] Backend ready, session count:', status.sessionCount);
               set({ backendInitialized: true });
               return;
             }
@@ -81,29 +78,23 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           elapsed += POLL_INTERVAL;
         }
 
-        console.error('[SessionStore] Backend initialization timed out');
         throw new Error('Backend initialization timed out');
       },
 
       loadSessions: async () => {
         // Wait for backend to be initialized first
         if (!get().backendInitialized) {
-          console.log('[SessionStore] Backend not initialized, waiting...');
           await get().waitForBackend();
         }
 
         set({ isLoading: true, error: null });
         try {
-          console.log('[SessionStore] Loading sessions from backend...');
           const sessions = await invoke<SessionSummary[]>('agent_list_sessions');
-          console.log('[SessionStore] Backend returned', sessions.length, 'sessions');
 
           // SAFETY: If backend returns 0 sessions but we have cached sessions,
           // this might indicate a timing issue - keep cached sessions
           const cachedSessions = get().sessions;
           if (sessions.length === 0 && cachedSessions.length > 0) {
-            console.warn('[SessionStore] Backend returned 0 sessions but cache has', cachedSessions.length);
-            console.warn('[SessionStore] This may indicate a timing issue. Keeping cached sessions.');
             // Still mark as loaded to prevent infinite retries
             set({ isLoading: false, hasLoaded: true });
             return;
@@ -118,13 +109,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           // If not found in list, double-check with get_session before clearing
           // This handles race conditions where the session exists but wasn't in the list yet
           if (!activeSessionExists && currentActiveId) {
-            console.log('[SessionStore] Active session not in list, verifying with get_session:', currentActiveId);
             try {
               await invoke('agent_get_session', { sessionId: currentActiveId });
               activeSessionExists = true; // Session exists, just not in list yet
-              console.log('[SessionStore] Session verified as existing');
             } catch {
-              console.log('[SessionStore] Session truly does not exist');
               // Session truly doesn't exist
             }
           }
@@ -137,7 +125,6 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             activeSessionId: activeSessionExists ? currentActiveId : null,
           });
         } catch (error) {
-          console.error('[SessionStore] loadSessions error:', error);
           const errorMessage = error instanceof Error ? error.message : String(error);
           toast.error('Failed to load sessions', errorMessage);
           set({
@@ -201,8 +188,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         // Update lastAccessedAt in backend
         try {
           await invoke('agent_update_session_last_accessed', { sessionId });
-        } catch (error) {
-          console.warn('[SessionStore] Failed to update last accessed time:', error);
+        } catch {
           // Continue - this is not critical
         }
 
@@ -245,8 +231,6 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       },
 
       updateSessionTitle: async (sessionId: string, title: string) => {
-        console.log('[SessionStore] updateSessionTitle called:', sessionId, 'title:', title);
-
         // Get current sessions for rollback
         const previousSessions = get().sessions;
 
@@ -262,8 +246,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             };
           } else {
             // Session not in list yet - this can happen due to timing
-            // Just log and proceed - backend will handle it
-            console.log('[SessionStore] Session not in list yet, proceeding with backend update');
+            // Just proceed - backend will handle it
             return state;
           }
         });
@@ -271,18 +254,15 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         try {
           // Persist to backend
           await invoke('agent_update_session_title', { sessionId, title });
-          console.log('[SessionStore] Title updated successfully on backend');
 
           // Ensure we have the latest session list
           await get().loadSessions();
         } catch (error) {
           // Rollback on error
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[SessionStore] Failed to update title:', errorMessage);
 
           // Check if it's a "session not found" error from the backend
           if (errorMessage.toLowerCase().includes('session not found')) {
-            console.warn('[SessionStore] Session not found in backend, clearing:', sessionId);
             set({
               sessions: previousSessions.filter((s) => s.id !== sessionId),
               activeSessionId: get().activeSessionId === sessionId ? null : get().activeSessionId,
@@ -307,7 +287,6 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         if (!sessionExists) {
           // Session doesn't exist locally - likely a stale ID
           // Just clear the active session and don't throw an error
-          console.warn('[SessionStore] Attempted to update non-existent session:', sessionId);
           set({ activeSessionId: null });
           return;
         }
@@ -331,7 +310,6 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           // Check if it's a "session not found" error from the backend
           if (errorMessage.toLowerCase().includes('session not found')) {
             // Session was removed from backend - clear it locally
-            console.warn('[SessionStore] Session not found in backend, clearing:', sessionId);
             set({
               sessions: previousSessions.filter((s) => s.id !== sessionId),
               activeSessionId: get().activeSessionId === sessionId ? null : get().activeSessionId,

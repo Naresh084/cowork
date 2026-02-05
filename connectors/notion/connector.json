@@ -1,0 +1,35 @@
+{
+  "id": "notion",
+  "name": "notion",
+  "displayName": "Notion",
+  "description": "Create, read, and update Notion pages, databases, and blocks",
+  "version": "1.0.0",
+  "icon": "FileText",
+  "category": "productivity",
+  "tags": ["notes", "wiki", "database", "documentation", "workspace", "collaboration"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-notion"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "NOTION_API_KEY",
+        "description": "Notion Integration Token (Internal Integration)",
+        "required": true,
+        "placeholder": "secret_...",
+        "link": "https://www.notion.so/my-integrations"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/notion#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

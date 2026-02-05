@@ -26,6 +26,7 @@ import { homedir } from 'os';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
 import { mcpBridge } from './mcp-bridge.js';
+import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
 import { toolPolicyService } from './tool-policy.js';
@@ -330,8 +331,8 @@ export class AgentRunner {
         this.subscribeToAgentEvents(session);
 
         restoredCount++;
-      } catch (error) {
-        console.error(`Failed to recreate session ${sessionId}:`, error);
+      } catch {
+        // Failed to recreate session - skip it
       }
     }
 
@@ -469,7 +470,6 @@ export class AgentRunner {
    */
   setSpecializedModels(models: Partial<SpecializedModels>): void {
     this.specializedModels = { ...this.specializedModels, ...models };
-    console.error('[AgentRunner] Specialized models updated:', this.specializedModels);
   }
 
   /**
@@ -800,7 +800,6 @@ export class AgentRunner {
             // Extract thinking content (agent's internal reasoning)
             const thinkingText = this.extractThinkingContent(event);
             if (thinkingText) {
-              console.error(`[stream] Thinking content received: ${thinkingText.substring(0, 100)}...`);
               if (!thinkingStarted) {
                 eventEmitter.thinkingStart(sessionId);
                 thinkingStarted = true;
@@ -1260,9 +1259,6 @@ export class AgentRunner {
 
     const firstMessage = this.getFirstMessagePreview(session);
 
-    // DEBUG: Log what we're returning
-    console.error(`[getSession] Session ${sessionId}: messages=${session.messages.length}, chatItems=${session.chatItems?.length || 0}`);
-
     return {
       id: session.id,
       type: session.type,
@@ -1306,7 +1302,6 @@ export class AgentRunner {
       try {
         await this.persistence.deleteSession(sessionId);
       } catch (error) {
-        console.error(`[AgentRunner] Failed to delete session from disk:`, error);
         throw error;
       }
     }
@@ -1372,8 +1367,8 @@ export class AgentRunner {
           tasks: session.tasks,
           artifacts: session.artifacts,
         });
-      } catch (error) {
-        console.error(`Failed to persist session ${session.id}:`, error);
+      } catch {
+        // Failed to persist session
       }
     }
 
@@ -1385,18 +1380,13 @@ export class AgentRunner {
    * Update session title.
    */
   async updateSessionTitle(sessionId: string, title: string): Promise<void> {
-    console.error('[AgentRunner] updateSessionTitle called:', sessionId, 'title:', title);
-
     const session = this.sessions.get(sessionId);
     if (!session) {
-      console.error('[AgentRunner] Session not found for title update:', sessionId);
-      console.error('[AgentRunner] Available sessions:', Array.from(this.sessions.keys()));
       throw new Error(`Session not found: ${sessionId}`);
     }
 
     session.title = title;
     session.updatedAt = Date.now();
-    console.error('[AgentRunner] Title updated in memory, persisting...');
 
     // CRITICAL: Persist to disk using V2 format
     if (this.persistence) {
@@ -1418,9 +1408,8 @@ export class AgentRunner {
           tasks: session.tasks,
           artifacts: session.artifacts,
         });
-        console.error('[AgentRunner] Title persisted to disk successfully');
-      } catch (error) {
-        console.error(`Failed to persist session title update for ${session.id}:`, error);
+      } catch {
+        // Failed to persist session title update
       }
     }
 
@@ -1474,8 +1463,8 @@ export class AgentRunner {
           tasks: session.tasks,
           artifacts: session.artifacts,
         });
-      } catch (error) {
-        console.error(`Failed to persist lastAccessedAt update for ${session.id}:`, error);
+      } catch {
+        // Failed to persist lastAccessedAt update
       }
     }
   }
@@ -1521,8 +1510,8 @@ export class AgentRunner {
           tasks: session.tasks,
           artifacts: session.artifacts,
         });
-      } catch (error) {
-        console.error(`Failed to persist working directory update for ${session.id}:`, error);
+      } catch {
+        // Failed to persist working directory update
       }
     }
 
@@ -1934,8 +1923,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         if (skillsPrompt) {
           return skillsPrompt;
         }
-      } catch (error) {
-        console.warn('[AgentRunner] Error loading skills from service, falling back to legacy:', error);
+      } catch {
+        // Fall back to legacy skill loading
       }
     }
 
@@ -2038,16 +2027,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       throw new Error('API key not set');
     }
 
-    console.error(`[createDeepAgent] Model: ${session.model}`);
-    console.error(`[createDeepAgent] Enabled skills: ${this.enabledSkillIds.size}`);
-
     // Initialize Deep Agents services for this session
     const memoryService = await this.getMemoryService(session.workingDirectory);
     const memoryExtractor = this.getMemoryExtractor(session.id);
     const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
-
-    console.error(`[createDeepAgent] Memory service initialized for: ${session.workingDirectory}`);
-    console.error(`[createDeepAgent] AGENTS.md loaded: ${agentsMdConfig !== null}`);
 
     // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
     // See: https://github.com/langchain-ai/langchainjs/issues/7434
@@ -2063,9 +2046,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     // Determine skills paths for DeepAgents
     // When skills are enabled, pass the virtual /skills/ path for DeepAgents to discover
     const skillsParam = this.enabledSkillIds.size > 0 ? ['/skills/'] : undefined;
-    if (skillsParam) {
-      console.error(`[createDeepAgent] Skills path: ${skillsParam}`);
-    }
 
     const skillsDir = this.getSkillsDirectory();
 
@@ -2147,6 +2127,7 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       () => session.model  // Use session model for search
     );
     const mcpTools = this.createMcpTools(session.id);
+    const connectorTools = this.createConnectorTools(session.id);
 
     // Create view_file tool for multimodal content analysis
     const viewFileTool: ToolHandler = {
@@ -2231,6 +2212,7 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       ...mediaTools,
       ...groundingTools,
       ...mcpTools,
+      ...connectorTools,
     ];
   }
 
@@ -3519,41 +3501,10 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
 
     const stateAny = state as Record<string, unknown>;
 
-    // Debug: log the state structure to understand where usage metadata is
-    console.error('[Usage] Checking state for usage metadata, keys:', Object.keys(stateAny));
-
-    // Check messages array - LangChain puts usage on AIMessage.response_metadata
-    if (Array.isArray(stateAny.messages)) {
-      const messages = stateAny.messages as Array<Record<string, unknown>>;
-      console.error(`[Usage] Found ${messages.length} messages in state`);
-
-      // Check each message (especially AI messages at the end)
-      for (let i = messages.length - 1; i >= 0 && i >= messages.length - 3; i--) {
-        const msg = messages[i];
-        if (msg) {
-          const msgType = (typeof msg._getType === 'function' ? msg._getType() : null) || msg.type || msg.role || 'unknown';
-          console.error(`[Usage] Message[${i}] type=${msgType}, keys:`, Object.keys(msg).slice(0, 15));
-
-          // Check response_metadata (LangChain AI message pattern)
-          if (msg.response_metadata && typeof msg.response_metadata === 'object') {
-            console.error(`[Usage] Message[${i}] has response_metadata:`, JSON.stringify(msg.response_metadata).slice(0, 500));
-          }
-
-          // Check usage_metadata directly
-          if (msg.usage_metadata && typeof msg.usage_metadata === 'object') {
-            console.error(`[Usage] Message[${i}] has usage_metadata:`, JSON.stringify(msg.usage_metadata).slice(0, 500));
-          }
-        }
-      }
-    }
-
     // Try to find usage metadata in various places it might be
     const usage = this.extractUsageMetadata(stateAny);
     if (usage && usage.promptTokens > 0) {
-      console.error('[Usage] Found usage metadata:', usage);
       session.lastKnownPromptTokens = usage.promptTokens;
-    } else {
-      console.error('[Usage] No usage metadata found in state');
     }
   }
 
@@ -3575,7 +3526,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       if (output) {
         const usage = this.extractUsageMetadata(output);
         if (usage && usage.promptTokens > 0) {
-          console.error('[Usage] Found usage in stream output:', usage);
           session.lastKnownPromptTokens = usage.promptTokens;
           return;
         }
@@ -3587,7 +3537,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         if (responseMetadata) {
           const usage = this.extractUsageMetadata(responseMetadata);
           if (usage && usage.promptTokens > 0) {
-            console.error('[Usage] Found usage in chunk response_metadata:', usage);
             session.lastKnownPromptTokens = usage.promptTokens;
             return;
           }
@@ -3597,7 +3546,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           const usageMetadata = chunk.usage_metadata as Record<string, unknown>;
           const promptTokens = Number(usageMetadata.prompt_token_count ?? usageMetadata.promptTokenCount ?? 0);
           if (promptTokens > 0) {
-            console.error('[Usage] Found usage_metadata on chunk:', usageMetadata);
             session.lastKnownPromptTokens = promptTokens;
             return;
           }
@@ -3764,6 +3712,23 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       execute: async (args: unknown) => {
         const result = await mcpBridge.callTool(
           tool.serverId,
+          tool.name,
+          (args as Record<string, unknown>) || {}
+        );
+        return { success: true, data: result };
+      },
+    }));
+  }
+
+  private createConnectorTools(_sessionId: string): ToolHandler[] {
+    const tools = connectorBridge.getTools();
+    return tools.map((tool) => ({
+      name: `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+      description: `[Connector:${tool.connectorId}] ${tool.description || tool.name}`,
+      parameters: z.record(z.unknown()),
+      execute: async (args: unknown) => {
+        const result = await connectorBridge.callTool(
+          tool.connectorId,
           tool.name,
           (args as Record<string, unknown>) || {}
         );

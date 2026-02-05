@@ -1,0 +1,41 @@
+{
+  "id": "sentry",
+  "name": "sentry",
+  "displayName": "Sentry",
+  "description": "View and manage error tracking, issues, and performance monitoring in Sentry",
+  "version": "1.0.0",
+  "icon": "AlertTriangle",
+  "category": "developer",
+  "tags": ["errors", "monitoring", "debugging", "performance", "crash-reporting"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sentry"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "SENTRY_AUTH_TOKEN",
+        "description": "Sentry Auth Token",
+        "required": true,
+        "placeholder": "sntrys_...",
+        "link": "https://sentry.io/settings/account/api/auth-tokens/"
+      },
+      {
+        "key": "SENTRY_ORG",
+        "description": "Sentry Organization Slug (optional)",
+        "required": false,
+        "placeholder": "your-org"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sentry#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

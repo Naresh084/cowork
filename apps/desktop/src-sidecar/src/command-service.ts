@@ -70,21 +70,15 @@ export class CommandService {
   async discoverAll(): Promise<CommandManifest[]> {
     const allCommands: CommandManifest[] = [];
 
-    console.error('[CommandService] discoverAll starting...');
-    console.error('[CommandService] Bundled dir:', this.bundledCommandsDir, 'exists:', existsSync(this.bundledCommandsDir));
-    console.error('[CommandService] Managed dir:', this.managedCommandsDir, 'exists:', existsSync(this.managedCommandsDir));
-
     // Discover managed commands (user-installed or custom)
     if (existsSync(this.managedCommandsDir)) {
       const commands = await this.discoverFromDirectory(this.managedCommandsDir, 'managed', 1);
-      console.error('[CommandService] Found', commands.length, 'managed commands:', commands.map(c => c.frontmatter.name));
       allCommands.push(...commands);
     }
 
     // Discover bundled commands (always available for installation)
     if (existsSync(this.bundledCommandsDir)) {
       const commands = await this.discoverFromDirectory(this.bundledCommandsDir, 'bundled', 100);
-      console.error('[CommandService] Found', commands.length, 'bundled commands:', commands.map(c => c.frontmatter.name));
       allCommands.push(...commands);
     }
 
@@ -93,7 +87,6 @@ export class CommandService {
       this.commandCache.set(command.id, command);
     }
 
-    console.error('[CommandService] Total commands discovered:', allCommands.length);
     return allCommands;
   }
 
@@ -127,7 +120,6 @@ export class CommandService {
           const parsed = parseCommandMarkdown(content);
 
           if (!parsed) {
-            console.warn(`[CommandService] Failed to parse ${commandMdPath}`);
             continue;
           }
 
@@ -149,12 +141,12 @@ export class CommandService {
           };
 
           commands.push(manifest);
-        } catch (error) {
-          console.error(`[CommandService] Error processing command at ${commandDir}:`, error);
+        } catch {
+          // Skip commands that fail to parse
         }
       }
-    } catch (error) {
-      console.error(`[CommandService] Error scanning directory ${dir}:`, error);
+    } catch {
+      // Directory scanning error - return empty array
     }
 
     return commands;
@@ -202,8 +194,6 @@ export class CommandService {
 
     // Clear cache to force re-discovery
     this.commandCache.clear();
-
-    console.error(`[CommandService] Installed command: ${command.frontmatter.name}`);
   }
 
   /**
@@ -225,8 +215,6 @@ export class CommandService {
 
     // Clear cache
     this.commandCache.delete(commandId);
-
-    console.error(`[CommandService] Uninstalled command: ${command.frontmatter.name}`);
   }
 
   /**
@@ -277,7 +265,6 @@ export class CommandService {
     this.commandCache.clear();
 
     const commandId = `managed:${params.name}`;
-    console.error(`[CommandService] Created custom command: ${commandId} at ${commandDir}`);
 
     return commandId;
   }

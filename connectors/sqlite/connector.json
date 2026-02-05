@@ -1,0 +1,34 @@
+{
+  "id": "sqlite",
+  "name": "sqlite",
+  "displayName": "SQLite",
+  "description": "Query and analyze local SQLite database files",
+  "version": "1.0.0",
+  "icon": "Database",
+  "category": "database",
+  "tags": ["sql", "database", "query", "sqlite", "local", "embedded"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sqlite", "${SQLITE_DB_PATH}"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "SQLITE_DB_PATH",
+        "description": "Path to SQLite database file",
+        "required": true,
+        "placeholder": "/path/to/database.db"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "google-workspace",
+  "name": "google-workspace",
+  "displayName": "Google Workspace",
+  "description": "Gmail, Calendar, Drive, Docs, Sheets, Slides, Forms, Tasks, Contacts, Chat - 145+ tools for complete Google Workspace integration",
+  "version": "1.0.0",
+  "icon": "Mail",
+  "category": "google",
+  "tags": ["email", "calendar", "drive", "docs", "sheets", "slides", "forms", "tasks", "contacts", "chat", "gmail", "google"],
+  "transport": {
+    "type": "stdio",
+    "command": "uvx",
+    "args": ["workspace-mcp", "--tool-tier", "extended"]
+  },
+  "auth": {
+    "type": "oauth",
+    "provider": "google",
+    "flow": "authorization_code",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/presentations",
+      "https://www.googleapis.com/auth/forms.body",
+      "https://www.googleapis.com/auth/tasks",
+      "https://www.googleapis.com/auth/contacts"
+    ]
+  },
+  "requirements": {
+    "runtime": "python",
+    "bins": ["uv"]
+  },
+  "documentation": {
+    "setup": "https://github.com/taylorwilsdon/google_workspace_mcp#setup",
+    "homepage": "https://github.com/taylorwilsdon/google_workspace_mcp"
+  }
+}

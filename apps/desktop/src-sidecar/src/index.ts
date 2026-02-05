@@ -47,8 +47,6 @@ async function processLine(line: string): Promise<void> {
 
   } catch (error) {
     // Parse error - send error response
-    console.error('[sidecar] Parse error:', error);
-
     const errorResponse = {
       id: 'unknown',
       success: false,
@@ -71,8 +69,8 @@ rl.on('close', () => {
 });
 
 // Handle errors
-rl.on('error', (error) => {
-  console.error('[sidecar] readline error:', error);
+rl.on('error', () => {
+  // Silently handle readline errors
 });
 
 /**
@@ -105,7 +103,6 @@ process.on('SIGINT', () => {
 
 // Handle uncaught errors
 process.on('uncaughtException', (error) => {
-  console.error('[sidecar] Uncaught exception:', error);
   eventEmitter.error(undefined, `Uncaught exception: ${error.message}`, 'UNCAUGHT_EXCEPTION');
   eventEmitter.flushSync();
 });
@@ -123,7 +120,6 @@ process.on('unhandledRejection', (reason) => {
     return; // Don't emit error for expected aborts
   }
 
-  console.error('[sidecar] Unhandled rejection:', reason);
   eventEmitter.error(undefined, `Unhandled rejection: ${message}`, 'UNHANDLED_REJECTION');
   eventEmitter.flushSync();
 });

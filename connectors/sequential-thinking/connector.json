@@ -1,0 +1,26 @@
+{
+  "id": "sequential-thinking",
+  "name": "sequential-thinking",
+  "displayName": "Sequential Thinking",
+  "description": "Dynamic problem-solving through structured thought sequences with branching and revision",
+  "version": "1.0.0",
+  "icon": "ListOrdered",
+  "category": "utility",
+  "tags": ["thinking", "reasoning", "problem-solving", "sequential", "logic"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequentialthinking"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

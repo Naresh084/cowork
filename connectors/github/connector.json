@@ -1,0 +1,35 @@
+{
+  "id": "github",
+  "name": "github",
+  "displayName": "GitHub",
+  "description": "Create issues, manage pull requests, read repository contents, and interact with GitHub APIs",
+  "version": "1.0.0",
+  "icon": "Github",
+  "category": "developer",
+  "tags": ["git", "repositories", "issues", "pull-requests", "code", "version-control"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "description": "GitHub Personal Access Token (Classic or Fine-grained)",
+        "required": true,
+        "placeholder": "ghp_...",
+        "link": "https://github.com/settings/tokens"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/github#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

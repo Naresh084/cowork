@@ -191,7 +191,6 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         );
         for (const config of installedConnectorConfigs) {
           if (!managedNames.has(config.name)) {
-            console.log(`[ConnectorStore] Removing stale config: ${config.id} (${config.name})`);
             removeInstalledConnectorConfig(config.id);
           }
         }
@@ -459,8 +458,6 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
 
       try {
         const result = await invoke<{ connectorId: string }>('create_connector', { params });
-
-        console.log('[ConnectorStore] Created connector:', result.connectorId);
 
         // Auto-install the created connector by adding to settings
         const config: InstalledConnectorConfig = {

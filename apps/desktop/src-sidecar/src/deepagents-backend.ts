@@ -130,9 +130,6 @@ export class CoworkBackend implements SandboxBackendProtocol {
     this.executor = new CommandExecutor();
     this.allowedPathProvider = allowedPathProvider || (() => []);
     this.skillsDir = skillsDir || null;
-    if (this.skillsDir) {
-      console.error(`[CoworkBackend] Skills directory configured: ${this.skillsDir}`);
-    }
   }
 
   async lsInfo(path: string): Promise<FileInfo[]> {
@@ -180,11 +177,8 @@ export class CoworkBackend implements SandboxBackendProtocol {
    */
   private async lsSkillsDir(): Promise<FileInfo[]> {
     if (!this.skillsDir) {
-      console.error('[CoworkBackend] lsSkillsDir: No skills directory configured');
       return [];
     }
-
-    console.error(`[CoworkBackend] lsSkillsDir: Listing ${this.skillsDir}`);
 
     try {
       const entries = await readdir(this.skillsDir, { withFileTypes: true });
@@ -211,10 +205,8 @@ export class CoworkBackend implements SandboxBackendProtocol {
         });
       }
 
-      console.error(`[CoworkBackend] lsSkillsDir: Found ${infos.length} skills:`, infos.map(i => i.path));
       return infos;
-    } catch (error) {
-      console.error('[CoworkBackend] Failed to list skills directory:', error);
+    } catch {
       return [];
     }
   }

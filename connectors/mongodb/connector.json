@@ -1,0 +1,33 @@
+{
+  "id": "mongodb",
+  "name": "mongodb",
+  "displayName": "MongoDB",
+  "description": "Query collections, inspect schema, and interact with MongoDB databases",
+  "version": "1.0.0",
+  "icon": "Database",
+  "category": "database",
+  "tags": ["nosql", "database", "query", "mongodb", "document"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mongodb-mcp"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "MONGODB_URI",
+        "description": "MongoDB connection URI",
+        "required": true,
+        "placeholder": "mongodb://user:password@host:27017/database"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "homepage": "https://github.com/kiliczsh/mcp-mongo-server"
+  }
+}

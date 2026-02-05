@@ -47,11 +47,9 @@ export class ChromeCDPDriver implements BrowserDriver {
       // Verify connection is still valid
       try {
         await existing.client.Runtime.evaluate({ expression: '1' });
-        console.error(`[CDPDriver] Reusing existing driver for session ${sessionId}`);
         return existing;
       } catch {
         // Connection dead, remove and recreate
-        console.error(`[CDPDriver] Session ${sessionId} driver connection lost, reconnecting`);
         sessionDrivers.delete(sessionId);
       }
     }
@@ -65,7 +63,6 @@ export class ChromeCDPDriver implements BrowserDriver {
     // Connect to the session's Chrome
     const driver = await ChromeCDPDriver.connect(result.port);
     sessionDrivers.set(sessionId, driver);
-    console.error(`[CDPDriver] Created driver for session ${sessionId}`);
     return driver;
   }
 
@@ -92,7 +89,6 @@ export class ChromeCDPDriver implements BrowserDriver {
         client.DOM.enable(),
       ]);
 
-      console.error(`[CDPDriver] Connected to Chrome on port ${port}`);
       return new ChromeCDPDriver(client);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -396,7 +392,7 @@ export class ChromeCDPDriver implements BrowserDriver {
       }
 
       default:
-        console.warn(`Unknown CDP action: ${name}`);
+        // Unknown action - silently ignore
     }
   }
 

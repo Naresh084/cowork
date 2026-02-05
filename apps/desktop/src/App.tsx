@@ -49,27 +49,13 @@ export function App() {
 
     const initBackend = async () => {
       try {
-        console.log('[App] Initializing backend and loading sessions...');
         await waitForBackend();
         await loadSessions();
-        console.log('[App] Backend initialized and sessions loaded');
-
-        // Load skills after backend is ready
-        console.log('[App] Loading skills...');
         await discoverSkills();
-        console.log('[App] Skills loaded');
-
-        // Load commands after backend is ready
-        console.log('[App] Loading commands...');
         await discoverCommands();
-        console.log('[App] Commands loaded');
-
-        // Load subagents after backend is ready
-        console.log('[App] Loading subagents...');
         await loadSubagents();
-        console.log('[App] Subagents loaded');
-      } catch (error) {
-        console.error('[App] Failed to initialize backend:', error);
+      } catch {
+        // Backend initialization failed - UI will show appropriate error state
       }
     };
 

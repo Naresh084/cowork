@@ -228,18 +228,15 @@ export function createComputerUseTool(
       // Get or create a Chrome instance for this session
       // Each session gets its own isolated Chrome with a dedicated profile
       // User's main browser is never touched
-      console.error(`[computer_use] Getting Chrome instance for session ${_context.sessionId}...`);
 
       try {
         driver = await ChromeCDPDriver.forSession(_context.sessionId);
-        console.error(`[computer_use] Chrome ready for session ${_context.sessionId}`);
 
         if (startUrl) {
           await driver.performAction({ name: 'navigate', args: { url: startUrl } });
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error('[computer_use] Failed to get Chrome instance:', errorMsg);
         return {
           success: false,
           error: `Failed to start Chrome for browser automation:\n${errorMsg}\n\n` +
@@ -391,10 +388,8 @@ export function createComputerUseTool(
           await new Promise(resolve => setTimeout(resolve, 500));
         }
 
-        // If we exited the loop without a proper completion, log it
-        if (!completed && steps >= maxSteps) {
-          console.error('[computer_use] Max steps reached, task incomplete');
-        }
+        // If we exited the loop without a proper completion, note it in result
+        // (max steps reached)
 
         // Emit final screenshot to show the end state
         try {
