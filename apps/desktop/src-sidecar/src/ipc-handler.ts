@@ -14,6 +14,7 @@ import { connectorService } from './connectors/connector-service.js';
 import { connectorBridge } from './connector-bridge.js';
 import { getSecretService } from './connectors/secret-service.js';
 import type { SecretService } from './connectors/secret-service.js';
+import { ConnectorOAuthService } from './connectors/connector-oauth-service.js';
 import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
@@ -63,6 +64,9 @@ let appDataDirectory: string | null = null;
 // Connector secret service (lazily initialized)
 let connectorSecretService: SecretService | null = null;
 
+// Connector OAuth service (lazily initialized)
+let connectorOAuthService: ConnectorOAuthService | null = null;
+
 /**
  * Get or create the SecretService for connectors.
  */
@@ -71,6 +75,17 @@ async function getConnectorSecretService(): Promise<SecretService> {
     connectorSecretService = await getSecretService();
   }
   return connectorSecretService;
+}
+
+/**
+ * Get or create the ConnectorOAuthService.
+ */
+async function getConnectorOAuthService(): Promise<ConnectorOAuthService> {
+  if (!connectorOAuthService) {
+    const secretService = await getConnectorSecretService();
+    connectorOAuthService = new ConnectorOAuthService(secretService);
+  }
+  return connectorOAuthService;
 }
 
 /**
@@ -1448,6 +1463,143 @@ registerHandler('connect_all_connectors', async (params) => {
 registerHandler('disconnect_all_connectors', async () => {
   await connectorBridge.disconnectAll();
   return { success: true };
+});
+
+// ============================================================================
+// Connector OAuth Handlers
+// ============================================================================
+
+/**
+ * Start OAuth flow for a connector.
+ * Returns either a browser URL to open (authorization_code flow)
+ * or device code info (device_code flow).
+ */
+registerHandler('start_connector_oauth_flow', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const connector = await connectorService.getConnector(p.connectorId);
+  if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
+
+  if (connector.auth.type !== 'oauth') {
+    throw new Error('Connector does not use OAuth authentication');
+  }
+
+  const oauthService = await getConnectorOAuthService();
+  const result = await oauthService.startOAuthFlow(
+    p.connectorId,
+    connector.auth.provider,
+    connector.auth.flow,
+    connector.auth.scopes
+  );
+
+  return result;
+});
+
+/**
+ * Poll for device code completion (Microsoft device_code flow).
+ * Returns true if authorized, false if still pending.
+ */
+registerHandler('poll_oauth_device_code', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const oauthService = await getConnectorOAuthService();
+  const complete = await oauthService.pollDeviceCode(p.connectorId);
+
+  return { complete };
+});
+
+/**
+ * Get OAuth authentication status for a connector.
+ * Returns whether authenticated and token expiration info.
+ */
+registerHandler('get_oauth_status', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const oauthService = await getConnectorOAuthService();
+  const status = await oauthService.getOAuthStatus(p.connectorId);
+
+  return status;
+});
+
+/**
+ * Refresh OAuth tokens if needed (when expired or about to expire).
+ * Returns true if tokens were refreshed, false if still valid.
+ */
+registerHandler('refresh_oauth_tokens', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const connector = await connectorService.getConnector(p.connectorId);
+  if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
+
+  if (connector.auth.type !== 'oauth') {
+    throw new Error('Connector does not use OAuth authentication');
+  }
+
+  const oauthService = await getConnectorOAuthService();
+  const refreshed = await oauthService.refreshTokensIfNeeded(p.connectorId);
+
+  return { refreshed };
+});
+
+/**
+ * Revoke OAuth tokens and clear stored credentials.
+ */
+registerHandler('revoke_oauth_tokens', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  // Clear all OAuth-related secrets for this connector
+  const secretService = await getConnectorSecretService();
+  await secretService.deleteSecret(p.connectorId, 'ACCESS_TOKEN');
+  await secretService.deleteSecret(p.connectorId, 'REFRESH_TOKEN');
+  await secretService.deleteSecret(p.connectorId, 'EXPIRES_AT');
+
+  return { success: true };
+});
+
+// ============================================================================
+// MCP Apps Handlers
+// ============================================================================
+
+/**
+ * Get all MCP Apps from all connected connectors.
+ * Apps are ui:// resources that provide interactive HTML interfaces.
+ */
+registerHandler('get_connector_apps', async () => {
+  const manager = await connectorBridge.getManager();
+  const apps = manager.getAllApps();
+  return { apps };
+});
+
+/**
+ * Get the HTML content for an MCP App.
+ */
+registerHandler('get_connector_app_content', async (params) => {
+  const p = params as { connectorId: string; appUri: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+  if (!p.appUri) throw new Error('appUri is required');
+
+  const manager = await connectorBridge.getManager();
+  const content = await manager.getAppContent(p.connectorId, p.appUri);
+
+  return { content };
+});
+
+/**
+ * Call a tool from an MCP App iframe.
+ * This handler forwards tool calls from the sandboxed iframe to the connector.
+ */
+registerHandler('call_connector_app_tool', async (params) => {
+  const p = params as { connectorId: string; toolName: string; args?: Record<string, unknown> };
+  if (!p.connectorId) throw new Error('connectorId is required');
+  if (!p.toolName) throw new Error('toolName is required');
+
+  const result = await connectorBridge.callTool(p.connectorId, p.toolName, p.args || {});
+  return { result };
 });
 
 // ============================================================================

@@ -47,7 +47,7 @@ interface ConnectorStoreState {
   // Filters
   searchQuery: string;
   selectedCategory: ConnectorCategory | 'all';
-  activeTab: 'available' | 'installed';
+  activeTab: 'available' | 'installed' | 'apps';
 
   // Selected connector for details panel
   selectedConnectorId: string | null;
@@ -99,6 +99,10 @@ interface ConnectorStoreActions {
   // Configuration
   configureSecrets: (connectorId: string, secrets: Record<string, string>) => Promise<void>;
 
+  // OAuth
+  getOAuthStatus: (connectorId: string) => Promise<{ authenticated: boolean; expiresAt?: number }>;
+  revokeOAuthTokens: (connectorId: string) => Promise<void>;
+
   // Custom connector
   createCustomConnector: (params: CreateCustomConnectorParams) => Promise<string>;
 
@@ -110,7 +114,7 @@ interface ConnectorStoreActions {
   // UI Actions
   setSearchQuery: (query: string) => void;
   setCategory: (category: ConnectorCategory | 'all') => void;
-  setActiveTab: (tab: 'available' | 'installed') => void;
+  setActiveTab: (tab: 'available' | 'installed' | 'apps') => void;
   selectConnector: (connectorId: string | null) => void;
 
   // Selectors (computed)
@@ -440,6 +444,51 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
           const existing = states.get(connectorId);
           if (existing) {
             states.set(connectorId, { ...existing, status: 'configured' });
+          }
+          return { connectorStates: states };
+        });
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+    },
+
+    // ========================================================================
+    // OAuth
+    // ========================================================================
+
+    getOAuthStatus: async (connectorId) => {
+      try {
+        const result = await invoke<{ authenticated: boolean; expiresAt?: number }>('get_oauth_status', {
+          connectorId,
+        });
+        return result;
+      } catch (error) {
+        console.error('Failed to get OAuth status:', error);
+        return { authenticated: false };
+      }
+    },
+
+    revokeOAuthTokens: async (connectorId) => {
+      try {
+        await invoke('revoke_oauth_tokens', { connectorId });
+
+        // Update config to mark secrets as not configured
+        const { installedConnectorConfigs, updateInstalledConnectorConfig } = useSettingsStore.getState();
+        const connector = get().availableConnectors.find((c) => c.id === connectorId);
+        if (connector) {
+          const config = installedConnectorConfigs.find((c) => c.name === connector.name);
+          if (config) {
+            updateInstalledConnectorConfig(config.id, { secretsConfigured: false });
+          }
+        }
+
+        // Update state to installed (needs reconfiguration)
+        set((state) => {
+          const states = new Map(state.connectorStates);
+          const existing = states.get(connectorId);
+          if (existing) {
+            states.set(connectorId, { ...existing, status: 'installed', tools: [], resources: [], prompts: [] });
           }
           return { connectorStates: states };
         });

@@ -13,6 +13,7 @@ import type {
   MCPTool as ConnectorMCPTool,
   MCPResource as ConnectorMCPResource,
   MCPPrompt as ConnectorMCPPrompt,
+  MCPApp,
 } from '@gemini-cowork/shared';
 import type { SecretService } from './secret-service.js';
 
@@ -30,6 +31,7 @@ interface ConnectorConnection {
   tools: ConnectorMCPTool[];
   resources: ConnectorMCPResource[];
   prompts: ConnectorMCPPrompt[];
+  apps: MCPApp[];  // MCP Apps (ui:// resources)
   status: ConnectorStatus;
   connectedAt?: number;
   error?: string;
@@ -88,14 +90,6 @@ export class ConnectorManager {
       };
     }
 
-    // Only stdio transport is supported currently
-    if (manifest.transport.type !== 'stdio') {
-      return {
-        success: false,
-        error: `Transport type "${manifest.transport.type}" is not yet supported`,
-      };
-    }
-
     // Initialize connection state
     const connection: ConnectorConnection = {
       connectorId,
@@ -104,28 +98,57 @@ export class ConnectorManager {
       tools: [],
       resources: [],
       prompts: [],
+      apps: [],
       status: 'connecting',
       retryCount: existing?.retryCount || 0,
     };
     this.connections.set(connectorId, connection);
 
     try {
-      // Build environment with secrets
+      // Build environment with secrets (used for both transport types)
       const env = await this.buildEnvFromSecrets(manifest);
 
-      // Interpolate ${VAR} in transport args
-      const interpolatedArgs = manifest.transport.args.map((arg) =>
-        arg.replace(/\$\{(\w+)\}/g, (_, key) => env[key] || '')
-      );
+      let serverConfig: MCPServerConfig;
 
-      // Create MCP server config
-      const serverConfig: MCPServerConfig = {
-        name: manifest.displayName,
-        command: manifest.transport.command,
-        args: interpolatedArgs,
-        env,
-        enabled: true,
-      };
+      // Handle different transport types
+      if (manifest.transport.type === 'stdio') {
+        // Stdio transport: local process-based MCP server
+        // Interpolate ${VAR} in transport args
+        const interpolatedArgs = manifest.transport.args.map((arg) =>
+          arg.replace(/\$\{(\w+)\}/g, (_, key) => env[key] || '')
+        );
+
+        serverConfig = {
+          name: manifest.displayName,
+          transport: 'stdio',
+          command: manifest.transport.command,
+          args: interpolatedArgs,
+          env,
+          enabled: true,
+        };
+      } else if (manifest.transport.type === 'http') {
+        // HTTP transport: remote MCP server via HTTP/SSE
+        // Interpolate ${VAR} in headers
+        const interpolatedHeaders: Record<string, string> = {};
+        if (manifest.transport.headers) {
+          for (const [key, value] of Object.entries(manifest.transport.headers)) {
+            interpolatedHeaders[key] = value.replace(/\$\{(\w+)\}/g, (_, k) => env[k] || '');
+          }
+        }
+
+        serverConfig = {
+          name: manifest.displayName,
+          transport: 'http',
+          url: manifest.transport.url,
+          headers: Object.keys(interpolatedHeaders).length > 0 ? interpolatedHeaders : undefined,
+          enabled: true,
+        };
+      } else {
+        return {
+          success: false,
+          error: `Transport type "${(manifest.transport as { type: string }).type}" is not supported`,
+        };
+      }
 
       // Add server to MCP manager
       const serverId = this.mcpManager.addServer(serverConfig);
@@ -156,6 +179,17 @@ export class ConnectorManager {
         mimeType: resource.mimeType,
         connectorId,
       }));
+
+      // Extract MCP Apps (ui:// resources)
+      connection.apps = (serverState.resources || [])
+        .filter((resource: MCPResource) => resource.uri.startsWith('ui://'))
+        .map((resource: MCPResource) => ({
+          uri: resource.uri,
+          name: resource.name,
+          description: resource.description,
+          mimeType: resource.mimeType,
+          connectorId,
+        }));
 
       // Map prompts with connector ID
       connection.prompts = (serverState.prompts || []).map((prompt: MCPPrompt) => ({
@@ -216,6 +250,7 @@ export class ConnectorManager {
     connection.tools = [];
     connection.resources = [];
     connection.prompts = [];
+    connection.apps = [];
     connection.connectedAt = undefined;
   }
 
@@ -309,6 +344,56 @@ export class ConnectorManager {
       }
     }
     return prompts;
+  }
+
+  /**
+   * Get all MCP Apps from all connected connectors
+   */
+  getAllApps(): MCPApp[] {
+    const apps: MCPApp[] = [];
+    for (const connection of this.connections.values()) {
+      if (connection.status === 'connected') {
+        apps.push(...connection.apps);
+      }
+    }
+    return apps;
+  }
+
+  /**
+   * Get HTML content for an MCP App
+   */
+  async getAppContent(connectorId: string, appUri: string): Promise<string> {
+    const connection = this.connections.get(connectorId);
+    if (!connection) {
+      throw new Error(`Connector not connected: ${connectorId}`);
+    }
+
+    if (connection.status !== 'connected') {
+      throw new Error(`Connector not in connected state: ${connectorId}`);
+    }
+
+    // Read resource from MCP server
+    const result = await this.mcpManager.readResource(connection.serverId, appUri) as {
+      contents?: Array<{ text?: string; blob?: string; uri?: string; mimeType?: string }>;
+    };
+
+    if (!result.contents || result.contents.length === 0) {
+      throw new Error(`No content returned for app: ${appUri}`);
+    }
+
+    const content = result.contents[0];
+
+    // Handle text content
+    if ('text' in content && content.text) {
+      return content.text;
+    }
+
+    // Handle blob content (base64)
+    if ('blob' in content && content.blob) {
+      return Buffer.from(content.blob, 'base64').toString('utf-8');
+    }
+
+    throw new Error(`Unsupported content type for app: ${appUri}`);
   }
 
   /**

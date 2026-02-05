@@ -6,8 +6,11 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { ConnectorsHeader } from './ConnectorsHeader';
 import { AvailableTab } from './AvailableTab';
 import { InstalledTab } from './InstalledTab';
+import { ConnectorAppsTab } from './ConnectorAppsTab';
 import { ConnectorDetailsPanel } from './ConnectorDetailsPanel';
 import { ConfigureSecretsModal } from './ConfigureSecretsModal';
+import { OAuthFlowModal } from './OAuthFlowModal';
+import { CreateConnectorModal } from './CreateConnectorModal';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ConnectorManagerProps {
@@ -27,6 +30,8 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
 
   const { defaultWorkingDirectory } = useSettingsStore();
   const [configureConnectorId, setConfigureConnectorId] = useState<string | null>(null);
+  const [oauthConnectorId, setOAuthConnectorId] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Discover connectors when modal opens
   useEffect(() => {
@@ -39,8 +44,8 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        // Don't close if configure modal is open
-        if (configureConnectorId) return;
+        // Don't close if any modal is open
+        if (configureConnectorId || oauthConnectorId || isCreateModalOpen) return;
 
         if (selectedConnectorId) {
           selectConnector(null);
@@ -57,10 +62,25 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, selectedConnectorId, selectConnector, onClose, configureConnectorId]);
+  }, [isOpen, selectedConnectorId, selectConnector, onClose, configureConnectorId, oauthConnectorId, isCreateModalOpen]);
 
-  // Get selected connector state for the configure modal
-  const selectedState = selectedConnectorId ? getConnectorState(selectedConnectorId) : undefined;
+  // Get OAuth connector state for the OAuth modal
+  const oauthConnectorState = oauthConnectorId ? getConnectorState(oauthConnectorId) : undefined;
+
+  // Get configure connector state for the secrets modal
+  const configureConnectorState = configureConnectorId ? getConnectorState(configureConnectorId) : undefined;
+
+  // Handle configure action - routes to appropriate modal based on auth type
+  const handleConfigure = (connectorId: string) => {
+    const state = getConnectorState(connectorId);
+    if (!state) return;
+
+    if (state.manifest.auth.type === 'oauth') {
+      setOAuthConnectorId(connectorId);
+    } else {
+      setConfigureConnectorId(connectorId);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -98,7 +118,7 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
             </div>
 
             {/* Search and Filters */}
-            <ConnectorsHeader />
+            <ConnectorsHeader onAddCustom={() => setIsCreateModalOpen(true)} />
 
             {/* Content */}
             <div className="flex-1 flex overflow-hidden">
@@ -109,11 +129,9 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
                   selectedConnectorId ? 'mr-96' : ''
                 )}
               >
-                {activeTab === 'available' ? (
-                  <AvailableTab />
-                ) : (
-                  <InstalledTab onConfigure={(id) => setConfigureConnectorId(id)} />
-                )}
+                {activeTab === 'available' && <AvailableTab />}
+                {activeTab === 'installed' && <InstalledTab onConfigure={handleConfigure} />}
+                {activeTab === 'apps' && <ConnectorAppsTab />}
               </div>
 
               {/* Details Panel */}
@@ -129,7 +147,7 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
                     <ConnectorDetailsPanel
                       connectorId={selectedConnectorId}
                       onClose={() => selectConnector(null)}
-                      onConfigure={() => setConfigureConnectorId(selectedConnectorId)}
+                      onConfigure={() => handleConfigure(selectedConnectorId)}
                     />
                   </motion.div>
                 )}
@@ -138,11 +156,11 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
           </motion.div>
 
           {/* Configure Secrets Modal */}
-          {configureConnectorId && selectedState && (
+          {configureConnectorId && configureConnectorState && (
             <ConfigureSecretsModal
               isOpen={!!configureConnectorId}
               onClose={() => setConfigureConnectorId(null)}
-              connector={selectedState.manifest}
+              connector={configureConnectorState.manifest}
               onConfigured={() => {
                 setConfigureConnectorId(null);
                 // Switch to installed tab to show the configured connector
@@ -150,6 +168,35 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
               }}
             />
           )}
+
+          {/* OAuth Flow Modal */}
+          {oauthConnectorId && oauthConnectorState && (
+            <OAuthFlowModal
+              isOpen={!!oauthConnectorId}
+              onClose={() => setOAuthConnectorId(null)}
+              connector={oauthConnectorState.manifest}
+              onSuccess={() => {
+                setOAuthConnectorId(null);
+                // Switch to installed tab to show the connected connector
+                setActiveTab('installed');
+                // Refresh connectors to update status
+                discoverConnectors(defaultWorkingDirectory || undefined);
+              }}
+            />
+          )}
+
+          {/* Create Custom Connector Modal */}
+          <CreateConnectorModal
+            isOpen={isCreateModalOpen}
+            onClose={() => setIsCreateModalOpen(false)}
+            onCreated={() => {
+              setIsCreateModalOpen(false);
+              // Refresh connectors to include the new one
+              discoverConnectors(defaultWorkingDirectory || undefined);
+              // Switch to installed tab to show the new connector
+              setActiveTab('installed');
+            }}
+          />
         </>
       )}
     </AnimatePresence>

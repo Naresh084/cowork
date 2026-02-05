@@ -76,6 +76,7 @@ export async function loadGeminiExtensions(): Promise<GeminiExtensionsResult> {
         servers.push({
           id: `ext-${server.name}-${Math.random().toString(36).slice(2, 8)}`,
           name: server.name,
+          transport: 'stdio',
           command: server.command,
           args: server.args,
           env: server.env,

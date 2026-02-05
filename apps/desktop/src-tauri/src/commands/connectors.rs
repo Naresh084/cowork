@@ -412,3 +412,194 @@ pub async fn disconnect_all_connectors(
     manager.send_command("disconnect_all_connectors", params).await?;
     Ok(())
 }
+
+// ============================================================================
+// OAuth Commands
+// ============================================================================
+
+/// OAuth flow result from the sidecar
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthFlowResult {
+    #[serde(rename = "type")]
+    pub flow_type: String,
+    pub url: Option<String>,
+    pub user_code: Option<String>,
+    pub verification_url: Option<String>,
+    pub expires_in: Option<i32>,
+}
+
+/// Start OAuth flow for a connector
+#[tauri::command]
+pub async fn start_connector_oauth_flow(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+) -> Result<OAuthFlowResult, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+    });
+
+    let result = manager.send_command("start_connector_oauth_flow", params).await?;
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse OAuth flow result: {}", e))
+}
+
+/// Poll OAuth device code for completion
+#[tauri::command]
+pub async fn poll_oauth_device_code(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+) -> Result<bool, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+    });
+
+    let result = manager.send_command("poll_oauth_device_code", params).await?;
+    result
+        .get("complete")
+        .and_then(|c| c.as_bool())
+        .ok_or_else(|| "Invalid response format: missing complete field".to_string())
+}
+
+/// OAuth status for a connector
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthStatus {
+    pub authenticated: bool,
+    pub expires_at: Option<i64>,
+}
+
+/// Get OAuth status for a connector
+#[tauri::command]
+pub async fn get_oauth_status(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+) -> Result<OAuthStatus, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+    });
+
+    let result = manager.send_command("get_oauth_status", params).await?;
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse OAuth status: {}", e))
+}
+
+/// Refresh OAuth tokens for a connector
+#[tauri::command]
+pub async fn refresh_oauth_tokens(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+    });
+
+    manager.send_command("refresh_oauth_tokens", params).await?;
+    Ok(())
+}
+
+/// Revoke OAuth tokens for a connector
+#[tauri::command]
+pub async fn revoke_oauth_tokens(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+    });
+
+    manager.send_command("revoke_oauth_tokens", params).await?;
+    Ok(())
+}
+
+// ============================================================================
+// MCP Apps Commands
+// ============================================================================
+
+/// MCP App definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPApp {
+    pub uri: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub mime_type: Option<String>,
+    pub connector_id: String,
+}
+
+/// Get all MCP apps from connected connectors
+#[tauri::command]
+pub async fn get_connector_apps(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({});
+
+    manager.send_command("get_connector_apps", params).await
+}
+
+/// Get HTML content for an MCP app
+#[tauri::command]
+pub async fn get_connector_app_content(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+    app_uri: String,
+) -> Result<String, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+        "appUri": app_uri,
+    });
+
+    let result = manager.send_command("get_connector_app_content", params).await?;
+    result
+        .get("content")
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Invalid response format: missing content field".to_string())
+}
+
+/// Call a tool from an MCP app (via iframe)
+#[tauri::command]
+pub async fn call_connector_app_tool(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    connector_id: String,
+    tool_name: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "connectorId": connector_id,
+        "toolName": tool_name,
+        "args": args,
+    });
+
+    manager.send_command("call_connector_app_tool", params).await
+}
