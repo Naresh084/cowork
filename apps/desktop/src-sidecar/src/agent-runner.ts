@@ -17,6 +17,7 @@ import { createResearchTools, createComputerUseTools, createMediaTools, createGr
 import { mcpBridge } from './mcp-bridge.js';
 import { chromeBridge } from './chrome-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
+import { skillService } from './skill-service.js';
 import type {
   SessionInfo,
   SessionDetails,
@@ -88,6 +89,8 @@ interface ActiveSession {
     data: string;
     path?: string;
   }>;
+  /** Last known prompt tokens from API response (for accurate context tracking) */
+  lastKnownPromptTokens: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -112,6 +115,7 @@ export class AgentRunner {
   private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
   private mcpServers: Array<{ id: string; name: string; prompt?: string; contextFileName?: string; enabled?: boolean }> = [];
   private skills: SkillConfig[] = [];
+  private enabledSkillIds: Set<string> = new Set();
   private persistence: SessionPersistence | null = null;
   private currentTurnInfo: Map<string, { turnMessageId: string; toolIds: string[] }> = new Map();
   private isInitialized = false;
@@ -127,13 +131,13 @@ export class AgentRunner {
    * Called after sidecar starts with path from Rust backend.
    */
   async initialize(appDataDir: string): Promise<{ sessionsRestored: number }> {
-    console.log('[AgentRunner] Initializing persistence with:', appDataDir);
+    console.error('[AgentRunner] Initializing persistence with:', appDataDir);
     this.appDataDir = appDataDir;
     this.persistence = new SessionPersistence(appDataDir);
     await this.persistence.initialize();
     const count = await this.restoreSessionsFromDisk();
     this.isInitialized = true;
-    console.log('[AgentRunner] Persistence initialized, restored', count, 'sessions');
+    console.error('[AgentRunner] Persistence initialized, restored', count, 'sessions');
     return { sessionsRestored: count };
   }
 
@@ -198,18 +202,18 @@ export class AgentRunner {
    */
   private async restoreSessionsFromDisk(): Promise<number> {
     if (!this.persistence) {
-      console.log('[AgentRunner] No persistence, skipping restore');
+      console.error('[AgentRunner] No persistence, skipping restore');
       return 0;
     }
 
-    console.log('[AgentRunner] Restoring sessions from disk...');
+    console.error('[AgentRunner] Restoring sessions from disk...');
     const persistedSessions = await this.persistence.loadAllSessions();
-    console.log('[AgentRunner] Found', persistedSessions.size, 'persisted sessions');
+    console.error('[AgentRunner] Found', persistedSessions.size, 'persisted sessions');
 
     let restoredCount = 0;
     for (const [sessionId, data] of persistedSessions) {
       try {
-        console.log('[AgentRunner] Recreating session:', sessionId, 'messages:', data.messages.length);
+        console.error('[AgentRunner] Recreating session:', sessionId, 'messages:', data.messages.length);
         const session = await this.recreateSession(data);
         this.sessions.set(sessionId, session);
 
@@ -217,14 +221,14 @@ export class AgentRunner {
         this.subscribeToAgentEvents(session);
 
         restoredCount++;
-        console.log('[AgentRunner] Restored session:', sessionId);
+        console.error('[AgentRunner] Restored session:', sessionId);
       } catch (error) {
         console.error(`[AgentRunner] Failed to recreate session ${sessionId}:`, error);
       }
     }
 
-    console.log('[AgentRunner] Restoration complete. Total restored:', restoredCount);
-    console.log('[AgentRunner] Sessions in memory:', this.sessions.size);
+    console.error('[AgentRunner] Restoration complete. Total restored:', restoredCount);
+    console.error('[AgentRunner] Sessions in memory:', this.sessions.size);
     return restoredCount;
   }
 
@@ -252,6 +256,7 @@ export class AgentRunner {
       pendingQuestions: new Map(),
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
+      lastKnownPromptTokens: 0,
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
     };
@@ -286,7 +291,7 @@ export class AgentRunner {
    */
   setSpecializedModels(models: Partial<SpecializedModels>): void {
     this.specializedModels = { ...this.specializedModels, ...models };
-    console.log('[AgentRunner] Specialized models updated:', this.specializedModels);
+    console.error('[AgentRunner] Specialized models updated:', this.specializedModels);
   }
 
   /**
@@ -342,12 +347,30 @@ export class AgentRunner {
 
   /**
    * Update skills and refresh tools for all sessions.
+   * Supports both legacy SkillConfig format and new skill IDs.
    */
   async setSkills(skills: SkillConfig[]): Promise<void> {
     this.skills = skills.map((skill) => ({
       ...skill,
       enabled: skill.enabled ?? true,
     }));
+
+    // Also update enabledSkillIds for new skill service integration
+    this.enabledSkillIds = new Set(
+      skills.filter((s) => s.enabled !== false).map((s) => s.id)
+    );
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  /**
+   * Set enabled skill IDs directly (for new marketplace skills)
+   */
+  async setEnabledSkillIds(skillIds: string[]): Promise<void> {
+    this.enabledSkillIds = new Set(skillIds);
 
     for (const session of this.sessions.values()) {
       const toolHandlers = this.buildToolHandlers(session);
@@ -408,6 +431,7 @@ export class AgentRunner {
       pendingQuestions: new Map(),
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
+      lastKnownPromptTokens: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -569,7 +593,7 @@ export class AgentRunner {
             // Extract thinking content (agent's internal reasoning)
             const thinkingText = this.extractThinkingContent(event);
             if (thinkingText) {
-              console.log(`[stream] Thinking content received: ${thinkingText.substring(0, 100)}...`);
+              console.error(`[stream] Thinking content received: ${thinkingText.substring(0, 100)}...`);
               if (!thinkingStarted) {
                 eventEmitter.thinkingStart(sessionId);
                 thinkingStarted = true;
@@ -615,6 +639,7 @@ export class AgentRunner {
             assistantMessage = this.extractAssistantMessage(finalState);
             if (finalState) {
               this.syncTasksFromState(session, finalState);
+              this.updateUsageFromState(session, finalState);
             }
             if (!assistantMessage && streamedText) {
               assistantMessage = {
@@ -647,6 +672,7 @@ export class AgentRunner {
             );
             assistantMessage = this.extractAssistantMessage(result);
             this.syncTasksFromState(session, result);
+            this.updateUsageFromState(session, result);
             if (assistantMessage) {
               const textContent = this.extractTextContent(assistantMessage);
               if (textContent) {
@@ -669,6 +695,7 @@ export class AgentRunner {
         );
         assistantMessage = this.extractAssistantMessage(result);
         this.syncTasksFromState(session, result);
+        this.updateUsageFromState(session, result);
         if (assistantMessage) {
           const textContent = this.extractTextContent(assistantMessage);
           if (textContent) {
@@ -1025,13 +1052,18 @@ export class AgentRunner {
    * Update session title.
    */
   async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+    console.error('[AgentRunner] updateSessionTitle called:', sessionId, 'title:', title);
+
     const session = this.sessions.get(sessionId);
     if (!session) {
+      console.error('[AgentRunner] Session not found for title update:', sessionId);
+      console.error('[AgentRunner] Available sessions:', Array.from(this.sessions.keys()));
       throw new Error(`Session not found: ${sessionId}`);
     }
 
     session.title = title;
     session.updatedAt = Date.now();
+    console.error('[AgentRunner] Title updated in memory, persisting...');
 
     // CRITICAL: Persist to disk
     if (this.persistence) {
@@ -1049,6 +1081,7 @@ export class AgentRunner {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
         });
+        console.error('[AgentRunner] Title persisted to disk successfully');
       } catch (error) {
         console.error(`Failed to persist session title update for ${session.id}:`, error);
       }
@@ -1156,7 +1189,11 @@ export class AgentRunner {
       return { used: 0, total: defaultContext.input, percentage: 0 };
     }
 
-    const used = this.estimateTokens(session.messages);
+    // Prefer API-tracked usage if available (more accurate than estimation)
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(session.messages);
+
     // Get context window from model configuration
     const contextWindow = getModelContextWindow(session.model);
     const total = contextWindow.input;
@@ -1334,6 +1371,19 @@ execute({ command: "git status" })
   }
 
   private async buildSkillsPrompt(session: ActiveSession): Promise<string> {
+    // First, try to use the new SkillService for marketplace skills
+    if (this.enabledSkillIds.size > 0) {
+      try {
+        const skillsPrompt = await skillService.getSkillsForAgent([...this.enabledSkillIds]);
+        if (skillsPrompt) {
+          return skillsPrompt;
+        }
+      } catch (error) {
+        console.warn('[AgentRunner] Error loading skills from service, falling back to legacy:', error);
+      }
+    }
+
+    // Fallback to legacy skill loading for backwards compatibility
     const enabledSkills = this.skills.filter((skill) => skill.enabled !== false);
     if (enabledSkills.length === 0) return '';
 
@@ -1432,18 +1482,28 @@ execute({ command: "git status" })
       throw new Error('API key not set');
     }
 
-    console.log(`[createDeepAgent] Model: ${session.model}`);
+    console.error(`[createDeepAgent] Model: ${session.model}`);
+    console.error(`[createDeepAgent] Enabled skills: ${this.enabledSkillIds.size}`);
 
+    // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
+    // See: https://github.com/langchain-ai/langchainjs/issues/7434
+    // The package throws "Unknown content type thinking" error when enabled
+    // Thinking UI remains in place for when support is added
     const model = new ChatGoogleGenerativeAI({
       model: session.model,
       apiKey: this.apiKey,
-      // Enable thinking content to be returned in responses
-      thinkingConfig: {
-        includeThoughts: true,
-      },
     });
 
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
+
+    // Determine skills paths for DeepAgents
+    // When skills are enabled, pass the virtual /skills/ path for DeepAgents to discover
+    const skillsParam = this.enabledSkillIds.size > 0 ? ['/skills/'] : undefined;
+    if (skillsParam) {
+      console.error(`[createDeepAgent] Skills path: ${skillsParam}`);
+    }
+
+    const skillsDir = this.getSkillsDirectory();
 
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const agent = createDeepAgentAny({
@@ -1452,14 +1512,23 @@ execute({ command: "git status" })
       systemPrompt: await this.buildSystemPrompt(session),
       middleware: [this.createToolMiddleware(session)],
       recursionLimit: RECURSION_LIMIT,
+      skills: skillsParam,
       backend: () => new CoworkBackend(
         session.workingDirectory,
         session.id,
-        () => this.getBackendAllowedScopes(session)
+        () => this.getBackendAllowedScopes(session),
+        skillsDir
       ),
     });
 
     return agent;
+  }
+
+  /**
+   * Get the managed skills directory for DeepAgents backend
+   */
+  private getSkillsDirectory(): string {
+    return skillService.getManagedSkillsDir();
   }
 
   private buildToolHandlers(session: ActiveSession): ToolHandler[] {
@@ -2634,6 +2703,74 @@ execute({ command: "git status" })
     return null;
   }
 
+  /**
+   * Extract and update usage metadata from stream events or final state.
+   * Gemini API returns usage_metadata with prompt_token_count, candidates_token_count, total_token_count.
+   * LangChain wraps this in response_metadata.usage_metadata or similar structures.
+   */
+  private updateUsageFromState(session: ActiveSession, state: unknown): void {
+    if (!state || typeof state !== 'object') return;
+
+    const stateAny = state as Record<string, unknown>;
+
+    // Try to find usage metadata in various places it might be
+    const usage = this.extractUsageMetadata(stateAny);
+    if (usage && usage.promptTokens > 0) {
+      session.lastKnownPromptTokens = usage.promptTokens;
+    }
+  }
+
+  private extractUsageMetadata(obj: Record<string, unknown>): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
+    // Direct usage object
+    if (obj.usage && typeof obj.usage === 'object') {
+      const usage = obj.usage as Record<string, unknown>;
+      const promptTokens = Number(usage.prompt_tokens ?? usage.promptTokens ?? usage.prompt_token_count ?? 0);
+      const completionTokens = Number(usage.completion_tokens ?? usage.completionTokens ?? usage.candidates_token_count ?? 0);
+      const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? usage.total_token_count ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // usage_metadata (Gemini style)
+    if (obj.usage_metadata && typeof obj.usage_metadata === 'object') {
+      const usage = obj.usage_metadata as Record<string, unknown>;
+      const promptTokens = Number(usage.prompt_token_count ?? usage.promptTokenCount ?? 0);
+      const completionTokens = Number(usage.candidates_token_count ?? usage.candidatesTokenCount ?? 0);
+      const totalTokens = Number(usage.total_token_count ?? usage.totalTokenCount ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // response_metadata (LangChain style)
+    if (obj.response_metadata && typeof obj.response_metadata === 'object') {
+      const nested = this.extractUsageMetadata(obj.response_metadata as Record<string, unknown>);
+      if (nested) return nested;
+    }
+
+    // Check in messages array (final state often has messages with metadata)
+    if (Array.isArray(obj.messages)) {
+      for (const msg of obj.messages) {
+        if (msg && typeof msg === 'object') {
+          const msgAny = msg as Record<string, unknown>;
+          // LangChain AIMessage often has response_metadata
+          if (msgAny.response_metadata && typeof msgAny.response_metadata === 'object') {
+            const nested = this.extractUsageMetadata(msgAny.response_metadata as Record<string, unknown>);
+            if (nested) return nested;
+          }
+          // Check usage_metadata directly on message
+          if (msgAny.usage_metadata && typeof msgAny.usage_metadata === 'object') {
+            const nested = this.extractUsageMetadata({ usage_metadata: msgAny.usage_metadata });
+            if (nested) return nested;
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   private getFirstMessagePreview(session: ActiveSession): string | null {
     const firstUserMsg = session.messages.find(m => m.role === 'user');
     if (!firstUserMsg) return null;
@@ -2786,6 +2923,22 @@ execute({ command: "git status" })
       }
     }
 
+    // Handle execute/bash/shell commands for artifact tracking
+    if (name === 'execute' || name === 'bash' || name === 'shell' || name === 'run_command') {
+      const command = String(args.command ?? args.cmd ?? '');
+      const resultAny = result as { output?: string; stdout?: string } | string | undefined;
+      const output = typeof resultAny === 'string'
+        ? resultAny
+        : resultAny?.output ?? resultAny?.stdout ?? '';
+
+      const shellArtifacts = this.parseShellCommandArtifacts(
+        command,
+        output,
+        session.workingDirectory
+      );
+      artifacts.push(...shellArtifacts);
+    }
+
     if (name.startsWith('mcp_') || name.includes('stitch')) {
       artifacts.push(...this.extractDesignArtifacts(toolName, result));
     }
@@ -2858,6 +3011,126 @@ execute({ command: "git status" })
     }
 
     return artifacts;
+  }
+
+  /**
+   * Parse shell command outputs to detect file creation/deletion.
+   * Handles git clone, mkdir, touch, cp, rm, and common scaffolding commands.
+   */
+  private parseShellCommandArtifacts(
+    command: string,
+    output: string,
+    workingDirectory: string
+  ): Artifact[] {
+    const artifacts: Artifact[] = [];
+    const timestamp = Date.now();
+    const cmd = command.trim().toLowerCase();
+
+    // 1. Git clone detection - "Cloning into 'repo-name'..."
+    const gitCloneMatch = output.match(/Cloning into ['"]?([^'".\n]+)['"]?/i);
+    if (gitCloneMatch && cmd.includes('git clone')) {
+      const clonedName = gitCloneMatch[1];
+      const clonedPath = isAbsolute(clonedName)
+        ? clonedName
+        : join(workingDirectory, clonedName);
+      artifacts.push({
+        id: generateId('art'),
+        path: clonedPath,
+        type: 'created',
+        timestamp,
+      });
+    }
+
+    // 2. mkdir detection
+    const mkdirMatch = cmd.match(/^mkdir\s+(?:-p\s+)?(.+)$/);
+    if (mkdirMatch && !output.toLowerCase().includes('error')) {
+      const paths = this.parseShellPaths(mkdirMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'created', timestamp });
+      }
+    }
+
+    // 3. touch detection
+    const touchMatch = cmd.match(/^touch\s+(.+)$/);
+    if (touchMatch && !output.toLowerCase().includes('error')) {
+      const paths = this.parseShellPaths(touchMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'created', timestamp });
+      }
+    }
+
+    // 4. cp detection (creates at destination)
+    const cpMatch = cmd.match(/^cp\s+(?:-[rRfai]+\s+)?(.+)\s+(\S+)$/);
+    if (cpMatch && !output.toLowerCase().includes('error')) {
+      const dest = this.resolveShellPath(cpMatch[2], workingDirectory);
+      artifacts.push({ id: generateId('art'), path: dest, type: 'created', timestamp });
+    }
+
+    // 5. npm init / npx create-* / yarn create detection
+    if (cmd.match(/^(npm\s+init|npx\s+create-|yarn\s+create)/)) {
+      // Look for "Created X" patterns in output
+      const createdMatches = output.match(/[Cc]reated?\s+([^\n]+)/g);
+      if (createdMatches) {
+        for (const match of createdMatches) {
+          const filePath = match.replace(/[Cc]reated?\s+/, '').trim();
+          if (filePath && !filePath.includes(' ')) {
+            artifacts.push({
+              id: generateId('art'),
+              path: this.resolveShellPath(filePath, workingDirectory),
+              type: 'created',
+              timestamp,
+            });
+          }
+        }
+      }
+      // Also check for common project directory creation
+      const projectMatch = output.match(/Success[!]?\s+Created\s+(\S+)/i) ||
+                          output.match(/Creating a new .+ app in\s+(\S+)/i);
+      if (projectMatch) {
+        artifacts.push({
+          id: generateId('art'),
+          path: this.resolveShellPath(projectMatch[1], workingDirectory),
+          type: 'created',
+          timestamp,
+        });
+      }
+    }
+
+    // 6. rm detection
+    const rmMatch = cmd.match(/^rm\s+(?:-[rRfi]+\s+)?(.+)$/);
+    if (rmMatch && !output.includes('No such file')) {
+      const paths = this.parseShellPaths(rmMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'deleted', timestamp });
+      }
+    }
+
+    return artifacts;
+  }
+
+  /**
+   * Parse space-separated paths from shell arguments, handling quotes.
+   */
+  private parseShellPaths(argsString: string, workingDirectory: string): string[] {
+    const paths: string[] = [];
+    const regex = /(?:"([^"]+)"|'([^']+)'|(\S+))/g;
+    let match;
+    while ((match = regex.exec(argsString)) !== null) {
+      const p = match[1] || match[2] || match[3];
+      if (p && !p.startsWith('-')) {
+        paths.push(this.resolveShellPath(p, workingDirectory));
+      }
+    }
+    return paths;
+  }
+
+  /**
+   * Resolve a file path relative to working directory if not absolute.
+   */
+  private resolveShellPath(filePath: string, workingDirectory: string): string {
+    // Remove any trailing quotes or whitespace
+    const cleaned = filePath.replace(/['"]/g, '').trim();
+    return isAbsolute(cleaned) ? cleaned : join(workingDirectory, cleaned);
   }
 
   private async maybeCompactContext(session: ActiveSession): Promise<void> {

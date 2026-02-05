@@ -1,6 +1,8 @@
 import { agentRunner } from './agent-runner.js';
 import { mcpBridge } from './mcp-bridge.js';
 import { loadGeminiExtensions } from './gemini-extensions.js';
+import { skillService } from './skill-service.js';
+import { checkSkillEligibility } from './eligibility-checker.js';
 import type {
   IPCRequest,
   IPCResponse,
@@ -317,6 +319,89 @@ registerHandler('get_initialization_status', async () => {
 // Verify persistence health
 registerHandler('verify_persistence', async () => {
   return agentRunner.verifyPersistence();
+});
+
+// ============================================================================
+// Skill Management
+// ============================================================================
+
+// Discover all skills from all sources
+registerHandler('discover_skills', async (params) => {
+  const p = params as { workingDirectory?: string };
+  const skills = await skillService.discoverAll(p.workingDirectory);
+  return { skills };
+});
+
+// Install a skill from bundled to managed directory
+registerHandler('install_skill', async (params) => {
+  const p = params as { skillId: string };
+  if (!p.skillId) throw new Error('skillId is required');
+  await skillService.installSkill(p.skillId);
+  return { success: true };
+});
+
+// Uninstall a skill from managed directory
+registerHandler('uninstall_skill', async (params) => {
+  const p = params as { skillId: string };
+  if (!p.skillId) throw new Error('skillId is required');
+  await skillService.uninstallSkill(p.skillId);
+  return { success: true };
+});
+
+// Check skill eligibility
+registerHandler('check_skill_eligibility', async (params) => {
+  const p = params as { skillId: string };
+  if (!p.skillId) throw new Error('skillId is required');
+  const skill = await skillService.getSkill(p.skillId);
+  if (!skill) throw new Error(`Skill not found: ${p.skillId}`);
+  const eligibility = await checkSkillEligibility(skill);
+  return eligibility;
+});
+
+// Get skill content
+registerHandler('get_skill_content', async (params) => {
+  const p = params as { skillId: string };
+  if (!p.skillId) throw new Error('skillId is required');
+  const content = await skillService.loadSkillContent(p.skillId);
+  return { content };
+});
+
+// Create a new custom skill
+registerHandler('create_skill', async (params) => {
+  const p = params as {
+    name: string;
+    description: string;
+    emoji?: string;
+    category?: string;
+    content: string;
+    requirements?: {
+      bins?: string[];
+      env?: string[];
+      os?: string[];
+    };
+  };
+
+  // Validate required fields
+  if (!p.name) {
+    throw new Error('name is required');
+  }
+  if (!p.description) {
+    throw new Error('description is required');
+  }
+  if (!p.content) {
+    throw new Error('content is required');
+  }
+
+  const skillId = await skillService.createSkill({
+    name: p.name,
+    description: p.description,
+    emoji: p.emoji,
+    category: p.category,
+    content: p.content,
+    requirements: p.requirements,
+  });
+
+  return { skillId };
 });
 
 // ============================================================================

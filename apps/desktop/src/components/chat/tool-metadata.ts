@@ -11,6 +11,7 @@ import {
   Wrench,
   ListTodo,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 
 const TOOL_ICONS: Record<string, typeof Terminal> = {
@@ -101,8 +102,37 @@ const TOOL_CATEGORIES: Record<string, string> = {
   subagent: 'Agent',
 };
 
-export function getToolMeta(name: string) {
+/**
+ * Check if a file path is a skill file read
+ */
+function isSkillPath(args?: Record<string, unknown>): { isSkill: boolean; skillName: string | null } {
+  if (!args) return { isSkill: false, skillName: null };
+
+  const path = (args.path || args.file_path || args.filePath || args.file) as string | undefined;
+  if (!path) return { isSkill: false, skillName: null };
+
+  // Check for /skills/skillname/SKILL.md pattern
+  const skillMatch = path.match(/\/skills\/([^/]+)\/SKILL\.md$/i);
+  if (skillMatch) {
+    return { isSkill: true, skillName: skillMatch[1] };
+  }
+
+  return { isSkill: false, skillName: null };
+}
+
+export function getToolMeta(name: string, args?: Record<string, unknown>) {
   const lower = name.toLowerCase();
+
+  // Check if this is a skill read
+  const { isSkill, skillName } = isSkillPath(args);
+  if (isSkill && (lower === 'read_file' || lower.includes('read'))) {
+    return {
+      icon: Sparkles,
+      title: skillName ? `Using ${skillName}` : 'Using Skill',
+      category: 'Skill',
+    };
+  }
+
   const icon =
     TOOL_ICONS[lower] ||
     (lower.includes('stitch') ? Palette : TOOL_ICONS.default);
@@ -123,8 +153,17 @@ export function getToolMeta(name: string) {
 export function getPrimaryArg(toolName: string, args: Record<string, unknown>): string | null {
   const lowerName = toolName.toLowerCase();
 
+  // Check for skill reads - show skill name instead of full path
   if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {
-    return (args.path || args.file_path || args.filePath || args.file) as string || null;
+    const path = (args.path || args.file_path || args.filePath || args.file) as string | undefined;
+    if (path) {
+      // Check if it's a skill path - show friendly name
+      const skillMatch = path.match(/\/skills\/([^/]+)\/SKILL\.md$/i);
+      if (skillMatch) {
+        return `Loading skill instructions...`;
+      }
+    }
+    return path || null;
   }
 
   if (lowerName.includes('bash') || lowerName.includes('shell') || lowerName.includes('command')) {

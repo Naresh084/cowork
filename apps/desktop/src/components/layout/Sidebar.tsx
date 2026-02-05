@@ -15,6 +15,7 @@ import {
   LogOut,
   Settings,
   Settings2,
+  Puzzle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -25,6 +26,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { BrandMark } from '../icons/BrandMark';
 import { ModelSettingsModal } from '../modals/ModelSettingsModal';
+import { SkillsModal } from '../skills/SkillsModal';
+import { useSkillStore } from '../../stores/skill-store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -57,9 +60,14 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isHovering, setIsHovering] = useState(false);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
   const sessionMenuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+
+  // Skills store
+  const { getEnabledCount } = useSkillStore();
+  const enabledSkillsCount = getEnabledCount();
 
   // Load sessions on mount
   useEffect(() => {
@@ -170,6 +178,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           onCloseProfile={() => setProfileMenuOpen(false)}
           profileButtonRef={profileButtonRef}
           profileMenuOpen={profileMenuOpen}
+          onOpenSkills={() => setSkillsModalOpen(true)}
+          enabledSkillsCount={enabledSkillsCount}
         />
       ) : (
         <SidebarExpanded
@@ -190,8 +200,16 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
           onCloseProfile={() => setProfileMenuOpen(false)}
           isOverlay={false}
+          onOpenSkills={() => setSkillsModalOpen(true)}
+          enabledSkillsCount={enabledSkillsCount}
         />
       )}
+
+      {/* Skills Modal */}
+      <SkillsModal
+        isOpen={skillsModalOpen}
+        onClose={() => setSkillsModalOpen(false)}
+      />
 
       <AnimatePresence>
         {showExpandedOverlay && (
@@ -219,6 +237,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
               onCloseProfile={() => setProfileMenuOpen(false)}
               isOverlay={true}
+              onOpenSkills={() => setSkillsModalOpen(true)}
+              enabledSkillsCount={enabledSkillsCount}
             />
           </motion.div>
         )}
@@ -238,6 +258,8 @@ interface SidebarRailProps {
   onCloseProfile: () => void;
   profileButtonRef: RefObject<HTMLButtonElement>;
   profileMenuOpen: boolean;
+  onOpenSkills: () => void;
+  enabledSkillsCount: number;
 }
 
 function SidebarRail({
@@ -251,6 +273,8 @@ function SidebarRail({
   onCloseProfile,
   profileButtonRef,
   profileMenuOpen,
+  onOpenSkills,
+  enabledSkillsCount,
 }: SidebarRailProps) {
   return (
     <motion.div
@@ -318,6 +342,28 @@ function SidebarRail({
         </div>
       </div>
 
+      {/* Skills Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenSkills}
+          className={cn(
+            'relative w-10 h-10 flex items-center justify-center rounded-xl',
+            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+            'transition-all duration-150'
+          )}
+          title={`Skills${enabledSkillsCount > 0 ? ` (${enabledSkillsCount} enabled)` : ''}`}
+        >
+          <Puzzle className="w-5 h-5" />
+          {enabledSkillsCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#4C71FF] text-white text-[10px] font-bold flex items-center justify-center">
+              {enabledSkillsCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
       {/* Profile Section */}
       <div className="p-2 border-t border-white/[0.06]">
         <motion.button
@@ -370,6 +416,8 @@ interface SidebarExpandedProps {
   onOpenProfile: () => void;
   onCloseProfile: () => void;
   isOverlay: boolean;
+  onOpenSkills: () => void;
+  enabledSkillsCount: number;
 }
 
 function SidebarExpanded({
@@ -390,6 +438,8 @@ function SidebarExpanded({
   onOpenProfile,
   onCloseProfile,
   isOverlay,
+  onOpenSkills,
+  enabledSkillsCount,
 }: SidebarExpandedProps) {
   return (
     <motion.div
@@ -483,6 +533,31 @@ function SidebarExpanded({
         <p className="text-xs text-white/25 px-2 py-4">
           These tasks run locally and aren't synced across devices
         </p>
+      </div>
+
+      {/* Skills Button */}
+      <div className="px-3 py-2 border-t border-white/[0.08]">
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          onClick={onOpenSkills}
+          className={cn(
+            'w-full flex items-center gap-3 p-2 rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+          )}
+        >
+          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <Puzzle className="w-4 h-4" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium truncate">Skills</div>
+          </div>
+          {enabledSkillsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#4C71FF]/20 text-[#8CA2FF] text-xs font-medium">
+              {enabledSkillsCount}
+            </span>
+          )}
+        </motion.button>
       </div>
 
       {/* Profile Section */}
