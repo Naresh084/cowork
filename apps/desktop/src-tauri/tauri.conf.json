@@ -79,22 +79,13 @@
   },
   "plugins": {
     "shell": {
-      "open": true,
-      "scope": [
-        {
-          "name": "binaries/sidecar",
-          "sidecar": true
-        }
-      ]
+      "open": true
     },
     "updater": {
       "endpoints": [
         "https://github.com/AiCodingBattle/geminicowork/releases/latest/download/latest.json"
       ],
-      "pubkey": "YOUR_PUBLIC_KEY_HERE",
-      "windows": {
-        "installMode": "passive"
-      }
+      "pubkey": "YOUR_PUBLIC_KEY_HERE"
     }
   }
 }
