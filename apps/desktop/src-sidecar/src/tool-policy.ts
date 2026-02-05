@@ -57,7 +57,41 @@ const TOOL_GROUPS: Record<string, string[]> = {
   'group:computer': ['computer_use', 'screenshot', 'mouse_click', 'keyboard_type'],
   'group:mcp': [], // Dynamic - populated at runtime
   'group:tasks': ['write_todos', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet', 'TodoWrite'],
-  'group:memory': ['read_memory', 'write_memory', 'memory_search'],
+  'group:memory': [
+    // Legacy memory tools
+    'read_memory',
+    'write_memory',
+    'memory_search',
+    // Deep Agents memory tools
+    'deep_memory_create',
+    'deep_memory_read',
+    'deep_memory_update',
+    'deep_memory_delete',
+    'deep_memory_list',
+    'deep_memory_search',
+    'deep_memory_get_relevant',
+    'deep_memory_list_groups',
+    'deep_memory_create_group',
+    'deep_memory_delete_group',
+    'deep_memory_build_prompt',
+  ],
+  // AGENTS.md tools
+  'group:agents_md': [
+    'agents_md_load',
+    'agents_md_generate',
+    'agents_md_to_prompt',
+    'agents_md_update_section',
+    'agents_md_validate',
+    'agents_md_scan_project',
+  ],
+  // Command tools
+  'group:commands': [
+    'command_list',
+    'command_get',
+    'command_execute',
+    'command_search',
+    'command_list_by_category',
+  ],
 };
 
 /**
@@ -82,16 +116,16 @@ const PROFILES: Record<ToolProfile, { allow: string[]; deny: string[] }> = {
     deny: ['write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'execute', 'Bash', 'group:media'],
   },
   coding: {
-    allow: ['group:fs', 'group:tasks', 'grep', 'Grep', 'google_grounded_search', 'Bash'],
-    deny: ['group:media', 'deep_research'],
+    allow: ['group:fs', 'group:tasks', 'group:memory', 'group:agents_md', 'group:commands', 'grep', 'Grep', 'google_grounded_search', 'Bash'],
+    deny: ['group:media', 'deep_research', 'deep_memory_delete'],  // Memory deletion requires confirmation
   },
   messaging: {
     allow: ['group:network', 'read_file', 'Read', 'glob', 'Glob'],
     deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file'],
   },
   research: {
-    allow: ['group:network', 'group:fs', 'deep_research', 'google_grounded_search'],
-    deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file'],
+    allow: ['group:network', 'group:fs', 'group:memory', 'group:agents_md', 'deep_research', 'google_grounded_search'],
+    deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'deep_memory_delete', 'deep_memory_create', 'deep_memory_update'],  // Research is read-only for memories
   },
   full: {
     allow: ['*'],

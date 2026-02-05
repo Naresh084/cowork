@@ -93,6 +93,116 @@ export interface SaveMemoryParams {
 }
 
 // ============================================================================
+// Deep Memory System Parameters (New)
+// ============================================================================
+
+export interface MemoryCreateParams {
+  workingDirectory: string;
+  title: string;
+  content: string;
+  group: string;
+  tags?: string[];
+  source?: 'manual' | 'auto';
+  confidence?: number;
+}
+
+export interface MemoryReadParams {
+  workingDirectory: string;
+  memoryId: string;
+}
+
+export interface MemoryUpdateParams {
+  workingDirectory: string;
+  memoryId: string;
+  title?: string;
+  content?: string;
+  group?: string;
+  tags?: string[];
+}
+
+export interface MemoryDeleteParams {
+  workingDirectory: string;
+  memoryId: string;
+}
+
+export interface MemoryListParams {
+  workingDirectory: string;
+  group?: string;
+}
+
+export interface MemorySearchParams {
+  workingDirectory: string;
+  query: string;
+  limit?: number;
+}
+
+export interface MemoryGetRelevantParams {
+  workingDirectory: string;
+  context: string;
+  limit?: number;
+}
+
+export interface MemoryGroupCreateParams {
+  workingDirectory: string;
+  groupName: string;
+}
+
+export interface MemoryGroupDeleteParams {
+  workingDirectory: string;
+  groupName: string;
+}
+
+// ============================================================================
+// Command System Parameters (New)
+// ============================================================================
+
+export interface CommandListParams {
+  workingDirectory?: string;
+  includeMarketplace?: boolean;
+}
+
+export interface CommandExecuteParams {
+  commandName: string;
+  args?: Record<string, unknown>;
+  sessionId?: string;
+  workingDirectory: string;
+}
+
+export interface CommandInstallParams {
+  commandId: string;
+  appDataDir: string;
+}
+
+export interface CommandUninstallParams {
+  commandId: string;
+  appDataDir: string;
+}
+
+export interface CommandGetParams {
+  commandName: string;
+  workingDirectory?: string;
+}
+
+// ============================================================================
+// AGENTS.md Parameters (New)
+// ============================================================================
+
+export interface AgentsMdLoadParams {
+  workingDirectory: string;
+}
+
+export interface AgentsMdGenerateParams {
+  workingDirectory: string;
+  force?: boolean;
+}
+
+export interface AgentsMdUpdateSectionParams {
+  workingDirectory: string;
+  section: string;
+  content: string;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 

@@ -1,7 +1,7 @@
 use crate::sidecar::{SidecarEvent, SidecarManager};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 // Re-export types from the shared module for frontend use
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,7 +126,7 @@ pub async fn ensure_sidecar_started_public(
 }
 
 /// Ensure sidecar is started and set up event forwarding
-async fn ensure_sidecar_started(
+pub async fn ensure_sidecar_started(
     app: &AppHandle,
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {

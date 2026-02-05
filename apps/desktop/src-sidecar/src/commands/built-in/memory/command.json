@@ -1,0 +1,43 @@
+{
+  "name": "memory",
+  "displayName": "Memory Management",
+  "description": "Manage long-term memories stored in .cowork/memories/",
+  "version": "1.0.0",
+  "author": "Gemini Cowork",
+  "aliases": ["mem", "memories"],
+  "category": "memory",
+  "icon": "brain",
+  "arguments": [
+    {
+      "name": "action",
+      "type": "select",
+      "required": true,
+      "description": "Action to perform",
+      "options": [
+        { "value": "list", "label": "List memories" },
+        { "value": "add", "label": "Add memory" },
+        { "value": "remove", "label": "Remove memory" },
+        { "value": "search", "label": "Search memories" },
+        { "value": "groups", "label": "List groups" }
+      ]
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": "Search query or memory ID"
+    },
+    {
+      "name": "group",
+      "type": "string",
+      "required": false,
+      "description": "Memory group filter"
+    }
+  ],
+  "type": "system",
+  "requiresSession": false,
+  "requiresWorkingDir": true,
+  "autoSuggest": true,
+  "priority": 85,
+  "keywords": ["memory", "remember", "recall", "store", "preferences"]
+}

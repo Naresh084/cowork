@@ -27,6 +27,14 @@ import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { cronService } from './cron/index.js';
+// Deep Agents middleware integration
+import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middleware-stack.js';
+import { createMemoryService, type MemoryService } from './memory/memory-service.js';
+import { createMemoryExtractor, type MemoryExtractor } from './memory/memory-extractor.js';
+import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-md-service.js';
+import type { AgentsMdConfig } from './agents-md/types.js';
+import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
+import { buildSubagentPromptSection, getSubagentConfigs } from './middleware/subagent-prompts.js';
 import type { ToolCallContext } from '@gemini-cowork/shared';
 import type {
   SessionInfo,
@@ -136,6 +144,11 @@ export class AgentRunner {
   private isInitialized = false;
   private specializedModels: SpecializedModels = { ...DEFAULT_SPECIALIZED_MODELS };
   private appDataDir: string | null = null;
+  // Deep Agents services (per-session instances stored in map)
+  private memoryServices: Map<string, MemoryService> = new Map();
+  private memoryExtractors: Map<string, MemoryExtractor> = new Map();
+  private agentsMdServices: Map<string, AgentsMdService> = new Map();
+  private agentsMdConfigs: Map<string, AgentsMdConfig | null> = new Map();
 
   constructor() {
     // Session-based Chrome instances are created on-demand by ChromeCDPDriver.forSession()
@@ -174,6 +187,80 @@ export class AgentRunner {
       initialized: this.isInitialized,
       sessionCount: this.sessions.size,
     };
+  }
+
+  // ============================================================================
+  // Deep Agents Service Management
+  // ============================================================================
+
+  /**
+   * Get or create MemoryService for a session's working directory.
+   */
+  private async getMemoryService(workingDirectory: string): Promise<MemoryService> {
+    let service = this.memoryServices.get(workingDirectory);
+    if (!service) {
+      service = createMemoryService(workingDirectory);
+      await service.initialize();
+      this.memoryServices.set(workingDirectory, service);
+    }
+    return service;
+  }
+
+  /**
+   * Get or create MemoryExtractor for a session.
+   */
+  private getMemoryExtractor(sessionId: string): MemoryExtractor {
+    let extractor = this.memoryExtractors.get(sessionId);
+    if (!extractor) {
+      extractor = createMemoryExtractor({
+        enabled: true,
+        confidenceThreshold: 0.7,
+        maxPerConversation: 5,
+      });
+      this.memoryExtractors.set(sessionId, extractor);
+    }
+    return extractor;
+  }
+
+  /**
+   * Get or create AgentsMdService for a session's working directory.
+   */
+  private getAgentsMdService(workingDirectory: string): AgentsMdService {
+    let service = this.agentsMdServices.get(workingDirectory);
+    if (!service) {
+      service = createAgentsMdService();
+      this.agentsMdServices.set(workingDirectory, service);
+    }
+    return service;
+  }
+
+  /**
+   * Load AGENTS.md config for a session, caching the result.
+   */
+  private async loadAgentsMdConfig(workingDirectory: string): Promise<AgentsMdConfig | null> {
+    if (this.agentsMdConfigs.has(workingDirectory)) {
+      return this.agentsMdConfigs.get(workingDirectory) || null;
+    }
+    const service = this.getAgentsMdService(workingDirectory);
+    const config = await service.parse(workingDirectory);
+    this.agentsMdConfigs.set(workingDirectory, config);
+    return config;
+  }
+
+  /**
+   * Clear Deep Agents services for a session (on session delete).
+   */
+  private clearSessionServices(sessionId: string, workingDirectory: string): void {
+    this.memoryExtractors.delete(sessionId);
+    // Note: memory service and agents.md service are shared per working directory
+    // Only clean them up if no other session uses this working directory
+    const otherSessionsWithSameDir = Array.from(this.sessions.values())
+      .filter(s => s.id !== sessionId && s.workingDirectory === workingDirectory);
+    if (otherSessionsWithSameDir.length === 0) {
+      this.memoryServices.delete(workingDirectory);
+      this.agentsMdServices.delete(workingDirectory);
+      this.agentsMdConfigs.delete(workingDirectory);
+    }
   }
 
   /**
@@ -1174,6 +1261,10 @@ export class AgentRunner {
       }
     }
 
+    // Clean up Deep Agents services for this session
+    this.clearSessionServices(sessionId, session.workingDirectory);
+    this.middlewareHooks.delete(sessionId);
+
     // Only delete from memory after successful disk deletion
     this.sessions.delete(sessionId);
     return true;
@@ -1643,10 +1734,103 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
 2. If a tool fails, explain and try alternatives
 3. Stay focused on the requested task
 4. Remove debug code before completion`;
+
+    // Build Deep Agents middleware prompts
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    const agentsMdPrompt = agentsMdConfig
+      ? this.buildAgentsMdPrompt(agentsMdConfig)
+      : '';
+
+    // Memory system prompt
+    const memoryPrompt = MEMORY_SYSTEM_PROMPT;
+
+    // Subagent prompts
+    const subagentConfigs = getSubagentConfigs(session.model);
+    const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
+
+    // Legacy skill and MCP prompts
     const skillBlock = await this.buildSkillsPrompt(session);
     const mcpBlock = await this.buildMcpPrompt(session);
 
-    return [basePrompt, skillBlock, mcpBlock].filter(Boolean).join('\n\n');
+    return buildFullSystemPrompt(basePrompt, [
+      agentsMdPrompt,
+      memoryPrompt,
+      subagentPrompt,
+      skillBlock,
+      mcpBlock,
+    ].filter(Boolean));
+  }
+
+  /**
+   * Build AGENTS.md prompt section.
+   */
+  private buildAgentsMdPrompt(config: AgentsMdConfig): string {
+    const parts: string[] = [
+      '',
+      '## Project Context (from AGENTS.md)',
+      '',
+    ];
+
+    // Project overview
+    if (config.overview) {
+      parts.push('### Project Overview');
+      parts.push(config.overview);
+      parts.push('');
+    }
+
+    // Tech stack
+    if (config.techStack.language !== 'Unknown') {
+      parts.push('### Tech Stack');
+      parts.push(`- Language: ${config.techStack.language}`);
+      if (config.techStack.framework) {
+        parts.push(`- Framework: ${config.techStack.framework}`);
+      }
+      if (config.techStack.buildTool) {
+        parts.push(`- Build Tool: ${config.techStack.buildTool}`);
+      }
+      if (config.techStack.packageManager) {
+        parts.push(`- Package Manager: ${config.techStack.packageManager}`);
+      }
+      parts.push('');
+    }
+
+    // Commands
+    if (config.commands.length > 0) {
+      parts.push('### Available Commands');
+      for (const cmd of config.commands.slice(0, 10)) {
+        parts.push(`- \`${cmd.command}\`: ${cmd.description}`);
+      }
+      parts.push('');
+    }
+
+    // Instructions
+    if (config.instructions.do.length > 0 || config.instructions.dont.length > 0) {
+      parts.push('### Instructions');
+      if (config.instructions.do.length > 0) {
+        parts.push('**Do:**');
+        for (const item of config.instructions.do) {
+          parts.push(`- ${item}`);
+        }
+      }
+      if (config.instructions.dont.length > 0) {
+        parts.push("**Don't:**");
+        for (const item of config.instructions.dont) {
+          parts.push(`- ${item}`);
+        }
+      }
+      parts.push('');
+    }
+
+    // Important files
+    if (config.importantFiles.length > 0) {
+      parts.push('### Important Files');
+      for (const file of config.importantFiles.slice(0, 10)) {
+        parts.push(`- \`${file.path}\`: ${file.description}`);
+      }
+      parts.push('');
+    }
+
+    return parts.join('\n');
   }
 
   private async buildSkillsPrompt(session: ActiveSession): Promise<string> {
@@ -1764,6 +1948,14 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     console.error(`[createDeepAgent] Model: ${session.model}`);
     console.error(`[createDeepAgent] Enabled skills: ${this.enabledSkillIds.size}`);
 
+    // Initialize Deep Agents services for this session
+    const memoryService = await this.getMemoryService(session.workingDirectory);
+    const memoryExtractor = this.getMemoryExtractor(session.id);
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+
+    console.error(`[createDeepAgent] Memory service initialized for: ${session.workingDirectory}`);
+    console.error(`[createDeepAgent] AGENTS.md loaded: ${agentsMdConfig !== null}`);
+
     // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
     // See: https://github.com/langchain-ai/langchainjs/issues/7434
     // The package throws "Unknown content type thinking" error when enabled
@@ -1784,6 +1976,21 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
 
     const skillsDir = this.getSkillsDirectory();
 
+    // Create Deep Agents middleware stack for memory and context injection
+    const middlewareStack = await createMiddlewareStack(
+      {
+        id: session.id,
+        messages: session.messages,
+        model: session.model,
+      },
+      memoryService,
+      memoryExtractor,
+      agentsMdConfig
+    );
+
+    // Store middleware hooks for later invocation
+    this.storeMiddlewareHooks(session.id, middlewareStack);
+
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const agent = createDeepAgentAny({
       model,
@@ -1801,6 +2008,24 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     });
 
     return agent;
+  }
+
+  /**
+   * Middleware hooks storage for memory injection and extraction.
+   */
+  private middlewareHooks: Map<string, {
+    beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
+    afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
+  }> = new Map();
+
+  private storeMiddlewareHooks(
+    sessionId: string,
+    stack: {
+      beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
+      afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
+    }
+  ): void {
+    this.middlewareHooks.set(sessionId, stack);
   }
 
   /**

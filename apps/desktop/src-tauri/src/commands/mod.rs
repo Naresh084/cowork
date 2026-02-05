@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod auth;
 pub mod cron;
+pub mod deep;
 pub mod files;
 pub mod heartbeat;
 pub mod keychain;

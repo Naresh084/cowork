@@ -14,11 +14,13 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAgentStore } from '../../stores/agent-store';
 import { useSessionStore } from '../../stores/session-store';
+import { useCommandStore, type Command } from '../../stores/command-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { type Attachment } from '../../stores/chat-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '../ui/Toast';
+import { CommandPalette } from './CommandPalette';
 
 interface InputAreaProps {
   onSend: (message: string, attachments?: Attachment[]) => void;
@@ -54,6 +56,15 @@ export function InputArea({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+
+  // Command palette state
+  const {
+    isPaletteOpen,
+    openPalette,
+    closePalette,
+    setPaletteQuery,
+    executeCommand,
+  } = useCommandStore();
 
   // Handle initial message from quick actions
   useEffect(() => {
@@ -248,7 +259,55 @@ export function InputArea({
     if ((!message.trim() && attachments.length === 0) || isStreaming) return;
     onSend(message, attachments.length > 0 ? attachments : undefined);
     setMessage('');
+    closePalette();
   };
+
+  // Handle "/" detection for command palette
+  const handleInputChange = useCallback((value: string) => {
+    setMessage(value);
+
+    // Check if user is typing a command (starts with "/" at the beginning)
+    if (value.startsWith('/')) {
+      if (!isPaletteOpen) {
+        openPalette();
+      }
+      // Update palette query (remove the leading "/")
+      setPaletteQuery(value.slice(1));
+    } else if (isPaletteOpen) {
+      // Close palette if "/" was removed
+      closePalette();
+    }
+  }, [isPaletteOpen, openPalette, closePalette, setPaletteQuery]);
+
+  // Handle command selection from palette
+  const handleCommandSelect = useCallback(async (command: Command) => {
+    // Check if command has required arguments
+    const hasRequiredArgs = command.arguments.some((arg) => arg.required);
+
+    if (!hasRequiredArgs) {
+      // Execute directly if no required args
+      const result = await executeCommand(command.name, {}, workingDirectory || undefined);
+      if (result.success && result.message) {
+        toast.success(`/${command.name}`, result.message);
+      } else if (!result.success && result.message) {
+        toast.error(`/${command.name} failed`, result.message);
+      }
+    } else {
+      // For now, insert the command into the input for user to complete args
+      setMessage(`/${command.name} `);
+    }
+
+    closePalette();
+  }, [executeCommand, closePalette, workingDirectory]);
+
+  // Handle closing command palette
+  const handlePaletteClose = useCallback(() => {
+    closePalette();
+    // Clear the "/" if user presses Escape
+    if (message === '/') {
+      setMessage('');
+    }
+  }, [closePalette, message]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -416,24 +475,31 @@ export function InputArea({
           )}
         </AnimatePresence>
 
-        {/* Input Card */}
-        <motion.div
-          whileFocus={{ boxShadow: '0 0 0 1px rgba(76, 113, 255, 0.45)' }}
-          className={cn(
-            'rounded-[20px] overflow-visible',
-            'bg-[#0F1014]/90 border border-white/[0.08] backdrop-blur',
-            'focus-within:border-[#4C71FF]/45',
-            'transition-colors duration-200 shadow-lg shadow-black/40'
-          )}
-        >
+        {/* Input Card with Command Palette */}
+        <div className="relative">
+          {/* Command Palette - positioned above input */}
+          <CommandPalette
+            onSelect={handleCommandSelect}
+            onClose={handlePaletteClose}
+          />
+
+          <motion.div
+            whileFocus={{ boxShadow: '0 0 0 1px rgba(76, 113, 255, 0.45)' }}
+            className={cn(
+              'rounded-[20px] overflow-visible',
+              'bg-[#0F1014]/90 border border-white/[0.08] backdrop-blur',
+              'focus-within:border-[#4C71FF]/45',
+              'transition-colors duration-200 shadow-lg shadow-black/40'
+            )}
+          >
           {/* Textarea Row */}
           <div className="flex items-end gap-2 px-3 py-2">
             <textarea
               ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={hasMessages ? 'Reply...' : 'Ask Gemini anything...'}
+              placeholder={hasMessages ? 'Reply...' : 'Ask Gemini anything... (type / for commands)'}
               disabled={isStreaming}
               rows={1}
               className={cn(
@@ -780,6 +846,7 @@ export function InputArea({
             </div>
           </div>
         </motion.div>
+        </div>
       </div>
     </div>
   );
