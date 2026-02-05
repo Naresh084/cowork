@@ -64,6 +64,13 @@ export interface DesignActivityItem {
   };
 }
 
+export interface BrowserViewScreenshot {
+  data: string;        // base64 PNG screenshot data
+  mimeType: string;    // 'image/png'
+  url: string;         // current browser URL
+  timestamp: number;   // when captured (Date.now())
+}
+
 export interface TurnActivityItem {
   id: string;
   type: 'thinking' | 'tool' | 'permission' | 'question' | 'media' | 'report' | 'design' | 'assistant';
@@ -124,6 +131,7 @@ export interface SessionChatState {
     content: string;
     attachments?: Attachment[];
   };
+  browserViewScreenshot: BrowserViewScreenshot | null;
 }
 
 interface ChatState {
@@ -177,6 +185,11 @@ interface ChatActions {
   appendThinkingChunk: (sessionId: string, chunk: string) => void;
   clearThinkingContent: (sessionId: string) => void;
   clearStreamingContent: (sessionId: string) => void;
+
+  // Browser View (Live View for computer_use)
+  isComputerUseRunning: (sessionId: string | null) => boolean;
+  updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => void;
+  clearBrowserScreenshot: (sessionId: string) => void;
 }
 
 export interface SessionDetails {
@@ -205,6 +218,7 @@ const createSessionState = (): SessionChatState => ({
   lastUpdatedAt: Date.now(),
   hasLoaded: false,
   lastUserMessage: undefined,
+  browserViewScreenshot: null,
 });
 
 // Helper functions for extracting activity data from tool results
@@ -423,6 +437,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     if (!sessionId) return EMPTY_SESSION_STATE;
     const state = get();
     return state.sessions[sessionId] ?? EMPTY_SESSION_STATE;
+  },
+
+  isComputerUseRunning: (sessionId: string | null) => {
+    if (!sessionId) return false;
+    const state = get();
+    const session = state.sessions[sessionId];
+    if (!session) return false;
+    return session.streamingToolCalls.some(
+      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
+    );
   },
 
   ensureSession: (sessionId: string) => {
@@ -993,6 +1017,23 @@ ${attachment.data}`,
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
       streamingContent: '',
+    })));
+  },
+
+  // Browser View (Live View for computer_use)
+  updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      browserViewScreenshot: screenshot,
+    })));
+  },
+
+  clearBrowserScreenshot: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      browserViewScreenshot: null,
     })));
   },
 }));

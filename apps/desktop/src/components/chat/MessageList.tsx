@@ -15,6 +15,7 @@ import { BrandMark } from '../icons/BrandMark';
 import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import remarkGfm from 'remark-gfm';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -101,7 +102,7 @@ export function MessageList() {
     }
 
     return (
-      <div className="mt-2 space-y-2">
+      <div className="mt-2 space-y-2 turn-activities">
         {activities.map((activity) => {
           if (activity.type === 'thinking') {
             // Don't render thinking from activities - we'll render it dynamically at the end
@@ -228,6 +229,7 @@ export function MessageList() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3, delay: index * 0.05 }}
+                className="message-turn-container"
               >
                 <MessageBubble message={message} />
                 {message.role === 'user' && renderTurnActivities(message.id)}
@@ -697,8 +699,8 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     const command = getArgValue(args, ['command', 'cmd']) || 'command';
     return (
       <>
-        <span className="text-[11px] text-white/55">{tool.status === 'running' ? 'Running' : 'Ran'}</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[360px]', isActive && 'codex-shimmer-text')}>
+        <span className="text-[11px] text-white/55 flex-shrink-0">{tool.status === 'running' ? 'Running' : 'Ran'}</span>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70', isActive && 'codex-shimmer-text')}>
           {command}
         </span>
       </>
@@ -1297,8 +1299,8 @@ function ToolActivityRow({
           {meta?.title ?? tool.name}
         </span>
         <span className="text-white/20">•</span>
-        <span className="flex-1 min-w-0">{buildToolSummary(tool, isActive)}</span>
-        <span className="ml-auto text-[10px] text-white/45">
+        <span className="flex-1 min-w-0 overflow-hidden truncate">{buildToolSummary(tool, isActive)}</span>
+        <span className="flex-shrink-0 ml-auto text-[10px] text-white/45">
           {statusLabel}
         </span>
         {hasDetails && (
@@ -1562,7 +1564,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex gap-2 no-select-extend',
+        'flex gap-2 no-select-extend message-block-isolate',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
@@ -1623,7 +1625,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex items-center gap-2 mt-2 pl-1"
+            className="flex items-center gap-2 mt-2 pl-1 select-none"
           >
             <motion.button
               whileHover={{ scale: 1.1 }}
@@ -1729,6 +1731,7 @@ function MarkdownContent({ content }: { content: string }) {
     <div className="px-3 py-2 text-[13px]">
       <Suspense fallback={<div className="text-sm text-white/70">{content}</div>}>
         <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
           components={{
             // Custom code block rendering with syntax highlighting
             code({ className, children, ...props }) {

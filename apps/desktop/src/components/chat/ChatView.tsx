@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { MessageList } from './MessageList';
 import { SessionHeader } from './SessionHeader';
 import { WelcomeScreen, type QuickAction } from './WelcomeScreen';
 import { InputArea } from './InputArea';
+import { LiveViewButton } from './LiveViewButton';
 import { DropZone } from './AttachmentPreview';
 import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
@@ -18,9 +20,24 @@ export function ChatView() {
   // Store state
   const { sendMessage, stopGeneration, ensureSession } = useChatStore();
   const { activeSessionId, createSession, updateSessionTitle, sessions } = useSessionStore();
-  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
+  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
   const { messages, isStreaming } = sessionState;
+
+  // Check if computer_use tool is running for live view button
+  const isComputerUseRunning = useChatStore((state) => {
+    if (!activeSessionId) return false;
+    const session = state.sessions[activeSessionId];
+    if (!session) return false;
+    return session.streamingToolCalls.some(
+      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
+    );
+  });
+
+  // Handle opening live view
+  const handleOpenLiveView = useCallback(() => {
+    setLiveViewOpen(true);
+  }, [setLiveViewOpen]);
 
   // Subscribe to agent events
   useAgentEvents(activeSessionId);
@@ -131,15 +148,16 @@ export function ChatView() {
       await sendMessage(sessionId, message, messageAttachments);
       setAttachments([]);
 
+      // Set title immediately for new sessions - don't check existing title
+      // because the sessions closure might be stale
       if (createdNew) {
-        const existingTitle = sessions.find((s) => s.id === sessionId)?.title;
-        if (!existingTitle) {
-          const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
-          updateSessionTitle(sessionId, derivedTitle).catch((error) => {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            toast.error('Failed to update session title', errorMessage);
-          });
-        }
+        const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+        console.log('[ChatView] Setting title for new session:', sessionId, 'title:', derivedTitle);
+        updateSessionTitle(sessionId, derivedTitle).catch((error) => {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[ChatView] Failed to update session title:', errorMessage);
+          toast.error('Failed to update session title', errorMessage);
+        });
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -153,6 +171,8 @@ export function ChatView() {
     activeSessionId,
     defaultWorkingDirectory,
     selectedModel,
+    availableModels,
+    modelsLoading,
     createSession,
     sendMessage,
     ensureSession,
@@ -336,6 +356,13 @@ export function ChatView() {
         initialMessage={initialMessage}
         onInitialMessageConsumed={handleInitialMessageConsumed}
       />
+
+      {/* Live View Button - appears when computer_use is running */}
+      <AnimatePresence>
+        {isComputerUseRunning && !liveViewOpen && (
+          <LiveViewButton onClick={handleOpenLiveView} />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

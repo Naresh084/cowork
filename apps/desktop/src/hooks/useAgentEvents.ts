@@ -259,6 +259,13 @@ export function useAgentEvents(sessionId: string | null): void {
       const activeId = activeSessionRef.current;
       const eventSessionId = event.sessionId;
 
+      // Handle events that don't require a sessionId first
+      if (event.type === 'session:updated') {
+        // Trigger a reload of sessions to get updated data (title, etc.)
+        sessionStoreRef.current.loadSessions();
+        return;
+      }
+
       if (!eventSessionId) return;
       chat.ensureSession(eventSessionId);
       agent.ensureSession(eventSessionId);
@@ -520,12 +527,6 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
         }
 
-        // Session events
-        case 'session:updated':
-          // Trigger a reload of sessions to get updated data
-          sessionStoreRef.current.loadSessions();
-          break;
-
         // Agent state events
         case 'agent:started':
           agent.setRunning(eventSessionId, true);
@@ -538,6 +539,25 @@ export function useAgentEvents(sessionId: string | null): void {
             chat.setThinking(activeId, false);
           }
           break;
+
+        // Browser View events (live screenshot streaming)
+        case 'browserView:screenshot': {
+          const screenshotEvent = event as {
+            type: 'browserView:screenshot';
+            sessionId: string;
+            data: string;
+            mimeType: string;
+            url: string;
+            timestamp: number;
+          };
+          chat.updateBrowserScreenshot(eventSessionId, {
+            data: screenshotEvent.data,
+            mimeType: screenshotEvent.mimeType,
+            url: screenshotEvent.url,
+            timestamp: screenshotEvent.timestamp,
+          });
+          break;
+        }
       }
     };
 

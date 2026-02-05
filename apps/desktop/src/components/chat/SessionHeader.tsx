@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Chrome, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
+import { useAppStore } from '../../stores/app-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
@@ -20,14 +21,51 @@ export function SessionHeader() {
   const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
   const { approvalMode, updateSetting } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
+  const { setShowChromeExtensionModal } = useAppStore();
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [pendingMode, setPendingMode] = useState<ApprovalMode | null>(null);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
+  const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
+  const [extensionConnected, setExtensionConnected] = useState<boolean | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const modeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Check Chrome extension status on mount and periodically
+  useEffect(() => {
+    const checkExtensionStatus = async () => {
+      try {
+        const result = await invoke<{ result: { connected: boolean } }>('agent_command', {
+          command: 'chrome_extension_status',
+          params: {},
+        });
+        setExtensionConnected(result.result?.connected ?? false);
+      } catch {
+        setExtensionConnected(false);
+      }
+    };
+
+    checkExtensionStatus();
+    const interval = setInterval(checkExtensionStatus, 30000); // Check every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  // Close mode dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modeDropdownRef.current && !modeDropdownRef.current.contains(e.target as Node)) {
+        setIsModeDropdownOpen(false);
+      }
+    };
+
+    if (isModeDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isModeDropdownOpen]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -285,34 +323,100 @@ export function SessionHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        {/* Chrome Extension Button - only shows if NOT connected */}
+        {extensionConnected === false && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            onClick={() => setShowChromeExtensionModal(true)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
+              'bg-[#4C71FF]/10 text-[#8CA2FF] border border-[#4C71FF]/20',
+              'hover:bg-[#4C71FF]/20 hover:border-[#4C71FF]/30',
+              'transition-colors'
+            )}
+            title="Install Chrome extension for better browser control"
+          >
+            <Chrome className="w-3.5 h-3.5" />
+            <span>Add to Chrome</span>
+          </motion.button>
+        )}
+
+        {/* Connection status */}
         <div className={cn(
-          'flex items-center gap-2 px-2.5 py-1.5 rounded-full text-xs',
+          'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
           isAuthenticated ? 'bg-[#0F1B33] text-[#8CA2FF]' : 'bg-[#1A1A1E] text-white/50'
         )}>
           <Plug className="w-3.5 h-3.5" />
           {connectionLabel}
         </div>
 
-        <div className="flex items-center gap-1 p-1 rounded-full bg-[#111218] border border-white/[0.08]">
-          {APPROVAL_MODES.map((mode) => (
-            <button
-              key={mode.id}
-              onClick={() => handleModeChange(mode.id)}
-              className={cn(
-                'px-3 py-1 rounded-full text-[11px] font-medium transition-colors',
-                approvalMode === mode.id
-                  ? modeStyles[mode.id].active
-                  : 'text-white/50 hover:text-white/80'
-              )}
-              title={mode.description}
-            >
-              <span className="flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                {mode.label}
-              </span>
-            </button>
-          ))}
+        {/* Approval Mode Dropdown */}
+        <div className="relative" ref={modeDropdownRef}>
+          <button
+            onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors',
+              'border',
+              modeStyles[approvalMode].ring,
+              'border-current/20 hover:border-current/40'
+            )}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>{APPROVAL_MODES.find(m => m.id === approvalMode)?.label}</span>
+            <ChevronDown className={cn(
+              'w-3 h-3 transition-transform',
+              isModeDropdownOpen && 'rotate-180'
+            )} />
+          </button>
+
+          <AnimatePresence>
+            {isModeDropdownOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -5, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -5, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className={cn(
+                  'absolute right-0 top-full mt-2 z-50',
+                  'w-52 py-1 bg-[#111218] rounded-xl',
+                  'border border-white/[0.08] shadow-2xl shadow-black/40'
+                )}
+              >
+                {APPROVAL_MODES.map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => {
+                      handleModeChange(mode.id);
+                      setIsModeDropdownOpen(false);
+                    }}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-3 py-2.5 text-left',
+                      'hover:bg-white/[0.04] transition-colors',
+                      approvalMode === mode.id && 'bg-white/[0.06]'
+                    )}
+                  >
+                    <div className={cn(
+                      'w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0',
+                      modeStyles[mode.id].ring
+                    )}>
+                      <Shield className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-white/90">{mode.label}</span>
+                        {approvalMode === mode.id && (
+                          <Check className="w-3.5 h-3.5 text-[#4C71FF]" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-white/40">{mode.description}</p>
+                    </div>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 

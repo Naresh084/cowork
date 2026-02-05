@@ -152,7 +152,16 @@ export type AgentEvent =
     }
   // Agent state events
   | { type: 'agent:started'; sessionId: string }
-  | { type: 'agent:stopped'; sessionId: string };
+  | { type: 'agent:stopped'; sessionId: string }
+  // Browser View events (for live browser screenshot streaming)
+  | {
+      type: 'browserView:screenshot';
+      sessionId: string;
+      data: string;        // base64 PNG screenshot
+      mimeType: string;    // 'image/png'
+      url: string;         // current browser URL
+      timestamp: number;   // when captured
+    };
 
 /**
  * Event handler function type
@@ -197,6 +206,7 @@ export const TAURI_EVENT_NAMES = [
   'agent:session:updated',
   'agent:started',
   'agent:stopped',
+  'agent:browserView:screenshot',
 ] as const;
 
 export type TauriEventName = (typeof TAURI_EVENT_NAMES)[number];

@@ -310,6 +310,7 @@
   /* Prevent flex containers from extending selection */
   .no-select-extend {
     user-select: none;
+    -webkit-user-select: none;
   }
 
   .no-select-extend > .message-content,
@@ -320,6 +321,48 @@
   .no-select-extend pre {
     user-select: text;
     -webkit-user-select: text;
+  }
+
+  /* Isolate selection within message blocks - prevent selection from extending to sibling elements */
+  .message-block-isolate {
+    user-select: none;
+    -webkit-user-select: none;
+    contain: layout;
+  }
+
+  .message-block-isolate .message-content {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Turn activities container - prevent selection bleeding between turns */
+  .turn-activities {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .turn-activities .message-content {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Message turn container - isolate selection within each turn */
+  .message-turn-container {
+    user-select: none;
+    -webkit-user-select: none;
+    contain: layout;
+  }
+
+  .message-turn-container .message-content {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  /* Ensure buttons and icons never get selected */
+  .message-turn-container button,
+  .message-turn-container svg {
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   /* Text content - use w-fit pattern to constrain selection to actual text */
@@ -738,6 +781,24 @@
   @keyframes progress-shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
+  }
+
+  /* =============================================================================
+     LIVE VIEW BUTTON GLOW ANIMATION
+     ============================================================================= */
+  @keyframes pulse-glow-blue {
+    0%, 100% {
+      box-shadow: 0 0 12px rgba(76, 113, 255, 0.3),
+                  0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    50% {
+      box-shadow: 0 0 24px rgba(76, 113, 255, 0.5),
+                  0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  .animate-pulse-glow-blue {
+    animation: pulse-glow-blue 2s ease-in-out infinite;
   }
 }
 

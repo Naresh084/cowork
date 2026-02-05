@@ -16,6 +16,7 @@ import {
   Settings,
   Settings2,
   Puzzle,
+  Calendar,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -28,6 +29,8 @@ import { BrandMark } from '../icons/BrandMark';
 import { ModelSettingsModal } from '../modals/ModelSettingsModal';
 import { SkillsModal } from '../skills/SkillsModal';
 import { useSkillStore } from '../../stores/skill-store';
+import { CronModal } from '../cron/CronModal';
+import { useCronActiveJobCount } from '../../stores/cron-store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -61,6 +64,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [cronModalOpen, setCronModalOpen] = useState(false);
+
+  // Cron store
+  const activeJobCount = useCronActiveJobCount();
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
   const sessionMenuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -180,6 +187,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           profileMenuOpen={profileMenuOpen}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
+          onOpenCron={() => setCronModalOpen(true)}
+          activeJobCount={activeJobCount}
         />
       ) : (
         <SidebarExpanded
@@ -202,6 +211,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           isOverlay={false}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
+          onOpenCron={() => setCronModalOpen(true)}
+          activeJobCount={activeJobCount}
         />
       )}
 
@@ -209,6 +220,12 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       <SkillsModal
         isOpen={skillsModalOpen}
         onClose={() => setSkillsModalOpen(false)}
+      />
+
+      {/* Cron Modal */}
+      <CronModal
+        isOpen={cronModalOpen}
+        onClose={() => setCronModalOpen(false)}
       />
 
       <AnimatePresence>
@@ -239,6 +256,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               isOverlay={true}
               onOpenSkills={() => setSkillsModalOpen(true)}
               enabledSkillsCount={enabledSkillsCount}
+              onOpenCron={() => setCronModalOpen(true)}
+              activeJobCount={activeJobCount}
             />
           </motion.div>
         )}
@@ -260,6 +279,8 @@ interface SidebarRailProps {
   profileMenuOpen: boolean;
   onOpenSkills: () => void;
   enabledSkillsCount: number;
+  onOpenCron: () => void;
+  activeJobCount: number;
 }
 
 function SidebarRail({
@@ -275,6 +296,8 @@ function SidebarRail({
   profileMenuOpen,
   onOpenSkills,
   enabledSkillsCount,
+  onOpenCron,
+  activeJobCount,
 }: SidebarRailProps) {
   return (
     <motion.div
@@ -364,6 +387,28 @@ function SidebarRail({
         </motion.button>
       </div>
 
+      {/* Automations Tasks Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenCron}
+          className={cn(
+            'relative w-10 h-10 flex items-center justify-center rounded-xl',
+            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+            'transition-all duration-150'
+          )}
+          title={`Automations${activeJobCount > 0 ? ` (${activeJobCount} active)` : ''}`}
+        >
+          <Calendar className="w-5 h-5" />
+          {activeJobCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#10B981] text-white text-[10px] font-bold flex items-center justify-center">
+              {activeJobCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
       {/* Profile Section */}
       <div className="p-2 border-t border-white/[0.06]">
         <motion.button
@@ -418,6 +463,8 @@ interface SidebarExpandedProps {
   isOverlay: boolean;
   onOpenSkills: () => void;
   enabledSkillsCount: number;
+  onOpenCron: () => void;
+  activeJobCount: number;
 }
 
 function SidebarExpanded({
@@ -440,6 +487,8 @@ function SidebarExpanded({
   isOverlay,
   onOpenSkills,
   enabledSkillsCount,
+  onOpenCron,
+  activeJobCount,
 }: SidebarExpandedProps) {
   return (
     <motion.div
@@ -555,6 +604,31 @@ function SidebarExpanded({
           {enabledSkillsCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-[#4C71FF]/20 text-[#8CA2FF] text-xs font-medium">
               {enabledSkillsCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Automations Tasks Button */}
+      <div className="px-3 py-2">
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          onClick={onOpenCron}
+          className={cn(
+            'w-full flex items-center gap-3 p-2 rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+          )}
+        >
+          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <Calendar className="w-4 h-4" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium truncate">Automations</div>
+          </div>
+          {activeJobCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#34D399] text-xs font-medium">
+              {activeJobCount}
             </span>
           )}
         </motion.button>
