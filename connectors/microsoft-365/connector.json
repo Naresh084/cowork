@@ -1,0 +1,37 @@
+{
+  "id": "microsoft-365",
+  "name": "microsoft-365",
+  "displayName": "Microsoft 365",
+  "description": "Outlook, Calendar, OneDrive, Teams, SharePoint, Planner, To Do, OneNote - 90+ tools for complete Microsoft 365 integration",
+  "version": "1.0.0",
+  "icon": "Mail",
+  "category": "microsoft",
+  "tags": ["email", "calendar", "onedrive", "teams", "sharepoint", "planner", "todo", "onenote", "outlook", "microsoft"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@softeria/ms-365-mcp-server", "--org-mode"]
+  },
+  "auth": {
+    "type": "oauth",
+    "provider": "microsoft",
+    "flow": "device_code",
+    "scopes": [
+      "Mail.ReadWrite",
+      "Calendars.ReadWrite",
+      "Files.ReadWrite",
+      "Team.ReadBasic.All",
+      "Chat.ReadWrite",
+      "Tasks.ReadWrite",
+      "Notes.ReadWrite"
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/Softeria/ms-365-mcp-server#setup",
+    "homepage": "https://github.com/Softeria/ms-365-mcp-server"
+  }
+}

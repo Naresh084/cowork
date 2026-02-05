@@ -44,14 +44,11 @@ pub async fn validate_api_key(api_key: String) -> Result<bool, String> {
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let response = client.get(&url).send().await.map_err(|e| {
-        eprintln!("API validation request failed: {}", e);
         format!("Network error: {}", e)
     })?;
 
     let status = response.status();
     if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        eprintln!("API validation failed: {} - {}", status, body);
         return Ok(false);
     }
 

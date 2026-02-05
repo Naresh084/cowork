@@ -1,0 +1,26 @@
+{
+  "id": "memory",
+  "name": "memory",
+  "displayName": "Memory",
+  "description": "Persistent memory storage for knowledge graph with entities and relations",
+  "version": "1.0.0",
+  "icon": "Brain",
+  "category": "utility",
+  "tags": ["memory", "knowledge", "graph", "entities", "storage"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-memory"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

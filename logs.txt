@@ -1,0 +1,1647 @@
+Last login: Fri Feb  6 01:04:03 on ttys002
+
+naresh@Nareshs-MacBook-Pro [01:04:50] [~/Work/Personal/geminicowork/apps/desktop] [main *]
+-> % pnpm tauri:dev
+
+> @gemini-cowork/desktop@0.1.0 tauri:dev /Users/naresh/Work/Personal/geminicowork/apps/desktop
+> tauri dev
+
+     Running BeforeDevCommand (`pnpm dev:vite`)
+
+> @gemini-cowork/desktop@0.1.0 dev:vite /Users/naresh/Work/Personal/geminicowork/apps/desktop
+> vite
+
+
+  VITE v6.4.1  ready in 214 ms
+
+  ➜  Local:   http://localhost:1420/
+  ➜  Network: use --host to expose
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching /Users/naresh/Work/Personal/geminicowork/apps/desktop/src-tauri for changes...
+warning: unused import: `tauri::Manager`
+ --> src/main.rs:8:5
+  |
+8 | use tauri::Manager;
+  |     ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `InstalledSkill` is never constructed
+  --> src/commands/skills.rs:92:12
+   |
+92 | pub struct InstalledSkill {
+   |            ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `stop` is never used
+   --> src/sidecar.rs:260:18
+    |
+ 66 | impl SidecarManager {
+    | ------------------- method in this implementation
+...
+260 |     pub async fn stop(&self) -> Result<(), String> {
+    |                  ^^^^
+
+warning: `gemini-cowork` (bin "gemini-cowork") generated 3 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.69s
+     Running `target/debug/gemini-cowork`
+[keychain] Getting key for service: gemini-cowork, account: api_key
+[keychain] Getting key for service: gemini-cowork, account: api_key
+[keychain] Found key, length: 39
+[keychain] Found key, length: 39
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar not running, starting...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] starting sidecar with app_data_dir: /Users/naresh/.geminicowork
+[ensure_sidecar] sidecar not running, starting...
+[ensure_sidecar] starting sidecar with app_data_dir: /Users/naresh/.geminicowork
+[ensure_sidecar] sidecar started
+[ensure_sidecar] sending initialize command...
+[sidecar-reader] Starting stdout reader thread...
+[send_command] Starting command: initialize
+[send_command] stdin is healthy
+[send_command] Generated request id: req_1
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] sidecar started
+[ensure_sidecar] sending initialize command...
+[send_command] Starting command: initialize
+[send_command] stdin is healthy
+[send_command] Generated request id: req_2
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_3
+[send_command] Registered pending request, count: 3
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: cron_list_jobs
+[send_command] stdin is healthy
+[send_command] Generated request id: req_4
+[send_command] Registered pending request, count: 4
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_5
+[send_command] Registered pending request, count: 5
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_6
+[send_command] Registered pending request, count: 6
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: set_approval_mode
+[send_command] stdin is healthy
+[send_command] Generated request id: req_7
+[send_command] Registered pending request, count: 7
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_8
+[send_command] Registered pending request, count: 8
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: cron_list_jobs
+[send_command] stdin is healthy
+[send_command] Generated request id: req_9
+[send_command] Registered pending request, count: 9
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: set_skills
+[send_command] stdin is healthy
+[send_command] Generated request id: req_10
+[send_command] Registered pending request, count: 10
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+npm warn Unknown env config "node-linker". This will stop working in the next major version of npm.
+npm warn Unknown env config "shamefully-hoist". This will stop working in the next major version of npm.
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: set_models
+[send_command] stdin is healthy
+[send_command] Generated request id: req_11
+[send_command] Registered pending request, count: 11
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: update_session_last_accessed
+[send_command] stdin is healthy
+[send_command] Generated request id: req_12
+[send_command] Registered pending request, count: 12
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Starting Gemini Cowork sidecar...
+[sidecar] Ready and listening for requests
+[sidecar-reader] Received line: {"type":"ready","sessionId":null,"data":{"timestamp":1770300304442}}
+[sidecar-reader] Parsed as Event: type=ready
+[sidecar] Request: initialize (req_1)
+[AgentRunner] Initializing persistence with: /Users/naresh/.geminicowork
+[sidecar] Request: initialize (req_2)
+[AgentRunner] Initializing persistence with: /Users/naresh/.geminicowork
+[sidecar] Request: get_initialization_status (req_3)
+[sidecar] Request: cron_list_jobs (req_4)
+[sidecar] Request: get_initialization_status (req_5)
+[sidecar] Request: get_initialization_status (req_6)
+[sidecar] Request: set_approval_mode (req_7)
+[sidecar] Request: get_initialization_status (req_8)
+[sidecar] Request: cron_list_jobs (req_9)
+[sidecar] Request: set_skills (req_10)
+[sidecar] Request: set_models (req_11)
+[sidecar] Request: update_session_last_accessed (req_12)
+[sidecar] Response: get_initialization_status (req_3) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_3","success":true,"result":{"initialized":false,"sessionCount":0}}
+[sidecar-reader] Parsed as Response: id=req_3, success=true
+[sidecar] Response: get_initialization_status (req_5) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar] Response: get_initialization_status (req_6) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Found pending request, sending response
+[sidecar] Response: set_approval_mode (req_7) success=false
+[sidecar] Wrote 82 bytes to stdout, buffered=false
+[sidecar] Response: get_initialization_status (req_8) success=true
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_5","success":true,"result":{"initialized":false,"sessionCount":0}}
+[sidecar] Response: set_models (req_11) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar] Response: set_skills (req_10) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar] Response: update_session_last_accessed (req_12) success=false
+[sidecar-reader] Parsed as Response: id=[sidecar] Wrote 83 bytes to stdout, buffered=false
+req_5, success=true
+[sidecar] Response: cron_list_jobs (req_4) success=false
+[sidecar] Wrote 93 bytes to stdout, buffered=false
+[sidecar] Response: cron_list_jobs (req_9) success=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Wrote 93 bytes to stdout, buffered=false
+[send_command] Got response: success=true
+[sidecar-reader] Received line: {"id":"req_6","success":true,"result":{"initialized":false,"sessionCount":0}}
+[send_command] Got response: success=true
+[sidecar-reader] Parsed as Response: id=req_6, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_7","success":false,"error":"Session not found: sess_99ZFsrS2-SJnJQMk"}
+[sidecar-reader] Parsed as Response: id=req_7, success=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_8","success":true,"result":{"initialized":false,"sessionCount":0}}
+[sidecar-reader] Parsed as Response: id=req_8, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_11","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_11, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_10","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_10, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_12","success":false,"error":"Session not found: sess_99ZFsrS2-SJnJQMk"}
+[send_command] Got response: success=true
+[send_command] Got response: success=false
+[sidecar-reader] Parsed as Response: id=req_12, success=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_4","success":false,"error":"CronStore not initialized. Call initialize() first."}
+[sidecar-reader] Parsed as Response: id=req_4, success=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_9","success":false,"error":"CronStore not initialized. Call initialize() first."}
+[sidecar-reader] Parsed as Response: id=req_9, success=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[send_command] Got response: success=false
+[send_command] Got response: success=false
+[send_command] Got response: success=false
+[AgentRunner] Tool policy service initialized
+[AgentRunner] Tool policy service initialized
+[AgentRunner] Cron service initialized and started
+[AgentRunner] Restoring sessions from disk...
+[AgentRunner] Cron service initialized and started
+[AgentRunner] Restoring sessions from disk...
+[AgentRunner] Found 1 persisted sessions
+[AgentRunner] Recreating session: sess_99ZFsrS2-SJnJQMk chatItems: 6
+[AgentRunner] Restored session: sess_99ZFsrS2-SJnJQMk
+[AgentRunner] Restoration complete. Total restored: 1
+[AgentRunner] Sessions in memory: 1
+[AgentRunner] Persistence initialized, restored 1 sessions
+[sidecar] Response: initialize (req_1) success=true
+[sidecar] Wrote 77 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_1","success":true,"result":{"success":true,"sessionsRestored":1}}
+[sidecar-reader] Parsed as Response: id=req_1, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] persistence initialized
+[ensure_sidecar] event handler set up
+[ensure_sidecar] getting API key from keychain...
+[keychain] Getting key for service: gemini-cowork, account: api_key
+[sidecar-reader] Received line: {"type":"context:update","sessionId":"sess_99ZFsrS2-SJnJQMk","data":{"used":1542,"total":1048576}}
+[sidecar-reader] Parsed as Event: type=context:update
+[sidecar-reader] Received line: {"type":"context:usage","sessionId":"sess_99ZFsrS2-SJnJQMk","data":{"usedTokens":1542,"maxTokens":1048576,"percentUsed":0.14705657958984375}}
+[sidecar-reader] Parsed as Event: type=context:usage
+[AgentRunner] Found 1 persisted sessions
+[AgentRunner] Recreating session: sess_99ZFsrS2-SJnJQMk chatItems: 6
+[AgentRunner] Restored session: sess_99ZFsrS2-SJnJQMk
+[AgentRunner] Restoration complete. Total restored: 1
+[AgentRunner] Sessions in memory: 1
+[AgentRunner] Persistence initialized, restored 1 sessions
+[sidecar] Response: initialize (req_2) success=true
+[sidecar] Wrote 77 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_2","success":true,"result":{"success":true,"sessionsRestored":1}}
+[sidecar-reader] Parsed as Response: id=req_2, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"type":"context:update","sessionId":"sess_99ZFsrS2-SJnJQMk","data":{"used":1542,"total":1048576}}
+[sidecar-reader] Parsed as Event: type=context:update
+[sidecar-reader] Received line: {"type":"context:usage","sessionId":"sess_99ZFsrS2-SJnJQMk","data":{"usedTokens":1542,"maxTokens":1048576,"percentUsed":0.14705657958984375}}
+[sidecar-reader] Parsed as Event: type=context:usage
+[send_command] Got response: success=true
+[ensure_sidecar] persistence initialized
+[ensure_sidecar] event handler set up
+[ensure_sidecar] getting API key from keychain...
+[keychain] Getting key for service: gemini-cowork, account: api_key
+[keychain] Found key, length: 39
+[ensure_sidecar] got API key, setting on sidecar...
+[send_command] Starting command: set_api_key
+[send_command] stdin is healthy
+[send_command] Generated request id: req_13
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: set_api_key (req_13)
+[sidecar] Response: set_api_key (req_13) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_13","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_13, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] API key set on sidecar
+[ensure_sidecar] done
+[send_command] Starting command: set_approval_mode
+[send_command] stdin is healthy
+[send_command] Generated request id: req_14
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: set_approval_mode (req_14)
+[sidecar] Response: set_approval_mode (req_14) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_14","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_14, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[keychain] Found key, length: 39
+[ensure_sidecar] got API key, setting on sidecar...
+[send_command] Starting command: set_api_key
+[send_command] stdin is healthy
+[send_command] Generated request id: req_15
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: set_api_key (req_15)
+[sidecar] Response: set_api_key (req_15) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_15","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_15, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] API key set on sidecar
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_16
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: get_initialization_status (req_16)
+[sidecar] Response: get_initialization_status (req_16) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_16","success":true,"result":{"initialized":true,"sessionCount":1}}
+[sidecar-reader] Parsed as Response: id=req_16, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[agent] agent_list_sessions called
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[agent] sidecar started, sending list_sessions command...
+[send_command] Starting command: list_sessions
+[send_command] stdin is healthy
+[send_command] Generated request id: req_17
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: list_sessions (req_17)
+[sidecar] Response: list_sessions (req_17) success=true
+[sidecar] Wrote 458 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_17","success":true,"result":[{"id":"sess_99ZFsrS2-SJnJQMk","type":"main","title":"Generate a comprehensive AGENTS.md file for this project. — Feb 6","firstMessage":"Generate a comprehensi
+[sidecar-reader] Parsed as Response: id=req_17, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[agent] got result from list_sessions: Array [Object {"createdAt": Number(1770300187745), "firstMessage": String("Generate a comprehensive AGENTS.md file for this project.\n\nIMPORTANT INSTRUCTIONS:\n\n1. ANALYZE the p"), "id": String("sess_99ZFsrS2-SJnJQMk"), "lastAccessedAt": Number(1770300187745), "messageCount": Number(2), "model": String("gemini-3-flash-preview"), "title": String("Generate a comprehensive AGENTS.md file for this project. — Feb 6"), "type": String("main"), "updatedAt": Number(1770300204717), "workingDirectory": String("/Users/naresh/Work")}]
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_18
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[sidecar] Request: get_initialization_status (req_18)
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_19
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: get_initialization_status (req_18) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[sidecar-reader] Received line: {"id":"req_18","success":true,"result":{"initialized":true,"sessionCount":1}}
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[sidecar-reader] Parsed as Response: id=req_18, success=true
+[sidecar] Request: get_initialization_status (req_19)
+[sidecar-reader] Found pending request, sending response
+[send_command] Generated request id: req_20
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[send_command] Registered pending request, count: [sidecar] Response: get_initialization_status (req_19) success=true
+2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_19","success":true,"result":{"initialized":true,"sessionCount":1}}[sidecar] Request: get_initialization_status (req_20)
+
+[sidecar-reader] Parsed as Response: id=req_19, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[sidecar] Response: get_initialization_status (req_20) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_initialization_status
+[send_command] stdin is healthy
+[send_command] Generated request id: req_21
+[send_command] Registered pending request, count: 2
+[sidecar-reader] Received line: {"id":"req_20","success":true,"result":{"initialized":true,"sessionCount":1}}
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Parsed as Response: id=req_20, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true[sidecar] Request: get_initialization_status (req_21)
+
+[sidecar] Response: get_initialization_status (req_21) success=true
+[sidecar] Wrote 78 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_21","success":true,"result":{"initialized":true,"sessionCount":1}}
+[sidecar-reader] Parsed as Response: id=req_21, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_session
+[send_command] stdin is healthy
+[send_command] Generated request id: req_22
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: get_session (req_22)
+[sidecar] Response: get_session (req_22) success=true
+[sidecar] Wrote 28534 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_22","success":true,"result":{"id":"sess_99ZFsrS2-SJnJQMk","type":"main","title":"Generate a comprehensive AGENTS.md file for this project. — Feb 6","firstMessage":"Generate a comprehensiv
+[sidecar-reader] Parsed as Response: id=req_22, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[agent] agent_list_sessions called
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[agent] sidecar started, sending list_sessions command...
+[send_command] Starting command: list_sessions
+[send_command] stdin is healthy
+[send_command] Generated request id: req_23
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: list_sessions (req_23)
+[sidecar] Response: list_sessions (req_23) success=true
+[sidecar] Wrote 458 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_23","success":true,"result":[{"id":"sess_99ZFsrS2-SJnJQMk","type":"main","title":"Generate a comprehensive AGENTS.md file for this project. — Feb 6","firstMessage":"Generate a comprehensi
+[sidecar-reader] Parsed as Response: id=req_23, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[agent] got result from list_sessions: Array [Object {"createdAt": Number(1770300187745), "firstMessage": String("Generate a comprehensive AGENTS.md file for this project.\n\nIMPORTANT INSTRUCTIONS:\n\n1. ANALYZE the p"), "id": String("sess_99ZFsrS2-SJnJQMk"), "lastAccessedAt": Number(1770300187745), "messageCount": Number(2), "model": String("gemini-3-flash-preview"), "title": String("Generate a comprehensive AGENTS.md file for this project. — Feb 6"), "type": String("main"), "updatedAt": Number(1770300204717), "workingDirectory": String("/Users/naresh/Work")}]
+[agent] agent_list_sessions called
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[agent] sidecar started, sending list_sessions command...
+[send_command] Starting command: list_sessions
+[send_command] stdin is healthy
+[send_command] Generated request id: req_24
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: list_sessions (req_24)
+[sidecar] Response: list_sessions (req_24) success=true
+[sidecar] Wrote 458 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_24","success":true,"result":[{"id":"sess_99ZFsrS2-SJnJQMk","type":"main","title":"Generate a comprehensive AGENTS.md file for this project. — Feb 6","firstMessage":"Generate a comprehensi
+[sidecar-reader] Parsed as Response: id=req_24, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[agent] got result from list_sessions: Array [Object {"createdAt": Number(1770300187745), "firstMessage": String("Generate a comprehensive AGENTS.md file for this project.\n\nIMPORTANT INSTRUCTIONS:\n\n1. ANALYZE the p"), "id": String("sess_99ZFsrS2-SJnJQMk"), "lastAccessedAt": Number(1770300187745), "messageCount": Number(2), "model": String("gemini-3-flash-preview"), "title": String("Generate a comprehensive AGENTS.md file for this project. — Feb 6"), "type": String("main"), "updatedAt": Number(1770300204717), "workingDirectory": String("/Users/naresh/Work")}]
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: get_session
+[send_command] stdin is healthy
+[send_command] Generated request id: req_25
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: get_session (req_25)
+[sidecar] Response: get_session (req_25) success=true
+[sidecar] Wrote 28534 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_25","success":true,"result":{"id":"sess_99ZFsrS2-SJnJQMk","type":"main","title":"Generate a comprehensive AGENTS.md file for this project. — Feb 6","firstMessage":"Generate a comprehensiv
+[sidecar-reader] Parsed as Response: id=req_25, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: discover_skills
+[send_command] stdin is healthy
+[send_command] Generated request id: req_26
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: discover_skills (req_26)
+[sidecar] Response: discover_skills (req_26) success=true
+[sidecar] Wrote 28683 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_26","success":true,"result":{"skills":[{"id":"managed:apple-notes","source":{"type":"managed","path":"/Users/naresh/.geminicowork/skills","priority":2},"frontmatter":{"name":"apple-notes","
+[sidecar-reader] Parsed as Response: id=req_26, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_27
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[sidecar] Request: check_skill_eligibility (req_27)
+[send_command] Generated request id: req_28
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_29
+[send_command] Registered pending request, count: 3
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_27) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_30
+[send_command] Registered pending request, count: [sidecar] Request: check_skill_eligibility (req_28)
+4
+[send_command] Sending to sidecar channel...
+[sidecar] Request: check_skill_eligibility (req_29)
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Received line: {"id":"req_27","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Response: check_skill_eligibility (req_28) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar] Response: check_skill_eligibility (req_29) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Parsed as Response: id=req_27, success=true[sidecar] Request: check_skill_eligibility (req_30)
+
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Response: check_skill_eligibility (req_30) success=true
+[sidecar-reader] Received line: {"id":"req_28","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Parsed as Response: id=req_28, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_29","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_29, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_30","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_30, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_31
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_31)
+[sidecar] Response: check_skill_eligibility (req_31) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_31","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_31, success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] Got response: success=true
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: discover_commands
+[send_command] stdin is healthy
+[send_command] Generated request id: req_32
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: discover_commands (req_32)
+[CommandService] discoverAll starting...
+[CommandService] Bundled dir: /Users/naresh/Work/Personal/geminicowork/commands/bundled exists: true
+[CommandService] Managed dir: /Users/naresh/.geminicowork/commands exists: true
+[CommandService] Found 1 managed commands: [ 'init' ]
+[CommandService] Found 4 bundled commands: [ 'clear', 'help', 'init', 'memory' ]
+[CommandService] Total commands discovered: 5
+[sidecar] Response: discover_commands (req_32) success=true
+[sidecar] Wrote 8312 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_32","success":true,"result":{"commands":[{"id":"managed:init","source":{"type":"managed","path":"/Users/naresh/.geminicowork/commands","priority":1},"frontmatter":{"name":"init","displayNam
+[sidecar-reader] Parsed as Response: id=req_32, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_33
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_34
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_33)
+[sidecar] Response: check_skill_eligibility (req_33) success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[sidecar-reader] Received line: {"id":"req_33","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Generated request id: req_35
+[send_command] Registered pending request, count: 3
+[sidecar-reader] Parsed as Response: id=req_33, success=true
+[send_command] Sending to sidecar channel...
+[sidecar-reader] Found pending request, sending response
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_34)
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_36
+[send_command] Registered pending request, count: [sidecar] Response: check_skill_eligibility (req_34) success=true
+3
+[send_command] Sending to sidecar channel...
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_35)
+[sidecar-reader] Received line: {"id":"req_34","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Response: check_skill_eligibility (req_35) success=true
+[sidecar-reader] Parsed as Response: id=[sidecar] Wrote 153 bytes to stdout, buffered=false
+req_34, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Request: check_skill_eligibility (req_36)
+[sidecar-reader] Received line: {"id":"req_35","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Got response: success=true
+[sidecar] Response: check_skill_eligibility (req_36) success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility[sidecar] Wrote 153 bytes to stdout, buffered=false
+
+[send_command] stdin is healthy
+[send_command] Generated request id: req_37
+[send_command] Registered pending request, count: 3
+[sidecar-reader] Parsed as Response: id=req_35, success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Found pending request, sending response
+[sidecar] Request: check_skill_eligibility (req_37)
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_36","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Got response: success=true
+[sidecar] Response: check_skill_eligibility (req_37) success=true
+[sidecar-reader] Parsed as Response: id=req_36, success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_37","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_37, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: subagent_list
+[send_command] stdin is healthy
+[send_command] Generated request id: req_38
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: subagent_list (req_38)
+[sidecar] Response: subagent_list (req_38) success=true
+[sidecar] Wrote 19347 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_38","success":true,"result":{"subagents":[{"name":"api-integrator","displayName":"API Integrator","description":"Specializes in integrating external APIs and SDKs. Use for: API integration,
+[sidecar-reader] Parsed as Response: id=req_38, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_39
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_40
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_39)
+[sidecar] Response: check_skill_eligibility (req_39) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_39","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_40)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[sidecar-reader] Parsed as Response: id=req_39, success=true
+[sidecar] Response: check_skill_eligibility (req_40) success=true
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[sidecar-reader] Found pending request, sending response
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Starting command: check_skill_eligibility
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_40","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Got response: success=true
+[sidecar-reader] Parsed as Response: id=req_40, success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] stdin is healthy
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Generated request id: req_41
+[send_command] Registered pending request, count: 1
+[send_command] Got response: success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: [sidecar] Request: check_skill_eligibility (req_41)
+[sidecar] Response: check_skill_eligibility (req_41) success=true
+req_42
+[send_command] Registered pending request, count: 2
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Received line: {"id":"req_41","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_42)
+[sidecar-reader] Parsed as Response: id=req_41, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_43
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_43)
+[sidecar] Response: check_skill_eligibility (req_43) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_43","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_43, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[sidecar] Response: check_skill_eligibility (req_42) success=true
+[sidecar] Wrote 225 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_42","success":true,"result":{"eligible":false,"missingBins":["ordercli"],"missingEnvVars":[],"platformMismatch":false,"installHints":["go install github.com/steipete/ordercli/cmd/ordercli@l
+[sidecar-reader] Parsed as Response: id=req_42, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_44
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_44)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_45
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_44) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_44","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_45)
+[sidecar] Response: check_skill_eligibility (req_45) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Parsed as Response: id=req_44, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_46
+[send_command] Registered pending request, count: 2
+[send_command] Got response: success=true
+[sidecar-reader] Received line: {"id":"req_45","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Parsed as Response: id=req_45, success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] Got response: success=true
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_47
+[sidecar] Request: check_skill_eligibility (req_46)
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_46) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_46","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_46, success=true
+[sidecar] Request: check_skill_eligibility (req_47)
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[send_command] Got response: success=true
+[sidecar] Response: check_skill_eligibility (req_47) success=true
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_48
+[send_command] Registered pending request, count: 2[sidecar] Wrote 153 bytes to stdout, buffered=false
+
+[sidecar-reader] Received line: {"id":"req_47","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_47, success=true
+[send_command] Sending to sidecar channel...
+[sidecar-reader] Found pending request, sending response
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_48)
+[sidecar] Response: check_skill_eligibility (req_48) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_48","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_48, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_49
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_49)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_50
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_49) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_49","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_50)
+[sidecar] Response: check_skill_eligibility (req_50) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Parsed as Response: id=req_49, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_50","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_50, success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_51
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_51)
+[sidecar] Response: check_skill_eligibility (req_51) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_51","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_52
+[send_command] Registered pending request, count: 2
+[sidecar-reader] Parsed as Response: id=req_51, success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_52)
+[sidecar] Response: check_skill_eligibility (req_52) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_52","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_53
+[sidecar-reader] Parsed as Response: id=req_52, success=true
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_53)
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Response: check_skill_eligibility (req_53) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Got response: success=true
+[sidecar-reader] Received line: {"id":"req_53","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_53, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_54
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_55
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_54)
+[sidecar] Response: check_skill_eligibility (req_54) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_54","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_55)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_56
+[send_command] Registered pending request, count: 3
+[sidecar-reader] Parsed as Response: id=req_54, success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_55) success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_55","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_56)
+[sidecar-reader] Parsed as Response: id=req_55, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar] Response: check_skill_eligibility (req_56) success=true
+[send_command] Got response: success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_57
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_56","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_56, success=true
+[send_command] Registered pending request, count: 2
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_57)
+[sidecar] Response: check_skill_eligibility (req_57) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[sidecar-reader] Received line: {"id":"req_57","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Generated request id: req_58
+[send_command] Registered pending request, count: 2
+[sidecar-reader] Parsed as Response: id=req_57, success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[sidecar] Request: check_skill_eligibility (req_58)
+[sidecar] Response: check_skill_eligibility (req_58) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_58","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_58, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_59
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_60
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_59)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_61
+[send_command] Registered pending request, count: 3
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_59) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_59","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_60)
+[sidecar] Request: check_skill_eligibility (req_61)
+[sidecar] Response: check_skill_eligibility (req_60) success=true
+[sidecar-reader] Parsed as Response: id=req_59, success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar] Response: check_skill_eligibility (req_61) success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_60","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[sidecar-reader] Parsed as Response: id=req_60, success=true
+[send_command] Got response: success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] stdin is healthy
+[send_command] Got response: success=true
+[send_command] Generated request id: req_62
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_61","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_61, success=true
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_63
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Request: check_skill_eligibility (req_62)
+[send_command] Got response: success=true
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[sidecar] Response: check_skill_eligibility (req_62) success=true
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_62","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_63)
+[sidecar-reader] Parsed as Response: id=req_62, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar] Response: check_skill_eligibility (req_63) success=true
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_63","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_63, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_64
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_64)
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_65
+[send_command] Registered pending request, count: 2
+[sidecar] Response: check_skill_eligibility (req_64) success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_66
+[send_command] Registered pending request, count: 3
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_65)
+[sidecar-reader] Received line: {"id":"req_64","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_67
+[send_command] Registered pending request, count: 4
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Parsed as Response: id=req_64, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_68
+[send_command] Registered pending request, count: 4
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_66)
+[sidecar] Request: check_skill_eligibility (req_67)
+[sidecar] Request: check_skill_eligibility (req_68)
+[sidecar] Response: check_skill_eligibility (req_66) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar] Response: check_skill_eligibility (req_67) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar] Response: check_skill_eligibility (req_68) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_66","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_66, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_67","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_67, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_68","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_68, success=true
+[send_command] Got response: success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[send_command] Got response: success=true
+[sidecar] Response: check_skill_eligibility (req_65) success=true
+[sidecar] Wrote 193 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_65","success":true,"result":{"eligible":false,"missingBins":["rg"],"missingEnvVars":[],"platformMismatch":false,"installHints":["brew install rg"],"foundBins":{"jq":"/usr/bin/jq"}}}
+[sidecar-reader] Parsed as Response: id=req_65, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_69
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_70
+[sidecar] Request: check_skill_eligibility (req_69)
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_69) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_69","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Request: check_skill_eligibility (req_70)
+[sidecar-reader] Parsed as Response: id=req_69, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Response: check_skill_eligibility (req_70) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_70","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_70, success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[sidecar-reader] Found pending request, sending response
+[send_command] Got response: success=true
+[sidecar-reader] Response sent via oneshot channel
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_71
+[send_command] Got response: success=true
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_71)
+[sidecar] Response: check_skill_eligibility (req_71) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_71","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[sidecar-reader] Parsed as Response: id=req_71, success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] stdin is healthy
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Generated request id: req_72
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Got response: success=true
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_72)
+[sidecar] Response: check_skill_eligibility (req_72) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_72","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_72, success=true
+[sidecar-reader] Found pending request, sending response
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_73
+[send_command] Got response: success=true
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_73)
+[sidecar] Response: check_skill_eligibility (req_73) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_73","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_73, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_74
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[sidecar] Request: check_skill_eligibility (req_74)
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_75
+[send_command] Registered pending request, count: 2
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Response: check_skill_eligibility (req_74) success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_76
+[send_command] Registered pending request, count: 3
+[sidecar-reader] Received line: {"id":"req_74","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_75)
+[sidecar-reader] Parsed as Response: id=[sidecar] Response: check_skill_eligibility (req_75) success=true
+req_74, success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Request: check_skill_eligibility (req_76)
+[sidecar-reader] Received line: {"id":"req_75","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}[sidecar] Response: check_skill_eligibility (req_76) success=true
+
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[send_command] Got response: success=true
+[sidecar-reader] Parsed as Response: id=req_75, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar-reader] Received line: {"id":"req_76","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_77
+[send_command] Registered pending request, count: 2
+[send_command] Got response: success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar-reader] Parsed as Response: id=req_76, success=true
+[sidecar] Request: check_skill_eligibility (req_77)
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[sidecar] Response: check_skill_eligibility (req_77) success=true
+[send_command] Got response: success=true
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[sidecar-reader] Received line: {"id":"req_77","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar-reader] Parsed as Response: id=req_77, success=true
+[sidecar-reader] Found pending request, sending response
+[send_command] stdin is healthy
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Generated request id: req_78
+[send_command] Registered pending request, count: 1
+[send_command] Got response: success=true
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_78)
+[sidecar] Response: check_skill_eligibility (req_78) success=true
+[sidecar-reader] Received line: {"id":"req_78","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{}}}
+[sidecar] Wrote 153 bytes to stdout, buffered=false
+[sidecar-reader] Parsed as Response: id=req_78, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: update_session_last_accessed
+[send_command] stdin is healthy
+[send_command] Generated request id: req_79
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: update_session_last_accessed (req_79)
+[sidecar] Response: update_session_last_accessed (req_79) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_79","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_79, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: check_skill_eligibility
+[send_command] stdin is healthy
+[send_command] Generated request id: req_80
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: check_skill_eligibility (req_80)
+[sidecar] Response: check_skill_eligibility (req_80) success=true
+[sidecar] Wrote 175 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_80","success":true,"result":{"eligible":true,"missingBins":[],"missingEnvVars":[],"platformMismatch":false,"installHints":[],"foundBins":{"curl":"/usr/bin/curl"}}}
+[sidecar-reader] Parsed as Response: id=req_80, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+[ensure_sidecar] accessing manager...
+[ensure_sidecar] manager ready, checking if running...
+[ensure_sidecar] sidecar already running
+[ensure_sidecar] done
+[send_command] Starting command: update_session_last_accessed
+[send_command] stdin is healthy
+[send_command] Generated request id: req_81
+[send_command] Registered pending request, count: 1
+[send_command] Sending to sidecar channel...
+[send_command] Sent to channel successfully
+[send_command] Waiting for response...
+[sidecar] Request: update_session_last_accessed (req_81)
+[sidecar] Response: update_session_last_accessed (req_81) success=true
+[sidecar] Wrote 57 bytes to stdout, buffered=false
+[sidecar-reader] Received line: {"id":"req_81","success":true,"result":{"success":true}}
+[sidecar-reader] Parsed as Response: id=req_81, success=true
+[sidecar-reader] Found pending request, sending response
+[sidecar-reader] Response sent via oneshot channel
+[send_command] Got response: success=true
+
+

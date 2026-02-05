@@ -221,20 +221,16 @@ export class ConnectorService {
           // Validate against schema
           const parseResult = ConnectorManifestSchema.safeParse(manifestWithSource);
           if (!parseResult.success) {
-            console.warn(
-              `[ConnectorService] Invalid connector manifest at ${connectorJsonPath}:`,
-              parseResult.error.errors
-            );
             continue;
           }
 
           connectors.push(parseResult.data);
-        } catch (error) {
-          console.error(`[ConnectorService] Error processing connector at ${connectorDir}:`, error);
+        } catch {
+          // Skip connectors that fail to parse
         }
       }
-    } catch (error) {
-      console.error(`[ConnectorService] Error scanning directory ${dir}:`, error);
+    } catch {
+      // Directory scanning error - return empty array
     }
 
     return connectors;
@@ -301,8 +297,6 @@ export class ConnectorService {
 
     // Clear cache to force re-discovery
     this.connectorCache.clear();
-
-    console.error(`[ConnectorService] Installed connector: ${connector.name}`);
   }
 
   /**
@@ -324,8 +318,6 @@ export class ConnectorService {
 
     // Clear cache
     this.connectorCache.delete(connectorId);
-
-    console.error(`[ConnectorService] Uninstalled connector: ${connector.name}`);
   }
 
   /**
@@ -384,7 +376,6 @@ export class ConnectorService {
     this.connectorCache.clear();
 
     const connectorId = `managed:${params.name}`;
-    console.error(`[ConnectorService] Created custom connector: ${connectorId} at ${connectorDir}`);
 
     return connectorId;
   }

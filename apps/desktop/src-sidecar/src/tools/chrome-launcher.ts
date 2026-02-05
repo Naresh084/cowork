@@ -197,7 +197,6 @@ async function launchChromeWithDebugging(_autoRestart = true): Promise<{ success
   if (running) {
     // Chrome is running without debugging - use a SEPARATE profile
     // This allows automation without disrupting the user's browsing session
-    console.error('[chrome-launcher] Chrome already running, launching separate automation instance...');
     userDataDir = getAutomationUserDataDir();
     usingSeparateProfile = true;
 
@@ -237,9 +236,6 @@ async function launchChromeWithDebugging(_autoRestart = true): Promise<{ success
 
       const ready = await hasDebuggingEnabled();
       if (ready) {
-        if (usingSeparateProfile) {
-          console.error('[chrome-launcher] Separate automation Chrome instance ready');
-        }
         return { success: true, usingSeparateProfile };
       }
     }
@@ -290,11 +286,9 @@ export async function getOrCreateSessionChrome(sessionId: string): Promise<{
     // Verify it's still running
     const isRunning = await hasDebuggingEnabled(existing.port);
     if (isRunning) {
-      console.error(`[chrome-launcher] Reusing existing Chrome instance for session ${sessionId} on port ${existing.port}`);
       return { success: true, port: existing.port, reused: true };
     }
     // Instance died, clean up and create new
-    console.error(`[chrome-launcher] Session ${sessionId} Chrome instance died, creating new one`);
     sessionInstances.delete(sessionId);
   }
 
@@ -321,8 +315,6 @@ export async function getOrCreateSessionChrome(sessionId: string): Promise<{
       '--new-window',
       'about:blank', // Start with blank page
     ];
-
-    console.error(`[chrome-launcher] Launching Chrome for session ${sessionId} on port ${port}`);
 
     const chromeProcess = spawn(chromePath, args, {
       detached: true,
@@ -351,7 +343,6 @@ export async function getOrCreateSessionChrome(sessionId: string): Promise<{
 
       const ready = await hasDebuggingEnabled(port);
       if (ready) {
-        console.error(`[chrome-launcher] Chrome ready for session ${sessionId} on port ${port}`);
         return { success: true, port, reused: false };
       }
     }
@@ -391,8 +382,6 @@ export async function closeSessionChrome(sessionId: string): Promise<{ success: 
   if (!instance) {
     return { success: true }; // No instance to close
   }
-
-  console.error(`[chrome-launcher] Closing Chrome for session ${sessionId}`);
 
   try {
     // Try to close gracefully via CDP
@@ -448,7 +437,6 @@ export async function hasSessionChrome(sessionId: string): Promise<boolean> {
  * Clean up all session Chrome instances (call on app shutdown)
  */
 export async function cleanupAllSessionChromes(): Promise<void> {
-  console.error(`[chrome-launcher] Cleaning up ${sessionInstances.size} session Chrome instances`);
   const promises = Array.from(sessionInstances.keys()).map(sessionId => closeSessionChrome(sessionId));
   await Promise.allSettled(promises);
 }

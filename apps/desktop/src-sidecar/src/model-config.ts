@@ -70,18 +70,10 @@ export function getModel(key: keyof ModelConfig): string {
 
 /**
  * Log the current model configuration (useful for debugging).
+ * This is a no-op in production.
  */
 export function logModelConfig(): void {
-  const config = getModelConfig();
-  console.error('[model-config] Current model configuration:');
-  console.error(`  Search Model:           ${config.searchModel}`);
-  console.error(`  Deep Research Agent:    ${config.deepResearchAgent}`);
-  console.error(`  Image Generation:       ${config.imageGenerationModel}`);
-  console.error(`  Image Editing:          ${config.imageEditingModel}`);
-  console.error(`  Video Generation:       ${config.videoGenerationModel}`);
-  console.error(`  Video Analysis:         ${config.videoAnalysisModel}`);
-  console.error(`  Computer Use:           ${config.computerUseModel}`);
-  console.error(`  Default Agent:          ${config.defaultAgentModel}`);
+  // Logging disabled in production
 }
 
 // Export defaults for reference

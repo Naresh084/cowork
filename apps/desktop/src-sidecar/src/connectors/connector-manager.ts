@@ -171,9 +171,6 @@ export class ConnectorManager {
       connection.error = undefined;
       connection.retryCount = 0;
 
-      console.error(`[ConnectorManager] Connected to ${manifest.displayName} (${connectorId})`);
-      console.error(`[ConnectorManager] Discovered ${connection.tools.length} tools`);
-
       return {
         success: true,
         capabilities: {
@@ -189,8 +186,6 @@ export class ConnectorManager {
       connection.error = errorMessage;
       connection.lastError = errorMessage;
       connection.retryCount += 1;
-
-      console.error(`[ConnectorManager] Failed to connect to ${manifest.displayName}:`, errorMessage);
 
       return {
         success: false,
@@ -212,8 +207,8 @@ export class ConnectorManager {
       if (connection.serverId) {
         await this.mcpManager.disconnect(connection.serverId);
       }
-    } catch (error) {
-      console.error(`[ConnectorManager] Error disconnecting ${connectorId}:`, error);
+    } catch {
+      // Ignore disconnect errors
     }
 
     // Update state
@@ -222,8 +217,6 @@ export class ConnectorManager {
     connection.resources = [];
     connection.prompts = [];
     connection.connectedAt = undefined;
-
-    console.error(`[ConnectorManager] Disconnected from ${connection.manifest.displayName}`);
   }
 
   /**
@@ -251,14 +244,8 @@ export class ConnectorManager {
       throw new Error(`Connector not connected: ${connectorId} (status: ${connection.status})`);
     }
 
-    try {
-      const result = await this.mcpManager.callTool(connection.serverId, toolName, args);
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[ConnectorManager] Tool call failed for ${connectorId}/${toolName}:`, errorMessage);
-      throw error;
-    }
+    const result = await this.mcpManager.callTool(connection.serverId, toolName, args);
+    return result;
   }
 
   /**

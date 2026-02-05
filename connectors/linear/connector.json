@@ -1,0 +1,35 @@
+{
+  "id": "linear",
+  "name": "linear",
+  "displayName": "Linear",
+  "description": "Create, update, and manage issues, projects, and cycles in Linear",
+  "version": "1.0.0",
+  "icon": "Target",
+  "category": "productivity",
+  "tags": ["issues", "project-management", "tracking", "agile", "engineering"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "linear-mcp-server"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "LINEAR_API_KEY",
+        "description": "Linear Personal API Key",
+        "required": true,
+        "placeholder": "lin_api_...",
+        "link": "https://linear.app/settings/api"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/jerhadf/linear-mcp-server#setup",
+    "homepage": "https://github.com/jerhadf/linear-mcp-server"
+  }
+}

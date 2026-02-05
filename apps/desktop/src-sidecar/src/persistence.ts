@@ -102,8 +102,6 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
   const timeline: ChatItem[] = [];
   const { messages, toolExecutions } = v1Data;
 
-  console.error(`[Persistence] Migrating session ${v1Data.metadata.id} from v1 to v2: ${messages.length} messages, ${toolExecutions.length} tools`);
-
   // Get user messages sorted by createdAt for turn association
   const userMessages = messages
     .filter(m => m.role === 'user')
@@ -330,12 +328,12 @@ export class SessionPersistence {
           if (data) {
             result.set(entry.id, data);
           }
-        } catch (error) {
-          console.error(`Failed to load session ${entry.id}:`, error);
+        } catch {
+          // Skip sessions that fail to load
         }
       }
-    } catch (error) {
-      console.error('Failed to load session index:', error);
+    } catch {
+      // Session index load failed
     }
 
     return result;
@@ -407,12 +405,11 @@ export class SessionPersistence {
     // Save migrated data
     try {
       await this.saveSessionV2(v2Data);
-      console.error(`[Persistence] Successfully migrated session ${sessionId} to v2`);
 
       // Clean up old v1 files
       await this.cleanupV1Files(sessionDir);
-    } catch (error) {
-      console.error(`[Persistence] Failed to save migrated session ${sessionId}:`, error);
+    } catch {
+      // Migration save failed
     }
 
     return v2Data;
@@ -428,7 +425,6 @@ export class SessionPersistence {
       if (existsSync(filePath)) {
         try {
           await unlink(filePath);
-          console.error(`[Persistence] Cleaned up v1 file: ${file}`);
         } catch {
           // Ignore cleanup errors
         }

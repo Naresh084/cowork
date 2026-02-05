@@ -1,0 +1,33 @@
+{
+  "id": "mysql",
+  "name": "mysql",
+  "displayName": "MySQL",
+  "description": "Query databases, inspect schema, and execute SQL queries against MySQL databases",
+  "version": "1.0.0",
+  "icon": "Database",
+  "category": "database",
+  "tags": ["sql", "database", "query", "mysql", "mariadb", "relational"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mysql-mcp"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "MYSQL_URL",
+        "description": "MySQL connection URL",
+        "required": true,
+        "placeholder": "mysql://user:password@host:3306/database"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "homepage": "https://github.com/benborber/mysql-mcp"
+  }
+}

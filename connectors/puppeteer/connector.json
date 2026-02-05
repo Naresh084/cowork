@@ -1,0 +1,26 @@
+{
+  "id": "puppeteer",
+  "name": "puppeteer",
+  "displayName": "Puppeteer",
+  "description": "Browser automation with Puppeteer - take screenshots, navigate pages, and interact with web elements",
+  "version": "1.0.0",
+  "icon": "Chrome",
+  "category": "utility",
+  "tags": ["browser", "automation", "puppeteer", "screenshots", "testing"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

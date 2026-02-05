@@ -12,8 +12,9 @@ import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
 import { SubagentService, createSubagentService } from './subagents/index.js';
 import { connectorService } from './connectors/connector-service.js';
-import { ConnectorManager } from './connectors/connector-manager.js';
-import { SecretService, getSecretService } from './connectors/secret-service.js';
+import { connectorBridge } from './connector-bridge.js';
+import { getSecretService } from './connectors/secret-service.js';
+import type { SecretService } from './connectors/secret-service.js';
 import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
@@ -60,9 +61,8 @@ const agentsMdServices: Map<string, AgentsMdService> = new Map();
 let subagentService: SubagentService | null = null;
 let appDataDirectory: string | null = null;
 
-// Connector services (lazily initialized)
+// Connector secret service (lazily initialized)
 let connectorSecretService: SecretService | null = null;
-let connectorManager: ConnectorManager | null = null;
 
 /**
  * Get or create the SecretService for connectors.
@@ -72,17 +72,6 @@ async function getConnectorSecretService(): Promise<SecretService> {
     connectorSecretService = await getSecretService();
   }
   return connectorSecretService;
-}
-
-/**
- * Get or create the ConnectorManager.
- */
-async function getConnectorManager(): Promise<ConnectorManager> {
-  if (!connectorManager) {
-    const secretService = await getConnectorSecretService();
-    connectorManager = new ConnectorManager(secretService);
-  }
-  return connectorManager;
 }
 
 /**
@@ -1274,9 +1263,8 @@ registerHandler('uninstall_connector', async (params) => {
   if (!p.connectorId) throw new Error('connectorId is required');
 
   // Disconnect first if connected
-  const manager = await getConnectorManager();
-  if (manager.isConnected(p.connectorId)) {
-    await manager.disconnect(p.connectorId);
+  if (connectorBridge.isConnected(p.connectorId)) {
+    await connectorBridge.disconnect(p.connectorId);
   }
 
   // Delete secrets
@@ -1296,18 +1284,13 @@ registerHandler('connect_connector', async (params) => {
   const connector = await connectorService.getConnector(p.connectorId);
   if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
 
-  const manager = await getConnectorManager();
-  const result = await manager.connect(connector);
-
-  if (!result.success) {
-    throw new Error(result.error || 'Connection failed');
-  }
+  const result = await connectorBridge.connect(connector);
 
   return {
     success: true,
-    tools: result.capabilities?.tools || [],
-    resources: result.capabilities?.resources || [],
-    prompts: result.capabilities?.prompts || [],
+    tools: result.tools || [],
+    resources: result.resources || [],
+    prompts: result.prompts || [],
   };
 });
 
@@ -1316,8 +1299,7 @@ registerHandler('disconnect_connector', async (params) => {
   const p = params as { connectorId: string };
   if (!p.connectorId) throw new Error('connectorId is required');
 
-  const manager = await getConnectorManager();
-  await manager.disconnect(p.connectorId);
+  await connectorBridge.disconnect(p.connectorId);
   return { success: true };
 });
 
@@ -1329,18 +1311,13 @@ registerHandler('reconnect_connector', async (params) => {
   const connector = await connectorService.getConnector(p.connectorId);
   if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
 
-  const manager = await getConnectorManager();
-  const result = await manager.reconnect(connector);
-
-  if (!result.success) {
-    throw new Error(result.error || 'Reconnection failed');
-  }
+  const result = await connectorBridge.reconnect(connector);
 
   return {
     success: true,
-    tools: result.capabilities?.tools || [],
-    resources: result.capabilities?.resources || [],
-    prompts: result.capabilities?.prompts || [],
+    tools: result.tools || [],
+    resources: result.resources || [],
+    prompts: result.prompts || [],
   };
 });
 
@@ -1371,10 +1348,9 @@ registerHandler('get_connector_status', async (params) => {
   const p = params as { connectorId: string };
   if (!p.connectorId) throw new Error('connectorId is required');
 
-  const manager = await getConnectorManager();
-  const isConnected = manager.isConnected(p.connectorId);
-  const status = manager.getStatus(p.connectorId);
-  const error = manager.getError(p.connectorId);
+  const isConnected = connectorBridge.isConnected(p.connectorId);
+  const status = connectorBridge.getStatus(p.connectorId);
+  const error = connectorBridge.getError(p.connectorId);
 
   // Get secrets status for the connector
   const connector = await connectorService.getConnector(p.connectorId);
@@ -1434,21 +1410,19 @@ registerHandler('connector_call_tool', async (params) => {
   if (!p.connectorId) throw new Error('connectorId is required');
   if (!p.toolName) throw new Error('toolName is required');
 
-  const manager = await getConnectorManager();
-  const result = await manager.callTool(p.connectorId, p.toolName, p.args || {});
+  const result = await connectorBridge.callTool(p.connectorId, p.toolName, p.args || {});
   return { result };
 });
 
 // Get all tools from all connected connectors
 registerHandler('get_all_connector_tools', async () => {
-  const manager = await getConnectorManager();
-  const tools = manager.getAllTools();
+  const tools = connectorBridge.getTools();
   return { tools };
 });
 
 // Get all connection states
 registerHandler('get_all_connector_states', async () => {
-  const manager = await getConnectorManager();
+  const manager = await connectorBridge.getManager();
   const connections = manager.getAllConnections();
   const states: Record<string, { status: string; error?: string }> = {};
   for (const [id, state] of connections) {
@@ -1465,7 +1439,6 @@ registerHandler('connect_all_connectors', async (params) => {
   }
 
   const results: Record<string, { success: boolean; error?: string }> = {};
-  const manager = await getConnectorManager();
 
   for (const connectorId of p.connectorIds) {
     try {
@@ -1475,8 +1448,8 @@ registerHandler('connect_all_connectors', async (params) => {
         continue;
       }
 
-      const result = await manager.connect(connector);
-      results[connectorId] = { success: result.success, error: result.error };
+      await connectorBridge.connect(connector);
+      results[connectorId] = { success: true };
     } catch (error) {
       results[connectorId] = {
         success: false,
@@ -1490,8 +1463,7 @@ registerHandler('connect_all_connectors', async (params) => {
 
 // Disconnect all connectors
 registerHandler('disconnect_all_connectors', async () => {
-  const manager = await getConnectorManager();
-  await manager.disconnectAll();
+  await connectorBridge.disconnectAll();
   return { success: true };
 });
 

@@ -140,7 +140,6 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         const { installedSkillConfigs, removeInstalledSkillConfig } = useSettingsStore.getState();
         for (const config of installedSkillConfigs) {
           if (!managedSkillNames.has(config.name)) {
-            console.log(`[SkillStore] Removing stale config: ${config.id} (${config.name})`);
             removeInstalledSkillConfig(config.id);
           }
         }
@@ -272,8 +271,6 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
           content: params.content,
           requirements: params.requirements,
         });
-
-        console.log('[SkillStore] Created skill:', skillId);
 
         // Auto-install the created skill by adding to settings
         const config: InstalledSkillConfig = {

@@ -338,7 +338,6 @@ function reconstructTurnActivities(
     .filter(m => m.role === 'user')
     .sort((a, b) => a.createdAt - b.createdAt);
 
-  console.log('[reconstructTurnActivities] Processing', messages.length, 'messages and', toolExecutions.length, 'tool executions');
 
   // Group tool executions by turn message ID
   const toolsByTurn = new Map<string, PersistedToolExecution[]>();
@@ -356,7 +355,6 @@ function reconstructTurnActivities(
       turnId = preceding?.id;
       if (turnId) {
         orphanedTools++;
-        console.log('[reconstructTurnActivities] Associated orphaned tool', tool.id, 'with message', turnId);
       }
     }
 
@@ -364,7 +362,6 @@ function reconstructTurnActivities(
     if (!turnId && userMessages.length > 0) {
       turnId = userMessages[userMessages.length - 1].id;
       orphanedTools++;
-      console.log('[reconstructTurnActivities] Fallback: Associated tool', tool.id, 'with last user message');
     }
 
     if (turnId) {
@@ -374,9 +371,6 @@ function reconstructTurnActivities(
     }
   }
 
-  if (orphanedTools > 0) {
-    console.log('[reconstructTurnActivities] Fixed', orphanedTools, 'orphaned tools');
-  }
 
   // Build activities for each user message (turn)
   for (let i = 0; i < messages.length; i++) {
@@ -452,7 +446,6 @@ function reconstructTurnActivities(
     turnActivities[msg.id] = activities;
   }
 
-  console.log('[reconstructTurnActivities] Built activities for', Object.keys(turnActivities).length, 'turns');
   return turnActivities;
 }
 
@@ -535,14 +528,12 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     // This prevents "session not found" errors during app startup
     const sessionStore = useSessionStore.getState();
     if (!sessionStore.backendInitialized) {
-      console.log('[ChatStore] Waiting for backend initialization before loading messages...');
       await sessionStore.waitForBackend();
     }
 
     // Check if already loaded and not forcing reload
     const sessionState = get().sessions[sessionId];
     if (sessionState?.hasLoaded && !forceReload) {
-      console.log('[ChatStore] Messages already loaded for session:', sessionId);
       return null;
     }
 
@@ -554,19 +545,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
     const attemptLoad = async (retry = 0): Promise<SessionDetails | null> => {
       try {
-        console.log('[ChatStore] Loading messages for session', sessionId, 'retry:', retry);
         const session = await invoke<SessionDetails>('agent_get_session', { sessionId });
-        console.warn('[ChatStore] RAW SESSION FROM BACKEND:', JSON.stringify(session, null, 2).slice(0, 2000));
-        console.log('[ChatStore] Got session from backend:', {
-          sessionId,
-          messageCount: session.messages?.length || 0,
-          chatItemsCount: session.chatItems?.length || 0,
-          toolExecutionCount: session.toolExecutions?.length || 0,
-          hasMessages: !!session.messages,
-          hasChatItems: !!session.chatItems,
-          firstMessage: session.messages?.[0],
-          firstChatItem: session.chatItems?.[0],
-        });
         const agentStore = useAgentStore.getState();
 
         // Reconstruct turn activities from persisted data
@@ -595,14 +574,6 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
             }
           }
 
-          console.log('[ChatStore] Merge result:', {
-            sessionId,
-            existingCount: existingMessages.length,
-            incomingCount: incoming.length,
-            mergedCount: merged.length,
-            chatItemsCount: mergedChatItems.length,
-          });
-
           return {
             ...existing,
             messages: merged,
@@ -622,16 +593,6 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
           agentStore.setArtifacts(sessionId, session.artifacts);
         }
 
-        console.log('[ChatStore] Loaded', session.messages?.length || 0, 'messages for session:', sessionId);
-
-        // Verify state was updated
-        const updatedState = get().sessions[sessionId];
-        console.log('[ChatStore] After update - store state:', {
-          sessionId,
-          messageCount: updatedState?.messages.length,
-          hasLoaded: updatedState?.hasLoaded,
-        });
-
         return session;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -643,14 +604,12 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
           msgLower.includes('network');
 
         if (isTransient && retry < 3) {
-          console.log('[ChatStore] Transient error, retrying:', errorMessage);
           await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
           return attemptLoad(retry + 1);
         }
 
         // Session not found - mark as loaded but empty
         if (msgLower.includes('session not found')) {
-          console.log('[ChatStore] Session not found:', sessionId);
           set((state) => updateSession(state, sessionId, (existing) => ({
             ...existing,
             messages: [],

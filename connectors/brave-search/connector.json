@@ -1,0 +1,35 @@
+{
+  "id": "brave-search",
+  "name": "brave-search",
+  "displayName": "Brave Search",
+  "description": "Search the web using Brave Search API for privacy-focused search results",
+  "version": "1.0.0",
+  "icon": "Search",
+  "category": "ai-search",
+  "tags": ["search", "web", "brave", "privacy", "internet"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "BRAVE_API_KEY",
+        "description": "Brave Search API Key",
+        "required": true,
+        "placeholder": "BSA...",
+        "link": "https://brave.com/search/api/"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

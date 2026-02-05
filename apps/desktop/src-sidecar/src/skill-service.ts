@@ -18,9 +18,6 @@ import type {
 import { parseFrontmatter, parseSkillMarkdown } from './skill-parser.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
 
-// Debug flag for verbose skill logging
-const DEBUG_SKILLS = process.env.DEBUG_SKILLS === 'true';
-
 /**
  * Parameters for creating a custom skill
  */
@@ -181,7 +178,6 @@ export class SkillService {
           const frontmatter = parseFrontmatter(content);
 
           if (!frontmatter) {
-            console.warn(`[SkillService] Failed to parse ${skillMdPath}`);
             continue;
           }
 
@@ -202,12 +198,12 @@ export class SkillService {
           };
 
           skills.push(manifest);
-        } catch (error) {
-          console.error(`[SkillService] Error processing skill at ${skillDir}:`, error);
+        } catch {
+          // Skip skills that fail to parse
         }
       }
-    } catch (error) {
-      console.error(`[SkillService] Error scanning directory ${dir}:`, error);
+    } catch {
+      // Directory scanning error - return empty array
     }
 
     return skills;
@@ -254,18 +250,12 @@ export class SkillService {
     await cp(skill.skillPath, targetDir, { recursive: true });
 
     // Check for setup.sh and run it if exists (with user notification)
-    const setupScript = join(targetDir, 'setup.sh');
-    if (existsSync(setupScript)) {
-      console.error(`[SkillService] Setup script found for ${skill.frontmatter.name}. Manual execution may be required.`);
-      // Note: We don't auto-execute setup scripts for security reasons
-      // The frontend should notify the user about this
-    }
+    // Note: We don't auto-execute setup scripts for security reasons
+    // The frontend should notify the user about this
 
     // Clear cache to force re-discovery
     this.skillCache.clear();
     this.contentCache.clear();
-
-    console.error(`[SkillService] Installed skill: ${skill.frontmatter.name}`);
   }
 
   /**
@@ -288,8 +278,6 @@ export class SkillService {
     // Clear cache
     this.skillCache.delete(skillId);
     this.contentCache.delete(skillId);
-
-    console.error(`[SkillService] Uninstalled skill: ${skill.frontmatter.name}`);
   }
 
   /**
@@ -338,7 +326,6 @@ export class SkillService {
     this.contentCache.clear();
 
     const skillId = `managed:${params.name}`;
-    console.error(`[SkillService] Created custom skill: ${skillId} at ${skillDir}`);
 
     return skillId;
   }
@@ -418,23 +405,18 @@ ${params.content}`;
    * Get combined skills prompt for agent
    */
   async getSkillsForAgent(enabledSkillIds: string[]): Promise<string> {
-    console.error(`[SkillService] Loading ${enabledSkillIds.length} skills:`, enabledSkillIds);
-
     const parts: string[] = [];
 
     for (const skillId of enabledSkillIds) {
       try {
         const skill = await this.getSkill(skillId);
         if (!skill) {
-          console.error(`[SkillService] ❌ Skill not found: ${skillId}`);
-          console.error(`[SkillService] Available skills:`, [...this.skillCache.keys()]);
           continue;
         }
 
         // Check eligibility
         const eligibility = await checkSkillEligibility(skill);
         if (!eligibility.eligible) {
-          console.warn(`[SkillService] Skill ${skillId} not eligible:`, eligibility.missingBins, eligibility.missingEnvVars);
           continue;
         }
 
@@ -445,21 +427,16 @@ ${params.content}`;
           // Include the full skill content for the agent
           parts.push(`## ${skill.frontmatter.metadata?.emoji || '📦'} ${skill.frontmatter.name}\n\n${parsed.body}`);
         }
-      } catch (error) {
-        console.error(`[SkillService] Error loading skill ${skillId}:`, error);
+      } catch {
+        // Skip skills that fail to load
       }
     }
 
     if (parts.length === 0) {
-      console.error('[SkillService] No skills loaded');
       return '';
     }
 
     const prompt = this.buildSkillsPrompt(parts);
-    console.error(`[SkillService] Built prompt for ${parts.length} skills`);
-    if (DEBUG_SKILLS) {
-      console.error('[SkillService] Skills prompt preview:', prompt.substring(0, 500));
-    }
     return prompt;
   }
 
@@ -522,39 +499,29 @@ ${skillContents.join('\n\n---\n\n')}
    * Used to prepare skills for DeepAgents native loading.
    */
   async syncSkillsForAgent(enabledSkillIds: string[]): Promise<Map<string, string>> {
-    console.error(`[SkillService] Syncing ${enabledSkillIds.length} skills for agent`);
-
     const files = new Map<string, string>();
 
     for (const skillId of enabledSkillIds) {
       try {
         const skill = await this.getSkill(skillId);
         if (!skill) {
-          console.warn(`[SkillService] Skill not found for sync: ${skillId}`);
           continue;
         }
 
         // Check eligibility before including
         const eligibility = await checkSkillEligibility(skill);
         if (!eligibility.eligible) {
-          console.warn(`[SkillService] Skill ${skillId} not eligible, skipping:`, {
-            missingBins: eligibility.missingBins,
-            missingEnvVars: eligibility.missingEnvVars,
-          });
           continue;
         }
 
         const content = await this.loadSkillContent(skillId);
         const virtualPath = `/skills/${skill.frontmatter.name}/SKILL.md`;
         files.set(virtualPath, content);
-
-        console.error(`[SkillService] ✓ Synced skill: ${skill.frontmatter.name} → ${virtualPath}`);
-      } catch (error) {
-        console.error(`[SkillService] Error syncing skill ${skillId}:`, error);
+      } catch {
+        // Skip skills that fail to sync
       }
     }
 
-    console.error(`[SkillService] Synced ${files.size} skills total`);
     return files;
   }
 }
