@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { generateId } from '@gemini-cowork/shared';
+import { createServer, type Server } from 'net';
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -23,21 +24,82 @@ export class ChromeBridge {
   private extensionVersion: string | null = null;
   private connectionPromise: Promise<void> | null = null;
   private connectionResolve: (() => void) | null = null;
+  private startAttempts = 0;
+  private maxStartAttempts = 3;
 
-  start(port = 8765): void {
+  /**
+   * Check if a port is available
+   */
+  private async isPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const server: Server = createServer();
+      server.once('error', () => {
+        resolve(false);
+      });
+      server.once('listening', () => {
+        server.close();
+        resolve(true);
+      });
+      server.listen(port);
+    });
+  }
+
+  /**
+   * Start the WebSocket server
+   */
+  async start(port = 8765): Promise<void> {
     if (this.wss) {
       // Already started, just return
+      console.error('[ChromeBridge] Server already running');
       return;
     }
 
     this.port = port;
+    this.startAttempts++;
+
+    // Check if port is available
+    const portAvailable = await this.isPortAvailable(port);
+    if (!portAvailable) {
+      console.error(`[ChromeBridge] Port ${port} in use, checking if it's our old instance...`);
+
+      // Try to connect to see if it's a valid WebSocket server
+      try {
+        const testWs = new WebSocket(`ws://localhost:${port}`);
+        await new Promise<void>((resolve, reject) => {
+          testWs.on('open', () => {
+            // It's a working WS server - maybe from another instance
+            testWs.close();
+            console.error('[ChromeBridge] Found existing WebSocket server, reusing connection');
+            resolve();
+          });
+          testWs.on('error', () => {
+            // Not a valid WS server, the port is taken by something else
+            reject(new Error('Port in use by non-WS server'));
+          });
+          setTimeout(() => reject(new Error('Connection timeout')), 1000);
+        });
+
+        // Port has a valid WS server, we don't need to start our own
+        // Just mark as started so we can try to connect to it
+        return;
+      } catch {
+        // Port is in use but not by a valid WS server
+        // Try next port
+        if (this.startAttempts < this.maxStartAttempts) {
+          console.error(`[ChromeBridge] Trying port ${port + 1}...`);
+          return this.start(port + 1);
+        }
+        console.error(`[ChromeBridge] Failed to start after ${this.maxStartAttempts} attempts`);
+        return;
+      }
+    }
 
     try {
       this.wss = new WebSocketServer({ port });
-      console.log(`[ChromeBridge] WebSocket server started on port ${port}`);
+      console.error(`[ChromeBridge] WebSocket server started on port ${port}`);
 
       this.wss.on('connection', (socket: WebSocket) => {
-        console.log('[ChromeBridge] Extension connected!');
+        console.error('[ChromeBridge] Extension connected!');
         this.socket = socket;
 
         socket.on('message', (data: WebSocket.RawData) => {
@@ -46,7 +108,7 @@ export class ChromeBridge {
         });
 
         socket.on('close', () => {
-          console.log('[ChromeBridge] Extension disconnected');
+          console.error('[ChromeBridge] Extension disconnected');
           this.socket = null;
           this.extensionVersion = null;
         });
@@ -58,10 +120,6 @@ export class ChromeBridge {
 
       this.wss.on('error', (err) => {
         console.error('[ChromeBridge] Server error:', err.message);
-        // Port might be in use, try to recover
-        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-          console.log('[ChromeBridge] Port in use, attempting to reuse...');
-        }
       });
     } catch (err) {
       console.error('[ChromeBridge] Failed to start server:', err);
@@ -77,7 +135,7 @@ export class ChromeBridge {
     }
 
     // Start the server if not already started
-    this.start();
+    await this.start();
 
     // Create a promise that resolves when connected
     this.connectionPromise = new Promise<void>((resolve) => {
@@ -125,7 +183,7 @@ export class ChromeBridge {
       // Handle hello message from extension
       if (message.type === 'hello') {
         this.extensionVersion = message.version || 'unknown';
-        console.log(`[ChromeBridge] Extension hello received, version: ${this.extensionVersion}`);
+        console.error(`[ChromeBridge] Extension hello received, version: ${this.extensionVersion}`);
 
         // Resolve any pending connection promise
         if (this.connectionResolve) {

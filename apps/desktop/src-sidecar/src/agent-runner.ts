@@ -127,7 +127,10 @@ export class AgentRunner {
   private appDataDir: string | null = null;
 
   constructor() {
-    chromeBridge.start();
+    // Start WebSocket server for Chrome extension communication
+    chromeBridge.start().catch(err => {
+      console.error('[AgentRunner] Failed to start Chrome bridge:', err);
+    });
   }
 
   /**

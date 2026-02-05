@@ -509,6 +509,13 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       try {
         console.log('[ChatStore] Loading messages for session', sessionId, 'retry:', retry);
         const session = await invoke<SessionDetails>('agent_get_session', { sessionId });
+        console.log('[ChatStore] Got session from backend:', {
+          sessionId,
+          messageCount: session.messages?.length || 0,
+          toolExecutionCount: session.toolExecutions?.length || 0,
+          hasMessages: !!session.messages,
+          firstMessage: session.messages?.[0],
+        });
         const agentStore = useAgentStore.getState();
 
         // Reconstruct turn activities from persisted data
@@ -526,6 +533,13 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
               merged.push(msg);
             }
           }
+
+          console.log('[ChatStore] Merge result:', {
+            sessionId,
+            existingCount: existingMessages.length,
+            incomingCount: incoming.length,
+            mergedCount: merged.length,
+          });
 
           return {
             ...existing,

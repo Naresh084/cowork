@@ -184,7 +184,7 @@ async function launchChromeWithDebugging(_autoRestart = true): Promise<{ success
   if (running) {
     // Chrome is running without debugging - use a SEPARATE profile
     // This allows automation without disrupting the user's browsing session
-    console.log('[chrome-launcher] Chrome already running, launching separate automation instance...');
+    console.error('[chrome-launcher] Chrome already running, launching separate automation instance...');
     userDataDir = getAutomationUserDataDir();
     usingSeparateProfile = true;
 
@@ -225,7 +225,7 @@ async function launchChromeWithDebugging(_autoRestart = true): Promise<{ success
       const ready = await hasDebuggingEnabled();
       if (ready) {
         if (usingSeparateProfile) {
-          console.log('[chrome-launcher] Separate automation Chrome instance ready');
+          console.error('[chrome-launcher] Separate automation Chrome instance ready');
         }
         return { success: true, usingSeparateProfile };
       }
