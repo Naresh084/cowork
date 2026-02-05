@@ -109,8 +109,12 @@ export class CommandValidator {
         if (regex.test(normalized)) {
           return true;
         }
-      } else if (normalized.includes(blocked.toLowerCase())) {
-        return true;
+      } else {
+        const escaped = blocked.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`(?:^|[;&|]\\s*)${escaped}`, 'i');
+        if (pattern.test(normalized)) {
+          return true;
+        }
       }
     }
 
@@ -263,7 +267,7 @@ export class CommandValidator {
   /**
    * Check if command modifies the specified path.
    */
-  private isModifyingCommand(command: string, _path: string): boolean {
+  private isModifyingCommand(command: string, path: string): boolean {
     const modifyingCommands = [
       'rm',
       'mv',
@@ -280,10 +284,16 @@ export class CommandValidator {
       'tee',
     ];
 
-    const firstToken = command.trim().split(/\s+/)[0];
-    return modifyingCommands.some(
-      (cmd) => firstToken === cmd || firstToken.endsWith(`/${cmd}`)
-    );
+    const subCommands = command.split(/[;&|]+/).map(c => c.trim());
+    for (const subCmd of subCommands) {
+      const firstToken = subCmd.split(/\s+/)[0]?.toLowerCase();
+      if (modifyingCommands.some(
+        (cmd) => firstToken === cmd || firstToken?.endsWith(`/${cmd}`)
+      ) && subCmd.includes(path)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

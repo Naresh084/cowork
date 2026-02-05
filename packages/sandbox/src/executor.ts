@@ -77,6 +77,8 @@ export class CommandExecutor {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
       let killed = false;
 
       const child = spawn(command, [], {
@@ -99,17 +101,21 @@ export class CommandExecutor {
 
       // Collect stdout
       child.stdout?.on('data', (data) => {
+        if (stdoutTruncated) return;
         stdout += data.toString();
         if (stdout.length > this.config.maxOutputSize) {
           stdout = stdout.slice(0, this.config.maxOutputSize) + '\n[Output truncated]';
+          stdoutTruncated = true;
         }
       });
 
       // Collect stderr
       child.stderr?.on('data', (data) => {
+        if (stderrTruncated) return;
         stderr += data.toString();
         if (stderr.length > this.config.maxOutputSize) {
           stderr = stderr.slice(0, this.config.maxOutputSize) + '\n[Output truncated]';
+          stderrTruncated = true;
         }
       });
 

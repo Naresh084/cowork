@@ -188,6 +188,14 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
 
         set({ availableConnectors: connectors, connectorStates: states, isDiscovering: false });
 
+        // Prune stale connector states that no longer match any discovered connector
+        const validIds = new Set(connectors.map(c => c.id));
+        const currentStates = get().connectorStates;
+        const prunedStates = new Map([...currentStates].filter(([id]) => validIds.has(id)));
+        if (prunedStates.size !== currentStates.size) {
+          set({ connectorStates: prunedStates });
+        }
+
         // Sync with settings store - remove stale configs
         const { installedConnectorConfigs, removeInstalledConnectorConfig } = useSettingsStore.getState();
         const managedNames = new Set(

@@ -36,11 +36,8 @@ export class OAuthService {
     // Store verifier for later token exchange
     this.pendingVerifier = pkce.verifier;
 
-    // Encode state with verifier for CSRF protection
-    const stateData = {
-      verifier: pkce.verifier,
-      nonce,
-    };
+    // Encode state with nonce for CSRF protection
+    const stateData = { nonce };
     const state = encodeStateData(stateData as Record<string, unknown>);
 
     // Build authorization URL
@@ -66,18 +63,17 @@ export class OAuthService {
    * Complete the OAuth flow by exchanging the authorization code for tokens.
    */
   async handleCallback(callback: OAuthCallbackResult): Promise<{ tokens: OAuthTokens; user: UserInfo }> {
-    // Validate and decode state
-    let stateData: Record<string, unknown>;
+    // Validate state parameter (decoding verifies it was not tampered with)
     try {
-      stateData = decodeStateData(callback.state);
+      decodeStateData(callback.state);
     } catch {
       throw new AuthenticationError('Invalid OAuth state parameter');
     }
 
-    // Verify the state matches
-    const verifier = stateData.verifier as string;
-    if (this.pendingVerifier && verifier !== this.pendingVerifier) {
-      throw new AuthenticationError('OAuth state mismatch - possible CSRF attack');
+    // Verify we have a pending verifier from startAuthFlow
+    const verifier = this.pendingVerifier;
+    if (!verifier) {
+      throw new AuthenticationError('No pending OAuth flow - possible replay attack');
     }
 
     // Exchange code for tokens

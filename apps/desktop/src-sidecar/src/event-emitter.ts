@@ -257,6 +257,58 @@ export class EventEmitter {
     this.emit('context:usage', sessionId, contextUsage);
   }
 
+  // ============================================================================
+  // Integration Events
+  // ============================================================================
+
+  /**
+   * Emit platform connection status change.
+   */
+  integrationStatus(status: { platform: string; connected: boolean; displayName?: string; error?: string; connectedAt?: number; lastMessageAt?: number }): void {
+    this.emit('integration:status', undefined, status);
+  }
+
+  /**
+   * Emit WhatsApp QR code for scanning.
+   */
+  integrationQR(qrDataUrl: string): void {
+    this.emit('integration:qr', undefined, { qrDataUrl });
+  }
+
+  /**
+   * Emit incoming message notification from platform.
+   */
+  integrationMessageIn(platform: string, sender: string, content: string): void {
+    this.emit('integration:message_in', undefined, {
+      platform,
+      sender,
+      content: content.substring(0, 100),
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit outgoing message sent to platform.
+   */
+  integrationMessageOut(platform: string, chatId: string): void {
+    this.emit('integration:message_out', undefined, {
+      platform,
+      chatId,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit message queued notification.
+   */
+  integrationQueued(platform: string, queueSize: number): void {
+    this.emit('integration:queued', undefined, {
+      platform,
+      queueSize,
+      timestamp: Date.now(),
+    });
+  }
+
   /**
    * Emit error event.
    */

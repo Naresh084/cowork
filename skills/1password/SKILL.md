@@ -37,9 +37,9 @@ The shell tool uses a fresh TTY per command. To avoid re-prompts and failures, a
 Example (see `tmux` skill for socket conventions, do not reuse old session names):
 
 ```bash
-SOCKET_DIR="${OPENCLAW_TMUX_SOCKET_DIR:-${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/openclaw-tmux-sockets}}"
+SOCKET_DIR="${GEMINICOWORK_TMUX_SOCKET_DIR:-${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/geminicowork-tmux-sockets}}"
 mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/openclaw-op.sock"
+SOCKET="$SOCKET_DIR/geminicowork-op.sock"
 SESSION="op-auth-$(date +%Y%m%d-%H%M%S)"
 
 tmux -S "$SOCKET" new -d -s "$SESSION" -n shell

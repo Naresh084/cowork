@@ -405,6 +405,16 @@ registerHandler('initialize', async (params) => {
   // Store app data directory for service initialization
   appDataDirectory = appDataDir;
   const result = await agentRunner.initialize(appDataDir);
+
+  // Initialize integration bridge (messaging platforms) - non-fatal
+  try {
+    const { integrationBridge } = await import('./integrations/index.js');
+    await integrationBridge.initialize(agentRunner);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[init] Integration bridge init warning: ${msg}\n`);
+  }
+
   return { success: true, sessionsRestored: result.sessionsRestored };
 });
 
@@ -1600,6 +1610,85 @@ registerHandler('call_connector_app_tool', async (params) => {
 
   const result = await connectorBridge.callTool(p.connectorId, p.toolName, p.args || {});
   return { result };
+});
+
+// ============================================================================
+// Integration (Messaging Platform) Handlers
+// ============================================================================
+
+registerHandler('integration_list_statuses', async () => {
+  const { integrationBridge } = await import('./integrations/index.js');
+  return integrationBridge.getStatuses();
+});
+
+registerHandler('integration_connect', async (params) => {
+  const { platform, config } = params as { platform: string; config: Record<string, string> };
+  const validPlatforms = ['whatsapp', 'slack', 'telegram'];
+  if (!platform || !validPlatforms.includes(platform)) {
+    throw new Error(`Invalid platform: ${platform}. Must be one of: ${validPlatforms.join(', ')}`);
+  }
+  // Platform-specific config validation
+  const safeConfig = config || {};
+  if (platform === 'slack' && (!safeConfig.botToken || !safeConfig.appToken)) {
+    throw new Error('Slack requires both botToken (xoxb-) and appToken (xapp-)');
+  }
+  if (platform === 'telegram' && !safeConfig.botToken) {
+    throw new Error('Telegram requires a botToken from @BotFather');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.connect(platform as any, safeConfig);
+  return integrationBridge.getStatuses().find(s => s.platform === platform);
+});
+
+registerHandler('integration_disconnect', async (params) => {
+  const { platform } = params as { platform: string };
+  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+    throw new Error(`Invalid platform: ${platform}`);
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.disconnect(platform as any);
+  return { success: true };
+});
+
+registerHandler('integration_get_status', async (params) => {
+  const { platform } = params as { platform: string };
+  const { integrationBridge } = await import('./integrations/index.js');
+  const statuses = integrationBridge.getStatuses();
+  return statuses.find(s => s.platform === platform) || { platform, connected: false };
+});
+
+registerHandler('integration_get_qr', async () => {
+  const { integrationBridge } = await import('./integrations/index.js');
+  return { qrDataUrl: integrationBridge.getWhatsAppQR() };
+});
+
+registerHandler('integration_configure', async (params) => {
+  const { platform, config } = params as { platform: string; config: Record<string, string> };
+  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+    throw new Error(`Invalid platform: ${platform}`);
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  const store = integrationBridge.getStore();
+  await store.setConfig(platform as any, { platform: platform as any, enabled: true, config: config || {} });
+  return { success: true };
+});
+
+registerHandler('integration_get_config', async (params) => {
+  const { platform } = params as { platform: string };
+  if (!platform) throw new Error('platform is required');
+  const { integrationBridge } = await import('./integrations/index.js');
+  const store = integrationBridge.getStore();
+  return store.getConfig(platform as any);
+});
+
+registerHandler('integration_send_test', async (params) => {
+  const { platform, message } = params as { platform: string; message?: string };
+  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+    throw new Error(`Invalid platform: ${platform}`);
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.sendTestMessage(platform as any, message || 'Hello from Gemini Cowork!');
+  return { success: true };
 });
 
 // ============================================================================

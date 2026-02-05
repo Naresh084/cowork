@@ -280,6 +280,11 @@ export type AgentEventType =
   | 'chat:item'
   | 'chat:update'
   | 'chat:items'
+  | 'integration:status'
+  | 'integration:qr'
+  | 'integration:message_in'
+  | 'integration:message_out'
+  | 'integration:queued'
   | 'error';
 
 export interface QuestionRequest {

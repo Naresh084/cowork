@@ -13,7 +13,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .manage(AgentState::new())
@@ -145,21 +144,16 @@ fn main() {
             commands::connectors::get_connector_apps,
             commands::connectors::get_connector_app_content,
             commands::connectors::call_connector_app_tool,
+            // Integration commands
+            commands::integrations::agent_integration_list_statuses,
+            commands::integrations::agent_integration_connect,
+            commands::integrations::agent_integration_disconnect,
+            commands::integrations::agent_integration_get_qr,
+            commands::integrations::agent_integration_configure,
+            commands::integrations::agent_integration_send_test,
         ])
         .setup(|app| {
-            // Spawn auto-update checker on startup (only in release mode)
-            #[cfg(not(debug_assertions))]
-            {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    // Wait a few seconds for app to fully initialize
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                    check_and_install_updates(handle).await;
-                });
-            }
-
-            // Suppress unused variable warning in debug mode
-            #[cfg(debug_assertions)]
+            // Auto-update disabled until a proper signing key pair is configured
             let _ = app;
 
             Ok(())
@@ -168,59 +162,3 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-#[cfg(not(debug_assertions))]
-async fn check_and_install_updates(app: tauri::AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
-
-    loop {
-        match app.updater().check().await {
-            Ok(Some(update)) => {
-                // Emit event to frontend to show update notification
-                let _ = app.emit("update:available", serde_json::json!({
-                    "version": update.version,
-                    "body": update.body
-                }));
-
-                // Download and install immediately
-                let download_result = update.download_and_install(
-                    |progress, total| {
-                        let percent = if let Some(total) = total {
-                            (progress as f64 / total as f64 * 100.0) as u32
-                        } else {
-                            0
-                        };
-                        // Emit progress to frontend
-                        let _ = app.emit("update:progress", serde_json::json!({
-                            "progress": progress,
-                            "total": total,
-                            "percent": percent
-                        }));
-                    },
-                    || {},
-                ).await;
-
-                match download_result {
-                    Ok(_) => {
-                        let _ = app.emit("update:installed", serde_json::json!({}));
-
-                        // Small delay to let UI show "Restarting..." message
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-                        // Restart the app
-                        app.restart();
-                    }
-                    Err(e) => {
-                        let _ = app.emit("update:error", serde_json::json!({
-                            "error": e.to_string()
-                        }));
-                    }
-                }
-            }
-            Ok(None) => {}
-            Err(_) => {}
-        }
-
-        // Check for updates every 30 minutes
-        tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
-    }
-}

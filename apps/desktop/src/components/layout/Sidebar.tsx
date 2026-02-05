@@ -26,10 +26,11 @@ import { useSessionStore, type SessionSummary } from '../../stores/session-store
 import { useChatStore } from '../../stores/chat-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
+import { useAppStore } from '../../stores/app-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { BrandMark } from '../icons/BrandMark';
-import { ModelSettingsModal } from '../modals/ModelSettingsModal';
+// ModelSettingsModal moved to SettingsView
 import { SkillsModal } from '../skills/SkillsModal';
 import { useSkillStore } from '../../stores/skill-store';
 import { CronModal } from '../cron/CronModal';
@@ -1055,7 +1056,6 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
   const [newApiKey, setNewApiKey] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
-  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { setApiKey, clearApiKey } = useAuthStore();
   const { userName, updateSetting } = useSettingsStore();
@@ -1277,14 +1277,17 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
         )}
       </div>
 
-      {/* Model Settings */}
+      {/* Settings */}
       <div className="px-4 pb-2">
         <button
-          onClick={() => setModelSettingsOpen(true)}
+          onClick={() => {
+            onClose();
+            useAppStore.getState().setCurrentView('settings');
+          }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/[0.04] transition-colors"
         >
           <Settings2 className="w-4 h-4" />
-          Model Settings
+          Settings
         </button>
       </div>
 
@@ -1304,10 +1307,6 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
   return (
     <>
       {createPortal(menuContent, document.body)}
-      <ModelSettingsModal
-        isOpen={modelSettingsOpen}
-        onClose={() => setModelSettingsOpen(false)}
-      />
     </>
   );
 }

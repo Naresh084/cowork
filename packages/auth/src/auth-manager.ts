@@ -301,18 +301,18 @@ export class AuthManager {
    * Default browser opener using system command.
    */
   private async defaultOpenBrowser(url: string): Promise<void> {
-    const { exec } = await import('child_process');
+    const { execFile } = await import('child_process');
     const { promisify } = await import('util');
-    const execAsync = promisify(exec);
+    const execFileAsync = promisify(execFile);
 
     const platform = process.platform;
 
     if (platform === 'darwin') {
-      await execAsync(`open "${url}"`);
+      await execFileAsync('open', [url]);
     } else if (platform === 'win32') {
-      await execAsync(`start "${url}"`);
+      await execFileAsync('cmd', ['/c', 'start', '', url]);
     } else {
-      await execAsync(`xdg-open "${url}"`);
+      await execFileAsync('xdg-open', [url]);
     }
   }
 }

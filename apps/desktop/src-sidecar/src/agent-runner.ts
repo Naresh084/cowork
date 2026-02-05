@@ -1244,7 +1244,7 @@ export class AgentRunner {
       model: session.model,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      lastAccessedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
       messageCount: session.messages.length,
       messages: session.messages,
       chatItems: session.chatItems,
@@ -1809,12 +1809,75 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     // Legacy skill prompts
     const skillBlock = await this.buildSkillsPrompt(session);
 
+    // Integration prompt (conditional - only when messaging platforms connected)
+    const integrationPrompt = this.buildIntegrationPrompt();
+
     return buildFullSystemPrompt(basePrompt, [
       agentsMdPrompt,
       memoryPrompt,
       subagentPrompt,
       skillBlock,
+      integrationPrompt,
     ].filter(Boolean));
+  }
+
+  /**
+   * Build integration system prompt section.
+   * Returns empty string if no platforms connected.
+   */
+  private buildIntegrationPrompt(): string {
+    try {
+      // Dynamic import check - if integrations module not available, return empty
+      const { integrationBridge } = require('./integrations/index.js');
+      const statuses = integrationBridge.getStatuses();
+      const connected = statuses.filter((s: any) => s.connected);
+
+      if (connected.length === 0) return '';
+
+      const displayNames: Record<string, string> = {
+        whatsapp: 'WhatsApp',
+        slack: 'Slack',
+        telegram: 'Telegram',
+      };
+
+      const platformList = connected
+        .map((s: any) => {
+          const name = displayNames[s.platform] || s.platform;
+          return `- ${name}: Connected${s.displayName ? ` as ${s.displayName}` : ''}`;
+        })
+        .join('\n');
+
+      const toolList = connected
+        .map((s: any) => {
+          const name = displayNames[s.platform] || s.platform;
+          return `- \`send_notification_${s.platform}\`: Send a message to the user via ${name}`;
+        })
+        .join('\n');
+
+      return `## Messaging Integrations
+
+The user has connected the following messaging platforms. You can proactively send notifications through these platforms.
+
+### Connected Platforms
+${platformList}
+
+### Notification Tools
+${toolList}
+
+### When to Use Notifications
+- Proactively notify when scheduled/long-running tasks complete
+- Alert about important findings during operations
+- Send summaries when cron jobs finish
+- Respond to user requests like "notify me on WhatsApp when done"
+
+### Guidelines
+- Keep notification messages concise (platform character limits apply)
+- Use plain text formatting (no complex markdown)
+- Don't send notifications for trivial operations
+- Always use the last active chat unless told otherwise`;
+    } catch {
+      return '';
+    }
   }
 
   /**
@@ -2149,6 +2212,19 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       },
     };
 
+    // Notification tools (conditional - only for connected messaging platforms)
+    let notificationTools: ToolHandler[] = [];
+    try {
+      // Use require() since buildToolHandlers is synchronous
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createNotificationTools } = require('./tools/notification-tools.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { integrationBridge } = require('./integrations/index.js');
+      notificationTools = createNotificationTools(() => integrationBridge);
+    } catch {
+      // Integration module not available - skip notification tools
+    }
+
     return [
       viewFileTool,
       ...researchTools,
@@ -2156,6 +2232,7 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       ...mediaTools,
       ...groundingTools,
       ...connectorTools,
+      ...notificationTools,
     ];
   }
 

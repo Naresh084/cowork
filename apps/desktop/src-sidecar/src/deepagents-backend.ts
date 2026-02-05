@@ -345,6 +345,9 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   async grepRaw(pattern: string, path = '/', glob: string | null = null): Promise<GrepMatch[] | string> {
+    if (pattern.length > 500) {
+      return 'Error: Regex pattern too long (max 500 chars)';
+    }
     let regex: RegExp;
     try {
       regex = new RegExp(pattern);
@@ -587,11 +590,13 @@ export class CoworkBackend implements SandboxBackendProtocol {
 
   private async walkFiles(
     baseAbsolute: string,
-    baseVirtual: string
+    baseVirtual: string,
+    maxDepth = 20
   ): Promise<Array<{ absolute: string; virtual: string; relative: string }>> {
     const results: Array<{ absolute: string; virtual: string; relative: string }> = [];
 
-    const walk = async (dir: string, relativeBase: string) => {
+    const walk = async (dir: string, relativeBase: string, depth: number) => {
+      if (depth > maxDepth) return;
       let entries;
       try {
         entries = await readdir(dir, { withFileTypes: true });
@@ -603,7 +608,7 @@ export class CoworkBackend implements SandboxBackendProtocol {
         const absolute = join(dir, entry.name);
         const relative = relativeBase ? join(relativeBase, entry.name) : entry.name;
         if (entry.isDirectory()) {
-          await walk(absolute, relative);
+          await walk(absolute, relative, depth + 1);
         } else if (entry.isFile()) {
           const virtual = ensureLeadingSlash(toPosixPath(join(baseVirtual, relative)));
           results.push({
@@ -615,7 +620,7 @@ export class CoworkBackend implements SandboxBackendProtocol {
       }
     };
 
-    await walk(baseAbsolute, '');
+    await walk(baseAbsolute, '', 0);
     return results;
   }
 }

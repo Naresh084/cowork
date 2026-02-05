@@ -71,9 +71,14 @@ export class MCPClientManager {
           },
         });
       } else if (state.config.command) {
+        // Validate command for shell metacharacters
+        const cmd = state.config.command;
+        if (cmd.includes(';') || cmd.includes('|') || cmd.includes('&') || cmd.includes('`') || cmd.includes('$(')) {
+          throw new Error(`Invalid MCP server command: contains shell metacharacters`);
+        }
         // Stdio transport for local process-based MCP servers
         transport = new StdioClientTransport({
-          command: state.config.command,
+          command: cmd,
           args: state.config.args,
           env: state.config.env,
         });

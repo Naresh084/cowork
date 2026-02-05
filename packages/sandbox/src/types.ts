@@ -60,7 +60,6 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
     '/var/tmp',
   ],
   deniedPaths: [
-    '/',
     '/etc',
     '/usr',
     '/bin',

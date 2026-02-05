@@ -185,6 +185,44 @@ export type AgentEvent =
       usedTokens: number;
       maxTokens: number;
       percentUsed: number;
+    }
+  // Integration events
+  | {
+      type: 'integration:status';
+      sessionId: string;
+      platform: string;
+      connected: boolean;
+      displayName?: string;
+      error?: string;
+      connectedAt?: number;
+      lastMessageAt?: number;
+    }
+  | {
+      type: 'integration:qr';
+      sessionId: string;
+      qrDataUrl: string;
+    }
+  | {
+      type: 'integration:message_in';
+      sessionId: string;
+      platform: string;
+      sender: string;
+      content: string;
+      timestamp: number;
+    }
+  | {
+      type: 'integration:message_out';
+      sessionId: string;
+      platform: string;
+      chatId: string;
+      timestamp: number;
+    }
+  | {
+      type: 'integration:queued';
+      sessionId: string;
+      platform: string;
+      queueSize: number;
+      timestamp: number;
     };
 
 /**
@@ -236,6 +274,12 @@ export const TAURI_EVENT_NAMES = [
   'agent:chat:item',
   'agent:chat:update',
   'agent:chat:items',
+  // Integration events
+  'agent:integration:status',
+  'agent:integration:qr',
+  'agent:integration:message_in',
+  'agent:integration:message_out',
+  'agent:integration:queued',
 ] as const;
 
 export type TauriEventName = (typeof TAURI_EVENT_NAMES)[number];
