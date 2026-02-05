@@ -50,6 +50,13 @@ export interface InstalledSkillConfig {
   source: 'bundled' | 'managed' | 'workspace' | 'custom';
 }
 
+export interface InstalledCommandConfig {
+  id: string;
+  name: string;
+  installedAt: number;
+  source: 'bundled' | 'managed';
+}
+
 export interface PermissionDefaults {
   fileRead: 'ask' | 'allow' | 'deny';
   fileWrite: 'ask' | 'allow' | 'deny';
@@ -88,6 +95,9 @@ export interface RightPanelSections {
 }
 
 interface SettingsState {
+  // User
+  userName: string;
+
   // General
   defaultWorkingDirectory: string;
   theme: Theme;
@@ -118,6 +128,9 @@ interface SettingsState {
   // Skills Marketplace
   skillsSettings: SkillsSettings;
   installedSkillConfigs: InstalledSkillConfig[];
+
+  // Commands Marketplace
+  installedCommandConfigs: InstalledCommandConfig[];
 
   // UI State
   sidebarCollapsed: boolean;
@@ -174,6 +187,10 @@ interface SettingsActions {
   toggleInstalledSkillEnabled: (skillId: string) => void;
   syncInstalledSkills: () => Promise<void>;
 
+  // Commands marketplace management
+  addInstalledCommandConfig: (config: InstalledCommandConfig) => void;
+  removeInstalledCommandConfig: (commandId: string) => void;
+
   // Specialized models management
   updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
   syncSpecializedModels: () => Promise<void>;
@@ -217,6 +234,9 @@ const defaultPermissions: PermissionDefaults = {
 };
 
 const initialState: SettingsState = {
+  // User
+  userName: '',
+
   // General
   defaultWorkingDirectory: '',
   theme: 'dark',
@@ -252,6 +272,9 @@ const initialState: SettingsState = {
     autoCheckEligibility: true,
   },
   installedSkillConfigs: [],
+
+  // Commands Marketplace
+  installedCommandConfigs: [],
 
   // UI State
   sidebarCollapsed: false,
@@ -571,6 +594,26 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }
       },
 
+      // Commands marketplace management
+      addInstalledCommandConfig: (config) => {
+        set((state) => {
+          // Check if already exists
+          const exists = state.installedCommandConfigs.some((c) => c.name === config.name);
+          if (exists) {
+            return state;
+          }
+          return {
+            installedCommandConfigs: [...state.installedCommandConfigs, config],
+          };
+        });
+      },
+
+      removeInstalledCommandConfig: (commandId) => {
+        set((state) => ({
+          installedCommandConfigs: state.installedCommandConfigs.filter((c) => c.id !== commandId),
+        }));
+      },
+
       // Specialized models management
       updateSpecializedModel: async (key, value) => {
         set((state) => ({
@@ -717,6 +760,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     {
       name: 'settings-store',
       partialize: (state) => ({
+        userName: state.userName,
         defaultWorkingDirectory: state.defaultWorkingDirectory,
         theme: state.theme,
         fontSize: state.fontSize,
@@ -825,3 +869,5 @@ export const useLiveViewOpen = () =>
   useSettingsStore((state) => state.liveViewOpen);
 export const useLiveViewSplitRatio = () =>
   useSettingsStore((state) => state.liveViewSplitRatio);
+export const useUserName = () =>
+  useSettingsStore((state) => state.userName);

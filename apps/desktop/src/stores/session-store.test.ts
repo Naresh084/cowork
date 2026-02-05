@@ -26,6 +26,7 @@ describe('session-store', () => {
           messageCount: 5,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 
@@ -100,6 +101,7 @@ describe('session-store', () => {
             messageCount: 0,
             createdAt: Date.now(),
             updatedAt: Date.now(),
+            lastAccessedAt: Date.now(),
           },
         ],
       });
@@ -128,6 +130,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
         {
           id: 'session-2',
@@ -138,6 +141,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 
@@ -163,6 +167,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 
@@ -192,6 +197,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 
@@ -214,6 +220,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 
@@ -242,6 +249,7 @@ describe('session-store', () => {
           messageCount: 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          lastAccessedAt: Date.now(),
         },
       ];
 

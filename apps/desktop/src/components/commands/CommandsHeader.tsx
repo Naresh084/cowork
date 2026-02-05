@@ -24,11 +24,12 @@ export function CommandsHeader({ onCreateClick }: CommandsHeaderProps) {
     activeTab,
     setActiveTab,
     getInstalledCount,
-    commands,
+    availableCommands,
   } = useCommandStore();
 
   const installedCount = getInstalledCount();
-  const totalCount = commands.length;
+  // Count bundled commands (available for install)
+  const bundledCount = availableCommands.filter((c) => c.source.type === 'bundled').length;
 
   return (
     <div className="px-6 py-4 border-b border-zinc-800 space-y-4">
@@ -66,7 +67,7 @@ export function CommandsHeader({ onCreateClick }: CommandsHeaderProps) {
                 : 'text-zinc-400 hover:text-zinc-200'
             )}
           >
-            Available ({totalCount})
+            Available ({bundledCount})
           </button>
           <button
             onClick={() => setActiveTab('installed')}

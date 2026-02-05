@@ -54,6 +54,7 @@ interface SessionMetadataV2 {
   approvalMode: 'auto' | 'read_only' | 'full';
   createdAt: number;
   updatedAt: number;
+  lastAccessedAt: number;
 }
 
 interface SessionIndex {
@@ -68,6 +69,7 @@ interface SessionIndex {
     messageCount: number;
     createdAt: number;
     updatedAt: number;
+    lastAccessedAt: number;
   }>;
 }
 
@@ -214,6 +216,8 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
     metadata: {
       ...v1Data.metadata,
       version: 2,
+      // For migrated sessions, set lastAccessedAt to updatedAt
+      lastAccessedAt: v1Data.metadata.updatedAt,
     },
     chatItems: timeline,
     tasks: v1Data.tasks,
@@ -363,7 +367,12 @@ export class SessionPersistence {
       ]);
 
       return {
-        metadata: { ...metadata, version: 2 },
+        metadata: {
+          ...metadata,
+          version: 2,
+          // Backward compat: if lastAccessedAt is missing, use updatedAt
+          lastAccessedAt: metadata.lastAccessedAt || metadata.updatedAt,
+        },
         chatItems: chatItemsData,
         tasks,
         artifacts,
@@ -448,6 +457,7 @@ export class SessionPersistence {
         approvalMode: data.metadata.approvalMode,
         createdAt: data.metadata.createdAt,
         updatedAt: data.metadata.updatedAt,
+        lastAccessedAt: data.metadata.lastAccessedAt,
       }),
       this.writeJson(join(sessionDir, 'chat-items.json'), {
         version: SCHEMA_VERSION,
@@ -646,6 +656,7 @@ export class SessionPersistence {
       messageCount,
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
+      lastAccessedAt: data.metadata.lastAccessedAt,
     };
 
     if (existingIdx >= 0) {

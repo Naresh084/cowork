@@ -47,6 +47,7 @@ export {
   useRightPanelCollapsed,
   useRightPanelPinned,
   useRightPanelTab,
+  useUserName,
   type MCPServerConfig,
   type PermissionDefaults,
   type ApprovalMode,
@@ -79,14 +80,24 @@ export {
   type UpdateMemoryInput,
 } from './memory-store';
 
-// Command Store (Simplified - frontend only)
+// Command Store (Marketplace-style)
 export {
   useCommandStore,
   useCommands,
+  useAvailableCommands,
+  useIsDiscoveringCommands,
   useIsPaletteOpen,
   usePaletteQuery,
+  useCommandSearchQuery,
+  useCommandCategory,
+  useCommandActiveTab,
+  useSelectedCommandId,
+  useCommandError,
   parseCommandInput,
   isCommandInput,
   type SlashCommand,
   type CommandCategory,
+  type CommandManifest,
+  type CommandFrontmatter,
+  type CommandSource,
 } from './command-store';

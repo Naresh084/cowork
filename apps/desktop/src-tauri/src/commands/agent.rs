@@ -25,6 +25,7 @@ pub struct SessionSummary {
     pub message_count: u32,
     pub created_at: i64,
     pub updated_at: i64,
+    pub last_accessed_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +429,24 @@ pub async fn agent_update_session_working_directory(
     });
 
     manager.send_command("update_session_working_directory", params).await?;
+    Ok(())
+}
+
+/// Update session last accessed time
+#[tauri::command]
+pub async fn agent_update_session_last_accessed(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+    });
+
+    manager.send_command("update_session_last_accessed", params).await?;
     Ok(())
 }
 

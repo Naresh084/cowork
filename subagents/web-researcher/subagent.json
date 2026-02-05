@@ -1,0 +1,12 @@
+{
+  "name": "web-researcher",
+  "displayName": "Web Researcher",
+  "description": "Conducts in-depth research and information gathering. Use for: finding documentation, searching for solutions, understanding external APIs, investigating best practices.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "research",
+  "icon": "search",
+  "tags": ["research", "web", "documentation", "api", "search"],
+  "priority": 100,
+  "source": "built-in"
+}

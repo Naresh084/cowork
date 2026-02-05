@@ -1,19 +1,20 @@
-import type { Command } from '../../stores/command-store';
+import type { CommandManifest } from '../../stores/command-store';
+import { useCommandStore } from '../../stores/command-store';
 import { CommandCard } from './CommandCard';
 
 interface CommandGridProps {
-  commands: Command[];
-  installingIds: Set<string>;
-  onSelect: (commandName: string) => void;
-  onInstall: (commandName: string) => void;
+  commands: CommandManifest[];
+  onSelect: (commandId: string) => void;
+  onInstall: (commandId: string) => void;
 }
 
 export function CommandGrid({
   commands,
-  installingIds,
   onSelect,
   onInstall,
 }: CommandGridProps) {
+  const { isInstalling, isCommandInstalled } = useCommandStore();
+
   if (commands.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
@@ -28,11 +29,12 @@ export function CommandGrid({
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {commands.map((command) => (
         <CommandCard
-          key={command.name}
+          key={command.id}
           command={command}
-          isInstalling={installingIds.has(command.name)}
-          onSelect={() => onSelect(command.name)}
-          onInstall={() => onInstall(command.name)}
+          isInstalled={isCommandInstalled(command.id)}
+          isInstalling={isInstalling.has(command.id)}
+          onSelect={() => onSelect(command.id)}
+          onInstall={() => onInstall(command.id)}
         />
       ))}
     </div>

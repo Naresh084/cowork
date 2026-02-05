@@ -1,0 +1,25 @@
+{
+  "name": "clear",
+  "displayName": "Clear Conversation",
+  "description": "Clear the current conversation while preserving memories",
+  "version": "1.0.0",
+  "author": "Gemini Cowork",
+  "aliases": ["cls", "reset"],
+  "category": "utility",
+  "icon": "trash-2",
+  "arguments": [
+    {
+      "name": "all",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Also clear task list and artifacts"
+    }
+  ],
+  "type": "system",
+  "requiresSession": true,
+  "requiresWorkingDir": false,
+  "autoSuggest": true,
+  "priority": 80,
+  "keywords": ["clear", "reset", "clean", "new"]
+}

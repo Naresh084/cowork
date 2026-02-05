@@ -1,7 +1,6 @@
 import { X, Download, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCommandStore } from '../../stores/command-store';
-import { useSessionStore } from '../../stores/session-store';
 import type { CommandCategory } from '../../stores/command-store';
 import {
   FolderCog,
@@ -30,26 +29,22 @@ const CATEGORY_COLORS: Record<CommandCategory, string> = {
 };
 
 interface CommandDetailsPanelProps {
-  commandName: string;
+  commandId: string;
   onClose: () => void;
 }
 
-export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPanelProps) {
+export function CommandDetailsPanel({ commandId, onClose }: CommandDetailsPanelProps) {
   const {
-    getCommandByName,
+    availableCommands,
     isCommandInstalled,
     installCommand,
     uninstallCommand,
     isInstalling,
   } = useCommandStore();
 
-  const { sessions, activeSessionId } = useSessionStore();
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const workingDirectory = activeSession?.workingDirectory;
-
-  const command = getCommandByName(commandName);
-  const isInstalled = isCommandInstalled(commandName);
-  const isCurrentlyInstalling = isInstalling.has(commandName);
+  const command = availableCommands.find((c) => c.id === commandId);
+  const isInstalled = command ? isCommandInstalled(command.id) : false;
+  const isCurrentlyInstalling = isInstalling.has(commandId);
 
   if (!command) {
     return (
@@ -59,8 +54,10 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
     );
   }
 
-  const CategoryIcon = CATEGORY_ICONS[command.category] || FileText;
-  const categoryColor = CATEGORY_COLORS[command.category] || 'text-zinc-400';
+  const { frontmatter } = command;
+  const CategoryIcon = CATEGORY_ICONS[frontmatter.category] || FileText;
+  const categoryColor = CATEGORY_COLORS[frontmatter.category] || 'text-zinc-400';
+  const emoji = frontmatter.metadata?.emoji;
 
   return (
     <div className="flex flex-col h-full">
@@ -68,12 +65,16 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
       <div className="flex items-start justify-between p-4 border-b border-zinc-800">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center">
-            <CategoryIcon className={cn('w-5 h-5', categoryColor)} />
+            {emoji ? (
+              <span className="text-xl">{emoji}</span>
+            ) : (
+              <CategoryIcon className={cn('w-5 h-5', categoryColor)} />
+            )}
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-zinc-100">/{command.name}</h3>
+            <h3 className="text-lg font-semibold text-zinc-100">/{frontmatter.name}</h3>
             <span className="text-xs text-zinc-500 capitalize">
-              {command.category}
+              {frontmatter.category}
             </span>
           </div>
         </div>
@@ -89,14 +90,14 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
         {/* Description */}
         <div>
-          <p className="text-sm text-zinc-300">{command.description}</p>
+          <p className="text-sm text-zinc-300">{frontmatter.description}</p>
         </div>
 
         {/* Action Button */}
         <div>
           {isInstalled ? (
             <button
-              onClick={() => uninstallCommand(command.name, workingDirectory || undefined)}
+              onClick={() => uninstallCommand(command.id)}
               disabled={isCurrentlyInstalling}
               className={cn(
                 'flex items-center justify-center gap-2 w-full py-2 rounded-lg font-medium transition-colors',
@@ -114,7 +115,7 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
             </button>
           ) : (
             <button
-              onClick={() => installCommand(command.name, workingDirectory || undefined)}
+              onClick={() => installCommand(command.id)}
               disabled={isCurrentlyInstalling}
               className={cn(
                 'flex items-center justify-center gap-2 w-full py-2 rounded-lg font-medium transition-colors',
@@ -134,13 +135,13 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
         </div>
 
         {/* Aliases */}
-        {command.aliases.length > 0 && (
+        {frontmatter.aliases && frontmatter.aliases.length > 0 && (
           <div>
             <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
               Aliases
             </h4>
             <div className="flex flex-wrap gap-2">
-              {command.aliases.map((alias) => (
+              {frontmatter.aliases.map((alias) => (
                 <span
                   key={alias}
                   className="px-2 py-1 rounded-md text-xs bg-zinc-800 text-zinc-300"
@@ -152,36 +153,16 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
           </div>
         )}
 
-        {/* Arguments */}
-        {command.arguments.length > 0 && (
+        {/* Prompt Preview */}
+        {command.prompt && (
           <div>
             <h4 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
-              Arguments
+              Prompt Preview
             </h4>
-            <div className="space-y-2">
-              {command.arguments.map((arg) => (
-                <div
-                  key={arg.name}
-                  className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-700"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-zinc-200">{arg.name}</span>
-                    <span className="text-xs text-zinc-500">({arg.type})</span>
-                    {arg.required && (
-                      <span className="text-xs text-red-400">required</span>
-                    )}
-                  </div>
-                  {arg.description && (
-                    <p className="text-xs text-zinc-400">{arg.description}</p>
-                  )}
-                  {arg.default !== undefined && (
-                    <p className="text-xs text-zinc-500 mt-1">
-                      Default: {String(arg.default)}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
+            <pre className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-700 text-xs text-zinc-400 whitespace-pre-wrap overflow-auto max-h-48">
+              {command.prompt.slice(0, 500)}
+              {command.prompt.length > 500 && '...'}
+            </pre>
           </div>
         )}
 
@@ -191,23 +172,21 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
             Details
           </h4>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-zinc-500">Version</dt>
-              <dd className="text-zinc-300">{command.version}</dd>
-            </div>
-            {command.author && (
+            {frontmatter.metadata?.version && (
+              <div className="flex justify-between">
+                <dt className="text-zinc-500">Version</dt>
+                <dd className="text-zinc-300">{frontmatter.metadata.version}</dd>
+              </div>
+            )}
+            {frontmatter.metadata?.author && (
               <div className="flex justify-between">
                 <dt className="text-zinc-500">Author</dt>
-                <dd className="text-zinc-300">{command.author}</dd>
+                <dd className="text-zinc-300">{frontmatter.metadata.author}</dd>
               </div>
             )}
             <div className="flex justify-between">
-              <dt className="text-zinc-500">Type</dt>
-              <dd className="text-zinc-300 capitalize">{command.type}</dd>
-            </div>
-            <div className="flex justify-between">
               <dt className="text-zinc-500">Source</dt>
-              <dd className="text-zinc-300 capitalize">{command.source}</dd>
+              <dd className="text-zinc-300 capitalize">{command.source.type}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-zinc-500">Status</dt>
@@ -215,14 +194,12 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
                 {isInstalled ? 'Installed' : 'Not Installed'}
               </dd>
             </div>
-            <div className="flex justify-between">
-              <dt className="text-zinc-500">Requires Session</dt>
-              <dd className="text-zinc-300">{command.requiresSession ? 'Yes' : 'No'}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-zinc-500">Requires Working Dir</dt>
-              <dd className="text-zinc-300">{command.requiresWorkingDir ? 'Yes' : 'No'}</dd>
-            </div>
+            {frontmatter.action && (
+              <div className="flex justify-between">
+                <dt className="text-zinc-500">Action</dt>
+                <dd className="text-zinc-300">{frontmatter.action}</dd>
+              </div>
+            )}
           </dl>
         </div>
 
@@ -230,7 +207,7 @@ export function CommandDetailsPanel({ commandName, onClose }: CommandDetailsPane
         <div className="p-3 rounded-lg bg-zinc-800/50 border border-zinc-700">
           <p className="text-xs text-zinc-400">
             <span className="text-zinc-300 font-medium">Tip:</span> Type{' '}
-            <code className="px-1 py-0.5 rounded bg-zinc-700 text-blue-400">/{command.name}</code>{' '}
+            <code className="px-1 py-0.5 rounded bg-zinc-700 text-blue-400">/{frontmatter.name}</code>{' '}
             in the chat input to use this command.
           </p>
         </div>

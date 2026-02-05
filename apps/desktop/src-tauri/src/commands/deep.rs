@@ -266,3 +266,174 @@ pub async fn deep_memory_delete_group(
     Ok(())
 }
 
+// ============================================================================
+// Command Types (Slash Commands Marketplace)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub path: String,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandMetadata {
+    pub author: Option<String>,
+    pub version: Option<String>,
+    pub emoji: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandFrontmatter {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub aliases: Option<Vec<String>>,
+    pub category: String,
+    pub icon: Option<String>,
+    pub priority: Option<i32>,
+    pub action: Option<String>,
+    pub metadata: Option<CommandMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandManifest {
+    pub id: String,
+    pub source: CommandSource,
+    pub frontmatter: CommandFrontmatter,
+    pub command_path: String,
+    pub prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCommandInput {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub aliases: Option<Vec<String>>,
+    pub category: String,
+    pub icon: Option<String>,
+    pub priority: Option<i32>,
+    pub content: String,
+    pub emoji: Option<String>,
+}
+
+// ============================================================================
+// Command Commands
+// ============================================================================
+
+/// Discover all commands from all sources
+#[tauri::command]
+pub async fn deep_command_list(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<Vec<CommandManifest>, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({});
+
+    let result = manager.send_command("discover_commands", params).await?;
+    // Handler returns { commands: [...] }
+    let wrapper: serde_json::Value = serde_json::from_value(result).map_err(|e| format!("Failed to parse: {}", e))?;
+    let commands = wrapper.get("commands").cloned().unwrap_or(serde_json::json!([]));
+    serde_json::from_value(commands).map_err(|e| format!("Failed to parse commands: {}", e))
+}
+
+/// Install a command from bundled to managed directory
+#[tauri::command]
+pub async fn deep_command_install(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    command_id: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "commandId": command_id,
+    });
+
+    manager.send_command("install_command", params).await?;
+    Ok(())
+}
+
+/// Uninstall a command from managed directory
+#[tauri::command]
+pub async fn deep_command_uninstall(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    command_id: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "commandId": command_id,
+    });
+
+    manager.send_command("uninstall_command", params).await?;
+    Ok(())
+}
+
+/// Get command content
+#[tauri::command]
+pub async fn deep_command_get_content(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    command_id: String,
+) -> Result<String, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "commandId": command_id,
+    });
+
+    let result = manager.send_command("get_command_content", params).await?;
+    // Handler returns { content: string }
+    let wrapper: serde_json::Value = serde_json::from_value(result).map_err(|e| format!("Failed to parse: {}", e))?;
+    wrapper.get("content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Invalid response".to_string())
+}
+
+/// Create a custom command
+#[tauri::command]
+pub async fn deep_command_create(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    input: CreateCommandInput,
+) -> Result<String, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "name": input.name,
+        "displayName": input.display_name,
+        "description": input.description,
+        "aliases": input.aliases,
+        "category": input.category,
+        "icon": input.icon,
+        "priority": input.priority,
+        "content": input.content,
+        "emoji": input.emoji,
+    });
+
+    let result = manager.send_command("create_command", params).await?;
+    // Handler returns { commandId: string }
+    let wrapper: serde_json::Value = serde_json::from_value(result).map_err(|e| format!("Failed to parse: {}", e))?;
+    wrapper.get("commandId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Invalid response".to_string())
+}
+

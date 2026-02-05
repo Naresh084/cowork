@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Wand2, Plus, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
-import type { CommandCategory } from '../../stores/command-store';
+import { useCommandStore, type CommandCategory } from '../../stores/command-store';
 
 interface CreateCommandModalProps {
   isOpen: boolean;
@@ -18,22 +18,17 @@ const CATEGORIES: Array<{ value: CommandCategory; label: string }> = [
   { value: 'workflow', label: 'Workflow' },
 ];
 
-const COMMAND_TYPES = [
-  { value: 'system', label: 'System', description: 'Runs without AI agent' },
-  { value: 'agent', label: 'Agent', description: 'Runs with AI agent' },
-  { value: 'hybrid', label: 'Hybrid', description: 'Combines system and agent' },
-];
-
 export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommandModalProps) {
+  const { createCommand } = useCommandStore();
+
   const [name, setName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<CommandCategory>('custom');
-  const [commandType, setCommandType] = useState<'system' | 'agent' | 'hybrid'>('system');
+  const [content, setContent] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [aliases, setAliases] = useState('');
-  const [requiresSession, setRequiresSession] = useState(false);
-  const [requiresWorkingDir, setRequiresWorkingDir] = useState(false);
+  const [emoji, setEmoji] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,22 +38,31 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
     setIsSubmitting(true);
 
     try {
-      // In a real implementation, this would call the backend to create the command
-      // For now, we'll just show a message
-      // TODO: Implement command creation via IPC
+      // Parse aliases from comma-separated string
+      const aliasArray = aliases
+        .split(',')
+        .map((a) => a.trim().toLowerCase())
+        .filter((a) => a.length > 0);
 
-      // Simulate command creation
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Create command via store (which calls backend)
+      await createCommand({
+        name,
+        displayName,
+        description,
+        category,
+        content,
+        aliases: aliasArray.length > 0 ? aliasArray : undefined,
+        emoji: emoji || undefined,
+      });
 
       // Reset form
       setName('');
       setDisplayName('');
       setDescription('');
       setCategory('custom');
-      setCommandType('system');
+      setContent('');
       setAliases('');
-      setRequiresSession(false);
-      setRequiresWorkingDir(false);
+      setEmoji('');
       setShowAdvanced(false);
 
       onCreated?.(name);
@@ -171,36 +175,38 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
                 />
               </div>
 
-              {/* Category and Type row */}
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">Category</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as CommandCategory)}
-                    className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {CATEGORIES.map((cat) => (
-                      <option key={cat.value} value={cat.value}>
-                        {cat.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-zinc-400 mb-2">Type</label>
-                  <select
-                    value={commandType}
-                    onChange={(e) => setCommandType(e.target.value as 'system' | 'agent' | 'hybrid')}
-                    className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {COMMAND_TYPES.map((type) => (
-                      <option key={type.value} value={type.value}>
-                        {type.label} - {type.description}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Category */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">Category</label>
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as CommandCategory)}
+                  className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {CATEGORIES.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Prompt Content */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-400 mb-2">
+                  Prompt Template <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  placeholder="Enter the prompt that will be expanded when this command is invoked..."
+                  rows={8}
+                  className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm resize-y"
+                  required
+                />
+                <p className="mt-1 text-xs text-zinc-500">
+                  This prompt will be sent to the AI when you use /{name || 'command'}
+                </p>
               </div>
 
               {/* Advanced Options (collapsible) */}
@@ -236,26 +242,19 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
                       />
                     </div>
 
-                    {/* Checkboxes */}
-                    <div className="flex gap-6">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={requiresSession}
-                          onChange={(e) => setRequiresSession(e.target.checked)}
-                          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-zinc-300">Requires Active Session</span>
+                    {/* Emoji */}
+                    <div>
+                      <label className="block text-sm font-medium text-zinc-400 mb-2">
+                        Icon Emoji
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={requiresWorkingDir}
-                          onChange={(e) => setRequiresWorkingDir(e.target.checked)}
-                          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-zinc-300">Requires Working Directory</span>
-                      </label>
+                      <input
+                        type="text"
+                        value={emoji}
+                        onChange={(e) => setEmoji(e.target.value)}
+                        placeholder="e.g. 🚀"
+                        maxLength={2}
+                        className="w-24 px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center text-lg"
+                      />
                     </div>
                   </div>
                 )}
@@ -265,8 +264,9 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
               <div className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg">
                 <p className="text-sm text-zinc-400">
                   <span className="text-zinc-300 font-medium">Note:</span> Custom commands are stored in{' '}
-                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#4C71FF]">.cowork/commands/</code>{' '}
-                  in your working directory. After creation, you can edit the command handler file to define its behavior.
+                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#4C71FF]">~/.geminicowork/commands/</code>{' '}
+                  and are automatically installed. Type <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#4C71FF]">/{name || 'command'}</code>{' '}
+                  in chat to use it.
                 </p>
               </div>
             </form>
@@ -282,7 +282,7 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={isSubmitting || !name || !displayName || !description || !isNameValid}
+                disabled={isSubmitting || !name || !displayName || !description || !content || !isNameValid}
                 className="px-6 py-2 bg-[#4C71FF] hover:bg-[#5C81FF] disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? (

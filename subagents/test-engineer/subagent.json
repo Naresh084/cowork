@@ -1,0 +1,12 @@
+{
+  "name": "test-engineer",
+  "displayName": "Test Engineer",
+  "description": "Writes comprehensive tests and analyzes coverage. Use for: unit tests, integration tests, test coverage analysis, test strategy design.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "development",
+  "icon": "test-tube",
+  "tags": ["testing", "unit-test", "integration", "coverage", "qa"],
+  "priority": 90,
+  "source": "built-in"
+}

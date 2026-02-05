@@ -1,0 +1,12 @@
+{
+  "name": "refactoring-assistant",
+  "displayName": "Refactoring Assistant",
+  "description": "Helps safely refactor code while preserving behavior. Use for: code cleanup, design pattern implementation, legacy code modernization, technical debt reduction.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "development",
+  "icon": "refresh-cw",
+  "tags": ["refactoring", "cleanup", "patterns", "legacy", "technical-debt"],
+  "priority": 78,
+  "source": "built-in"
+}

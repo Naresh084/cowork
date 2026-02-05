@@ -5,6 +5,7 @@ mod commands;
 mod sidecar;
 
 use commands::agent::AgentState;
+use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()
@@ -12,6 +13,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AgentState::new())
         .invoke_handler(tauri::generate_handler![
             // Auth commands
@@ -42,6 +46,7 @@ fn main() {
             commands::agent::agent_delete_session,
             commands::agent::agent_update_session_title,
             commands::agent::agent_update_session_working_directory,
+            commands::agent::agent_update_session_last_accessed,
             commands::agent::agent_load_memory,
             commands::agent::agent_save_memory,
             commands::agent::agent_get_context_usage,
@@ -101,6 +106,12 @@ fn main() {
             commands::deep::deep_memory_list_groups,
             commands::deep::deep_memory_create_group,
             commands::deep::deep_memory_delete_group,
+            // Command (Slash Commands) marketplace commands
+            commands::deep::deep_command_list,
+            commands::deep::deep_command_install,
+            commands::deep::deep_command_uninstall,
+            commands::deep::deep_command_get_content,
+            commands::deep::deep_command_create,
             // Subagent commands
             commands::subagent::deep_subagent_list,
             commands::subagent::deep_subagent_install,
@@ -109,9 +120,93 @@ fn main() {
             commands::subagent::deep_subagent_get,
             commands::subagent::deep_subagent_create,
         ])
-        .setup(|_app| {
+        .setup(|app| {
+            // Spawn auto-update checker on startup (only in release mode)
+            #[cfg(not(debug_assertions))]
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // Wait a few seconds for app to fully initialize
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    check_and_install_updates(handle).await;
+                });
+            }
+
+            // Suppress unused variable warning in debug mode
+            #[cfg(debug_assertions)]
+            let _ = app;
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(not(debug_assertions))]
+async fn check_and_install_updates(app: tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+
+    loop {
+        eprintln!("[updater] Checking for updates...");
+        match app.updater().check().await {
+            Ok(Some(update)) => {
+                eprintln!("[updater] New version available: {}", update.version);
+
+                // Emit event to frontend to show update notification
+                let _ = app.emit("update:available", serde_json::json!({
+                    "version": update.version,
+                    "body": update.body
+                }));
+
+                // Download and install immediately
+                let download_result = update.download_and_install(
+                    |progress, total| {
+                        let percent = if let Some(total) = total {
+                            (progress as f64 / total as f64 * 100.0) as u32
+                        } else {
+                            0
+                        };
+                        eprintln!("[updater] Download progress: {}%", percent);
+                        // Emit progress to frontend
+                        let _ = app.emit("update:progress", serde_json::json!({
+                            "progress": progress,
+                            "total": total,
+                            "percent": percent
+                        }));
+                    },
+                    || {
+                        eprintln!("[updater] Download complete, installing...");
+                    },
+                ).await;
+
+                match download_result {
+                    Ok(_) => {
+                        eprintln!("[updater] Update installed, restarting...");
+                        let _ = app.emit("update:installed", serde_json::json!({}));
+
+                        // Small delay to let UI show "Restarting..." message
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                        // Restart the app
+                        app.restart();
+                    }
+                    Err(e) => {
+                        eprintln!("[updater] Failed to install update: {}", e);
+                        let _ = app.emit("update:error", serde_json::json!({
+                            "error": e.to_string()
+                        }));
+                    }
+                }
+            }
+            Ok(None) => {
+                eprintln!("[updater] No updates available");
+            }
+            Err(e) => {
+                eprintln!("[updater] Failed to check for updates: {}", e);
+            }
+        }
+
+        // Check for updates every 30 minutes
+        tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+    }
 }

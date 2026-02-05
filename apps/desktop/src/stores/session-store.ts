@@ -13,6 +13,7 @@ export interface SessionSummary {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  lastAccessedAt: number;
 }
 
 export interface SessionInfo {
@@ -23,6 +24,7 @@ export interface SessionInfo {
   model: string;
   createdAt: number;
   updatedAt: number;
+  lastAccessedAt: number;
 }
 
 interface SessionState {
@@ -154,7 +156,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             model,
           });
 
-          // Add to sessions list
+          // Add to sessions list (new sessions are most recently accessed)
           const newSummary: SessionSummary = {
             id: session.id,
             title: session.title,
@@ -164,6 +166,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             messageCount: 0,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
+            lastAccessedAt: session.lastAccessedAt,
           };
 
           set((state) => ({
@@ -193,7 +196,23 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           return;
         }
 
-        set({ activeSessionId: sessionId });
+        const now = Date.now();
+
+        // Update lastAccessedAt in backend
+        try {
+          await invoke('agent_update_session_last_accessed', { sessionId });
+        } catch (error) {
+          console.warn('[SessionStore] Failed to update last accessed time:', error);
+          // Continue - this is not critical
+        }
+
+        // Optimistic update in frontend state and sort by lastAccessedAt
+        set((state) => ({
+          activeSessionId: sessionId,
+          sessions: state.sessions
+            .map((s) => s.id === sessionId ? { ...s, lastAccessedAt: now } : s)
+            .sort((a, b) => b.lastAccessedAt - a.lastAccessedAt),
+        }));
       },
 
       deleteSession: async (sessionId: string) => {
@@ -351,6 +370,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           messageCount: s.messageCount,
           createdAt: s.createdAt,
           updatedAt: s.updatedAt,
+          lastAccessedAt: s.lastAccessedAt,
         })),
       }),
     }

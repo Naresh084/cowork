@@ -27,6 +27,7 @@ const CATEGORY_ICONS: Record<CommandCategory, React.ComponentType<{ className?: 
   memory: Brain,
   utility: Settings,
   workflow: Zap,
+  custom: FileText,
 };
 
 // Icon mapping by command name (for specific icons)
@@ -43,6 +44,7 @@ const CATEGORY_COLORS: Record<CommandCategory, string> = {
   memory: 'text-[#9B59B6]',
   utility: 'text-[#F5C400]',
   workflow: 'text-[#27AE60]',
+  custom: 'text-white/60',
 };
 
 interface CommandPaletteProps {
@@ -58,11 +60,11 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
     paletteQuery,
     selectedIndex,
     setSelectedIndex,
-    getFilteredCommands,
+    getPaletteCommands,
   } = useCommandStore();
 
-  // Get all filtered commands (no installation filtering)
-  const filteredCommands = getFilteredCommands();
+  // Get installed commands filtered by palette query
+  const filteredCommands = getPaletteCommands();
 
   // Keyboard navigation
   const handleKeyDown = useCallback(

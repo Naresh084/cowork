@@ -3,6 +3,8 @@ import { mcpBridge } from './mcp-bridge.js';
 import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
+import { commandService } from './command-service.js';
+import type { CommandCategory } from '@gemini-cowork/shared';
 import { cronService } from './cron/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
@@ -301,6 +303,14 @@ registerHandler('update_session_working_directory', async (params) => {
   return { success: true };
 });
 
+// Update session last accessed time
+registerHandler('update_session_last_accessed', async (params) => {
+  const p = params as { sessionId: string };
+  if (!p.sessionId) throw new Error('sessionId is required');
+  await agentRunner.updateSessionLastAccessed(p.sessionId);
+  return { success: true };
+});
+
 // Get tasks
 registerHandler('get_tasks', async (params) => {
   const p = params as unknown as GetSessionParams;
@@ -474,6 +484,86 @@ registerHandler('create_skill', async (params) => {
   });
 
   return { skillId };
+});
+
+// ============================================================================
+// Command Management (Slash Commands Marketplace)
+// ============================================================================
+
+// Discover all commands from all sources
+registerHandler('discover_commands', async () => {
+  const commands = await commandService.discoverAll();
+  return { commands };
+});
+
+// Install a command from bundled to managed directory
+registerHandler('install_command', async (params) => {
+  const p = params as { commandId: string };
+  if (!p.commandId) throw new Error('commandId is required');
+  await commandService.installCommand(p.commandId);
+  return { success: true };
+});
+
+// Uninstall a command from managed directory
+registerHandler('uninstall_command', async (params) => {
+  const p = params as { commandId: string };
+  if (!p.commandId) throw new Error('commandId is required');
+  await commandService.uninstallCommand(p.commandId);
+  return { success: true };
+});
+
+// Get command content
+registerHandler('get_command_content', async (params) => {
+  const p = params as { commandId: string };
+  if (!p.commandId) throw new Error('commandId is required');
+  const content = await commandService.loadCommandContent(p.commandId);
+  return { content };
+});
+
+// Create a new custom command
+registerHandler('create_command', async (params) => {
+  const p = params as {
+    name: string;
+    displayName: string;
+    description: string;
+    aliases?: string[];
+    category: CommandCategory;
+    icon?: string;
+    priority?: number;
+    content: string;
+    emoji?: string;
+  };
+
+  // Validate required fields
+  if (!p.name) {
+    throw new Error('name is required');
+  }
+  if (!p.displayName) {
+    throw new Error('displayName is required');
+  }
+  if (!p.description) {
+    throw new Error('description is required');
+  }
+  if (!p.content) {
+    throw new Error('content is required');
+  }
+  if (!p.category) {
+    throw new Error('category is required');
+  }
+
+  const commandId = await commandService.createCommand({
+    name: p.name,
+    displayName: p.displayName,
+    description: p.description,
+    aliases: p.aliases,
+    category: p.category,
+    icon: p.icon,
+    priority: p.priority,
+    content: p.content,
+    emoji: p.emoji,
+  });
+
+  return { commandId };
 });
 
 // ============================================================================

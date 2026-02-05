@@ -215,11 +215,13 @@ export interface SessionInfo {
   model: string;
   createdAt: number;
   updatedAt: number;
+  lastAccessedAt: number;
   messageCount: number;
 }
 
 export interface SessionDetails extends SessionInfo {
   messages: Message[];
+  chatItems?: import('@gemini-cowork/shared').ChatItem[];
   tasks?: Task[];
   artifacts?: Artifact[];
   toolExecutions?: ToolExecution[];

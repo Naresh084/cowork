@@ -1,0 +1,12 @@
+{
+  "name": "code-reviewer",
+  "displayName": "Code Reviewer",
+  "description": "Performs thorough code reviews with actionable feedback. Use for: PR reviews, code quality analysis, best practices enforcement, refactoring suggestions.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "analysis",
+  "icon": "eye",
+  "tags": ["code-review", "quality", "best-practices", "refactoring", "pr-review"],
+  "priority": 92,
+  "source": "built-in"
+}

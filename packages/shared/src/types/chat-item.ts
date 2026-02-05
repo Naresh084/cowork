@@ -195,6 +195,20 @@ export const DesignItemSchema = ChatItemBaseSchema.extend({
 export type DesignItem = z.infer<typeof DesignItemSchema>;
 
 // ============================================================================
+// Error Item - Recoverable errors shown in chat
+// ============================================================================
+
+export const ErrorItemSchema = ChatItemBaseSchema.extend({
+  kind: z.literal('error'),
+  message: z.string(),
+  code: z.string().optional(),
+  recoverable: z.boolean().optional(),
+  details: z.record(z.unknown()).optional(),
+});
+
+export type ErrorItem = z.infer<typeof ErrorItemSchema>;
+
+// ============================================================================
 // Context Usage - Persisted separately but linked
 // ============================================================================
 
@@ -223,6 +237,7 @@ export const ChatItemSchema = z.discriminatedUnion('kind', [
   MediaItemSchema,
   ReportItemSchema,
   DesignItemSchema,
+  ErrorItemSchema,
 ]);
 
 export type ChatItem =
@@ -236,7 +251,8 @@ export type ChatItem =
   | QuestionItem
   | MediaItem
   | ReportItem
-  | DesignItem;
+  | DesignItem
+  | ErrorItem;
 
 // ============================================================================
 // Helper type guards
@@ -284,6 +300,10 @@ export function isReport(item: ChatItem): item is ReportItem {
 
 export function isDesign(item: ChatItem): item is DesignItem {
   return item.kind === 'design';
+}
+
+export function isError(item: ChatItem): item is ErrorItem {
+  return item.kind === 'error';
 }
 
 // ============================================================================
