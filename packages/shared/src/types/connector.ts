@@ -547,3 +547,27 @@ export const ConnectorConnectionResultSchema = z.object({
 });
 
 export type ConnectorConnectionResult = z.infer<typeof ConnectorConnectionResultSchema>;
+
+// ============================================================================
+// MCP App Types (for ui:// resources - interactive UI components)
+// ============================================================================
+
+/**
+ * MCP App discovered from a connected connector
+ * Apps are special resources with ui:// URI scheme that provide
+ * interactive HTML interfaces that can call MCP tools.
+ */
+export const MCPAppSchema = z.object({
+  /** App URI (ui://app-name) */
+  uri: z.string(),
+  /** App display name */
+  name: z.string(),
+  /** App description */
+  description: z.string().optional(),
+  /** MIME type (typically text/html) */
+  mimeType: z.string().optional(),
+  /** Connector that provides this app */
+  connectorId: z.string(),
+});
+
+export type MCPApp = z.infer<typeof MCPAppSchema>;

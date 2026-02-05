@@ -135,6 +135,16 @@ fn main() {
             commands::connectors::get_all_connector_states,
             commands::connectors::connect_all_connectors,
             commands::connectors::disconnect_all_connectors,
+            // OAuth commands
+            commands::connectors::start_connector_oauth_flow,
+            commands::connectors::poll_oauth_device_code,
+            commands::connectors::get_oauth_status,
+            commands::connectors::refresh_oauth_tokens,
+            commands::connectors::revoke_oauth_tokens,
+            // MCP Apps commands
+            commands::connectors::get_connector_apps,
+            commands::connectors::get_connector_app_content,
+            commands::connectors::call_connector_app_tool,
         ])
         .setup(|app| {
             // Spawn auto-update checker on startup (only in release mode)

@@ -1,5 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type {
   MCPServerConfig,
   MCPServerState,
@@ -19,7 +21,7 @@ import { generateId, now } from '@gemini-cowork/shared';
 export class MCPClientManager {
   private servers: Map<string, MCPServerState> = new Map();
   private clients: Map<string, Client> = new Map();
-  private transports: Map<string, StdioClientTransport> = new Map();
+  private transports: Map<string, Transport> = new Map();
   private eventHandlers: Map<MCPEventType, Set<MCPEventHandler>> = new Map();
 
   /**
@@ -41,6 +43,7 @@ export class MCPClientManager {
 
   /**
    * Connect to a server.
+   * Supports both stdio (local process) and HTTP/SSE (remote) transports.
    */
   async connect(serverId: string): Promise<void> {
     const state = this.servers.get(serverId);
@@ -55,11 +58,32 @@ export class MCPClientManager {
     state.status = 'connecting';
 
     try {
-      const transport = new StdioClientTransport({
-        command: state.config.command,
-        args: state.config.args,
-        env: state.config.env,
-      });
+      let transport: Transport;
+
+      // Select transport based on configuration
+      const transportType = state.config.transport || 'stdio';
+
+      if (transportType === 'http' && state.config.url) {
+        // HTTP/SSE transport for remote MCP servers
+        transport = new StreamableHTTPClientTransport(new URL(state.config.url), {
+          requestInit: {
+            headers: state.config.headers || {},
+          },
+        });
+      } else if (state.config.command) {
+        // Stdio transport for local process-based MCP servers
+        transport = new StdioClientTransport({
+          command: state.config.command,
+          args: state.config.args,
+          env: state.config.env,
+        });
+      } else {
+        throw new Error(
+          `Invalid server configuration: transport '${transportType}' requires ${
+            transportType === 'http' ? 'url' : 'command'
+          }`
+        );
+      }
 
       const client = new Client(
         { name: 'gemini-cowork', version: '0.1.0' },

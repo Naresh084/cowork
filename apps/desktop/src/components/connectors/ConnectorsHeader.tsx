@@ -1,7 +1,11 @@
-import { Search } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useConnectorStore } from '../../stores/connector-store';
 import type { ConnectorCategory } from '@gemini-cowork/shared';
+
+interface ConnectorsHeaderProps {
+  onAddCustom?: () => void;
+}
 
 const CATEGORIES: Array<{ value: ConnectorCategory | 'all'; label: string }> = [
   { value: 'all', label: 'All' },
@@ -15,7 +19,7 @@ const CATEGORIES: Array<{ value: ConnectorCategory | 'all'; label: string }> = [
   { value: 'utility', label: 'Utility' },
 ];
 
-export function ConnectorsHeader() {
+export function ConnectorsHeader({ onAddCustom }: ConnectorsHeaderProps) {
   const {
     searchQuery,
     setSearchQuery,
@@ -34,7 +38,7 @@ export function ConnectorsHeader() {
 
   return (
     <div className="px-6 py-4 border-b border-zinc-800 space-y-4">
-      {/* Search */}
+      {/* Search and Add Custom */}
       <div className="flex gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
@@ -46,6 +50,15 @@ export function ConnectorsHeader() {
             className="w-full pl-10 pr-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
         </div>
+        {onAddCustom && (
+          <button
+            onClick={onAddCustom}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Custom
+          </button>
+        )}
       </div>
 
       {/* Tabs and Categories */}
@@ -78,6 +91,17 @@ export function ConnectorsHeader() {
                 {connectedCount} online
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setActiveTab('apps')}
+            className={cn(
+              'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
+              activeTab === 'apps'
+                ? 'bg-zinc-700 text-zinc-100'
+                : 'text-zinc-400 hover:text-zinc-200'
+            )}
+          >
+            Apps
           </button>
         </div>
 
