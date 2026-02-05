@@ -330,8 +330,8 @@ export class ConnectorManager {
    */
   async disconnectAll(): Promise<void> {
     const promises = Array.from(this.connections.keys()).map((id) =>
-      this.disconnect(id).catch((error) => {
-        console.error(`[ConnectorManager] Error disconnecting ${id}:`, error);
+      this.disconnect(id).catch(() => {
+        // Ignore disconnect errors during cleanup
       })
     );
     await Promise.all(promises);

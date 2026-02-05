@@ -113,8 +113,7 @@ export class CronScheduler extends EventEmitter {
       });
       const next = cronExpr.next();
       return next.getTime();
-    } catch (error) {
-      console.error(`Failed to parse cron expression "${expression}":`, error);
+    } catch {
       return undefined;
     }
   }
@@ -179,18 +178,13 @@ export class CronScheduler extends EventEmitter {
       );
 
       // Execute all due jobs in parallel
-      const results = await Promise.allSettled(
+      await Promise.allSettled(
         dueJobs.map(job => this.executeJob(job))
       );
 
-      // Log any failures
-      results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          console.error(`Cron job ${dueJobs[index].id} failed:`, result.reason);
-        }
-      });
-    } catch (error) {
-      console.error('Error in scheduler timer callback:', error);
+      // Failures are tracked per-job via run records
+    } catch {
+      // Error in scheduler timer callback - re-arm will still happen
     }
 
     // Re-arm timer for next job (always, even on error)
@@ -246,8 +240,7 @@ export class CronScheduler extends EventEmitter {
       await cronStore.appendRun(run);
 
       this.emit('job:executed', job, success);
-    } catch (error) {
-      console.error(`Failed to execute job ${job.id}:`, error);
+    } catch {
       this.emit('job:executed', job, false);
     }
   }

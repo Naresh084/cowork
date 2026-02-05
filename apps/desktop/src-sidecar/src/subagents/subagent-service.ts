@@ -190,18 +190,12 @@ export class SubagentService {
             source,
             subagentPath: subagentDir,
           });
-        } catch (error) {
-          console.error(
-            `[SubagentService] Error processing subagent at ${subagentDir}:`,
-            error
-          );
+        } catch {
+          // Skip subagents that fail to parse
         }
       }
-    } catch (error) {
-      console.error(
-        `[SubagentService] Error scanning directory ${dir}:`,
-        error
-      );
+    } catch {
+      // Directory scanning error - return empty array
     }
 
     return subagents;
@@ -240,8 +234,6 @@ export class SubagentService {
     await cp(bundledPath, targetDir, { recursive: true });
 
     this.subagentCache.clear();
-
-    console.error(`[SubagentService] Installed subagent: ${subagentName}`);
   }
 
   /**
@@ -256,8 +248,6 @@ export class SubagentService {
     await rm(targetDir, { recursive: true, force: true });
 
     this.subagentCache.delete(subagentName);
-
-    console.error(`[SubagentService] Uninstalled subagent: ${subagentName}`);
   }
 
   /**
@@ -348,7 +338,6 @@ export class SubagentService {
 
     this.subagentCache.clear();
 
-    console.error(`[SubagentService] Created custom subagent: ${params.name}`);
     return params.name;
   }
 

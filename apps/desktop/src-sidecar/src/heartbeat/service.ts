@@ -227,8 +227,8 @@ export class HeartbeatService extends EventEmitter {
           try {
             this.emit('system-event', event);
             this.emit('event:processed', event);
-          } catch (error) {
-            console.error(`Error processing system event ${event.id}:`, error);
+          } catch {
+            // Error processing system event - continue
           }
         }
       }

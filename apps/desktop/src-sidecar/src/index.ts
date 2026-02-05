@@ -60,7 +60,9 @@ async function processLine(line: string): Promise<void> {
 // Handle incoming lines
 rl.on('line', (line) => {
   if (isShuttingDown) return;
-  processLine(line).catch(console.error);
+  processLine(line).catch(() => {
+    // Errors are handled in processLine
+  });
 });
 
 // Handle stdin close (Rust process closed the pipe)

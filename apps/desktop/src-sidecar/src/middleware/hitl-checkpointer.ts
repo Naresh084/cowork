@@ -92,8 +92,7 @@ export class HitlCheckpointer {
         tasksRestored: checkpoint.tasks?.length || 0,
         resumedAt: Date.now(),
       };
-    } catch (error) {
-      console.error('Failed to resume from checkpoint:', error);
+    } catch {
       return null;
     }
   }

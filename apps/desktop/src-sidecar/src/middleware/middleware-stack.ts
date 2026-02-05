@@ -123,8 +123,8 @@ export async function createMiddlewareStack(
               source: 'auto',
               confidence: memory.confidence,
             });
-          } catch (error) {
-            console.error('Failed to save extracted memory:', error);
+          } catch {
+            // Failed to save extracted memory - continue
           }
         }
       }
