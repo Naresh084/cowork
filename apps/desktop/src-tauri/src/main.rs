@@ -119,6 +119,22 @@ fn main() {
             commands::subagent::deep_subagent_is_installed,
             commands::subagent::deep_subagent_get,
             commands::subagent::deep_subagent_create,
+            // Connector commands
+            commands::connectors::discover_connectors,
+            commands::connectors::install_connector,
+            commands::connectors::uninstall_connector,
+            commands::connectors::connect_connector,
+            commands::connectors::disconnect_connector,
+            commands::connectors::reconnect_connector,
+            commands::connectors::configure_connector_secrets,
+            commands::connectors::get_connector_secrets_status,
+            commands::connectors::get_connector_status,
+            commands::connectors::create_connector,
+            commands::connectors::connector_call_tool,
+            commands::connectors::get_all_connector_tools,
+            commands::connectors::get_all_connector_states,
+            commands::connectors::connect_all_connectors,
+            commands::connectors::disconnect_all_connectors,
         ])
         .setup(|app| {
             // Spawn auto-update checker on startup (only in release mode)

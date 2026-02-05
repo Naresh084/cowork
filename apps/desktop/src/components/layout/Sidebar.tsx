@@ -19,6 +19,7 @@ import {
   Calendar,
   Terminal,
   Bot,
+  Plug,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -37,6 +38,8 @@ import { CommandManager } from '../commands/CommandManager';
 import { useCommandStore } from '../../stores/command-store';
 import { SubagentManager } from '../subagents/SubagentManager';
 import { useSubagentStore } from '../../stores/subagent-store';
+import { ConnectorManager } from '../connectors/ConnectorManager';
+import { useConnectorStore } from '../../stores/connector-store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -73,6 +76,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [cronModalOpen, setCronModalOpen] = useState(false);
   const [commandsModalOpen, setCommandsModalOpen] = useState(false);
   const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
+  const [connectorsModalOpen, setConnectorsModalOpen] = useState(false);
 
   // Cron store
   const activeJobCount = useCronActiveJobCount();
@@ -94,6 +98,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   // Subscribe to subagents array for reactivity when it changes
   const { subagents } = useSubagentStore();
   const installedSubagentCount = subagents.filter((s) => s.installed).length;
+
+  // Connectors store - show CONNECTED count
+  const { getConnectedCount } = useConnectorStore();
+  const connectedConnectorCount = getConnectedCount();
 
   // Load sessions on mount
   useEffect(() => {
@@ -212,6 +220,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           commandCount={commandCount}
           onOpenSubagents={() => setSubagentsModalOpen(true)}
           subagentCount={installedSubagentCount}
+          onOpenConnectors={() => setConnectorsModalOpen(true)}
+          connectorCount={connectedConnectorCount}
         />
       ) : (
         <SidebarExpanded
@@ -240,6 +250,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           commandCount={commandCount}
           onOpenSubagents={() => setSubagentsModalOpen(true)}
           subagentCount={installedSubagentCount}
+          onOpenConnectors={() => setConnectorsModalOpen(true)}
+          connectorCount={connectedConnectorCount}
         />
       )}
 
@@ -265,6 +277,12 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       <SubagentManager
         isOpen={subagentsModalOpen}
         onClose={() => setSubagentsModalOpen(false)}
+      />
+
+      {/* Connectors Modal */}
+      <ConnectorManager
+        isOpen={connectorsModalOpen}
+        onClose={() => setConnectorsModalOpen(false)}
       />
 
       <AnimatePresence>
@@ -301,6 +319,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               commandCount={commandCount}
               onOpenSubagents={() => setSubagentsModalOpen(true)}
               subagentCount={installedSubagentCount}
+              onOpenConnectors={() => setConnectorsModalOpen(true)}
+              connectorCount={connectedConnectorCount}
             />
           </motion.div>
         )}
@@ -328,6 +348,8 @@ interface SidebarRailProps {
   commandCount: number;
   onOpenSubagents: () => void;
   subagentCount: number;
+  onOpenConnectors: () => void;
+  connectorCount: number;
 }
 
 function SidebarRail({
@@ -349,6 +371,8 @@ function SidebarRail({
   commandCount,
   onOpenSubagents,
   subagentCount,
+  onOpenConnectors,
+  connectorCount,
 }: SidebarRailProps) {
   const { userName } = useSettingsStore();
   const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
@@ -484,6 +508,28 @@ function SidebarRail({
         </motion.button>
       </div>
 
+      {/* Connectors Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenConnectors}
+          className={cn(
+            'relative w-10 h-10 flex items-center justify-center rounded-xl',
+            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+            'transition-all duration-150'
+          )}
+          title={`Connectors${connectorCount > 0 ? ` (${connectorCount} connected)` : ''}`}
+        >
+          <Plug className="w-5 h-5" />
+          {connectorCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#10B981] text-white text-[10px] font-bold flex items-center justify-center">
+              {connectorCount > 9 ? '9+' : connectorCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
       {/* Automations Tasks Button */}
       <div className="p-2">
         <motion.button
@@ -566,6 +612,8 @@ interface SidebarExpandedProps {
   commandCount: number;
   onOpenSubagents: () => void;
   subagentCount: number;
+  onOpenConnectors: () => void;
+  connectorCount: number;
 }
 
 function SidebarExpanded({
@@ -594,6 +642,8 @@ function SidebarExpanded({
   commandCount,
   onOpenSubagents,
   subagentCount,
+  onOpenConnectors,
+  connectorCount,
 }: SidebarExpandedProps) {
   const { userName } = useSettingsStore();
   const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
@@ -761,6 +811,31 @@ function SidebarExpanded({
           {commandCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-[#9B59B6]/20 text-[#BB8FCE] text-xs font-medium">
               {commandCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Connectors Button */}
+      <div className="px-3 py-2">
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          onClick={onOpenConnectors}
+          className={cn(
+            'w-full flex items-center gap-3 p-2 rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+          )}
+        >
+          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <Plug className="w-4 h-4" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium truncate">Connectors</div>
+          </div>
+          {connectorCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#34D399] text-xs font-medium">
+              {connectorCount}
             </span>
           )}
         </motion.button>

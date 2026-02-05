@@ -64,34 +64,28 @@ export class CommandService {
 
   /**
    * Discover all commands from all sources
-   * Sources are checked in priority order:
-   * 1. Managed commands (installed from marketplace / custom)
-   * 2. Bundled commands (lowest priority)
+   * Returns both managed and bundled commands with unique IDs.
+   * The frontend decides what to show based on source type and installed configs.
    */
   async discoverAll(): Promise<CommandManifest[]> {
     const allCommands: CommandManifest[] = [];
-    const seenNames = new Set<string>();
 
-    // Priority 1: Managed commands (installed from marketplace / custom)
+    console.error('[CommandService] discoverAll starting...');
+    console.error('[CommandService] Bundled dir:', this.bundledCommandsDir, 'exists:', existsSync(this.bundledCommandsDir));
+    console.error('[CommandService] Managed dir:', this.managedCommandsDir, 'exists:', existsSync(this.managedCommandsDir));
+
+    // Discover managed commands (user-installed or custom)
     if (existsSync(this.managedCommandsDir)) {
       const commands = await this.discoverFromDirectory(this.managedCommandsDir, 'managed', 1);
-      for (const command of commands) {
-        if (!seenNames.has(command.frontmatter.name)) {
-          seenNames.add(command.frontmatter.name);
-          allCommands.push(command);
-        }
-      }
+      console.error('[CommandService] Found', commands.length, 'managed commands:', commands.map(c => c.frontmatter.name));
+      allCommands.push(...commands);
     }
 
-    // Priority 2: Bundled commands (lowest priority)
+    // Discover bundled commands (always available for installation)
     if (existsSync(this.bundledCommandsDir)) {
       const commands = await this.discoverFromDirectory(this.bundledCommandsDir, 'bundled', 100);
-      for (const command of commands) {
-        if (!seenNames.has(command.frontmatter.name)) {
-          seenNames.add(command.frontmatter.name);
-          allCommands.push(command);
-        }
-      }
+      console.error('[CommandService] Found', commands.length, 'bundled commands:', commands.map(c => c.frontmatter.name));
+      allCommands.push(...commands);
     }
 
     // Update cache
@@ -99,6 +93,7 @@ export class CommandService {
       this.commandCache.set(command.id, command);
     }
 
+    console.error('[CommandService] Total commands discovered:', allCommands.length);
     return allCommands;
   }
 
@@ -193,17 +188,17 @@ export class CommandService {
       throw new Error(`Can only install bundled commands. Command ${commandId} is ${command.source.type}`);
     }
 
-    // Check if already installed
     const targetDir = join(this.managedCommandsDir, command.frontmatter.name);
-    if (existsSync(targetDir)) {
-      throw new Error(`Command already installed: ${command.frontmatter.name}`);
+
+    // If managed folder doesn't exist, copy from bundled
+    if (!existsSync(targetDir)) {
+      // Ensure managed directory exists
+      await mkdir(this.managedCommandsDir, { recursive: true });
+
+      // Copy command directory
+      await cp(command.commandPath, targetDir, { recursive: true });
     }
-
-    // Ensure managed directory exists
-    await mkdir(this.managedCommandsDir, { recursive: true });
-
-    // Copy command directory
-    await cp(command.commandPath, targetDir, { recursive: true });
+    // If folder already exists (orphaned from previous install), just use it
 
     // Clear cache to force re-discovery
     this.commandCache.clear();

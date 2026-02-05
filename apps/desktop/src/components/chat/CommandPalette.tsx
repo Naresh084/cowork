@@ -6,7 +6,7 @@
  * On select: inserts command into input (user presses Enter to send).
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Command as CommandIcon,
@@ -60,11 +60,45 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
     paletteQuery,
     selectedIndex,
     setSelectedIndex,
-    getPaletteCommands,
+    availableCommands,
   } = useCommandStore();
 
-  // Get installed commands filtered by palette query
-  const filteredCommands = getPaletteCommands();
+  // Compute installed commands - show MANAGED commands (same logic as sidebar)
+  // This is simpler and doesn't rely on installedCommandConfigs being in sync
+  const commands = useMemo((): SlashCommand[] => {
+    // Filter to only managed commands (installed by user)
+    const managedCommands = availableCommands.filter((c) => c.source.type === 'managed');
+
+    // Convert to SlashCommand format
+    return managedCommands
+      .map((cmd) => ({
+        name: cmd.frontmatter.name,
+        displayName: cmd.frontmatter.displayName,
+        description: cmd.frontmatter.description,
+        aliases: cmd.frontmatter.aliases || [],
+        category: cmd.frontmatter.category,
+        icon: cmd.frontmatter.icon,
+        prompt: cmd.prompt,
+        action: cmd.frontmatter.action,
+        priority: cmd.frontmatter.priority,
+      }))
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  }, [availableCommands]);
+
+  // Filter commands based on palette query
+  const filteredCommands = useMemo(() => {
+    const q = paletteQuery.toLowerCase();
+    if (!q) {
+      return commands;
+    }
+    return commands.filter(
+      (cmd) =>
+        cmd.name.toLowerCase().includes(q) ||
+        cmd.displayName.toLowerCase().includes(q) ||
+        cmd.description.toLowerCase().includes(q) ||
+        cmd.aliases.some((a) => a.toLowerCase().includes(q))
+    );
+  }, [commands, paletteQuery]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback(
@@ -118,6 +152,18 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
       }
     }
   }, [selectedIndex, filteredCommands.length]);
+
+  // Debug: Log state when palette should be open
+  if (isPaletteOpen) {
+    console.log('[CommandPalette] Debug:', {
+      isPaletteOpen,
+      availableCommandsCount: availableCommands.length,
+      managedCommandsCount: commands.length,
+      managedNames: commands.map(c => c.name),
+      filteredCommandsCount: filteredCommands.length,
+      paletteQuery,
+    });
+  }
 
   if (!isPaletteOpen || filteredCommands.length === 0) {
     return null;

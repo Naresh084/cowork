@@ -208,48 +208,42 @@ impl SidecarManager {
 
         // Spawn stdout reader in a blocking thread to avoid blocking the async runtime
         std::thread::spawn(move || {
-            eprintln!("[sidecar-reader] Starting stdout reader thread...");
+            // stdout reader started
             let reader = BufReader::new(stdout);
             for line in reader.lines() {
                 match line {
                     Ok(line) if !line.is_empty() => {
-                        eprintln!("[sidecar-reader] Received line: {}", &line[..line.len().min(200)]);
+                        // Received line from sidecar
                         // Try to parse as JSON
                         match serde_json::from_str::<SidecarMessage>(&line) {
                             Ok(SidecarMessage::Response(response)) => {
-                                eprintln!("[sidecar-reader] Parsed as Response: id={}, success={}", response.id, response.success);
+                                // Parsed response
                                 // Handle response - find pending request
                                 // Use blocking lock since we're in a sync thread
                                 let mut pending = pending_requests.blocking_lock();
                                 if let Some(sender) = pending.remove(&response.id) {
-                                    eprintln!("[sidecar-reader] Found pending request, sending response");
                                     let _ = sender.send(response);
-                                    eprintln!("[sidecar-reader] Response sent via oneshot channel");
-                                } else {
-                                    eprintln!("[sidecar-reader] No pending request found for id={}", response.id);
                                 }
                             }
                             Ok(SidecarMessage::Event(event)) => {
-                                eprintln!("[sidecar-reader] Parsed as Event: type={}", event.event_type);
                                 // Handle event - use blocking lock
                                 let handler = event_handler.blocking_lock();
                                 if let Some(ref handler) = *handler {
                                     handler(event);
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("[sidecar-reader] Failed to parse message: {} - {}", e, line);
+                            Err(_) => {
+                                // Failed to parse - ignore non-JSON output
                             }
                         }
                     }
                     Ok(_) => {} // Empty line
-                    Err(e) => {
-                        eprintln!("[sidecar-reader] Failed to read from sidecar: {}", e);
+                    Err(_) => {
                         break;
                     }
                 }
             }
-            eprintln!("[sidecar-reader] stdout reader thread ended");
+            // stdout reader thread ended
         });
 
         *process_guard = Some(child);
@@ -280,13 +274,13 @@ impl SidecarManager {
         command: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        eprintln!("[send_command] Starting command: {}", command);
+        // Starting command
 
         // Check if stdin is healthy before attempting to send
         if !*self.stdin_healthy.lock().await {
             return Err("Sidecar stdin is not healthy - please restart the application".to_string());
         }
-        eprintln!("[send_command] stdin is healthy");
+        // stdin is healthy
 
         // Generate unique request ID
         let id = {
@@ -294,7 +288,7 @@ impl SidecarManager {
             *counter += 1;
             format!("req_{}", *counter)
         };
-        eprintln!("[send_command] Generated request id: {}", id);
+        // Generated request id
 
         // Create response channel
         let (response_tx, response_rx) = oneshot::channel();
@@ -303,7 +297,7 @@ impl SidecarManager {
         {
             let mut pending = self.pending_requests.lock().await;
             pending.insert(id.clone(), response_tx);
-            eprintln!("[send_command] Registered pending request, count: {}", pending.len());
+            // Registered pending request
         }
 
         // Build request
@@ -320,17 +314,14 @@ impl SidecarManager {
         {
             let tx_guard = self.tx.lock().await;
             if let Some(ref tx) = *tx_guard {
-                eprintln!("[send_command] Sending to sidecar channel...");
                 tx.send(msg)
                     .await
                     .map_err(|e| format!("Failed to send to sidecar: {}", e))?;
-                eprintln!("[send_command] Sent to channel successfully");
             } else {
                 return Err("Sidecar not running".to_string());
             }
         }
 
-        eprintln!("[send_command] Waiting for response...");
         // Wait for response with timeout
         // Uses DEFAULT_REQUEST_TIMEOUT_SECS (300s) to handle large context operations
         let response = tokio::time::timeout(
@@ -340,8 +331,6 @@ impl SidecarManager {
             .await
             .map_err(|_| format!("Request timed out after {}s", DEFAULT_REQUEST_TIMEOUT_SECS))?
             .map_err(|_| "Response channel closed")?;
-
-        eprintln!("[send_command] Got response: success={}", response.success);
 
         if response.success {
             Ok(response.result.unwrap_or(serde_json::Value::Null))

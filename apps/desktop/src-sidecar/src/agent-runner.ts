@@ -164,23 +164,19 @@ export class AgentRunner {
    * Called after sidecar starts with path from Rust backend.
    */
   async initialize(appDataDir: string): Promise<{ sessionsRestored: number }> {
-    console.error('[AgentRunner] Initializing persistence with:', appDataDir);
     this.appDataDir = appDataDir;
     this.persistence = new SessionPersistence(appDataDir);
     await this.persistence.initialize();
 
     // Initialize tool policy service
     await toolPolicyService.initialize();
-    console.error('[AgentRunner] Tool policy service initialized');
 
     // Initialize and start cron service
     cronService.initialize(this);
     await cronService.start();
-    console.error('[AgentRunner] Cron service initialized and started');
 
     const count = await this.restoreSessionsFromDisk();
     this.isInitialized = true;
-    console.error('[AgentRunner] Persistence initialized, restored', count, 'sessions');
     return { sessionsRestored: count };
   }
 
@@ -319,18 +315,14 @@ export class AgentRunner {
    */
   private async restoreSessionsFromDisk(): Promise<number> {
     if (!this.persistence) {
-      console.error('[AgentRunner] No persistence, skipping restore');
       return 0;
     }
 
-    console.error('[AgentRunner] Restoring sessions from disk...');
     const persistedSessions = await this.persistence.loadAllSessions();
-    console.error('[AgentRunner] Found', persistedSessions.size, 'persisted sessions');
 
     let restoredCount = 0;
     for (const [sessionId, data] of persistedSessions) {
       try {
-        console.error('[AgentRunner] Recreating session:', sessionId, 'chatItems:', data.chatItems.length);
         const session = await this.recreateSession(data);
         this.sessions.set(sessionId, session);
 
@@ -338,14 +330,11 @@ export class AgentRunner {
         this.subscribeToAgentEvents(session);
 
         restoredCount++;
-        console.error('[AgentRunner] Restored session:', sessionId);
       } catch (error) {
-        console.error(`[AgentRunner] Failed to recreate session ${sessionId}:`, error);
+        console.error(`Failed to recreate session ${sessionId}:`, error);
       }
     }
 
-    console.error('[AgentRunner] Restoration complete. Total restored:', restoredCount);
-    console.error('[AgentRunner] Sessions in memory:', this.sessions.size);
     return restoredCount;
   }
 
@@ -1270,6 +1259,9 @@ export class AgentRunner {
     if (!session) return null;
 
     const firstMessage = this.getFirstMessagePreview(session);
+
+    // DEBUG: Log what we're returning
+    console.error(`[getSession] Session ${sessionId}: messages=${session.messages.length}, chatItems=${session.chatItems?.length || 0}`);
 
     return {
       id: session.id,

@@ -57,6 +57,18 @@ export interface InstalledCommandConfig {
   source: 'bundled' | 'managed';
 }
 
+export interface InstalledConnectorConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  installedAt: number;
+  source: 'managed' | 'workspace';
+  /** Whether all required secrets are configured */
+  secretsConfigured: boolean;
+  /** Whether OAuth authentication is configured (for OAuth connectors) */
+  oauthConfigured?: boolean;
+}
+
 export interface PermissionDefaults {
   fileRead: 'ask' | 'allow' | 'deny';
   fileWrite: 'ask' | 'allow' | 'deny';
@@ -132,6 +144,9 @@ interface SettingsState {
   // Commands Marketplace
   installedCommandConfigs: InstalledCommandConfig[];
 
+  // Connectors Marketplace
+  installedConnectorConfigs: InstalledConnectorConfig[];
+
   // UI State
   sidebarCollapsed: boolean;
   rightPanelCollapsed: boolean;
@@ -190,6 +205,13 @@ interface SettingsActions {
   // Commands marketplace management
   addInstalledCommandConfig: (config: InstalledCommandConfig) => void;
   removeInstalledCommandConfig: (commandId: string) => void;
+
+  // Connectors marketplace management
+  addInstalledConnectorConfig: (config: InstalledConnectorConfig) => void;
+  removeInstalledConnectorConfig: (connectorId: string) => void;
+  updateInstalledConnectorConfig: (connectorId: string, updates: Partial<InstalledConnectorConfig>) => void;
+  toggleInstalledConnectorEnabled: (connectorId: string) => void;
+  syncInstalledConnectors: () => Promise<void>;
 
   // Specialized models management
   updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
@@ -275,6 +297,9 @@ const initialState: SettingsState = {
 
   // Commands Marketplace
   installedCommandConfigs: [],
+
+  // Connectors Marketplace
+  installedConnectorConfigs: [],
 
   // UI State
   sidebarCollapsed: false,
@@ -614,6 +639,48 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }));
       },
 
+      // Connectors marketplace management
+      addInstalledConnectorConfig: (config) => {
+        set((state) => ({
+          installedConnectorConfigs: [
+            ...state.installedConnectorConfigs.filter((c) => c.id !== config.id),
+            config,
+          ],
+        }));
+        void useSettingsStore.getState().syncInstalledConnectors();
+      },
+
+      removeInstalledConnectorConfig: (connectorId) => {
+        set((state) => ({
+          installedConnectorConfigs: state.installedConnectorConfigs.filter((c) => c.id !== connectorId),
+        }));
+        void useSettingsStore.getState().syncInstalledConnectors();
+      },
+
+      updateInstalledConnectorConfig: (connectorId, updates) => {
+        set((state) => ({
+          installedConnectorConfigs: state.installedConnectorConfigs.map((c) =>
+            c.id === connectorId ? { ...c, ...updates } : c
+          ),
+        }));
+        void useSettingsStore.getState().syncInstalledConnectors();
+      },
+
+      toggleInstalledConnectorEnabled: (connectorId) => {
+        set((state) => ({
+          installedConnectorConfigs: state.installedConnectorConfigs.map((c) =>
+            c.id === connectorId ? { ...c, enabled: !c.enabled } : c
+          ),
+        }));
+        void useSettingsStore.getState().syncInstalledConnectors();
+      },
+
+      syncInstalledConnectors: async () => {
+        // Connectors are managed by the connector-store which syncs with the sidecar
+        // This function is called to ensure persistence is triggered
+        // Actual connection state is managed by connector-store
+      },
+
       // Specialized models management
       updateSpecializedModel: async (key, value) => {
         set((state) => ({
@@ -775,6 +842,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         mcpServers: state.mcpServers,
         skillsSettings: state.skillsSettings,
         installedSkillConfigs: state.installedSkillConfigs,
+        installedCommandConfigs: state.installedCommandConfigs, // Persist installed commands
+        installedConnectorConfigs: state.installedConnectorConfigs, // Persist installed connectors
         sidebarCollapsed: state.sidebarCollapsed,
         rightPanelCollapsed: state.rightPanelCollapsed,
         rightPanelPinned: state.rightPanelPinned,
@@ -871,3 +940,5 @@ export const useLiveViewSplitRatio = () =>
   useSettingsStore((state) => state.liveViewSplitRatio);
 export const useUserName = () =>
   useSettingsStore((state) => state.userName);
+export const useInstalledConnectorConfigs = () =>
+  useSettingsStore((state) => state.installedConnectorConfigs);
