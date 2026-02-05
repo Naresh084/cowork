@@ -3,17 +3,20 @@ import {
   ChevronRight,
   ListChecks,
   Folder,
-  StickyNote,
+  Wrench,
   Layers,
+  Calendar,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSessionStore } from '../../stores/session-store';
+import { useCronActiveJobCount } from '../../stores/cron-store';
 import { ProgressSection } from '../panels/ProgressSection';
 import { WorkingFolderSection } from '../panels/WorkingFolderSection';
-import { ScratchpadSection } from '../panels/ScratchpadSection';
+import { ToolsUsedSection } from '../panels/ToolsUsedSection';
 import { ContextSection } from '../panels/ContextSection';
+import { ScheduledSection } from '../panels/ScheduledSection';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface RightPanelProps {
@@ -47,6 +50,7 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
   // Badge counts
   const activeTasks = tasks.filter((t) => t.status !== 'completed').length;
   const artifactCount = artifacts.length;
+  const activeJobCount = useCronActiveJobCount();
 
   // Handle resize
   useEffect(() => {
@@ -176,13 +180,13 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
                 title="Working folder"
               />
               <CollapsedSectionButton
-                icon={StickyNote}
-                isActive={rightPanelSections.scratchpad}
+                icon={Wrench}
+                isActive={rightPanelSections.toolsUsed}
                 onClick={() => {
-                  if (!rightPanelSections.scratchpad) toggleRightPanelSection('scratchpad');
+                  if (!rightPanelSections.toolsUsed) toggleRightPanelSection('toolsUsed');
                   toggleRightPanel();
                 }}
-                title="Scratchpad"
+                title="Tools & Skills"
               />
               <CollapsedSectionButton
                 icon={Layers}
@@ -192,6 +196,16 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
                   toggleRightPanel();
                 }}
                 title="Context"
+              />
+              <CollapsedSectionButton
+                icon={Calendar}
+                badge={activeJobCount > 0 ? activeJobCount : undefined}
+                isActive={rightPanelSections.scheduled}
+                onClick={() => {
+                  if (!rightPanelSections.scheduled) toggleRightPanelSection('scheduled');
+                  toggleRightPanel();
+                }}
+                title="Scheduled"
               />
             </div>
           </motion.div>
@@ -215,8 +229,9 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
             <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10 hover:scrollbar-thumb-white/20">
               <ProgressSection />
               <WorkingFolderSection />
-              <ScratchpadSection />
+              <ToolsUsedSection />
               <ContextSection />
+              <ScheduledSection />
             </div>
           </motion.div>
         )}

@@ -226,30 +226,40 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       },
 
       updateSessionTitle: async (sessionId: string, title: string) => {
-        // First verify the session exists locally
-        const { sessions } = get();
-        const sessionExists = sessions.some((s) => s.id === sessionId);
+        console.log('[SessionStore] updateSessionTitle called:', sessionId, 'title:', title);
 
-        if (!sessionExists) {
-          console.warn('[SessionStore] Attempted to update title of non-existent session:', sessionId);
-          return;
-        }
+        // Get current sessions for rollback
+        const previousSessions = get().sessions;
 
-        // Optimistic update
-        const previousSessions = sessions;
-
-        set((state) => ({
-          sessions: state.sessions.map((s) =>
-            s.id === sessionId ? { ...s, title } : s
-          ),
-        }));
+        // Optimistic update - add or update the session title
+        set((state) => {
+          const exists = state.sessions.some((s) => s.id === sessionId);
+          if (exists) {
+            // Update existing session
+            return {
+              sessions: state.sessions.map((s) =>
+                s.id === sessionId ? { ...s, title } : s
+              ),
+            };
+          } else {
+            // Session not in list yet - this can happen due to timing
+            // Just log and proceed - backend will handle it
+            console.log('[SessionStore] Session not in list yet, proceeding with backend update');
+            return state;
+          }
+        });
 
         try {
           // Persist to backend
           await invoke('agent_update_session_title', { sessionId, title });
+          console.log('[SessionStore] Title updated successfully on backend');
+
+          // Ensure we have the latest session list
+          await get().loadSessions();
         } catch (error) {
           // Rollback on error
           const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[SessionStore] Failed to update title:', errorMessage);
 
           // Check if it's a "session not found" error from the backend
           if (errorMessage.toLowerCase().includes('session not found')) {

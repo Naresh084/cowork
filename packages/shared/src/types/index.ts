@@ -7,6 +7,24 @@ import { z } from 'zod';
 export * from './skill.js';
 
 // ============================================================================
+// Cron Types (re-exported from cron.ts)
+// ============================================================================
+
+export * from './cron.js';
+
+// ============================================================================
+// Heartbeat Types (re-exported from heartbeat.ts)
+// ============================================================================
+
+export * from './heartbeat.js';
+
+// ============================================================================
+// Tool Policy Types (re-exported from tool-policy.ts)
+// ============================================================================
+
+export * from './tool-policy.js';
+
+// ============================================================================
 // Message Types
 // ============================================================================
 
@@ -285,3 +303,93 @@ export interface EventEmitter {
   off<T>(type: EventType, handler: EventHandler<T>): void;
   emit<T>(type: EventType, payload: T): void;
 }
+
+// ============================================================================
+// Enhanced Session Types
+// ============================================================================
+
+// Note: SessionType is exported from tool-policy.ts
+
+/**
+ * Compaction strategy for sessions
+ */
+export const CompactionStrategySchema = z.enum(['summarize', 'truncate', 'smart']);
+export type CompactionStrategy = z.infer<typeof CompactionStrategySchema>;
+
+/**
+ * Session compaction configuration
+ */
+export const CompactionConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  strategy: CompactionStrategySchema.default('smart'),
+  messageThreshold: z.number().int().positive().default(100).describe('Compact after N messages'),
+  tokenThreshold: z.number().int().positive().default(50000).describe('Compact at N tokens'),
+  keepRecentMessages: z.number().int().positive().default(10).describe('Always keep last N messages'),
+  keepSystemMessages: z.boolean().default(true).describe('Preserve system messages'),
+  summaryMaxTokens: z.number().int().positive().default(1000).describe('Max tokens for summary'),
+});
+
+export type CompactionConfig = z.infer<typeof CompactionConfigSchema>;
+
+/**
+ * Enhanced session metadata with type, compaction, and lifecycle info
+ */
+export const EnhancedSessionMetadataSchema = z.object({
+  id: z.string(),
+  type: z.enum(['main', 'isolated', 'cron', 'ephemeral']),
+  prefix: z.string().describe('Session prefix (e.g., "main-abc123-001")'),
+  title: z.string().nullable(),
+  workingDirectory: z.string(),
+  model: z.string(),
+
+  // Compaction state
+  isCompacted: z.boolean().default(false),
+  compactedAt: z.number().optional(),
+  originalMessageCount: z.number().optional(),
+
+  // Lifecycle
+  parentSessionId: z.string().optional().describe('For forked sessions'),
+  expiresAt: z.number().optional().describe('For ephemeral/cron sessions'),
+
+  // Stats
+  totalTokensUsed: z.number().default(0),
+  lastActivityAt: z.number(),
+
+  // Timestamps
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export type EnhancedSessionMetadata = z.infer<typeof EnhancedSessionMetadataSchema>;
+
+/**
+ * Session query options for listing/filtering sessions
+ */
+export const SessionQueryOptionsSchema = z.object({
+  type: z.union([
+    z.enum(['main', 'isolated', 'cron', 'ephemeral']),
+    z.array(z.enum(['main', 'isolated', 'cron', 'ephemeral'])),
+  ]).optional(),
+  workingDirectory: z.string().optional(),
+  search: z.string().optional(),
+  limit: z.number().int().positive().optional(),
+  offset: z.number().int().nonnegative().optional(),
+  sortBy: z.enum(['createdAt', 'updatedAt', 'lastActivityAt']).optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+  includeCompacted: z.boolean().optional(),
+});
+
+export type SessionQueryOptions = z.infer<typeof SessionQueryOptionsSchema>;
+
+/**
+ * Result of session compaction
+ */
+export const CompactionResultSchema = z.object({
+  sessionId: z.string(),
+  originalMessageCount: z.number(),
+  newMessageCount: z.number(),
+  tokensSaved: z.number().optional(),
+  summaryLength: z.number().optional(),
+});
+
+export type CompactionResult = z.infer<typeof CompactionResultSchema>;

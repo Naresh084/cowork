@@ -1,6 +1,6 @@
 import type { ToolHandler, ToolContext } from '@gemini-cowork/core';
 import { GeminiProvider, getModelContextWindow, setModelContextWindows } from '@gemini-cowork/providers';
-import type { Message, PermissionRequest, PermissionDecision, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, PermissionRequest, PermissionDecision, MessageContentPart, SessionType } from '@gemini-cowork/shared';
 import { generateId, generateMessageId, now } from '@gemini-cowork/shared';
 import { createDeepAgent } from 'deepagents';
 import { createMiddleware } from 'langchain';
@@ -18,6 +18,9 @@ import { mcpBridge } from './mcp-bridge.js';
 import { chromeBridge } from './chrome-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
+import { toolPolicyService } from './tool-policy.js';
+import { cronService } from './cron/index.js';
+import type { ToolCallContext } from '@gemini-cowork/shared';
 import type {
   SessionInfo,
   SessionDetails,
@@ -51,6 +54,7 @@ type ApprovalMode = 'auto' | 'read_only' | 'full';
 
 interface ActiveSession {
   id: string;
+  type: SessionType;
   workingDirectory: string;
   model: string;
   title: string | null;
@@ -135,6 +139,16 @@ export class AgentRunner {
     this.appDataDir = appDataDir;
     this.persistence = new SessionPersistence(appDataDir);
     await this.persistence.initialize();
+
+    // Initialize tool policy service
+    await toolPolicyService.initialize();
+    console.error('[AgentRunner] Tool policy service initialized');
+
+    // Initialize and start cron service
+    cronService.initialize(this);
+    await cronService.start();
+    console.error('[AgentRunner] Cron service initialized and started');
+
     const count = await this.restoreSessionsFromDisk();
     this.isInitialized = true;
     console.error('[AgentRunner] Persistence initialized, restored', count, 'sessions');
@@ -239,6 +253,7 @@ export class AgentRunner {
   private async recreateSession(data: PersistedSessionData): Promise<ActiveSession> {
     const session: ActiveSession = {
       id: data.metadata.id,
+      type: (data.metadata as { type?: SessionType }).type || 'main', // Default to 'main' for legacy sessions
       workingDirectory: data.metadata.workingDirectory,
       model: data.metadata.model,
       title: data.metadata.title,
@@ -395,7 +410,8 @@ export class AgentRunner {
   async createSession(
     workingDirectory: string,
     model?: string | null,
-    title?: string
+    title?: string,
+    type: SessionType = 'main'
   ): Promise<SessionInfo> {
     if (!this.provider) {
       throw new Error('Provider not initialized. Set API key first.');
@@ -414,6 +430,7 @@ export class AgentRunner {
     // Create session
     const session: ActiveSession = {
       id: sessionId,
+      type,
       workingDirectory,
       model: actualModel,
       title: title || null,
@@ -446,6 +463,7 @@ export class AgentRunner {
 
     const sessionInfo: SessionInfo = {
       id: sessionId,
+      type,
       title: session.title,
       firstMessage: null,
       workingDirectory,
@@ -617,6 +635,9 @@ export class AgentRunner {
             if (output) {
               finalState = output;
             }
+
+            // Try to extract usage metadata from stream events
+            this.extractUsageFromStreamEvent(session, event);
 
             this.syncTasksFromStreamEvent(session, event);
           }
@@ -926,6 +947,7 @@ export class AgentRunner {
 
       return {
         id: session.id,
+        type: session.type,
         title: session.title,
         firstMessage,
         workingDirectory: session.workingDirectory,
@@ -948,6 +970,7 @@ export class AgentRunner {
 
     return {
       id: session.id,
+      type: session.type,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -1028,6 +1051,7 @@ export class AgentRunner {
       try {
         await this.persistence.saveSession({
           id: session.id,
+          type: session.type,
           title: session.title,
           workingDirectory: session.workingDirectory,
           model: session.model,
@@ -1070,6 +1094,7 @@ export class AgentRunner {
       try {
         await this.persistence.saveSession({
           id: session.id,
+          type: session.type,
           title: session.title,
           workingDirectory: session.workingDirectory,
           model: session.model,
@@ -1092,6 +1117,7 @@ export class AgentRunner {
 
     const sessionInfo: SessionInfo = {
       id: session.id,
+      type: session.type,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -1129,6 +1155,7 @@ export class AgentRunner {
         // Save session with new working directory (also adds to new workspace index)
         await this.persistence.saveSession({
           id: session.id,
+          type: session.type,
           title: session.title,
           workingDirectory: session.workingDirectory,
           model: session.model,
@@ -1150,6 +1177,7 @@ export class AgentRunner {
 
     const sessionInfo: SessionInfo = {
       id: session.id,
+      type: session.type,
       title: session.title,
       firstMessage: firstMessageWd,
       workingDirectory: session.workingDirectory,
@@ -1358,6 +1386,86 @@ execute({ command: "git status" })
 - **generate_image/edit_image**: Image generation and editing
 - **generate_video/analyze_video**: Video generation and analysis
 - **computer_use**: Browser automation for web tasks (requires Chrome with --remote-debugging-port=9222)
+
+## Scheduled Tasks with schedule_task
+
+You can create automated recurring tasks that run in the background. Use the \`schedule_task\` tool when appropriate.
+
+### When to Suggest Scheduling
+Proactively suggest scheduling when the user:
+- Mentions "every day", "daily", "weekly", "monthly", "regularly"
+- Says "remind me", "don't forget", "check this tomorrow"
+- Asks you to do something repeatedly (e.g., "review code every morning")
+- Wants monitoring or reporting tasks (e.g., "check for updates weekly")
+- Mentions specific future times (e.g., "on Friday", "next week")
+
+### How to Suggest
+When you detect scheduling intent, offer to create a scheduled task:
+
+Example response:
+"I can set this up as a scheduled task that runs automatically. Here's what I'll create:
+- **Daily at 9 AM**: Review commits from the last 24 hours
+- Summarize changes and flag potential issues
+
+Would you like me to create this scheduled task?"
+
+### schedule_task Tool Usage
+\`\`\`
+schedule_task({
+  name: "Daily Code Review",
+  prompt: "Review yesterday's commits and summarize changes. Focus on code quality, missing tests, and security issues.",
+  schedule: { type: "daily", time: "09:00" }
+})
+\`\`\`
+
+### Schedule Types
+- **once**: One-time at specific datetime
+  \`{ type: "once", datetime: "tomorrow at 9am" }\`
+  \`{ type: "once", datetime: "2026-02-10T15:00:00" }\`
+
+- **daily**: Every day at specified time
+  \`{ type: "daily", time: "09:00", timezone: "America/Los_Angeles" }\`
+
+- **weekly**: Specific day and time each week
+  \`{ type: "weekly", dayOfWeek: "monday", time: "09:00" }\`
+
+- **interval**: Every N minutes
+  \`{ type: "interval", every: 60 }\` (every hour)
+
+- **cron**: Advanced cron expression
+  \`{ type: "cron", expression: "0 9 * * MON-FRI" }\`
+
+### Managing Existing Tasks
+Use \`manage_scheduled_task\` to:
+- \`list\`: Show all scheduled tasks
+- \`pause\`: Temporarily stop a task
+- \`resume\`: Resume a paused task
+- \`run\`: Trigger immediate execution
+- \`history\`: View past runs
+- \`delete\`: Remove a task
+
+### Best Practices
+1. **Be specific in prompts**: Include exactly what to check/do
+2. **Use isolated sessions**: Tasks run with fresh context (default)
+3. **Consider timing**: Suggest appropriate frequencies based on the task
+4. **Proactively suggest**: When user asks something repetitive, offer scheduling
+5. **Confirm before creating**: Always ask user before creating a scheduled task
+
+### Example Interactions
+
+User: "Can you review my commits every morning?"
+Assistant: "I can set up a daily code review that runs each morning. I'll:
+- Check commits from the last 24 hours
+- Summarize changes and highlight potential issues
+- Post a summary here when done
+
+Would you like me to schedule this for 9 AM your time?"
+
+User: "Remind me to deploy on Friday"
+Assistant: "I'll create a one-time reminder for Friday. What time works best for you?"
+
+User: "Check for security updates weekly"
+Assistant: "I can check for security updates every week. I suggest Monday mornings at 9 AM. Should I create this scheduled task?"
 
 ## Important Reminders
 1. Always mark todos completed when done
@@ -1808,30 +1916,71 @@ execute({ command: "git status" })
           turnInfo.toolIds.push(toolCallId);
         }
 
+        // Step 1: Evaluate tool call against policy
+        const policyContext: ToolCallContext = {
+          toolName,
+          arguments: args as Record<string, unknown>,
+          sessionType: session.type,
+          sessionId: session.id,
+        };
+        const policyResult = toolPolicyService.evaluate(policyContext);
+
+        // If policy explicitly denies, block immediately
+        if (policyResult.action === 'deny') {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const errorMsg = `Tool blocked by policy: ${policyResult.reason}`;
+          const payload = {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.updateToolExecution(session, toolCallId, {
+            status: 'error',
+            error: errorMsg,
+            completedAt: Date.now(),
+          });
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
+        // Step 2: Check existing permission system (for 'ask' or when policy allows but still needs user approval)
         const permissionRequest = this.getPermissionForDeepagentsTool(toolName, args, toolCallId);
         if (permissionRequest) {
-          const decision = await this.requestPermission(session, permissionRequest);
-          if (decision === 'deny') {
-            const duration = this.consumeToolDuration(session, toolCallId);
-            const payload = {
-              toolCallId,
-              success: false,
-              result: null,
-              error: 'Permission denied',
-              duration,
-              parentToolId,
-            };
-            eventEmitter.toolResult(session.id, toolCallPayload, payload);
-            this.updateToolExecution(session, toolCallId, {
-              status: 'error',
-              error: payload.error,
-              completedAt: Date.now(),
-            });
-            return new ToolMessage({
-              content: 'Permission denied',
-              tool_call_id: toolCallId,
-              name: toolName,
-            });
+          // If policy says 'allow', we can skip the permission prompt for non-dangerous ops
+          // But we still respect the existing permission system for dangerous operations
+          const skipPermission = policyResult.action === 'allow' && !this.isDangerousOperation(toolName, args);
+
+          if (!skipPermission) {
+            const decision = await this.requestPermission(session, permissionRequest);
+            if (decision === 'deny') {
+              const duration = this.consumeToolDuration(session, toolCallId);
+              const payload = {
+                toolCallId,
+                success: false,
+                result: null,
+                error: 'Permission denied by user',
+                duration,
+                parentToolId,
+              };
+              eventEmitter.toolResult(session.id, toolCallPayload, payload);
+              this.updateToolExecution(session, toolCallId, {
+                status: 'error',
+                error: payload.error,
+                completedAt: Date.now(),
+              });
+              return new ToolMessage({
+                content: 'Permission denied by user',
+                tool_call_id: toolCallId,
+                name: toolName,
+              });
+            }
           }
         }
 
@@ -2713,19 +2862,102 @@ execute({ command: "git status" })
 
     const stateAny = state as Record<string, unknown>;
 
+    // Debug: log the state structure to understand where usage metadata is
+    console.error('[Usage] Checking state for usage metadata, keys:', Object.keys(stateAny));
+
+    // Check messages array - LangChain puts usage on AIMessage.response_metadata
+    if (Array.isArray(stateAny.messages)) {
+      const messages = stateAny.messages as Array<Record<string, unknown>>;
+      console.error(`[Usage] Found ${messages.length} messages in state`);
+
+      // Check each message (especially AI messages at the end)
+      for (let i = messages.length - 1; i >= 0 && i >= messages.length - 3; i--) {
+        const msg = messages[i];
+        if (msg) {
+          const msgType = (typeof msg._getType === 'function' ? msg._getType() : null) || msg.type || msg.role || 'unknown';
+          console.error(`[Usage] Message[${i}] type=${msgType}, keys:`, Object.keys(msg).slice(0, 15));
+
+          // Check response_metadata (LangChain AI message pattern)
+          if (msg.response_metadata && typeof msg.response_metadata === 'object') {
+            console.error(`[Usage] Message[${i}] has response_metadata:`, JSON.stringify(msg.response_metadata).slice(0, 500));
+          }
+
+          // Check usage_metadata directly
+          if (msg.usage_metadata && typeof msg.usage_metadata === 'object') {
+            console.error(`[Usage] Message[${i}] has usage_metadata:`, JSON.stringify(msg.usage_metadata).slice(0, 500));
+          }
+        }
+      }
+    }
+
     // Try to find usage metadata in various places it might be
     const usage = this.extractUsageMetadata(stateAny);
     if (usage && usage.promptTokens > 0) {
+      console.error('[Usage] Found usage metadata:', usage);
       session.lastKnownPromptTokens = usage.promptTokens;
+    } else {
+      console.error('[Usage] No usage metadata found in state');
     }
   }
 
-  private extractUsageMetadata(obj: Record<string, unknown>): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
+  /**
+   * Extract usage metadata from a stream event and update the session.
+   */
+  private extractUsageFromStreamEvent(session: ActiveSession, event: unknown): void {
+    if (!event || typeof event !== 'object') return;
+
+    const eventAny = event as Record<string, unknown>;
+    const data = eventAny.data as Record<string, unknown> | undefined;
+
+    // Check for usage in various places in stream events
+    if (data) {
+      // LangChain often puts it in data.output or data.chunk
+      const output = data.output as Record<string, unknown> | undefined;
+      const chunk = data.chunk as Record<string, unknown> | undefined;
+
+      if (output) {
+        const usage = this.extractUsageMetadata(output);
+        if (usage && usage.promptTokens > 0) {
+          console.error('[Usage] Found usage in stream output:', usage);
+          session.lastKnownPromptTokens = usage.promptTokens;
+          return;
+        }
+      }
+
+      if (chunk) {
+        // Check response_metadata on chunk (common LangChain pattern)
+        const responseMetadata = chunk.response_metadata as Record<string, unknown> | undefined;
+        if (responseMetadata) {
+          const usage = this.extractUsageMetadata(responseMetadata);
+          if (usage && usage.promptTokens > 0) {
+            console.error('[Usage] Found usage in chunk response_metadata:', usage);
+            session.lastKnownPromptTokens = usage.promptTokens;
+            return;
+          }
+        }
+        // Check usage_metadata directly on chunk
+        if (chunk.usage_metadata && typeof chunk.usage_metadata === 'object') {
+          const usageMetadata = chunk.usage_metadata as Record<string, unknown>;
+          const promptTokens = Number(usageMetadata.prompt_token_count ?? usageMetadata.promptTokenCount ?? 0);
+          if (promptTokens > 0) {
+            console.error('[Usage] Found usage_metadata on chunk:', usageMetadata);
+            session.lastKnownPromptTokens = promptTokens;
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  private extractUsageMetadata(obj: Record<string, unknown>, depth = 0): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
+    // Prevent infinite recursion
+    if (depth > 5) return null;
+
     // Direct usage object
     if (obj.usage && typeof obj.usage === 'object') {
       const usage = obj.usage as Record<string, unknown>;
-      const promptTokens = Number(usage.prompt_tokens ?? usage.promptTokens ?? usage.prompt_token_count ?? 0);
-      const completionTokens = Number(usage.completion_tokens ?? usage.completionTokens ?? usage.candidates_token_count ?? 0);
+      const promptTokens = Number(usage.prompt_tokens ?? usage.promptTokens ?? usage.prompt_token_count ?? usage.inputTokens ?? 0);
+      const completionTokens = Number(usage.completion_tokens ?? usage.completionTokens ?? usage.candidates_token_count ?? usage.outputTokens ?? 0);
       const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? usage.total_token_count ?? promptTokens + completionTokens);
       if (promptTokens > 0) {
         return { promptTokens, completionTokens, totalTokens };
@@ -2735,9 +2967,20 @@ execute({ command: "git status" })
     // usage_metadata (Gemini style)
     if (obj.usage_metadata && typeof obj.usage_metadata === 'object') {
       const usage = obj.usage_metadata as Record<string, unknown>;
-      const promptTokens = Number(usage.prompt_token_count ?? usage.promptTokenCount ?? 0);
-      const completionTokens = Number(usage.candidates_token_count ?? usage.candidatesTokenCount ?? 0);
+      const promptTokens = Number(usage.prompt_token_count ?? usage.promptTokenCount ?? usage.input_tokens ?? 0);
+      const completionTokens = Number(usage.candidates_token_count ?? usage.candidatesTokenCount ?? usage.output_tokens ?? 0);
       const totalTokens = Number(usage.total_token_count ?? usage.totalTokenCount ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // usageMetadata (camelCase - common in JS SDKs)
+    if (obj.usageMetadata && typeof obj.usageMetadata === 'object') {
+      const usage = obj.usageMetadata as Record<string, unknown>;
+      const promptTokens = Number(usage.promptTokenCount ?? usage.prompt_token_count ?? 0);
+      const completionTokens = Number(usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0);
+      const totalTokens = Number(usage.totalTokenCount ?? usage.total_token_count ?? promptTokens + completionTokens);
       if (promptTokens > 0) {
         return { promptTokens, completionTokens, totalTokens };
       }
@@ -2745,27 +2988,43 @@ execute({ command: "git status" })
 
     // response_metadata (LangChain style)
     if (obj.response_metadata && typeof obj.response_metadata === 'object') {
-      const nested = this.extractUsageMetadata(obj.response_metadata as Record<string, unknown>);
+      const nested = this.extractUsageMetadata(obj.response_metadata as Record<string, unknown>, depth + 1);
       if (nested) return nested;
     }
 
     // Check in messages array (final state often has messages with metadata)
     if (Array.isArray(obj.messages)) {
-      for (const msg of obj.messages) {
+      // Check from the end (most recent message likely has usage)
+      for (let i = obj.messages.length - 1; i >= 0; i--) {
+        const msg = obj.messages[i];
         if (msg && typeof msg === 'object') {
           const msgAny = msg as Record<string, unknown>;
           // LangChain AIMessage often has response_metadata
           if (msgAny.response_metadata && typeof msgAny.response_metadata === 'object') {
-            const nested = this.extractUsageMetadata(msgAny.response_metadata as Record<string, unknown>);
+            const nested = this.extractUsageMetadata(msgAny.response_metadata as Record<string, unknown>, depth + 1);
             if (nested) return nested;
           }
           // Check usage_metadata directly on message
           if (msgAny.usage_metadata && typeof msgAny.usage_metadata === 'object') {
-            const nested = this.extractUsageMetadata({ usage_metadata: msgAny.usage_metadata });
+            const nested = this.extractUsageMetadata({ usage_metadata: msgAny.usage_metadata }, depth + 1);
             if (nested) return nested;
           }
+          // Check usageMetadata (camelCase)
+          if (msgAny.usageMetadata && typeof msgAny.usageMetadata === 'object') {
+            const nested = this.extractUsageMetadata({ usageMetadata: msgAny.usageMetadata }, depth + 1);
+            if (nested) return nested;
+          }
+          // Recurse into the message itself
+          const nested = this.extractUsageMetadata(msgAny, depth + 1);
+          if (nested) return nested;
         }
       }
+    }
+
+    // Check in output object (deepagents pattern)
+    if (obj.output && typeof obj.output === 'object') {
+      const nested = this.extractUsageMetadata(obj.output as Record<string, unknown>, depth + 1);
+      if (nested) return nested;
     }
 
     return null;
@@ -2803,6 +3062,40 @@ execute({ command: "git status" })
       default:
         return 'medium';
     }
+  }
+
+  /**
+   * Check if an operation is dangerous and requires user approval even when policy allows.
+   * These are high-risk operations that should always prompt the user.
+   */
+  private isDangerousOperation(toolName: string, args: Record<string, unknown>): boolean {
+    // Shell commands with dangerous patterns
+    if (toolName === 'execute' || toolName === 'Bash') {
+      const command = (args.command as string) || '';
+      const dangerousPatterns = [
+        /\brm\s+(-rf?|--recursive)\b/i,  // rm -rf
+        /\brm\s+.*\*/,                    // rm with wildcard
+        /\bsudo\b/,                       // sudo commands
+        /\bchmod\s+777\b/,                // chmod 777
+        /\bdd\b/,                         // dd command
+        />\s*\/dev\//,                    // writing to /dev
+        /\bgit\s+(push|reset\s+--hard|clean\s+-[fd])/i, // dangerous git ops
+        /\bnpm\s+publish\b/,              // npm publish
+        /\bcurl\b.*\|\s*(ba)?sh/,         // curl | sh
+      ];
+      return dangerousPatterns.some(p => p.test(command));
+    }
+
+    // File operations on system directories
+    if (toolName === 'write_file' || toolName === 'Write' ||
+        toolName === 'edit_file' || toolName === 'Edit' ||
+        toolName === 'delete_file') {
+      const path = (args.file_path as string) || (args.path as string) || '';
+      const systemDirs = ['/System', '/etc', '/usr', '/bin', '/sbin', '/var', '/private'];
+      return systemDirs.some(dir => path.startsWith(dir));
+    }
+
+    return false;
   }
 
   private createMcpTools(_sessionId: string): ToolHandler[] {

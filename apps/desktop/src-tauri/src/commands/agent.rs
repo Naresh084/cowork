@@ -602,3 +602,17 @@ pub async fn agent_get_initialization_status(
     let manager = &state.manager;
     manager.send_command("get_initialization_status", serde_json::json!({})).await
 }
+
+/// Generic command handler - forwards any command to the sidecar
+#[tauri::command]
+pub async fn agent_command(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    command: String,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let result = manager.send_command(&command, params).await?;
+    Ok(serde_json::json!({ "result": result }))
+}

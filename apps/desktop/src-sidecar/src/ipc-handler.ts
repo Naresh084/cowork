@@ -3,6 +3,11 @@ import { mcpBridge } from './mcp-bridge.js';
 import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
+import { cronService } from './cron/index.js';
+import { heartbeatService } from './heartbeat/service.js';
+import { toolPolicyService } from './tool-policy.js';
+import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
+import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
   IPCRequest,
   IPCResponse,
@@ -88,7 +93,7 @@ registerHandler('is_ready', async () => {
 registerHandler('create_session', async (params) => {
   const p = params as unknown as CreateSessionParams;
   if (!p.workingDirectory) throw new Error('workingDirectory is required');
-  const session = await agentRunner.createSession(p.workingDirectory, p.model, p.title);
+  const session = await agentRunner.createSession(p.workingDirectory, p.model, p.title, p.type);
   return session;
 });
 
@@ -494,6 +499,237 @@ function generateGeminiMd(entries: MemoryEntry[]): string {
 
   return lines.join('\n');
 }
+
+// ============================================================================
+// Cron Command Handlers
+// ============================================================================
+
+// List all cron jobs
+registerHandler('cron_list_jobs', async (): Promise<CronJob[]> => {
+  return cronService.listJobs();
+});
+
+// Get single cron job
+registerHandler('cron_get_job', async (params): Promise<CronJob | null> => {
+  const { jobId } = params as { jobId: string };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.getJob(jobId);
+});
+
+// Create cron job
+registerHandler('cron_create_job', async (params): Promise<CronJob> => {
+  const input = params as unknown as CreateCronJobInput;
+  if (!input.name || !input.prompt || !input.schedule) {
+    throw new Error('name, prompt, and schedule are required');
+  }
+  return cronService.createJob(input);
+});
+
+// Update cron job
+registerHandler('cron_update_job', async (params): Promise<CronJob> => {
+  const { jobId, updates } = params as { jobId: string; updates: UpdateCronJobInput };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.updateJob(jobId, updates);
+});
+
+// Delete cron job
+registerHandler('cron_delete_job', async (params): Promise<void> => {
+  const { jobId } = params as { jobId: string };
+  if (!jobId) throw new Error('jobId is required');
+  await cronService.deleteJob(jobId);
+});
+
+// Pause cron job
+registerHandler('cron_pause_job', async (params): Promise<CronJob> => {
+  const { jobId } = params as { jobId: string };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.pauseJob(jobId);
+});
+
+// Resume cron job
+registerHandler('cron_resume_job', async (params): Promise<CronJob> => {
+  const { jobId } = params as { jobId: string };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.resumeJob(jobId);
+});
+
+// Trigger cron job immediately
+registerHandler('cron_trigger_job', async (params): Promise<CronRun> => {
+  const { jobId } = params as { jobId: string };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.triggerJob(jobId);
+});
+
+// Get run history for job
+registerHandler('cron_get_runs', async (params): Promise<CronRun[]> => {
+  const { jobId, options } = params as { jobId: string; options?: RunQueryOptions };
+  if (!jobId) throw new Error('jobId is required');
+  return cronService.getJobRuns(jobId, options);
+});
+
+// Get cron service status
+registerHandler('cron_get_status', async (): Promise<CronServiceStatus> => {
+  return cronService.getStatus();
+});
+
+// ============================================================================
+// Heartbeat Command Handlers
+// ============================================================================
+
+// Get heartbeat status
+registerHandler('heartbeat_get_status', async () => {
+  return heartbeatService.getStatus();
+});
+
+// Start heartbeat service
+registerHandler('heartbeat_start', async (): Promise<void> => {
+  heartbeatService.start();
+});
+
+// Stop heartbeat service
+registerHandler('heartbeat_stop', async (): Promise<void> => {
+  heartbeatService.stop();
+});
+
+// Configure heartbeat
+registerHandler('heartbeat_configure', async (params): Promise<void> => {
+  const config = params as {
+    enabled?: boolean;
+    intervalMs?: number;
+    systemEventsEnabled?: boolean;
+    cronEnabled?: boolean;
+  };
+  await heartbeatService.configure(config);
+});
+
+// Wake heartbeat (trigger immediate processing)
+registerHandler('heartbeat_wake', async (params): Promise<void> => {
+  const { mode } = params as { mode?: 'now' | 'next-heartbeat' };
+  heartbeatService.wake(mode || 'now');
+});
+
+// Get queued events
+registerHandler('heartbeat_get_events', async (): Promise<SystemEvent[]> => {
+  return heartbeatService.getQueuedEvents();
+});
+
+// ============================================================================
+// Tool Policy Command Handlers
+// ============================================================================
+
+// Get current policy
+registerHandler('policy_get', async (): Promise<ToolPolicy> => {
+  await toolPolicyService.initialize();
+  return toolPolicyService.getPolicy();
+});
+
+// Update policy
+registerHandler('policy_update', async (params): Promise<ToolPolicy> => {
+  await toolPolicyService.initialize();
+  const updates = params as Partial<ToolPolicy>;
+  return toolPolicyService.updatePolicy(updates);
+});
+
+// Set profile
+registerHandler('policy_set_profile', async (params): Promise<ToolPolicy> => {
+  const { profile } = params as { profile: ToolProfile };
+  if (!profile) throw new Error('profile is required');
+  await toolPolicyService.initialize();
+  return toolPolicyService.setProfile(profile);
+});
+
+// Add rule
+registerHandler('policy_add_rule', async (params): Promise<ToolRule> => {
+  await toolPolicyService.initialize();
+  const rule = params as Omit<ToolRule, 'priority'>;
+  return toolPolicyService.addRule(rule);
+});
+
+// Remove rule
+registerHandler('policy_remove_rule', async (params): Promise<void> => {
+  const { index } = params as { index: number };
+  if (index === undefined) throw new Error('index is required');
+  await toolPolicyService.initialize();
+  await toolPolicyService.removeRule(index);
+});
+
+// Evaluate tool (for testing/preview)
+registerHandler('policy_evaluate', async (params) => {
+  const { toolName, arguments: args, sessionId, sessionType, provider } = params as {
+    toolName: string;
+    arguments: Record<string, unknown>;
+    sessionId: string;
+    sessionType: string;
+    provider?: string;
+  };
+  if (!toolName || !sessionId || !sessionType) {
+    throw new Error('toolName, sessionId, and sessionType are required');
+  }
+  await toolPolicyService.initialize();
+  return toolPolicyService.evaluate({
+    toolName,
+    arguments: args || {},
+    sessionId,
+    sessionType: sessionType as SessionType,
+    provider,
+  });
+});
+
+// Register MCP tools
+registerHandler('policy_register_mcp_tools', async (params): Promise<void> => {
+  const { tools } = params as { tools: string[] };
+  if (!tools) throw new Error('tools array is required');
+  await toolPolicyService.initialize();
+  toolPolicyService.registerMcpTools(tools);
+});
+
+// Reset policy to defaults
+registerHandler('policy_reset', async (): Promise<ToolPolicy> => {
+  await toolPolicyService.initialize();
+  return toolPolicyService.setProfile('coding'); // Reset to default profile
+});
+
+// ============================================================================
+// Chrome Extension Command Handlers
+// ============================================================================
+
+import {
+  openChromeExtensionsPage,
+  openExtensionFolder,
+  openExtensionInstallHelper,
+  getExtensionPath
+} from './tools/chrome-launcher.js';
+import { chromeBridge } from './chrome-bridge.js';
+
+// Check if Chrome extension is connected
+registerHandler('chrome_extension_status', async () => {
+  chromeBridge.start();
+  await new Promise(resolve => setTimeout(resolve, 300));
+  return {
+    connected: chromeBridge.isConnected(),
+    port: chromeBridge.getPort(),
+  };
+});
+
+// Open Chrome extensions page
+registerHandler('chrome_open_extensions_page', async () => {
+  return openChromeExtensionsPage();
+});
+
+// Open extension folder in file browser
+registerHandler('chrome_open_extension_folder', async () => {
+  return openExtensionFolder();
+});
+
+// Open both Chrome extensions page and extension folder (for easy install)
+registerHandler('chrome_install_extension_helper', async () => {
+  return openExtensionInstallHelper();
+});
+
+// Get extension folder path
+registerHandler('chrome_get_extension_path', async () => {
+  return { path: getExtensionPath() };
+});
 
 // ============================================================================
 // Export

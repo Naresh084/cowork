@@ -51,6 +51,7 @@ fn main() {
             commands::agent::agent_mcp_call_tool,
             commands::agent::agent_load_gemini_extensions,
             commands::agent::agent_get_initialization_status,
+            commands::agent::agent_command,
             // Skill commands
             commands::skills::agent_discover_skills,
             commands::skills::agent_install_skill,
@@ -58,6 +59,37 @@ fn main() {
             commands::skills::agent_check_skill_eligibility,
             commands::skills::agent_get_skill_content,
             commands::skills::agent_create_skill,
+            // Cron commands
+            commands::cron::cron_list_jobs,
+            commands::cron::cron_get_job,
+            commands::cron::cron_create_job,
+            commands::cron::cron_update_job,
+            commands::cron::cron_delete_job,
+            commands::cron::cron_pause_job,
+            commands::cron::cron_resume_job,
+            commands::cron::cron_trigger_job,
+            commands::cron::cron_get_runs,
+            commands::cron::cron_get_status,
+            // Heartbeat commands
+            commands::heartbeat::heartbeat_get_status,
+            commands::heartbeat::heartbeat_get_config,
+            commands::heartbeat::heartbeat_set_config,
+            commands::heartbeat::heartbeat_start,
+            commands::heartbeat::heartbeat_stop,
+            commands::heartbeat::heartbeat_wake,
+            commands::heartbeat::heartbeat_queue_event,
+            commands::heartbeat::heartbeat_get_events,
+            commands::heartbeat::heartbeat_clear_events,
+            // Policy commands
+            commands::policy::policy_get,
+            commands::policy::policy_update,
+            commands::policy::policy_set_profile,
+            commands::policy::policy_add_rule,
+            commands::policy::policy_remove_rule,
+            commands::policy::policy_evaluate,
+            commands::policy::policy_reset,
+            commands::policy::policy_get_profiles,
+            commands::policy::policy_get_groups,
         ])
         .setup(|_app| {
             Ok(())

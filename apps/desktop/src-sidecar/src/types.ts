@@ -1,7 +1,7 @@
-import type { Message, PermissionRequest, PermissionDecision } from '@gemini-cowork/shared';
+import type { Message, PermissionRequest, PermissionDecision, SessionType } from '@gemini-cowork/shared';
 
-// Re-export Message for use in persistence types
-export type { Message };
+// Re-export types for use in persistence types
+export type { Message, SessionType };
 
 // ============================================================================
 // IPC Message Types
@@ -34,6 +34,7 @@ export interface CreateSessionParams {
   workingDirectory: string;
   model?: string;
   title?: string;
+  type?: SessionType;
 }
 
 export interface SendMessageParams {
@@ -97,6 +98,7 @@ export interface SaveMemoryParams {
 
 export interface SessionInfo {
   id: string;
+  type: SessionType;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -161,6 +163,7 @@ export type AgentEventType =
   | 'research:progress'
   | 'context:update'
   | 'session:updated'
+  | 'browserView:screenshot'
   | 'error';
 
 export interface QuestionRequest {

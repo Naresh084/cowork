@@ -23,6 +23,7 @@
     "@langchain/google-genai": "^2.1.14",
     "@langchain/openai": "^1.2.4",
     "chrome-remote-interface": "^0.33.3",
+    "cron-parser": "^5.5.0",
     "deepagents": "^1.6.1",
     "micromatch": "^4.0.5",
     "playwright": "^1.40.0",

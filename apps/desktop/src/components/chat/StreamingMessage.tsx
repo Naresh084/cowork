@@ -12,7 +12,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-      className="flex gap-3"
+      className="flex gap-3 message-block-isolate"
     >
       {/* Avatar */}
       <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center">

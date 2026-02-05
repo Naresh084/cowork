@@ -186,6 +186,27 @@ export class EventEmitter {
   }
 
   /**
+   * Emit browser view screenshot event for live view display.
+   * Called during computer_use tool execution after each action.
+   */
+  browserViewScreenshot(
+    sessionId: string,
+    screenshot: {
+      data: string;      // base64 PNG
+      mimeType: string;  // 'image/png'
+      url: string;       // current browser URL
+      timestamp: number; // Date.now()
+    }
+  ): void {
+    this.emit('browserView:screenshot', sessionId, {
+      data: screenshot.data,
+      mimeType: screenshot.mimeType,
+      url: screenshot.url,
+      timestamp: screenshot.timestamp,
+    });
+  }
+
+  /**
    * Emit session updated event.
    */
   sessionUpdated(session: unknown): void {

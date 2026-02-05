@@ -4,6 +4,8 @@ import { chromium, type Browser, type Page } from 'playwright';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { chromeBridge } from '../chrome-bridge.js';
 import { ChromeCDPDriver, checkChromeAvailable } from './chrome-cdp-driver.js';
+import { ensureChromeWithDebugging } from './chrome-launcher.js';
+import { eventEmitter } from '../event-emitter.js';
 
 interface ComputerUseAction extends Record<string, unknown> {
   name: string;
@@ -228,42 +230,74 @@ export function createComputerUseTool(
         return { success: false, error: 'API key not set. Please configure an API key first.' };
       }
 
-      let driver: BrowserDriver;
+      let driver: BrowserDriver | null = null;
       let driverType: 'cdp' | 'chrome_extension' | 'playwright' = 'cdp';
+      let usingFallback = false;
 
-      // Try Chrome CDP first (native Chrome with remote debugging)
-      try {
-        const cdpAvailable = await checkChromeAvailable(9222);
-        if (cdpAvailable) {
-          driver = await ChromeCDPDriver.connect(9222);
-          driverType = 'cdp';
-          if (startUrl) {
-            await driver.performAction({ name: 'navigate', args: { url: startUrl } });
-          }
-        } else {
-          throw new Error('CDP not available');
+      // Strategy 1: Try Chrome Extension first (best UX - works with user's existing Chrome)
+      console.log('[computer_use] Attempting to connect to Chrome extension...');
+      const extensionConnected = await chromeBridge.waitForConnection(2000);
+
+      if (extensionConnected) {
+        console.log('[computer_use] Chrome extension connected! Using extension driver.');
+        driver = new ChromeExtensionDriver();
+        driverType = 'chrome_extension';
+        if (startUrl) {
+          await driver.performAction({ name: 'navigate', args: { url: startUrl } });
         }
-      } catch {
-        // Try Chrome Extension
-        chromeBridge.start();
-        if (chromeBridge.isConnected()) {
-          driver = new ChromeExtensionDriver();
-          driverType = 'chrome_extension';
-          if (startUrl) {
-            await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+      } else {
+        console.log('[computer_use] Chrome extension not available, falling back to CDP...');
+      }
+
+      // Strategy 2: Fallback to Chrome CDP (auto-launch/restart Chrome if needed)
+      if (!driver) {
+        usingFallback = true;
+        try {
+          let cdpAvailable = await checkChromeAvailable(9222);
+
+          if (!cdpAvailable) {
+            // Auto-launch Chrome with debugging using user's profile
+            // This will also auto-restart Chrome if it's running without debugging
+            const launchResult = await ensureChromeWithDebugging();
+            if (launchResult.success) {
+              // Wait a bit for Chrome to be fully ready
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              cdpAvailable = await checkChromeAvailable(9222);
+            } else if (launchResult.error) {
+              // Chrome couldn't be launched or restarted
+              return {
+                success: false,
+                error: launchResult.error + '\n\n💡 Tip: Install the Chrome Extension for seamless browser control.',
+              };
+            }
           }
-        } else {
-          // Return helpful error instead of falling back to Playwright
-          return {
-            success: false,
-            error: `Chrome not available for browser automation.\n\n` +
-                   `Please start Chrome with remote debugging enabled:\n\n` +
-                   `macOS:\n  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222\n\n` +
-                   `Windows:\n  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222\n\n` +
-                   `Linux:\n  google-chrome --remote-debugging-port=9222\n\n` +
-                   `Or install the Gemini Cowork Chrome extension for browser control.`,
-          };
+
+          if (cdpAvailable) {
+            driver = await ChromeCDPDriver.connect(9222);
+            driverType = 'cdp';
+            if (startUrl) {
+              await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+            }
+          }
+        } catch (error) {
+          console.error('CDP connection failed:', error);
         }
+      }
+
+      // If still no driver, Chrome is likely not installed
+      if (!driver) {
+        return {
+          success: false,
+          error: `Google Chrome is required for browser automation but could not be found.\n\n` +
+                 `Please install Google Chrome from:\n` +
+                 `https://www.google.com/chrome/\n\n` +
+                 `After installing, try again.`,
+        };
+      }
+
+      // Log suggestion to install extension if using fallback (non-blocking)
+      if (usingFallback) {
+        console.log('[computer_use] Using CDP fallback. For better experience, install the Gemini Cowork Chrome Extension.');
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -276,6 +310,16 @@ export function createComputerUseTool(
       try {
         while (steps < maxSteps) {
           const screenshot = await driver.getScreenshot();
+
+          // Emit screenshot for live browser view
+          const currentUrl = screenshot.url || await driver.getUrl();
+          eventEmitter.browserViewScreenshot(_context.sessionId, {
+            data: screenshot.data,
+            mimeType: screenshot.mimeType,
+            url: currentUrl,
+            timestamp: Date.now(),
+          });
+
           const response = await ai.models.generateContent({
             model: getComputerUseModel(),
             contents: [
@@ -323,6 +367,20 @@ export function createComputerUseTool(
           }
 
           steps += 1;
+        }
+
+        // Emit final screenshot to show the end state
+        try {
+          const finalScreenshot = await driver.getScreenshot();
+          const finalUrl = finalScreenshot.url || await driver.getUrl();
+          eventEmitter.browserViewScreenshot(_context.sessionId, {
+            data: finalScreenshot.data,
+            mimeType: finalScreenshot.mimeType,
+            url: finalUrl,
+            timestamp: Date.now(),
+          });
+        } catch {
+          // Ignore screenshot errors at the end
         }
 
         return {

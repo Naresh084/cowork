@@ -20,18 +20,81 @@ export class ChromeBridge {
   private socket: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private port = 8765;
+  private extensionVersion: string | null = null;
+  private connectionPromise: Promise<void> | null = null;
+  private connectionResolve: (() => void) | null = null;
 
   start(port = 8765): void {
-    if (this.wss) return;
+    if (this.wss) {
+      // Already started, just return
+      return;
+    }
+
     this.port = port;
-    this.wss = new WebSocketServer({ port });
-    this.wss.on('connection', (socket: WebSocket) => {
-      this.socket = socket;
-      socket.on('message', (data: WebSocket.RawData) => this.handleMessage(data.toString()));
-      socket.on('close', () => {
-        this.socket = null;
+
+    try {
+      this.wss = new WebSocketServer({ port });
+      console.log(`[ChromeBridge] WebSocket server started on port ${port}`);
+
+      this.wss.on('connection', (socket: WebSocket) => {
+        console.log('[ChromeBridge] Extension connected!');
+        this.socket = socket;
+
+        socket.on('message', (data: WebSocket.RawData) => {
+          const message = data.toString();
+          this.handleMessage(message);
+        });
+
+        socket.on('close', () => {
+          console.log('[ChromeBridge] Extension disconnected');
+          this.socket = null;
+          this.extensionVersion = null;
+        });
+
+        socket.on('error', (err) => {
+          console.error('[ChromeBridge] Socket error:', err.message);
+        });
       });
+
+      this.wss.on('error', (err) => {
+        console.error('[ChromeBridge] Server error:', err.message);
+        // Port might be in use, try to recover
+        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+          console.log('[ChromeBridge] Port in use, attempting to reuse...');
+        }
+      });
+    } catch (err) {
+      console.error('[ChromeBridge] Failed to start server:', err);
+    }
+  }
+
+  /**
+   * Wait for extension to connect with timeout
+   */
+  async waitForConnection(timeoutMs = 3000): Promise<boolean> {
+    if (this.isConnected()) {
+      return true;
+    }
+
+    // Start the server if not already started
+    this.start();
+
+    // Create a promise that resolves when connected
+    this.connectionPromise = new Promise<void>((resolve) => {
+      this.connectionResolve = resolve;
     });
+
+    // Race between connection and timeout
+    const timeout = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Connection timeout')), timeoutMs);
+    });
+
+    try {
+      await Promise.race([this.connectionPromise, timeout]);
+      return this.isConnected();
+    } catch {
+      return false;
+    }
   }
 
   isConnected(): boolean {
@@ -40,6 +103,10 @@ export class ChromeBridge {
 
   getPort(): number {
     return this.port;
+  }
+
+  getExtensionVersion(): string | null {
+    return this.extensionVersion;
   }
 
   async requestScreenshot(): Promise<ChromeScreenshot> {
@@ -53,19 +120,37 @@ export class ChromeBridge {
 
   private handleMessage(raw: string): void {
     try {
-      const message = JSON.parse(raw) as { id?: string; error?: string; result?: unknown };
+      const message = JSON.parse(raw) as { id?: string; type?: string; error?: string; result?: unknown; version?: string };
+
+      // Handle hello message from extension
+      if (message.type === 'hello') {
+        this.extensionVersion = message.version || 'unknown';
+        console.log(`[ChromeBridge] Extension hello received, version: ${this.extensionVersion}`);
+
+        // Resolve any pending connection promise
+        if (this.connectionResolve) {
+          this.connectionResolve();
+          this.connectionResolve = null;
+        }
+        return;
+      }
+
+      // Handle response messages (must have id)
       if (!message.id) return;
+
       const pending = this.pending.get(message.id);
       if (!pending) return;
+
       clearTimeout(pending.timeout);
       this.pending.delete(message.id);
+
       if (message.error) {
         pending.reject(new Error(message.error));
       } else {
         pending.resolve(message.result);
       }
-    } catch {
-      // ignore malformed messages
+    } catch (err) {
+      console.error('[ChromeBridge] Failed to parse message:', err);
     }
   }
 

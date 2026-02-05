@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rm, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import type { Task, Artifact, PersistedMessage, PersistedToolExecution } from './types.js';
+import type { Task, Artifact, PersistedMessage, PersistedToolExecution, SessionType } from './types.js';
 
 // Schema version for migrations
 const SCHEMA_VERSION = 1;
@@ -24,6 +24,7 @@ export type { PersistedMessage, PersistedToolExecution };
 interface SessionMetadata {
   version: number;
   id: string;
+  type?: SessionType; // Optional for backwards compatibility with legacy sessions
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -36,6 +37,7 @@ interface SessionIndex {
   version: number;
   sessions: Array<{
     id: string;
+    type?: SessionType; // Optional for backwards compatibility
     title: string | null;
     firstMessage: string | null;
     workingDirectory: string;
@@ -197,6 +199,7 @@ export class SessionPersistence {
 
   async saveSession(session: {
     id: string;
+    type?: SessionType;
     title: string | null;
     workingDirectory: string;
     model: string;
@@ -220,6 +223,7 @@ export class SessionPersistence {
       this.writeJson(join(sessionDir, 'session.json'), {
         version: SCHEMA_VERSION,
         id: session.id,
+        type: session.type || 'main', // Default to 'main' for legacy
         title: session.title,
         workingDirectory: session.workingDirectory,
         model: session.model,
@@ -275,6 +279,7 @@ export class SessionPersistence {
 
   private async updateIndex(session: {
     id: string;
+    type?: SessionType;
     title: string | null;
     workingDirectory: string;
     model: string;
@@ -300,6 +305,7 @@ export class SessionPersistence {
     const existingIdx = index.sessions.findIndex(s => s.id === session.id);
     const entry = {
       id: session.id,
+      type: session.type || 'main',
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,

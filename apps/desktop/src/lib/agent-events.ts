@@ -212,6 +212,16 @@ function parseTauriEvent(
     case 'agent:stopped':
       return { type: 'agent:stopped', sessionId };
 
+    case 'browserView:screenshot':
+      return {
+        type: 'browserView:screenshot',
+        sessionId,
+        data: (data.data as string) ?? '',
+        mimeType: (data.mimeType as string) ?? 'image/png',
+        url: (data.url as string) ?? '',
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
     default:
       console.warn('Unknown event type:', type);
       return null;
@@ -291,6 +301,7 @@ export function subscribeToAgentEvents(
     'agent:session:updated',
     'agent:started',
     'agent:stopped',
+    'agent:browserView:screenshot',
   ];
 
   // Set up listeners for each event type
@@ -363,6 +374,7 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:session:updated',
     'agent:started',
     'agent:stopped',
+    'agent:browserView:screenshot',
   ];
 
   for (const eventType of eventTypes) {

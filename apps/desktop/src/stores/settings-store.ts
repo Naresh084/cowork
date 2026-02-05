@@ -82,8 +82,9 @@ export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
 export interface RightPanelSections {
   progress: boolean;
   workingFolder: boolean;
-  scratchpad: boolean;
+  toolsUsed: boolean;
   context: boolean;
+  scheduled: boolean;
 }
 
 interface SettingsState {
@@ -124,8 +125,11 @@ interface SettingsState {
   rightPanelPinned: boolean;
   rightPanelTab: 'tasks' | 'artifacts' | 'memory';
   viewMode: ViewMode;
-  scratchpadContent: string;
   rightPanelSections: RightPanelSections;
+
+  // Live Browser View
+  liveViewOpen: boolean;
+  liveViewSplitRatio: number;  // 0.3 to 0.7, default 0.5 (50/50 split)
 
   // Meta
   isLoading: boolean;
@@ -191,8 +195,12 @@ interface SettingsActions {
   toggleRightPanelPinned: () => void;
   setRightPanelTab: (tab: 'tasks' | 'artifacts' | 'memory') => void;
   setViewMode: (mode: ViewMode) => void;
-  setScratchpadContent: (content: string) => void;
   toggleRightPanelSection: (section: keyof RightPanelSections) => void;
+
+  // Live Browser View
+  setLiveViewOpen: (open: boolean) => void;
+  setLiveViewSplitRatio: (ratio: number) => void;
+  closeLiveView: () => void;
 
   clearError: () => void;
 }
@@ -251,13 +259,17 @@ const initialState: SettingsState = {
   rightPanelPinned: false,
   rightPanelTab: 'tasks',
   viewMode: 'cowork',
-  scratchpadContent: '',
   rightPanelSections: {
     progress: true,
     workingFolder: true,
-    scratchpad: false,
+    toolsUsed: true,
     context: true,
+    scheduled: true,
   },
+
+  // Live Browser View
+  liveViewOpen: false,
+  liveViewSplitRatio: 0.5,  // Default 50/50 split
 
   // Meta
   isLoading: false,
@@ -678,10 +690,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set({ viewMode: mode });
       },
 
-      setScratchpadContent: (content) => {
-        set({ scratchpadContent: content });
-      },
-
       toggleRightPanelSection: (section) => {
         set((state) => ({
           rightPanelSections: {
@@ -694,6 +702,17 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       clearError: () => {
         set({ error: null });
       },
+
+      // Live Browser View actions
+      setLiveViewOpen: (open) => set({ liveViewOpen: open }),
+
+      setLiveViewSplitRatio: (ratio) => {
+        // Clamp ratio between 0.3 and 0.7 to ensure min panel widths
+        const clampedRatio = Math.max(0.3, Math.min(0.7, ratio));
+        set({ liveViewSplitRatio: clampedRatio });
+      },
+
+      closeLiveView: () => set({ liveViewOpen: false }),
     }),
     {
       name: 'settings-store',
@@ -717,8 +736,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         rightPanelPinned: state.rightPanelPinned,
         rightPanelTab: state.rightPanelTab,
         viewMode: state.viewMode,
-        scratchpadContent: state.scratchpadContent,
         rightPanelSections: state.rightPanelSections,
+        // liveViewOpen is intentionally NOT persisted - should always start closed
+        liveViewSplitRatio: state.liveViewSplitRatio,
       }),
       // Validate persisted state on rehydration
       merge: (persistedState, currentState) => {
@@ -797,9 +817,11 @@ export const useRightPanelTab = () =>
   useSettingsStore((state) => state.rightPanelTab);
 export const useViewMode = () =>
   useSettingsStore((state) => state.viewMode);
-export const useScratchpadContent = () =>
-  useSettingsStore((state) => state.scratchpadContent);
 export const useRightPanelSections = () =>
   useSettingsStore((state) => state.rightPanelSections);
 export const useSpecializedModels = () =>
   useSettingsStore((state) => state.specializedModels);
+export const useLiveViewOpen = () =>
+  useSettingsStore((state) => state.liveViewOpen);
+export const useLiveViewSplitRatio = () =>
+  useSettingsStore((state) => state.liveViewSplitRatio);

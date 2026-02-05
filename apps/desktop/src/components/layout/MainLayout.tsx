@@ -1,18 +1,33 @@
+import { useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ChatView } from '../chat/ChatView';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
 import { RightPanel } from './RightPanel';
+import { SplitViewLayout } from './SplitViewLayout';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useAppStore } from '../../stores/app-store';
 import { ToastContainer } from '../ui/Toast';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
+import { ChromeExtensionModal } from '../modals/ChromeExtensionModal';
 
 export function MainLayout() {
-  const { sidebarCollapsed } = useSettingsStore();
+  const { sidebarCollapsed, liveViewOpen, closeLiveView } = useSettingsStore();
+  const { activeSessionId } = useSessionStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
-  const { showApiKeyModal, apiKeyError, setShowApiKeyModal } = useAppStore();
+  const { showApiKeyModal, apiKeyError, setShowApiKeyModal, showChromeExtensionModal, setShowChromeExtensionModal } = useAppStore();
+
+  // Close live view when switching sessions
+  useEffect(() => {
+    if (liveViewOpen) {
+      closeLiveView();
+    }
+    // Only run when activeSessionId changes, not when liveViewOpen changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId]);
 
   const handlePreviewArtifact = (artifact: Artifact) => {
     setPreviewArtifact(artifact);
@@ -23,19 +38,32 @@ export function MainLayout() {
       {/* Title Bar - minimal drag area for macOS */}
       <TitleBar />
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <Sidebar isCollapsed={sidebarCollapsed} />
+      {/* Main Content - Switches between normal and split view layouts */}
+      <AnimatePresence mode="wait">
+        {liveViewOpen ? (
+          <SplitViewLayout key="split-view" />
+        ) : (
+          <motion.div
+            key="normal-layout"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex overflow-hidden"
+          >
+            {/* Sidebar */}
+            <Sidebar isCollapsed={sidebarCollapsed} />
 
-        {/* Main View */}
-        <main className="flex-1 flex flex-col min-w-0 min-h-0 relative codex-grid codex-vignette overflow-x-hidden">
-          <ChatView />
-        </main>
+            {/* Main View */}
+            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative codex-grid codex-vignette overflow-x-hidden">
+              <ChatView />
+            </main>
 
-        {/* Right Panel - Always connected to layout */}
-        <RightPanel onPreviewArtifact={handlePreviewArtifact} />
-      </div>
+            {/* Right Panel */}
+            <RightPanel onPreviewArtifact={handlePreviewArtifact} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Toast notifications */}
       <ToastContainer />
@@ -58,6 +86,12 @@ export function MainLayout() {
         isOpen={showApiKeyModal}
         onClose={() => setShowApiKeyModal(false)}
         errorMessage={apiKeyError}
+      />
+
+      {/* Chrome Extension Modal */}
+      <ChromeExtensionModal
+        isOpen={showChromeExtensionModal}
+        onClose={() => setShowChromeExtensionModal(false)}
       />
     </div>
   );
