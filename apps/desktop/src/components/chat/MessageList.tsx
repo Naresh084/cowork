@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { cn } from '../../lib/utils';
 import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2 } from 'lucide-react';
-import { useChatStore, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem } from '../../stores/chat-store';
+import { useChatStore, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type TurnActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -40,10 +40,10 @@ const EMPTY_SESSION_STATE = {
   thinkingContent: '',
   streamingContent: '',
   isLoadingMessages: false,
-  pendingQuestions: [] as Array<{ id: string; question: string; options: string[] }>,
+  pendingQuestions: [] as UserQuestion[],
   pendingPermissions: [] as ExtendedPermissionRequest[],
   streamingToolCalls: [] as ToolExecution[],
-  turnActivities: {} as Record<string, Array<{ type: string; id: string; [key: string]: unknown }>>,
+  turnActivities: {} as Record<string, TurnActivityItem[]>,
   activeTurnId: undefined as string | undefined,
   hasLoaded: false,
   lastUpdatedAt: 0,

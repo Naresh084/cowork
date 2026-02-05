@@ -3,9 +3,20 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import type { Task, Artifact, PersistedMessage, PersistedToolExecution, SessionType } from './types.js';
+import type {
+  ChatItem,
+  UserMessageItem,
+  AssistantMessageItem,
+  SystemMessageItem,
+  ToolStartItem,
+  ToolResultItem,
+  ContextUsage,
+} from '@gemini-cowork/shared';
 
 // Schema version for migrations
-const SCHEMA_VERSION = 1;
+// v1: Separate messages.json, tools.json
+// v2: Unified chat-items.json
+const SCHEMA_VERSION = 2;
 
 /**
  * Generate a stable hash for a working directory path.
@@ -21,10 +32,22 @@ function hashWorkingDirectory(workingDirectory: string): string {
 // Re-export types for convenience
 export type { PersistedMessage, PersistedToolExecution };
 
-interface SessionMetadata {
-  version: number;
+interface SessionMetadataV1 {
+  version: 1;
   id: string;
-  type?: SessionType; // Optional for backwards compatibility with legacy sessions
+  type?: SessionType;
+  title: string | null;
+  workingDirectory: string;
+  model: string;
+  approvalMode: 'auto' | 'read_only' | 'full';
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface SessionMetadataV2 {
+  version: 2;
+  id: string;
+  type?: SessionType;
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -37,7 +60,7 @@ interface SessionIndex {
   version: number;
   sessions: Array<{
     id: string;
-    type?: SessionType; // Optional for backwards compatibility
+    type?: SessionType;
     title: string | null;
     firstMessage: string | null;
     workingDirectory: string;
@@ -48,12 +71,155 @@ interface SessionIndex {
   }>;
 }
 
-export interface PersistedSessionData {
-  metadata: SessionMetadata;
+// V1 persisted data structure (for migration)
+export interface PersistedSessionDataV1 {
+  metadata: SessionMetadataV1;
   messages: PersistedMessage[];
   toolExecutions: PersistedToolExecution[];
   tasks: Task[];
   artifacts: Artifact[];
+}
+
+// V2 persisted data structure (unified)
+export interface PersistedSessionDataV2 {
+  metadata: SessionMetadataV2;
+  chatItems: ChatItem[];
+  tasks: Task[];
+  artifacts: Artifact[];
+  contextUsage?: ContextUsage;
+}
+
+// Union type for loading
+export type PersistedSessionData = PersistedSessionDataV1 | PersistedSessionDataV2;
+
+/**
+ * Migrate V1 session data to V2 format.
+ * Converts messages[] and toolExecutions[] into unified chatItems[] array.
+ */
+function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
+  const timeline: ChatItem[] = [];
+  const { messages, toolExecutions } = v1Data;
+
+  console.error(`[Persistence] Migrating session ${v1Data.metadata.id} from v1 to v2: ${messages.length} messages, ${toolExecutions.length} tools`);
+
+  // Get user messages sorted by createdAt for turn association
+  const userMessages = messages
+    .filter(m => m.role === 'user')
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  // Build map of tool executions by turnMessageId
+  const toolsByTurn = new Map<string, PersistedToolExecution[]>();
+  for (const tool of toolExecutions) {
+    let turnId = tool.turnMessageId;
+
+    // Fallback: find user message that precedes this tool by timestamp
+    if (!turnId) {
+      const preceding = [...userMessages].reverse().find(m => m.createdAt <= tool.startedAt);
+      turnId = preceding?.id || userMessages[userMessages.length - 1]?.id;
+    }
+
+    if (turnId) {
+      const tools = toolsByTurn.get(turnId) || [];
+      tools.push(tool);
+      toolsByTurn.set(turnId, tools);
+    }
+  }
+
+  // Process messages in order
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const timestamp = msg.createdAt;
+
+    if (msg.role === 'user') {
+      // User message
+      const userItem: UserMessageItem = {
+        id: `ci-${msg.id}`,
+        kind: 'user_message',
+        timestamp,
+        turnId: msg.id,
+        content: msg.content,
+      };
+      timeline.push(userItem);
+
+      // Add tool executions for this turn
+      const turnTools = (toolsByTurn.get(msg.id) || [])
+        .sort((a, b) => (a.turnOrder ?? 0) - (b.turnOrder ?? 0));
+
+      for (const tool of turnTools) {
+        // Skip sub-tools - they'll be rendered inside their parent
+        if (tool.parentToolId) continue;
+
+        // Tool start
+        const toolStartItem: ToolStartItem = {
+          id: `ci-ts-${tool.id}`,
+          kind: 'tool_start',
+          timestamp: tool.startedAt,
+          turnId: msg.id,
+          toolId: tool.id,
+          name: tool.name,
+          args: tool.args,
+          status: tool.status === 'running' ? 'running' : tool.status === 'error' ? 'error' : 'completed',
+          parentToolId: tool.parentToolId,
+        };
+        timeline.push(toolStartItem);
+
+        // Tool result (if completed)
+        if (tool.completedAt || tool.status !== 'running') {
+          const toolResultItem: ToolResultItem = {
+            id: `ci-tr-${tool.id}`,
+            kind: 'tool_result',
+            timestamp: tool.completedAt || tool.startedAt + 1,
+            turnId: msg.id,
+            toolId: tool.id,
+            name: tool.name,
+            status: tool.status === 'error' ? 'error' : 'success',
+            result: tool.result,
+            error: tool.error,
+            duration: tool.completedAt ? tool.completedAt - tool.startedAt : undefined,
+            parentToolId: tool.parentToolId,
+          };
+          timeline.push(toolResultItem);
+        }
+      }
+    } else if (msg.role === 'assistant') {
+      // Find the preceding user message to get turnId
+      const precedingUserMsg = [...userMessages].reverse().find(m => m.createdAt < timestamp);
+      const turnId = precedingUserMsg?.id;
+
+      const assistantItem: AssistantMessageItem = {
+        id: `ci-${msg.id}`,
+        kind: 'assistant_message',
+        timestamp,
+        turnId,
+        content: msg.content,
+        metadata: msg.metadata,
+      };
+      timeline.push(assistantItem);
+    } else if (msg.role === 'system') {
+      const systemItem: SystemMessageItem = {
+        id: `ci-${msg.id}`,
+        kind: 'system_message',
+        timestamp,
+        content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+        metadata: msg.metadata,
+      };
+      timeline.push(systemItem);
+    }
+  }
+
+  // Sort timeline by timestamp
+  timeline.sort((a, b) => a.timestamp - b.timestamp);
+
+  return {
+    metadata: {
+      ...v1Data.metadata,
+      version: 2,
+    },
+    chatItems: timeline,
+    tasks: v1Data.tasks,
+    artifacts: v1Data.artifacts,
+    contextUsage: undefined,
+  };
 }
 
 export class SessionPersistence {
@@ -61,17 +227,14 @@ export class SessionPersistence {
   private workspacesDir: string;
 
   constructor(appDataDir: string) {
-    // appDataDir is now ~/.geminicowork
     this.sessionsDir = join(appDataDir, 'sessions');
     this.workspacesDir = join(appDataDir, 'workspaces');
   }
 
   async initialize(): Promise<void> {
-    // Create all directories
     await mkdir(this.sessionsDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
 
-    // Create index if doesn't exist
     const indexPath = join(this.sessionsDir, 'index.json');
     if (!existsSync(indexPath)) {
       await this.writeJson(indexPath, { version: SCHEMA_VERSION, sessions: [] });
@@ -138,7 +301,6 @@ export class SessionPersistence {
       const sessions = (data.sessions || []).filter(id => id !== sessionId);
 
       if (sessions.length === 0) {
-        // Remove empty index file
         await unlink(indexPath);
       } else {
         await this.writeJson(indexPath, {
@@ -152,8 +314,8 @@ export class SessionPersistence {
     }
   }
 
-  async loadAllSessions(): Promise<Map<string, PersistedSessionData>> {
-    const result = new Map<string, PersistedSessionData>();
+  async loadAllSessions(): Promise<Map<string, PersistedSessionDataV2>> {
+    const result = new Map<string, PersistedSessionDataV2>();
 
     try {
       const index = await this.readJson<SessionIndex>(join(this.sessionsDir, 'index.json'));
@@ -175,15 +337,43 @@ export class SessionPersistence {
     return result;
   }
 
-  async loadSession(sessionId: string): Promise<PersistedSessionData | null> {
+  /**
+   * Load a session, automatically migrating v1 to v2 format.
+   */
+  async loadSession(sessionId: string): Promise<PersistedSessionDataV2 | null> {
     const sessionDir = join(this.sessionsDir, sessionId);
 
     if (!existsSync(sessionDir)) {
       return null;
     }
 
+    // Check for v2 format first (chat-items.json)
+    const chatItemsPath = join(sessionDir, 'chat-items.json');
+    if (existsSync(chatItemsPath)) {
+      // V2 format - load unified data
+      const [metadata, chatItemsData, tasks, artifacts, contextUsage] = await Promise.all([
+        this.readJson<SessionMetadataV2>(join(sessionDir, 'session.json')),
+        this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath)
+          .then(d => d.chatItems).catch(() => []),
+        this.readJson<{ tasks: Task[] }>(join(sessionDir, 'tasks.json'))
+          .then(d => d.tasks).catch(() => []),
+        this.readJson<{ artifacts: Artifact[] }>(join(sessionDir, 'artifacts.json'))
+          .then(d => d.artifacts).catch(() => []),
+        this.readJson<ContextUsage>(join(sessionDir, 'context.json')).catch(() => undefined),
+      ]);
+
+      return {
+        metadata: { ...metadata, version: 2 },
+        chatItems: chatItemsData,
+        tasks,
+        artifacts,
+        contextUsage,
+      };
+    }
+
+    // V1 format - load and migrate
     const [metadata, messages, toolExecutions, tasks, artifacts] = await Promise.all([
-      this.readJson<SessionMetadata>(join(sessionDir, 'session.json')),
+      this.readJson<SessionMetadataV1>(join(sessionDir, 'session.json')),
       this.readJson<{ messages: PersistedMessage[] }>(join(sessionDir, 'messages.json'))
         .then(d => d.messages).catch(() => []),
       this.readJson<{ executions: PersistedToolExecution[] }>(join(sessionDir, 'tools.json'))
@@ -194,9 +384,99 @@ export class SessionPersistence {
         .then(d => d.artifacts).catch(() => []),
     ]);
 
-    return { metadata, messages, toolExecutions, tasks, artifacts };
+    const v1Data: PersistedSessionDataV1 = {
+      metadata: { ...metadata, version: 1 },
+      messages,
+      toolExecutions,
+      tasks,
+      artifacts,
+    };
+
+    // Migrate to v2
+    const v2Data = migrateV1toV2(v1Data);
+
+    // Save migrated data
+    try {
+      await this.saveSessionV2(v2Data);
+      console.error(`[Persistence] Successfully migrated session ${sessionId} to v2`);
+
+      // Clean up old v1 files
+      await this.cleanupV1Files(sessionDir);
+    } catch (error) {
+      console.error(`[Persistence] Failed to save migrated session ${sessionId}:`, error);
+    }
+
+    return v2Data;
   }
 
+  /**
+   * Remove old v1 format files after migration.
+   */
+  private async cleanupV1Files(sessionDir: string): Promise<void> {
+    const v1Files = ['messages.json', 'tools.json'];
+    for (const file of v1Files) {
+      const filePath = join(sessionDir, file);
+      if (existsSync(filePath)) {
+        try {
+          await unlink(filePath);
+          console.error(`[Persistence] Cleaned up v1 file: ${file}`);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }
+
+  /**
+   * Save session in V2 format (unified chatItems).
+   */
+  async saveSessionV2(data: PersistedSessionDataV2): Promise<void> {
+    const sessionDir = join(this.sessionsDir, data.metadata.id);
+
+    if (!existsSync(sessionDir)) {
+      await mkdir(sessionDir, { recursive: true });
+    }
+
+    await Promise.all([
+      this.writeJson(join(sessionDir, 'session.json'), {
+        version: SCHEMA_VERSION,
+        id: data.metadata.id,
+        type: data.metadata.type || 'main',
+        title: data.metadata.title,
+        workingDirectory: data.metadata.workingDirectory,
+        model: data.metadata.model,
+        approvalMode: data.metadata.approvalMode,
+        createdAt: data.metadata.createdAt,
+        updatedAt: data.metadata.updatedAt,
+      }),
+      this.writeJson(join(sessionDir, 'chat-items.json'), {
+        version: SCHEMA_VERSION,
+        chatItems: data.chatItems,
+      }),
+      this.writeJson(join(sessionDir, 'tasks.json'), {
+        version: SCHEMA_VERSION,
+        tasks: data.tasks,
+      }),
+      this.writeJson(join(sessionDir, 'artifacts.json'), {
+        version: SCHEMA_VERSION,
+        artifacts: data.artifacts,
+      }),
+      data.contextUsage
+        ? this.writeJson(join(sessionDir, 'context.json'), data.contextUsage)
+        : Promise.resolve(),
+    ]);
+
+    // Update index
+    await this.updateIndexV2(data);
+
+    // Update workspace index
+    await this.addSessionToWorkspace(data.metadata.id, data.metadata.workingDirectory);
+  }
+
+  /**
+   * Legacy saveSession for backwards compatibility during migration.
+   * Converts to V2 format internally.
+   */
   async saveSession(session: {
     id: string;
     type?: SessionType;
@@ -211,82 +491,131 @@ export class SessionPersistence {
     createdAt: number;
     updatedAt: number;
   }): Promise<void> {
-    const sessionDir = join(this.sessionsDir, session.id);
-
-    // Ensure session directory exists
-    if (!existsSync(sessionDir)) {
-      await mkdir(sessionDir, { recursive: true });
-    }
-
-    // Write all files in parallel
-    await Promise.all([
-      this.writeJson(join(sessionDir, 'session.json'), {
-        version: SCHEMA_VERSION,
+    // Convert to V1 format then migrate to V2
+    const v1Data: PersistedSessionDataV1 = {
+      metadata: {
+        version: 1,
         id: session.id,
-        type: session.type || 'main', // Default to 'main' for legacy
+        type: session.type,
         title: session.title,
         workingDirectory: session.workingDirectory,
         model: session.model,
         approvalMode: session.approvalMode,
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
-      }),
-      this.writeJson(join(sessionDir, 'messages.json'), {
-        version: SCHEMA_VERSION,
-        messages: session.messages,
-      }),
-      this.writeJson(join(sessionDir, 'tools.json'), {
-        version: SCHEMA_VERSION,
-        executions: session.toolExecutions,
-      }),
-      this.writeJson(join(sessionDir, 'tasks.json'), {
-        version: SCHEMA_VERSION,
-        tasks: session.tasks,
-      }),
-      this.writeJson(join(sessionDir, 'artifacts.json'), {
-        version: SCHEMA_VERSION,
-        artifacts: session.artifacts,
-      }),
-    ]);
+      },
+      messages: session.messages,
+      toolExecutions: session.toolExecutions,
+      tasks: session.tasks,
+      artifacts: session.artifacts,
+    };
 
-    // Update index
-    await this.updateIndex(session);
+    const v2Data = migrateV1toV2(v1Data);
+    await this.saveSessionV2(v2Data);
+  }
 
-    // Update workspace index
-    await this.addSessionToWorkspace(session.id, session.workingDirectory);
+  /**
+   * Save chatItems directly for incremental updates.
+   */
+  async saveChatItems(sessionId: string, chatItems: ChatItem[]): Promise<void> {
+    const sessionDir = join(this.sessionsDir, sessionId);
+    if (!existsSync(sessionDir)) {
+      await mkdir(sessionDir, { recursive: true });
+    }
+
+    await this.writeJson(join(sessionDir, 'chat-items.json'), {
+      version: SCHEMA_VERSION,
+      chatItems,
+    });
+  }
+
+  /**
+   * Append a single chat item for real-time persistence.
+   */
+  async appendChatItem(sessionId: string, item: ChatItem): Promise<void> {
+    const sessionDir = join(this.sessionsDir, sessionId);
+    const chatItemsPath = join(sessionDir, 'chat-items.json');
+
+    let chatItems: ChatItem[] = [];
+    if (existsSync(chatItemsPath)) {
+      try {
+        const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
+        chatItems = data.chatItems || [];
+      } catch {
+        // Start fresh
+      }
+    }
+
+    chatItems.push(item);
+    await this.saveChatItems(sessionId, chatItems);
+  }
+
+  /**
+   * Update a chat item by ID.
+   */
+  async updateChatItem(sessionId: string, itemId: string, updates: Partial<ChatItem>): Promise<void> {
+    const sessionDir = join(this.sessionsDir, sessionId);
+    const chatItemsPath = join(sessionDir, 'chat-items.json');
+
+    if (!existsSync(chatItemsPath)) return;
+
+    const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
+    const chatItems = data.chatItems || [];
+
+    const index = chatItems.findIndex(item => item.id === itemId);
+    if (index >= 0) {
+      chatItems[index] = { ...chatItems[index], ...updates } as ChatItem;
+      await this.saveChatItems(sessionId, chatItems);
+    }
+  }
+
+  /**
+   * Save context usage.
+   */
+  async saveContextUsage(sessionId: string, contextUsage: ContextUsage): Promise<void> {
+    const sessionDir = join(this.sessionsDir, sessionId);
+    if (!existsSync(sessionDir)) {
+      await mkdir(sessionDir, { recursive: true });
+    }
+
+    await this.writeJson(join(sessionDir, 'context.json'), {
+      ...contextUsage,
+      lastUpdated: Date.now(),
+    });
+  }
+
+  /**
+   * Load context usage.
+   */
+  async loadContextUsage(sessionId: string): Promise<ContextUsage | null> {
+    const contextPath = join(this.sessionsDir, sessionId, 'context.json');
+    if (!existsSync(contextPath)) return null;
+
+    try {
+      return await this.readJson<ContextUsage>(contextPath);
+    } catch {
+      return null;
+    }
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
-    // Load session first to get working directory for workspace index cleanup
     const session = await this.loadSession(sessionId);
-
     const sessionDir = join(this.sessionsDir, sessionId);
 
     if (existsSync(sessionDir)) {
       await rm(sessionDir, { recursive: true, force: true });
     }
 
-    // Update workspace index
     if (session) {
       await this.removeSessionFromWorkspace(sessionId, session.metadata.workingDirectory);
     }
 
-    // Update index
     await this.removeFromIndex(sessionId);
 
     return true;
   }
 
-  private async updateIndex(session: {
-    id: string;
-    type?: SessionType;
-    title: string | null;
-    workingDirectory: string;
-    model: string;
-    messages: PersistedMessage[];
-    createdAt: number;
-    updatedAt: number;
-  }): Promise<void> {
+  private async updateIndexV2(data: PersistedSessionDataV2): Promise<void> {
     const indexPath = join(this.sessionsDir, 'index.json');
     const index = await this.readJson<SessionIndex>(indexPath).catch((): SessionIndex => ({
       version: SCHEMA_VERSION,
@@ -294,31 +623,35 @@ export class SessionPersistence {
     }));
 
     // Find first user message for preview
-    const firstUserMsg = session.messages.find(m => m.role === 'user');
-    const firstMessage = firstUserMsg
-      ? (typeof firstUserMsg.content === 'string'
-          ? firstUserMsg.content.slice(0, 100)
+    const firstUserItem = data.chatItems.find(item => item.kind === 'user_message') as UserMessageItem | undefined;
+    const firstMessage = firstUserItem
+      ? (typeof firstUserItem.content === 'string'
+          ? firstUserItem.content.slice(0, 100)
           : null)
       : null;
 
-    // Update or add session entry
-    const existingIdx = index.sessions.findIndex(s => s.id === session.id);
+    // Count message items
+    const messageCount = data.chatItems.filter(
+      item => item.kind === 'user_message' || item.kind === 'assistant_message'
+    ).length;
+
+    const existingIdx = index.sessions.findIndex(s => s.id === data.metadata.id);
     const entry = {
-      id: session.id,
-      type: session.type || 'main',
-      title: session.title,
+      id: data.metadata.id,
+      type: data.metadata.type || 'main',
+      title: data.metadata.title,
       firstMessage,
-      workingDirectory: session.workingDirectory,
-      model: session.model,
-      messageCount: session.messages.length,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
+      workingDirectory: data.metadata.workingDirectory,
+      model: data.metadata.model,
+      messageCount,
+      createdAt: data.metadata.createdAt,
+      updatedAt: data.metadata.updatedAt,
     };
 
     if (existingIdx >= 0) {
       index.sessions[existingIdx] = entry;
     } else {
-      index.sessions.unshift(entry); // Add to beginning (most recent)
+      index.sessions.unshift(entry);
     }
 
     await this.writeJson(indexPath, index);

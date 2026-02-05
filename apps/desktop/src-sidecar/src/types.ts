@@ -162,8 +162,12 @@ export type AgentEventType =
   | 'artifact:created'
   | 'research:progress'
   | 'context:update'
+  | 'context:usage'
   | 'session:updated'
   | 'browserView:screenshot'
+  | 'chat:item'
+  | 'chat:update'
+  | 'chat:items'
   | 'error';
 
 export interface QuestionRequest {

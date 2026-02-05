@@ -1,4 +1,5 @@
 import type { AgentEventType } from './types.js';
+import type { ChatItem } from '@gemini-cowork/shared';
 
 /**
  * SidecarEvent format expected by Rust (camelCase due to serde rename_all)
@@ -216,6 +217,44 @@ export class EventEmitter {
       title: sessionAny.title ?? undefined,
       messageCount: sessionAny.messageCount ?? undefined,
     });
+  }
+
+  // ============================================================================
+  // Unified Chat Item Events (V2 architecture)
+  // ============================================================================
+
+  /**
+   * Emit a new chat item to be appended to the chat timeline.
+   * This is the primary event for the unified chat storage architecture.
+   */
+  chatItem(sessionId: string, item: ChatItem): void {
+    this.emit('chat:item', sessionId, { item });
+  }
+
+  /**
+   * Emit an update to an existing chat item.
+   * Used to update status (e.g., tool running -> completed, thinking active -> done).
+   */
+  chatItemUpdate(sessionId: string, itemId: string, updates: Partial<ChatItem>): void {
+    this.emit('chat:update', sessionId, { itemId, updates });
+  }
+
+  /**
+   * Emit multiple chat items at once (for batch operations like load).
+   */
+  chatItemsBatch(sessionId: string, items: ChatItem[]): void {
+    this.emit('chat:items', sessionId, { items });
+  }
+
+  /**
+   * Emit context usage update.
+   */
+  contextUsageUpdate(sessionId: string, contextUsage: {
+    usedTokens: number;
+    maxTokens: number;
+    percentUsed: number;
+  }): void {
+    this.emit('context:usage', sessionId, contextUsage);
   }
 
   /**

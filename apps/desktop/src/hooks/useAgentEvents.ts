@@ -540,6 +540,38 @@ export function useAgentEvents(sessionId: string | null): void {
           }
           break;
 
+        // ============================================================================
+        // V2 Unified ChatItem Events
+        // ============================================================================
+
+        case 'chat:item': {
+          // Append new chat item to the unified timeline
+          chat.appendChatItem(eventSessionId, event.item);
+          break;
+        }
+
+        case 'chat:update': {
+          // Update an existing chat item (e.g., status change)
+          chat.updateChatItem(eventSessionId, event.itemId, event.updates);
+          break;
+        }
+
+        case 'chat:items': {
+          // Batch set chat items (e.g., on session load)
+          chat.setChatItems(eventSessionId, event.items);
+          break;
+        }
+
+        case 'context:usage': {
+          // Update context usage stats
+          chat.updateContextUsage(eventSessionId, {
+            usedTokens: event.usedTokens,
+            maxTokens: event.maxTokens,
+            percentUsed: event.percentUsed,
+          });
+          break;
+        }
+
         // Browser View events (live screenshot streaming)
         case 'browserView:screenshot': {
           const screenshotEvent = event as {
