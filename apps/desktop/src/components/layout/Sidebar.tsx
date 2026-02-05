@@ -17,6 +17,8 @@ import {
   Settings2,
   Puzzle,
   Calendar,
+  Terminal,
+  Bot,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -31,6 +33,10 @@ import { SkillsModal } from '../skills/SkillsModal';
 import { useSkillStore } from '../../stores/skill-store';
 import { CronModal } from '../cron/CronModal';
 import { useCronActiveJobCount } from '../../stores/cron-store';
+import { CommandManager } from '../commands/CommandManager';
+import { useCommandStore } from '../../stores/command-store';
+import { SubagentManager } from '../subagents/SubagentManager';
+import { useSubagentStore } from '../../stores/subagent-store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -65,6 +71,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [isHovering, setIsHovering] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [cronModalOpen, setCronModalOpen] = useState(false);
+  const [commandsModalOpen, setCommandsModalOpen] = useState(false);
+  const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
 
   // Cron store
   const activeJobCount = useCronActiveJobCount();
@@ -75,6 +83,14 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   // Skills store
   const { getEnabledCount } = useSkillStore();
   const enabledSkillsCount = getEnabledCount();
+
+  // Commands store - show total command count (commands are now frontend-only, no install concept)
+  const { commands } = useCommandStore();
+  const commandCount = commands.length;
+
+  // Subagents store - show INSTALLED count, not total
+  const { getInstalledCount: getInstalledSubagentCount } = useSubagentStore();
+  const installedSubagentCount = getInstalledSubagentCount();
 
   // Load sessions on mount
   useEffect(() => {
@@ -189,6 +205,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           enabledSkillsCount={enabledSkillsCount}
           onOpenCron={() => setCronModalOpen(true)}
           activeJobCount={activeJobCount}
+          onOpenCommands={() => setCommandsModalOpen(true)}
+          commandCount={commandCount}
+          onOpenSubagents={() => setSubagentsModalOpen(true)}
+          subagentCount={installedSubagentCount}
         />
       ) : (
         <SidebarExpanded
@@ -213,6 +233,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           enabledSkillsCount={enabledSkillsCount}
           onOpenCron={() => setCronModalOpen(true)}
           activeJobCount={activeJobCount}
+          onOpenCommands={() => setCommandsModalOpen(true)}
+          commandCount={commandCount}
+          onOpenSubagents={() => setSubagentsModalOpen(true)}
+          subagentCount={installedSubagentCount}
         />
       )}
 
@@ -226,6 +250,18 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       <CronModal
         isOpen={cronModalOpen}
         onClose={() => setCronModalOpen(false)}
+      />
+
+      {/* Commands Modal */}
+      <CommandManager
+        isOpen={commandsModalOpen}
+        onClose={() => setCommandsModalOpen(false)}
+      />
+
+      {/* Subagents Modal */}
+      <SubagentManager
+        isOpen={subagentsModalOpen}
+        onClose={() => setSubagentsModalOpen(false)}
       />
 
       <AnimatePresence>
@@ -258,6 +294,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               enabledSkillsCount={enabledSkillsCount}
               onOpenCron={() => setCronModalOpen(true)}
               activeJobCount={activeJobCount}
+              onOpenCommands={() => setCommandsModalOpen(true)}
+              commandCount={commandCount}
+              onOpenSubagents={() => setSubagentsModalOpen(true)}
+              subagentCount={installedSubagentCount}
             />
           </motion.div>
         )}
@@ -281,6 +321,10 @@ interface SidebarRailProps {
   enabledSkillsCount: number;
   onOpenCron: () => void;
   activeJobCount: number;
+  onOpenCommands: () => void;
+  commandCount: number;
+  onOpenSubagents: () => void;
+  subagentCount: number;
 }
 
 function SidebarRail({
@@ -298,6 +342,10 @@ function SidebarRail({
   enabledSkillsCount,
   onOpenCron,
   activeJobCount,
+  onOpenCommands,
+  commandCount,
+  onOpenSubagents,
+  subagentCount,
 }: SidebarRailProps) {
   return (
     <motion.div
@@ -387,6 +435,50 @@ function SidebarRail({
         </motion.button>
       </div>
 
+      {/* Subagents Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenSubagents}
+          className={cn(
+            'relative w-10 h-10 flex items-center justify-center rounded-xl',
+            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+            'transition-all duration-150'
+          )}
+          title={`Subagents${subagentCount > 0 ? ` (${subagentCount} installed)` : ''}`}
+        >
+          <Bot className="w-5 h-5" />
+          {subagentCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#3498DB] text-white text-[10px] font-bold flex items-center justify-center">
+              {subagentCount > 9 ? '9+' : subagentCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Commands Button */}
+      <div className="p-2">
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenCommands}
+          className={cn(
+            'relative w-10 h-10 flex items-center justify-center rounded-xl',
+            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+            'transition-all duration-150'
+          )}
+          title={`Commands${commandCount > 0 ? ` (${commandCount} available)` : ''}`}
+        >
+          <Terminal className="w-5 h-5" />
+          {commandCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#9B59B6] text-white text-[10px] font-bold flex items-center justify-center">
+              {commandCount > 9 ? '9+' : commandCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
       {/* Automations Tasks Button */}
       <div className="p-2">
         <motion.button
@@ -465,6 +557,10 @@ interface SidebarExpandedProps {
   enabledSkillsCount: number;
   onOpenCron: () => void;
   activeJobCount: number;
+  onOpenCommands: () => void;
+  commandCount: number;
+  onOpenSubagents: () => void;
+  subagentCount: number;
 }
 
 function SidebarExpanded({
@@ -489,6 +585,10 @@ function SidebarExpanded({
   enabledSkillsCount,
   onOpenCron,
   activeJobCount,
+  onOpenCommands,
+  commandCount,
+  onOpenSubagents,
+  subagentCount,
 }: SidebarExpandedProps) {
   return (
     <motion.div
@@ -604,6 +704,56 @@ function SidebarExpanded({
           {enabledSkillsCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-[#4C71FF]/20 text-[#8CA2FF] text-xs font-medium">
               {enabledSkillsCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Subagents Button */}
+      <div className="px-3 py-2">
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          onClick={onOpenSubagents}
+          className={cn(
+            'w-full flex items-center gap-3 p-2 rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+          )}
+        >
+          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <Bot className="w-4 h-4" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium truncate">Subagents</div>
+          </div>
+          {subagentCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#3498DB]/20 text-[#5DADE2] text-xs font-medium">
+              {subagentCount}
+            </span>
+          )}
+        </motion.button>
+      </div>
+
+      {/* Commands Button */}
+      <div className="px-3 py-2">
+        <motion.button
+          whileHover={{ scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          onClick={onOpenCommands}
+          className={cn(
+            'w-full flex items-center gap-3 p-2 rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+          )}
+        >
+          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+            <Terminal className="w-4 h-4" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <div className="text-sm font-medium truncate">Commands</div>
+          </div>
+          {commandCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-[#9B59B6]/20 text-[#BB8FCE] text-xs font-medium">
+              {commandCount}
             </span>
           )}
         </motion.button>

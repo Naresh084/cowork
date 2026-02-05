@@ -7,3 +7,4 @@ pub mod heartbeat;
 pub mod keychain;
 pub mod policy;
 pub mod skills;
+pub mod subagent;

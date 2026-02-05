@@ -1,8 +1,9 @@
 /**
  * CommandPalette - Auto-suggest UI for slash commands
  *
- * Shows when user types "/" at the start of the input
- * Provides fuzzy matching and keyboard navigation
+ * Shows when user types "/" at the start of the input.
+ * Provides fuzzy matching and keyboard navigation.
+ * On select: inserts command into input (user presses Enter to send).
  */
 
 import { useEffect, useRef, useCallback } from 'react';
@@ -15,9 +16,10 @@ import {
   Settings,
   Zap,
   FolderCog,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useCommandStore, type Command, type CommandCategory } from '../../stores/command-store';
+import { useCommandStore, type SlashCommand, type CommandCategory } from '../../stores/command-store';
 
 // Category icons mapping
 const CATEGORY_ICONS: Record<CommandCategory, React.ComponentType<{ className?: string }>> = {
@@ -25,7 +27,14 @@ const CATEGORY_ICONS: Record<CommandCategory, React.ComponentType<{ className?: 
   memory: Brain,
   utility: Settings,
   workflow: Zap,
-  custom: FileText,
+};
+
+// Icon mapping by command name (for specific icons)
+const COMMAND_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  init: FileText,
+  help: HelpCircle,
+  clear: Trash2,
+  memory: Brain,
 };
 
 // Category colors
@@ -34,11 +43,10 @@ const CATEGORY_COLORS: Record<CommandCategory, string> = {
   memory: 'text-[#9B59B6]',
   utility: 'text-[#F5C400]',
   workflow: 'text-[#27AE60]',
-  custom: 'text-white/60',
 };
 
 interface CommandPaletteProps {
-  onSelect: (command: Command) => void;
+  onSelect: (command: SlashCommand) => void;
   onClose: () => void;
 }
 
@@ -53,6 +61,7 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
     getFilteredCommands,
   } = useCommandStore();
 
+  // Get all filtered commands (no installation filtering)
   const filteredCommands = getFilteredCommands();
 
   // Keyboard navigation
@@ -131,7 +140,7 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
         <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
           <CommandIcon className="w-3.5 h-3.5 text-[#4C71FF]" />
           <span className="text-xs text-white/50">
-            {paletteQuery ? `Searching: ${paletteQuery}` : 'Available Commands'}
+            {paletteQuery ? `Searching: ${paletteQuery}` : 'Commands'}
           </span>
           <div className="flex-1" />
           <kbd className="px-1.5 py-0.5 rounded text-[10px] bg-white/[0.06] text-white/40 border border-white/[0.08]">
@@ -148,7 +157,8 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
           className="overflow-y-auto max-h-[260px] py-1"
         >
           {filteredCommands.map((command, index) => {
-            const CategoryIcon = CATEGORY_ICONS[command.category] || HelpCircle;
+            // Use specific icon if available, otherwise category icon
+            const IconComponent = COMMAND_ICONS[command.name] || CATEGORY_ICONS[command.category] || HelpCircle;
             const categoryColor = CATEGORY_COLORS[command.category] || 'text-white/60';
             const isSelected = index === selectedIndex;
 
@@ -173,7 +183,7 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
                     isSelected ? 'bg-[#4C71FF]/20' : 'bg-white/[0.04]'
                   )}
                 >
-                  <CategoryIcon
+                  <IconComponent
                     className={cn('w-4 h-4', isSelected ? 'text-[#4C71FF]' : categoryColor)}
                   />
                 </div>
@@ -224,166 +234,6 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
         <div className="px-3 py-2 border-t border-white/[0.06] text-[10px] text-white/30">
           Type to filter • Press Enter to select • Esc to close
         </div>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
-
-/**
- * CommandPaletteOverlay - Full-screen command palette
- * Used when user presses Cmd+K or similar
- */
-export function CommandPaletteOverlay({ onClose }: { onClose: () => void }) {
-  const {
-    isPaletteOpen,
-    paletteQuery,
-    setPaletteQuery,
-    selectedIndex,
-    setSelectedIndex,
-    getFilteredCommands,
-    executeCommand,
-  } = useCommandStore();
-
-  const inputRef = useRef<HTMLInputElement>(null);
-  const filteredCommands = getFilteredCommands();
-
-  // Focus input on open
-  useEffect(() => {
-    if (isPaletteOpen && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [isPaletteOpen]);
-
-  const handleSelect = async (command: Command) => {
-    // For commands that need arguments, we might show a form
-    // For now, execute directly if no required args
-    const hasRequiredArgs = command.arguments.some((arg) => arg.required);
-
-    if (!hasRequiredArgs) {
-      await executeCommand(command.name, {});
-    }
-
-    onClose();
-  };
-
-  if (!isPaletteOpen) return null;
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95, y: -20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.95, y: -20 }}
-          transition={{ duration: 0.2 }}
-          className={cn(
-            'w-[560px] max-h-[480px] rounded-2xl overflow-hidden',
-            'bg-[#1A1A1E] border border-white/[0.10]',
-            'shadow-2xl shadow-black/60'
-          )}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Search Input */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.08]">
-            <CommandIcon className="w-5 h-5 text-[#4C71FF]" />
-            <input
-              ref={inputRef}
-              type="text"
-              value={paletteQuery}
-              onChange={(e) => setPaletteQuery(e.target.value)}
-              placeholder="Search commands..."
-              className={cn(
-                'flex-1 bg-transparent text-white',
-                'placeholder:text-white/30 focus:outline-none',
-                'text-base'
-              )}
-            />
-            <kbd className="px-2 py-1 rounded text-xs bg-white/[0.06] text-white/40 border border-white/[0.08]">
-              Esc
-            </kbd>
-          </div>
-
-          {/* Command List */}
-          <div className="max-h-[360px] overflow-y-auto py-2">
-            {filteredCommands.length === 0 ? (
-              <div className="px-4 py-8 text-center">
-                <HelpCircle className="w-8 h-8 mx-auto mb-3 text-white/20" />
-                <p className="text-sm text-white/40">
-                  No commands found matching "{paletteQuery}"
-                </p>
-              </div>
-            ) : (
-              filteredCommands.map((command, index) => {
-                const CategoryIcon = CATEGORY_ICONS[command.category] || HelpCircle;
-                const isSelected = index === selectedIndex;
-
-                return (
-                  <button
-                    key={command.name}
-                    onClick={() => handleSelect(command)}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    className={cn(
-                      'w-full flex items-center gap-4 px-4 py-3',
-                      'text-left transition-colors',
-                      isSelected ? 'bg-[#4C71FF]/15' : 'hover:bg-white/[0.04]'
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'w-10 h-10 rounded-xl flex items-center justify-center',
-                        isSelected ? 'bg-[#4C71FF]/20' : 'bg-white/[0.04]'
-                      )}
-                    >
-                      <CategoryIcon
-                        className={cn(
-                          'w-5 h-5',
-                          isSelected ? 'text-[#4C71FF]' : CATEGORY_COLORS[command.category]
-                        )}
-                      />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            'font-medium',
-                            isSelected ? 'text-white' : 'text-white/80'
-                          )}
-                        >
-                          /{command.name}
-                        </span>
-                        <span
-                          className={cn(
-                            'px-2 py-0.5 rounded-full text-[10px] capitalize',
-                            'bg-white/[0.04] border border-white/[0.06]',
-                            CATEGORY_COLORS[command.category]
-                          )}
-                        >
-                          {command.category}
-                        </span>
-                      </div>
-                      <p className="text-sm text-white/50 mt-0.5 line-clamp-1">
-                        {command.description}
-                      </p>
-                    </div>
-
-                    {isSelected && (
-                      <kbd className="px-2 py-1 rounded text-xs bg-white/[0.06] text-white/40 border border-white/[0.08]">
-                        Enter
-                      </kbd>
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </motion.div>
       </motion.div>
     </AnimatePresence>
   );

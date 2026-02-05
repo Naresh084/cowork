@@ -4,12 +4,14 @@ import { Onboarding } from './components/onboarding/Onboarding';
 import { useAuthStore } from './stores/auth-store';
 import { useSessionStore } from './stores/session-store';
 import { useSettingsStore } from './stores/settings-store';
+import { useSkillStore } from './stores/skill-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const { isAuthenticated, initialize, apiKey } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
   const { fetchModels, availableModels, modelsLoading } = useSettingsStore();
+  const { discoverSkills } = useSkillStore();
 
   useEffect(() => {
     let isMounted = true;
@@ -46,13 +48,18 @@ export function App() {
         await waitForBackend();
         await loadSessions();
         console.log('[App] Backend initialized and sessions loaded');
+
+        // Load skills after backend is ready
+        console.log('[App] Loading skills...');
+        await discoverSkills();
+        console.log('[App] Skills loaded');
       } catch (error) {
         console.error('[App] Failed to initialize backend:', error);
       }
     };
 
     initBackend();
-  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions]);
+  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills]);
 
   useEffect(() => {
     if (!apiKey || modelsLoading || availableModels.length > 0) return;
