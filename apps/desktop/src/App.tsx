@@ -13,7 +13,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const { isAuthenticated, initialize, apiKey } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
-  const { fetchModels, availableModels, modelsLoading } = useSettingsStore();
+  const { fetchModels, availableModels, modelsLoading, userName } = useSettingsStore();
   const { discoverSkills } = useSkillStore();
   const { discoverCommands } = useCommandStore();
   const { loadSubagents } = useSubagentStore();
@@ -122,9 +122,6 @@ export function App() {
       </div>
     );
   }
-
-  // Get userName from settings store
-  const { userName } = useSettingsStore();
 
   // Show onboarding if not authenticated OR if userName is not set
   if (!isAuthenticated || !userName) {
