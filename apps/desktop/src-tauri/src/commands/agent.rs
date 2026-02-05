@@ -36,6 +36,7 @@ pub struct SessionDetails {
     pub working_directory: Option<String>,
     pub model: Option<String>,
     pub messages: Vec<Message>,
+    pub chat_items: Option<Vec<serde_json::Value>>,
     pub tasks: Option<Vec<serde_json::Value>>,
     pub artifacts: Option<Vec<serde_json::Value>>,
     pub tool_executions: Option<Vec<serde_json::Value>>,
@@ -131,12 +132,9 @@ pub async fn ensure_sidecar_started(
     app: &AppHandle,
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {
-    eprintln!("[ensure_sidecar] accessing manager...");
     let manager = &state.manager;
-    eprintln!("[ensure_sidecar] manager ready, checking if running...");
 
     if !manager.is_running().await {
-        eprintln!("[ensure_sidecar] sidecar not running, starting...");
         // Use home directory for persistence: ~/.geminicowork
         // This provides consistent, user-accessible storage across platforms
         let home_dir = dirs::home_dir()
@@ -152,19 +150,14 @@ pub async fn ensure_sidecar_started(
             .ok_or("Invalid path")?
             .to_string();
 
-        eprintln!("[ensure_sidecar] starting sidecar with app_data_dir: {}", app_data_str);
         manager.start(&app_data_str).await?;
-        eprintln!("[ensure_sidecar] sidecar started");
 
         // Initialize persistence in sidecar with app data directory
-        eprintln!("[ensure_sidecar] sending initialize command...");
         let init_params = serde_json::json!({
             "appDataDir": app_data_str
         });
         if let Err(e) = manager.send_command("initialize", init_params).await {
             eprintln!("Warning: Failed to initialize sidecar persistence: {}", e);
-        } else {
-            eprintln!("[ensure_sidecar] persistence initialized");
         }
 
         // Set up event forwarding to frontend
@@ -173,32 +166,21 @@ pub async fn ensure_sidecar_started(
             .set_event_handler(move |event: SidecarEvent| {
                 // Forward event to frontend
                 let event_name = format!("agent:{}", event.event_type);
-                // CRITICAL: Log errors instead of silently discarding them
-                // Silent errors make debugging impossible when events fail to emit
                 if let Err(e) = app_handle.emit(&event_name, &event) {
-                    eprintln!("[event] Failed to emit {}: {}", event_name, e);
+                    eprintln!("Failed to emit event {}: {}", event_name, e);
                 }
             })
             .await;
-        eprintln!("[ensure_sidecar] event handler set up");
 
         // Get API key from keychain and set it on the sidecar
-        eprintln!("[ensure_sidecar] getting API key from keychain...");
         if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
-            eprintln!("[ensure_sidecar] got API key, setting on sidecar...");
             let params = serde_json::json!({ "apiKey": api_key });
             if let Err(e) = manager.send_command("set_api_key", params).await {
                 eprintln!("Warning: Failed to set API key on sidecar: {}", e);
             }
-            eprintln!("[ensure_sidecar] API key set on sidecar");
-        } else {
-            eprintln!("[ensure_sidecar] no API key found in keychain");
         }
-    } else {
-        eprintln!("[ensure_sidecar] sidecar already running");
     }
 
-    eprintln!("[ensure_sidecar] done");
     Ok(())
 }
 
@@ -344,14 +326,11 @@ pub async fn agent_list_sessions(
     app: AppHandle,
     state: State<'_, AgentState>,
 ) -> Result<Vec<SessionSummary>, String> {
-    eprintln!("[agent] agent_list_sessions called");
     ensure_sidecar_started(&app, &state).await?;
     let manager = &state.manager;
-    eprintln!("[agent] sidecar started, sending list_sessions command...");
     let result = manager
         .send_command("list_sessions", serde_json::json!({}))
         .await?;
-    eprintln!("[agent] got result from list_sessions: {:?}", result);
 
     serde_json::from_value(result).map_err(|e| format!("Failed to parse sessions: {}", e))
 }

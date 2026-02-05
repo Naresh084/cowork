@@ -64,21 +64,6 @@ export function App() {
         await discoverCommands();
         console.log('[App] Commands loaded');
 
-        // Auto-install /init command if not already installed
-        const commandStore = useCommandStore.getState();
-        const settingsStore = useSettingsStore.getState();
-        const initInstalled = settingsStore.installedCommandConfigs.some((c) => c.name === 'init');
-        if (!initInstalled) {
-          const initCommand = commandStore.availableCommands.find(
-            (c) => c.frontmatter.name === 'init' && c.source.type === 'bundled'
-          );
-          if (initCommand) {
-            console.log('[App] Auto-installing /init command...');
-            await commandStore.installCommand(initCommand.id);
-            console.log('[App] /init command installed');
-          }
-        }
-
         // Load subagents after backend is ready
         console.log('[App] Loading subagents...');
         await loadSubagents();

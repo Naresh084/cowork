@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod auth;
+pub mod connectors;
 pub mod cron;
 pub mod deep;
 pub mod files;

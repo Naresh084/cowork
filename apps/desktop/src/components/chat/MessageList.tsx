@@ -102,6 +102,9 @@ export function MessageList() {
   // Debug: log messages on every render
   console.log('[MessageList] Render with:', {
     messageCount: messages.length,
+    chatItemsCount: chatItems?.length || 0,
+    legacyMessagesCount: legacyMessages?.length || 0,
+    usingChatItems: chatItems && chatItems.length > 0,
     isLoadingMessages,
     hasLoaded: 'hasLoaded' in sessionState ? sessionState.hasLoaded : false,
     isStreaming,

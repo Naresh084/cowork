@@ -16,9 +16,6 @@ import type { IPCRequest } from './types.js';
  * - stderr: Used for logging (doesn't interfere with IPC)
  */
 
-// Log startup
-console.error('[sidecar] Starting Gemini Cowork sidecar...');
-
 // Create readline interface for stdin
 // IMPORTANT: Do NOT set output to stdout as it will interfere with our IPC protocol
 const rl = createInterface({
@@ -38,19 +35,12 @@ async function processLine(line: string): Promise<void> {
   try {
     const request = JSON.parse(line) as IPCRequest;
 
-    // Log request (to stderr so it doesn't interfere with IPC)
-    console.error(`[sidecar] Request: ${request.command} (${request.id})`);
-
     // Handle the request
     const response = await handleRequest(request);
 
-    // Log the response (to stderr)
-    console.error(`[sidecar] Response: ${request.command} (${request.id}) success=${response.success}`);
-
     // Send response directly to stdout (Rust expects flat response, not wrapped)
     const responseLine = JSON.stringify(response) + '\n';
-    const written = process.stdout.write(responseLine);
-    console.error(`[sidecar] Wrote ${responseLine.length} bytes to stdout, buffered=${!written}`);
+    process.stdout.write(responseLine);
 
     // Flush any pending events
     eventEmitter.flushSync();
@@ -77,7 +67,6 @@ rl.on('line', (line) => {
 
 // Handle stdin close (Rust process closed the pipe)
 rl.on('close', () => {
-  console.error('[sidecar] stdin closed, shutting down...');
   shutdown();
 });
 
@@ -93,8 +82,6 @@ function shutdown(): void {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
-  console.error('[sidecar] Shutting down...');
-
   // Flush any pending events
   eventEmitter.flushSync();
 
@@ -109,12 +96,10 @@ function shutdown(): void {
 
 // Handle signals
 process.on('SIGTERM', () => {
-  console.error('[sidecar] Received SIGTERM');
   shutdown();
 });
 
 process.on('SIGINT', () => {
-  console.error('[sidecar] Received SIGINT');
   shutdown();
 });
 
@@ -135,7 +120,6 @@ process.on('unhandledRejection', (reason) => {
     message.toLowerCase().includes('cancel');
 
   if (isAbort) {
-    console.warn('[sidecar] AbortError (expected during stop):', message);
     return; // Don't emit error for expected aborts
   }
 
@@ -145,5 +129,4 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Signal that we're ready (using SidecarEvent format with camelCase)
-console.error('[sidecar] Ready and listening for requests');
 process.stdout.write(JSON.stringify({ type: 'ready', sessionId: null, data: { timestamp: Date.now() } }) + '\n');

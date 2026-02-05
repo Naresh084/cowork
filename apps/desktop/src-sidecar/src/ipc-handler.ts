@@ -4,13 +4,16 @@ import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
 import { commandService } from './command-service.js';
-import type { CommandCategory } from '@gemini-cowork/shared';
+import type { CommandCategory, SecretDefinition } from '@gemini-cowork/shared';
 import { cronService } from './cron/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
 import { SubagentService, createSubagentService } from './subagents/index.js';
+import { connectorService } from './connectors/connector-service.js';
+import { ConnectorManager } from './connectors/connector-manager.js';
+import { SecretService, getSecretService } from './connectors/secret-service.js';
 import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
@@ -56,6 +59,31 @@ const memoryServices: Map<string, MemoryService> = new Map();
 const agentsMdServices: Map<string, AgentsMdService> = new Map();
 let subagentService: SubagentService | null = null;
 let appDataDirectory: string | null = null;
+
+// Connector services (lazily initialized)
+let connectorSecretService: SecretService | null = null;
+let connectorManager: ConnectorManager | null = null;
+
+/**
+ * Get or create the SecretService for connectors.
+ */
+async function getConnectorSecretService(): Promise<SecretService> {
+  if (!connectorSecretService) {
+    connectorSecretService = await getSecretService();
+  }
+  return connectorSecretService;
+}
+
+/**
+ * Get or create the ConnectorManager.
+ */
+async function getConnectorManager(): Promise<ConnectorManager> {
+  if (!connectorManager) {
+    const secretService = await getConnectorSecretService();
+    connectorManager = new ConnectorManager(secretService);
+  }
+  return connectorManager;
+}
 
 /**
  * Get or create a MemoryService for the given working directory.
@@ -1219,6 +1247,252 @@ registerHandler('subagent_get_configs', async (params) => {
   await service.discoverAll(p.workingDirectory);
   const configs = await service.getSubagentConfigs(p.sessionModel);
   return { configs };
+});
+
+// ============================================================================
+// Connector System Handlers
+// ============================================================================
+
+// Discover all connectors from all sources
+registerHandler('discover_connectors', async (params) => {
+  const p = params as { workingDirectory?: string };
+  const connectors = await connectorService.discoverAll(p.workingDirectory);
+  return { connectors };
+});
+
+// Install a connector from bundled to managed directory
+registerHandler('install_connector', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+  await connectorService.installConnector(p.connectorId);
+  return { success: true };
+});
+
+// Uninstall a connector from managed directory
+registerHandler('uninstall_connector', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  // Disconnect first if connected
+  const manager = await getConnectorManager();
+  if (manager.isConnected(p.connectorId)) {
+    await manager.disconnect(p.connectorId);
+  }
+
+  // Delete secrets
+  const secretService = await getConnectorSecretService();
+  await secretService.deleteAllSecrets(p.connectorId);
+
+  // Uninstall
+  await connectorService.uninstallConnector(p.connectorId);
+  return { success: true };
+});
+
+// Connect to a connector's MCP server
+registerHandler('connect_connector', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const connector = await connectorService.getConnector(p.connectorId);
+  if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
+
+  const manager = await getConnectorManager();
+  const result = await manager.connect(connector);
+
+  if (!result.success) {
+    throw new Error(result.error || 'Connection failed');
+  }
+
+  return {
+    success: true,
+    tools: result.capabilities?.tools || [],
+    resources: result.capabilities?.resources || [],
+    prompts: result.capabilities?.prompts || [],
+  };
+});
+
+// Disconnect from a connector
+registerHandler('disconnect_connector', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const manager = await getConnectorManager();
+  await manager.disconnect(p.connectorId);
+  return { success: true };
+});
+
+// Reconnect to a connector
+registerHandler('reconnect_connector', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const connector = await connectorService.getConnector(p.connectorId);
+  if (!connector) throw new Error(`Connector not found: ${p.connectorId}`);
+
+  const manager = await getConnectorManager();
+  const result = await manager.reconnect(connector);
+
+  if (!result.success) {
+    throw new Error(result.error || 'Reconnection failed');
+  }
+
+  return {
+    success: true,
+    tools: result.capabilities?.tools || [],
+    resources: result.capabilities?.resources || [],
+    prompts: result.capabilities?.prompts || [],
+  };
+});
+
+// Configure connector secrets
+registerHandler('configure_connector_secrets', async (params) => {
+  const p = params as { connectorId: string; secrets: Record<string, string> };
+  if (!p.connectorId) throw new Error('connectorId is required');
+  if (!p.secrets) throw new Error('secrets is required');
+
+  const secretService = await getConnectorSecretService();
+  await secretService.setSecrets(p.connectorId, p.secrets);
+
+  return { success: true };
+});
+
+// Get secrets status for a connector
+registerHandler('get_connector_secrets_status', async (params) => {
+  const p = params as { connectorId: string; secretDefs?: SecretDefinition[] };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const secretService = await getConnectorSecretService();
+  const status = await secretService.getSecretsStatus(p.connectorId, p.secretDefs || []);
+  return status;
+});
+
+// Get connector status
+registerHandler('get_connector_status', async (params) => {
+  const p = params as { connectorId: string };
+  if (!p.connectorId) throw new Error('connectorId is required');
+
+  const manager = await getConnectorManager();
+  const isConnected = manager.isConnected(p.connectorId);
+  const status = manager.getStatus(p.connectorId);
+  const error = manager.getError(p.connectorId);
+
+  // Get secrets status for the connector
+  const connector = await connectorService.getConnector(p.connectorId);
+  let secretsConfigured = true;
+  if (connector?.auth.type === 'env') {
+    const secretService = await getConnectorSecretService();
+    const secretStatus = await secretService.getSecretsStatus(p.connectorId, connector.auth.secrets);
+    secretsConfigured = secretStatus.configured;
+  }
+
+  return {
+    connectorId: p.connectorId,
+    isConnected,
+    secretsConfigured,
+    status,
+    error,
+  };
+});
+
+// Create a custom connector
+registerHandler('create_connector', async (params) => {
+  const p = params as {
+    name: string;
+    displayName: string;
+    description: string;
+    icon?: string;
+    category?: string;
+    tags?: string[];
+    transport: {
+      type: 'stdio' | 'http';
+      command?: string;
+      args?: string[];
+      url?: string;
+    };
+    auth: {
+      type: 'none' | 'env';
+      secrets?: Array<{
+        key: string;
+        description: string;
+        required: boolean;
+      }>;
+    };
+  };
+
+  if (!p.name) throw new Error('name is required');
+  if (!p.displayName) throw new Error('displayName is required');
+  if (!p.description) throw new Error('description is required');
+  if (!p.transport) throw new Error('transport is required');
+
+  const connectorId = await connectorService.createConnector(p as Parameters<typeof connectorService.createConnector>[0]);
+  return { connectorId };
+});
+
+// Call a tool on a connector
+registerHandler('connector_call_tool', async (params) => {
+  const p = params as { connectorId: string; toolName: string; args?: Record<string, unknown> };
+  if (!p.connectorId) throw new Error('connectorId is required');
+  if (!p.toolName) throw new Error('toolName is required');
+
+  const manager = await getConnectorManager();
+  const result = await manager.callTool(p.connectorId, p.toolName, p.args || {});
+  return { result };
+});
+
+// Get all tools from all connected connectors
+registerHandler('get_all_connector_tools', async () => {
+  const manager = await getConnectorManager();
+  const tools = manager.getAllTools();
+  return { tools };
+});
+
+// Get all connection states
+registerHandler('get_all_connector_states', async () => {
+  const manager = await getConnectorManager();
+  const connections = manager.getAllConnections();
+  const states: Record<string, { status: string; error?: string }> = {};
+  for (const [id, state] of connections) {
+    states[id] = state;
+  }
+  return { states };
+});
+
+// Connect all enabled connectors
+registerHandler('connect_all_connectors', async (params) => {
+  const p = params as { connectorIds: string[] };
+  if (!p.connectorIds || !Array.isArray(p.connectorIds)) {
+    throw new Error('connectorIds array is required');
+  }
+
+  const results: Record<string, { success: boolean; error?: string }> = {};
+  const manager = await getConnectorManager();
+
+  for (const connectorId of p.connectorIds) {
+    try {
+      const connector = await connectorService.getConnector(connectorId);
+      if (!connector) {
+        results[connectorId] = { success: false, error: 'Connector not found' };
+        continue;
+      }
+
+      const result = await manager.connect(connector);
+      results[connectorId] = { success: result.success, error: result.error };
+    } catch (error) {
+      results[connectorId] = {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  return { results };
+});
+
+// Disconnect all connectors
+registerHandler('disconnect_all_connectors', async () => {
+  const manager = await getConnectorManager();
+  await manager.disconnectAll();
+  return { success: true };
 });
 
 // ============================================================================

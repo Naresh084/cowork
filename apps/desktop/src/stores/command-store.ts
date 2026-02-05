@@ -177,13 +177,22 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const { installedCommandConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
 
-      // Return only installed commands as SlashCommand format
-      return availableCommands
-        .filter((cmd) => {
-          // Include managed commands or bundled commands that are installed
-          if (cmd.source.type === 'managed') return true;
-          return installedNames.has(cmd.frontmatter.name);
-        })
+      // Build a map of commands, preferring managed over bundled
+      const commandMap = new Map<string, typeof availableCommands[0]>();
+
+      for (const cmd of availableCommands) {
+        // Only include commands that are tracked in installedCommandConfigs
+        if (!installedNames.has(cmd.frontmatter.name)) continue;
+
+        const existing = commandMap.get(cmd.frontmatter.name);
+        // Prefer managed over bundled
+        if (!existing || cmd.source.type === 'managed') {
+          commandMap.set(cmd.frontmatter.name, cmd);
+        }
+      }
+
+      // Convert to SlashCommand format
+      return Array.from(commandMap.values())
         .map((cmd) => ({
           name: cmd.frontmatter.name,
           displayName: cmd.frontmatter.displayName,
@@ -432,10 +441,12 @@ export const useCommandStore = create<CommandState & CommandActions>()(
 
       // Filter by tab
       if (activeTab === 'available') {
-        // Show bundled commands that don't have a managed version
+        // Show bundled commands (available for installation)
+        // Exclude commands that are already installed (in installedCommandConfigs)
         commands = commands.filter((c) => {
           if (c.source.type === 'managed') return false;
-          return true;
+          // Show bundled commands that are NOT yet installed
+          return !installedNames.has(c.frontmatter.name);
         });
       } else if (activeTab === 'installed') {
         // Show only managed commands that are in installed configs
@@ -475,22 +486,26 @@ export const useCommandStore = create<CommandState & CommandActions>()(
     },
 
     getInstalledCount: () => {
-      const { availableCommands } = get();
-      return availableCommands.filter((c) => c.source.type === 'managed').length;
+      // Count only managed commands that are in installedCommandConfigs
+      return get().getInstalledCommands().length;
     },
 
     isCommandInstalled: (commandId) => {
       const { availableCommands } = get();
+      const { installedCommandConfigs } = useSettingsStore.getState();
+      const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
 
       const command = availableCommands.find((c) => c.id === commandId);
       if (!command) return false;
 
-      // A command is installed if a managed version exists on disk
+      // A command is installed if:
+      // 1. A managed version exists on disk AND
+      // 2. It's tracked in installedCommandConfigs
       const managedCommandExists = availableCommands.some(
         (c) => c.source.type === 'managed' && c.frontmatter.name === command.frontmatter.name
       );
 
-      return managedCommandExists;
+      return managedCommandExists && installedNames.has(command.frontmatter.name);
     },
 
     getCommandByAlias: (alias) => {

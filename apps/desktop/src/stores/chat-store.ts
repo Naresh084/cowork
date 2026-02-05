@@ -556,12 +556,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       try {
         console.log('[ChatStore] Loading messages for session', sessionId, 'retry:', retry);
         const session = await invoke<SessionDetails>('agent_get_session', { sessionId });
+        console.warn('[ChatStore] RAW SESSION FROM BACKEND:', JSON.stringify(session, null, 2).slice(0, 2000));
         console.log('[ChatStore] Got session from backend:', {
           sessionId,
           messageCount: session.messages?.length || 0,
+          chatItemsCount: session.chatItems?.length || 0,
           toolExecutionCount: session.toolExecutions?.length || 0,
           hasMessages: !!session.messages,
+          hasChatItems: !!session.chatItems,
           firstMessage: session.messages?.[0],
+          firstChatItem: session.chatItems?.[0],
         });
         const agentStore = useAgentStore.getState();
 
