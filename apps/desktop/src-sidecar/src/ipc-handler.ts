@@ -693,45 +693,6 @@ registerHandler('policy_reset', async (): Promise<ToolPolicy> => {
 // Chrome Extension Command Handlers
 // ============================================================================
 
-import {
-  openChromeExtensionsPage,
-  openExtensionFolder,
-  openExtensionInstallHelper,
-  getExtensionPath
-} from './tools/chrome-launcher.js';
-import { chromeBridge } from './chrome-bridge.js';
-
-// Check if Chrome extension is connected
-registerHandler('chrome_extension_status', async () => {
-  await chromeBridge.start();
-  // Wait a bit for extension to connect if it's trying
-  await new Promise(resolve => setTimeout(resolve, 500));
-  return {
-    connected: chromeBridge.isConnected(),
-    port: chromeBridge.getPort(),
-  };
-});
-
-// Open Chrome extensions page
-registerHandler('chrome_open_extensions_page', async () => {
-  return openChromeExtensionsPage();
-});
-
-// Open extension folder in file browser
-registerHandler('chrome_open_extension_folder', async () => {
-  return openExtensionFolder();
-});
-
-// Open both Chrome extensions page and extension folder (for easy install)
-registerHandler('chrome_install_extension_helper', async () => {
-  return openExtensionInstallHelper();
-});
-
-// Get extension folder path
-registerHandler('chrome_get_extension_path', async () => {
-  return { path: getExtensionPath() };
-});
-
 // ============================================================================
 // Export
 // ============================================================================

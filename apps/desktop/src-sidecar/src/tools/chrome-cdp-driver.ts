@@ -1,5 +1,6 @@
 import CDP from 'chrome-remote-interface';
 import type { Client } from 'chrome-remote-interface';
+import { getOrCreateSessionChrome } from './chrome-launcher.js';
 
 /**
  * Action for Gemini Computer Use
@@ -19,9 +20,12 @@ interface BrowserDriver {
   close(): Promise<void>;
 }
 
+// Cache of CDP drivers per session (one driver per session)
+const sessionDrivers = new Map<string, ChromeCDPDriver>();
+
 /**
  * Chrome DevTools Protocol driver for native browser automation.
- * Connects to Chrome running with --remote-debugging-port=9222.
+ * Each session gets its own Chrome instance - never touches user's browser.
  */
 export class ChromeCDPDriver implements BrowserDriver {
   private client: Client;
@@ -33,8 +37,41 @@ export class ChromeCDPDriver implements BrowserDriver {
   }
 
   /**
-   * Connect to Chrome via CDP.
-   * Chrome must be started with: --remote-debugging-port=9222
+   * Get or create a CDP driver for a specific session.
+   * This is the preferred method - ensures one Chrome instance per session.
+   */
+  static async forSession(sessionId: string): Promise<ChromeCDPDriver> {
+    // Check if we already have a driver for this session
+    const existing = sessionDrivers.get(sessionId);
+    if (existing) {
+      // Verify connection is still valid
+      try {
+        await existing.client.Runtime.evaluate({ expression: '1' });
+        console.error(`[CDPDriver] Reusing existing driver for session ${sessionId}`);
+        return existing;
+      } catch {
+        // Connection dead, remove and recreate
+        console.error(`[CDPDriver] Session ${sessionId} driver connection lost, reconnecting`);
+        sessionDrivers.delete(sessionId);
+      }
+    }
+
+    // Get or create Chrome instance for this session
+    const result = await getOrCreateSessionChrome(sessionId);
+    if (!result.success || !result.port) {
+      throw new Error(result.error || 'Failed to start Chrome for session');
+    }
+
+    // Connect to the session's Chrome
+    const driver = await ChromeCDPDriver.connect(result.port);
+    sessionDrivers.set(sessionId, driver);
+    console.error(`[CDPDriver] Created driver for session ${sessionId}`);
+    return driver;
+  }
+
+  /**
+   * Connect to Chrome via CDP on a specific port.
+   * Use forSession() instead for session-based automation.
    */
   static async connect(port = 9222): Promise<ChromeCDPDriver> {
     try {
@@ -43,7 +80,7 @@ export class ChromeCDPDriver implements BrowserDriver {
       const pageTarget = targets.find((t: { type: string }) => t.type === 'page');
 
       if (!pageTarget) {
-        throw new Error('No page target found. Open a Chrome tab first.');
+        throw new Error('No page target found. Chrome may still be starting.');
       }
 
       const client = await CDP({ port, target: pageTarget.id });
@@ -55,20 +92,30 @@ export class ChromeCDPDriver implements BrowserDriver {
         client.DOM.enable(),
       ]);
 
+      console.error(`[CDPDriver] Connected to Chrome on port ${port}`);
       return new ChromeCDPDriver(client);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
 
       if (msg.includes('ECONNREFUSED')) {
         throw new Error(
-          `Cannot connect to Chrome. Please start Chrome with remote debugging:\n\n` +
-          `macOS:\n  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222\n\n` +
-          `Windows:\n  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222\n\n` +
-          `Linux:\n  google-chrome --remote-debugging-port=9222`
+          `Cannot connect to Chrome on port ${port}. ` +
+          `The browser may not have started yet or crashed.`
         );
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Close driver for a specific session (call when session ends)
+   */
+  static closeSession(sessionId: string): void {
+    const driver = sessionDrivers.get(sessionId);
+    if (driver) {
+      driver.close().catch(() => {});
+      sessionDrivers.delete(sessionId);
     }
   }
 
