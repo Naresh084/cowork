@@ -6,6 +6,10 @@ import { checkSkillEligibility } from './eligibility-checker.js';
 import { cronService } from './cron/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
+import { MemoryService, createMemoryService } from './memory/index.js';
+import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
+import { CommandService, createCommandService } from './commands/index.js';
+import { CommandMarketplace, createCommandMarketplace } from './commands/marketplace.js';
 import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
@@ -23,10 +27,98 @@ import type {
   SaveMemoryParams,
   MemoryEntry,
   SetModelsParams,
+  // New Deep Memory System params
+  MemoryCreateParams,
+  MemoryReadParams,
+  MemoryUpdateParams,
+  MemoryDeleteParams,
+  MemoryListParams,
+  MemorySearchParams,
+  MemoryGetRelevantParams,
+  MemoryGroupCreateParams,
+  MemoryGroupDeleteParams,
+  // Command System params
+  CommandListParams,
+  CommandExecuteParams,
+  CommandGetParams,
+  // AGENTS.md params
+  AgentsMdLoadParams,
+  AgentsMdGenerateParams,
+  AgentsMdUpdateSectionParams,
 } from './types.js';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
+
+// ============================================================================
+// Service Instances (lazily initialized per working directory)
+// ============================================================================
+
+const memoryServices: Map<string, MemoryService> = new Map();
+const agentsMdServices: Map<string, AgentsMdService> = new Map();
+let commandService: CommandService | null = null;
+let marketplace: CommandMarketplace | null = null;
+let appDataDirectory: string | null = null;
+
+/**
+ * Get or create a MemoryService for the given working directory.
+ */
+async function getMemoryService(workingDirectory: string): Promise<MemoryService> {
+  let service = memoryServices.get(workingDirectory);
+  if (!service) {
+    service = createMemoryService(workingDirectory);
+    await service.initialize();
+    memoryServices.set(workingDirectory, service);
+  }
+  return service;
+}
+
+/**
+ * Get or create an AgentsMdService for the given working directory.
+ */
+function getAgentsMdService(workingDirectory: string): AgentsMdService {
+  let service = agentsMdServices.get(workingDirectory);
+  if (!service) {
+    service = createAgentsMdService();
+    agentsMdServices.set(workingDirectory, service);
+  }
+  return service;
+}
+
+/**
+ * Get or create the CommandService.
+ */
+async function getCommandService(workDir?: string): Promise<CommandService> {
+  if (!commandService) {
+    if (!appDataDirectory) {
+      throw new Error('App data directory not initialized. Call initialize first.');
+    }
+    commandService = createCommandService(appDataDirectory);
+
+    // Get services for initialization
+    const memoryService = workDir ? await getMemoryService(workDir) : null;
+    const agentsMdService = workDir ? getAgentsMdService(workDir) : null;
+
+    if (memoryService && agentsMdService) {
+      await commandService.initialize(memoryService, agentsMdService);
+    }
+  }
+  return commandService;
+}
+
+/**
+ * Get or create the CommandMarketplace.
+ */
+async function getMarketplace(): Promise<CommandMarketplace> {
+  if (!marketplace) {
+    if (!appDataDirectory) {
+      throw new Error('App data directory not initialized. Call initialize first.');
+    }
+    marketplace = createCommandMarketplace(appDataDirectory);
+    await marketplace.initialize();
+  }
+  return marketplace;
+}
 
 // ============================================================================
 // IPC Handler
@@ -312,6 +404,8 @@ registerHandler('initialize', async (params) => {
   if (!appDataDir) {
     throw new Error('appDataDir is required');
   }
+  // Store app data directory for service initialization
+  appDataDirectory = appDataDir;
   const result = await agentRunner.initialize(appDataDir);
   return { success: true, sessionsRestored: result.sessionsRestored };
 });
@@ -692,6 +786,430 @@ registerHandler('policy_reset', async (): Promise<ToolPolicy> => {
 // ============================================================================
 // Chrome Extension Command Handlers
 // ============================================================================
+
+// ============================================================================
+// Deep Memory System Command Handlers (New)
+// ============================================================================
+
+// Initialize memory service for a working directory
+registerHandler('deep_memory_init', async (params) => {
+  const p = params as unknown as { workingDirectory: string };
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  await getMemoryService(p.workingDirectory);
+  return { success: true };
+});
+
+// Create a new memory
+registerHandler('deep_memory_create', async (params) => {
+  const p = params as unknown as MemoryCreateParams;
+  if (!p.workingDirectory || !p.title || !p.content || !p.group) {
+    throw new Error('workingDirectory, title, content, and group are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const memory = await service.create({
+    title: p.title,
+    content: p.content,
+    group: p.group,
+    tags: p.tags || [],
+    source: p.source || 'manual',
+    confidence: p.confidence,
+  });
+  return memory;
+});
+
+// Read a memory by ID
+registerHandler('deep_memory_read', async (params) => {
+  const p = params as unknown as MemoryReadParams;
+  if (!p.workingDirectory || !p.memoryId) {
+    throw new Error('workingDirectory and memoryId are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const memory = await service.read(p.memoryId);
+  if (!memory) {
+    throw new Error(`Memory not found: ${p.memoryId}`);
+  }
+  return memory;
+});
+
+// Update a memory
+registerHandler('deep_memory_update', async (params) => {
+  const p = params as unknown as MemoryUpdateParams;
+  if (!p.workingDirectory || !p.memoryId) {
+    throw new Error('workingDirectory and memoryId are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const memory = await service.update(p.memoryId, {
+    title: p.title,
+    content: p.content,
+    group: p.group,
+    tags: p.tags,
+  });
+  if (!memory) {
+    throw new Error(`Memory not found: ${p.memoryId}`);
+  }
+  return memory;
+});
+
+// Delete a memory
+registerHandler('deep_memory_delete', async (params) => {
+  const p = params as unknown as MemoryDeleteParams;
+  if (!p.workingDirectory || !p.memoryId) {
+    throw new Error('workingDirectory and memoryId are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const success = await service.delete(p.memoryId);
+  return { success };
+});
+
+// List all memories or by group
+registerHandler('deep_memory_list', async (params) => {
+  const p = params as unknown as MemoryListParams;
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  if (p.group) {
+    const memories = await service.getMemoriesByGroup(p.group);
+    return { memories };
+  }
+  const memories = await service.getAll();
+  return { memories };
+});
+
+// Search memories
+registerHandler('deep_memory_search', async (params) => {
+  const p = params as unknown as MemorySearchParams;
+  if (!p.workingDirectory || !p.query) {
+    throw new Error('workingDirectory and query are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const memories = await service.search({ query: p.query, limit: p.limit || 20 });
+  return { memories };
+});
+
+// Get relevant memories for context
+registerHandler('deep_memory_get_relevant', async (params) => {
+  const p = params as unknown as MemoryGetRelevantParams;
+  if (!p.workingDirectory || !p.context) {
+    throw new Error('workingDirectory and context are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const memories = await service.getRelevantMemories(p.context, p.limit || 5);
+  return { memories };
+});
+
+// List memory groups
+registerHandler('deep_memory_list_groups', async (params) => {
+  const p = params as unknown as { workingDirectory: string };
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const groups = await service.listGroups();
+  return { groups };
+});
+
+// Create a memory group
+registerHandler('deep_memory_create_group', async (params) => {
+  const p = params as unknown as MemoryGroupCreateParams;
+  if (!p.workingDirectory || !p.groupName) {
+    throw new Error('workingDirectory and groupName are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  await service.createGroup(p.groupName);
+  return { success: true };
+});
+
+// Delete a memory group
+registerHandler('deep_memory_delete_group', async (params) => {
+  const p = params as unknown as MemoryGroupDeleteParams;
+  if (!p.workingDirectory || !p.groupName) {
+    throw new Error('workingDirectory and groupName are required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  await service.deleteGroup(p.groupName);
+  return { success: true };
+});
+
+// Build memory prompt section for injection
+registerHandler('deep_memory_build_prompt', async (params) => {
+  const p = params as unknown as { workingDirectory: string; sessionContext?: string };
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const service = await getMemoryService(p.workingDirectory);
+  const promptSection = await service.buildMemoryPromptSection(p.sessionContext);
+  return { promptSection };
+});
+
+// ============================================================================
+// Command System Command Handlers (New)
+// ============================================================================
+
+// List available commands
+registerHandler('command_list', async (params) => {
+  const p = params as unknown as CommandListParams;
+  const service = await getCommandService(p.workingDirectory);
+  const commands = service.getAllCommands();
+  return { commands };
+});
+
+// Get a specific command
+registerHandler('command_get', async (params) => {
+  const p = params as unknown as CommandGetParams;
+  if (!p.commandName) {
+    throw new Error('commandName is required');
+  }
+  const service = await getCommandService(p.workingDirectory);
+  const command = service.getCommand(p.commandName);
+  if (!command) {
+    throw new Error(`Command not found: ${p.commandName}`);
+  }
+  return command.manifest;
+});
+
+// Execute a command
+registerHandler('command_execute', async (params) => {
+  const p = params as unknown as CommandExecuteParams;
+  if (!p.commandName || !p.workingDirectory) {
+    throw new Error('commandName and workingDirectory are required');
+  }
+  const service = await getCommandService(p.workingDirectory);
+
+  // Execute command - the service will use its internal context
+  const result = await service.execute(
+    p.commandName,
+    p.workingDirectory,
+    {
+      sessionId: p.sessionId,
+      workingDirectory: p.workingDirectory,
+    }
+  );
+
+  return result;
+});
+
+// Search commands
+registerHandler('command_search', async (params) => {
+  const p = params as unknown as { query: string; workingDirectory?: string };
+  if (!p.query) {
+    throw new Error('query is required');
+  }
+  const service = await getCommandService(p.workingDirectory);
+  const commands = service.search({ query: p.query });
+  return { commands };
+});
+
+// Get commands by category
+registerHandler('command_list_by_category', async (params) => {
+  const p = params as unknown as { category: string; workingDirectory?: string };
+  if (!p.category) {
+    throw new Error('category is required');
+  }
+  const service = await getCommandService(p.workingDirectory);
+  const commands = service.getByCategory(p.category as 'setup' | 'memory' | 'utility' | 'workflow' | 'custom');
+  return { commands };
+});
+
+// ============================================================================
+// Marketplace Command Handlers (New)
+// ============================================================================
+
+// Search marketplace
+registerHandler('marketplace_search', async (params) => {
+  const p = params as unknown as {
+    query?: string;
+    category?: string;
+    tags?: string[];
+    verified?: boolean;
+    limit?: number;
+    offset?: number;
+  };
+  const mp = await getMarketplace();
+  const commands = await mp.search({
+    query: p.query,
+    category: p.category as 'setup' | 'memory' | 'utility' | 'workflow' | 'custom' | undefined,
+    tags: p.tags,
+    verified: p.verified,
+    limit: p.limit,
+    offset: p.offset,
+  });
+  return { commands };
+});
+
+// Get marketplace command details
+registerHandler('marketplace_get_command', async (params) => {
+  const p = params as unknown as { commandId: string };
+  if (!p.commandId) {
+    throw new Error('commandId is required');
+  }
+  const mp = await getMarketplace();
+  const command = await mp.getCommand(p.commandId);
+  if (!command) {
+    throw new Error(`Command not found: ${p.commandId}`);
+  }
+  return command;
+});
+
+// Install command from marketplace
+registerHandler('marketplace_install', async (params) => {
+  const p = params as unknown as { commandId: string };
+  if (!p.commandId) {
+    throw new Error('commandId is required');
+  }
+  const mp = await getMarketplace();
+  const result = await mp.install(p.commandId);
+  return result;
+});
+
+// Uninstall command
+registerHandler('marketplace_uninstall', async (params) => {
+  const p = params as unknown as { commandId: string };
+  if (!p.commandId) {
+    throw new Error('commandId is required');
+  }
+  const mp = await getMarketplace();
+  const result = await mp.uninstall(p.commandId);
+  return result;
+});
+
+// Update installed command
+registerHandler('marketplace_update', async (params) => {
+  const p = params as unknown as { commandId: string };
+  if (!p.commandId) {
+    throw new Error('commandId is required');
+  }
+  const mp = await getMarketplace();
+  const result = await mp.update(p.commandId);
+  return result;
+});
+
+// List installed commands
+registerHandler('marketplace_list_installed', async (_params) => {
+  const mp = await getMarketplace();
+  const commands = await mp.listInstalled();
+  return { commands };
+});
+
+// Check if command is installed
+registerHandler('marketplace_is_installed', async (params) => {
+  const p = params as unknown as { commandId: string };
+  if (!p.commandId) {
+    throw new Error('commandId is required');
+  }
+  const mp = await getMarketplace();
+  const isInstalled = await mp.isInstalled(p.commandId);
+  return { isInstalled };
+});
+
+// Check for updates
+registerHandler('marketplace_check_updates', async (_params) => {
+  const mp = await getMarketplace();
+  const updates = await mp.checkForUpdates();
+  return { updates };
+});
+
+// ============================================================================
+// AGENTS.md Command Handlers (New)
+// ============================================================================
+
+// Load AGENTS.md configuration
+registerHandler('agents_md_load', async (params) => {
+  const p = params as unknown as AgentsMdLoadParams;
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const service = getAgentsMdService(p.workingDirectory);
+  const config = await service.parse(p.workingDirectory);
+  if (!config) {
+    return { exists: false, config: null };
+  }
+  return { exists: true, config };
+});
+
+// Generate AGENTS.md from project scan
+registerHandler('agents_md_generate', async (params) => {
+  const p = params as unknown as AgentsMdGenerateParams;
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+
+  const agentsMdPath = join(p.workingDirectory, 'AGENTS.md');
+  if (existsSync(agentsMdPath) && !p.force) {
+    throw new Error('AGENTS.md already exists. Use force: true to overwrite.');
+  }
+
+  const service = getAgentsMdService(p.workingDirectory);
+  const content = await service.generate(p.workingDirectory);
+
+  await writeFile(agentsMdPath, content, 'utf-8');
+
+  return {
+    success: true,
+    path: agentsMdPath,
+    content,
+  };
+});
+
+// Convert AGENTS.md to system prompt addition
+registerHandler('agents_md_to_prompt', async (params) => {
+  const p = params as unknown as AgentsMdLoadParams;
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const service = getAgentsMdService(p.workingDirectory);
+  const config = await service.parse(p.workingDirectory);
+  if (!config) {
+    return { promptAddition: '' };
+  }
+  const promptAddition = service.toSystemPrompt(config);
+  return { promptAddition };
+});
+
+// Update a specific section in AGENTS.md
+registerHandler('agents_md_update_section', async (params) => {
+  const p = params as unknown as AgentsMdUpdateSectionParams;
+  if (!p.workingDirectory || !p.section || p.content === undefined) {
+    throw new Error('workingDirectory, section, and content are required');
+  }
+  const service = getAgentsMdService(p.workingDirectory);
+  await service.updateSection(p.workingDirectory, p.section, p.content);
+  return { success: true };
+});
+
+// Validate AGENTS.md content
+registerHandler('agents_md_validate', async (params) => {
+  const p = params as unknown as { workingDirectory: string; content?: string };
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+
+  let content = p.content;
+  if (!content) {
+    const agentsMdPath = join(p.workingDirectory, 'AGENTS.md');
+    if (!existsSync(agentsMdPath)) {
+      return { valid: false, errors: ['AGENTS.md does not exist'] };
+    }
+    content = await readFile(agentsMdPath, 'utf-8');
+  }
+
+  const service = getAgentsMdService(p.workingDirectory);
+  const result = service.validate(content);
+  return result;
+});
+
+// Scan project and return info (without generating AGENTS.md)
+registerHandler('agents_md_scan_project', async (params) => {
+  const p = params as unknown as { workingDirectory: string };
+  if (!p.workingDirectory) {
+    throw new Error('workingDirectory is required');
+  }
+  const scanner = createProjectScanner(p.workingDirectory);
+  const projectInfo = await scanner.scan();
+  return projectInfo;
+});
 
 // ============================================================================
 // Export
