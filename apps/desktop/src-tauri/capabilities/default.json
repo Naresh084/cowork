@@ -22,6 +22,8 @@
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir",
     "fs:default",
     "fs:allow-read",
     "fs:allow-exists",

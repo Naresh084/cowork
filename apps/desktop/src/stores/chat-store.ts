@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Message, MessageContentPart, PermissionRequest as BasePermissionRequest } from '@gemini-cowork/shared';
 import type { Task, Artifact } from './agent-store';
 import { useAgentStore } from './agent-store';
+import { useSessionStore } from './session-store';
 
 export interface Attachment {
   type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf';
@@ -458,6 +459,14 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
   loadMessages: async (sessionId: string, forceReload = false) => {
     if (!sessionId) return null;
+
+    // CRITICAL: Wait for backend to be initialized before attempting to load
+    // This prevents "session not found" errors during app startup
+    const sessionStore = useSessionStore.getState();
+    if (!sessionStore.backendInitialized) {
+      console.log('[ChatStore] Waiting for backend initialization before loading messages...');
+      await sessionStore.waitForBackend();
+    }
 
     // Check if already loaded and not forcing reload
     const sessionState = get().sessions[sessionId];

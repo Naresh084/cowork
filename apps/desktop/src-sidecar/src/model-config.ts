@@ -73,15 +73,15 @@ export function getModel(key: keyof ModelConfig): string {
  */
 export function logModelConfig(): void {
   const config = getModelConfig();
-  console.log('[model-config] Current model configuration:');
-  console.log(`  Search Model:           ${config.searchModel}`);
-  console.log(`  Deep Research Agent:    ${config.deepResearchAgent}`);
-  console.log(`  Image Generation:       ${config.imageGenerationModel}`);
-  console.log(`  Image Editing:          ${config.imageEditingModel}`);
-  console.log(`  Video Generation:       ${config.videoGenerationModel}`);
-  console.log(`  Video Analysis:         ${config.videoAnalysisModel}`);
-  console.log(`  Computer Use:           ${config.computerUseModel}`);
-  console.log(`  Default Agent:          ${config.defaultAgentModel}`);
+  console.error('[model-config] Current model configuration:');
+  console.error(`  Search Model:           ${config.searchModel}`);
+  console.error(`  Deep Research Agent:    ${config.deepResearchAgent}`);
+  console.error(`  Image Generation:       ${config.imageGenerationModel}`);
+  console.error(`  Image Editing:          ${config.imageEditingModel}`);
+  console.error(`  Video Generation:       ${config.videoGenerationModel}`);
+  console.error(`  Video Analysis:         ${config.videoAnalysisModel}`);
+  console.error(`  Computer Use:           ${config.computerUseModel}`);
+  console.error(`  Default Agent:          ${config.defaultAgentModel}`);
 }
 
 // Export defaults for reference

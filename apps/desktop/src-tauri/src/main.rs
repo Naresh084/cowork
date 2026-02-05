@@ -11,6 +11,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AgentState::new())
         .invoke_handler(tauri::generate_handler![
             // Auth commands
@@ -50,6 +51,13 @@ fn main() {
             commands::agent::agent_mcp_call_tool,
             commands::agent::agent_load_gemini_extensions,
             commands::agent::agent_get_initialization_status,
+            // Skill commands
+            commands::skills::agent_discover_skills,
+            commands::skills::agent_install_skill,
+            commands::skills::agent_uninstall_skill,
+            commands::skills::agent_check_skill_eligibility,
+            commands::skills::agent_get_skill_content,
+            commands::skills::agent_create_skill,
         ])
         .setup(|_app| {
             Ok(())

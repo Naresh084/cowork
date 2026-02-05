@@ -36,7 +36,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const [argsExpanded, setArgsExpanded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
 
-  const { icon: Icon, title: displayName, category } = getToolMeta(execution.name);
+  const { icon: Icon, title: displayName, category } = getToolMeta(execution.name, execution.args as Record<string, unknown>);
   const { activeSessionId } = useSessionStore();
   const pendingPermission = useChatStore((state) =>
     state.getSessionState(activeSessionId).pendingPermissions.find((permission) => permission.toolCallId === execution.id)
@@ -318,7 +318,7 @@ interface ToolExecutionInlineProps {
 }
 
 export function ToolExecutionInline({ execution, className }: ToolExecutionInlineProps) {
-  const { icon: Icon, title: displayName, category } = getToolMeta(execution.name);
+  const { icon: Icon, title: displayName, category } = getToolMeta(execution.name, execution.args as Record<string, unknown>);
   const statusConfig = getStatusConfig(execution.status);
   const primaryArg = getPrimaryArg(execution.name, execution.args);
 

@@ -117,6 +117,14 @@ impl Default for AgentState {
     }
 }
 
+/// Ensure sidecar is started and set up event forwarding (public for use by other command modules)
+pub async fn ensure_sidecar_started_public(
+    app: &AppHandle,
+    state: &State<'_, AgentState>,
+) -> Result<(), String> {
+    ensure_sidecar_started(app, state).await
+}
+
 /// Ensure sidecar is started and set up event forwarding
 async fn ensure_sidecar_started(
     app: &AppHandle,

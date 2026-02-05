@@ -31,6 +31,25 @@ export interface SkillConfig {
   enabled: boolean;
 }
 
+export interface SkillsSettings {
+  /** Directory for managed skills (installed from marketplace) */
+  managedDir: string;
+  /** Custom skill directories to scan */
+  customDirs: string[];
+  /** Whether to show unavailable skills in marketplace */
+  showUnavailable: boolean;
+  /** Whether to auto-check eligibility on startup */
+  autoCheckEligibility: boolean;
+}
+
+export interface InstalledSkillConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
+  installedAt: number;
+  source: 'bundled' | 'managed' | 'workspace' | 'custom';
+}
+
 export interface PermissionDefaults {
   fileRead: 'ask' | 'allow' | 'deny';
   fileWrite: 'ask' | 'allow' | 'deny';
@@ -92,8 +111,12 @@ interface SettingsState {
   // MCP Servers
   mcpServers: MCPServerConfig[];
 
-  // Skills
+  // Skills (legacy)
   skills: SkillConfig[];
+
+  // Skills Marketplace
+  skillsSettings: SkillsSettings;
+  installedSkillConfigs: InstalledSkillConfig[];
 
   // UI State
   sidebarCollapsed: boolean;
@@ -130,12 +153,22 @@ interface SettingsActions {
   syncMCPServers: (servers: MCPServerConfig[]) => Promise<void>;
   loadGeminiExtensions: () => Promise<void>;
 
-  // Skills management
+  // Skills management (legacy)
   addSkill: (config: Omit<SkillConfig, 'id'>) => void;
   updateSkill: (skillId: string, updates: Partial<SkillConfig>) => void;
   removeSkill: (skillId: string) => void;
   toggleSkill: (skillId: string) => void;
   syncSkills: (skills: SkillConfig[]) => Promise<void>;
+
+  // Skills marketplace management
+  updateSkillsSettings: (updates: Partial<SkillsSettings>) => void;
+  addCustomSkillDir: (path: string) => void;
+  removeCustomSkillDir: (path: string) => void;
+  addInstalledSkillConfig: (config: InstalledSkillConfig) => void;
+  removeInstalledSkillConfig: (skillId: string) => void;
+  updateInstalledSkillConfig: (skillId: string, updates: Partial<InstalledSkillConfig>) => void;
+  toggleInstalledSkillEnabled: (skillId: string) => void;
+  syncInstalledSkills: () => Promise<void>;
 
   // Specialized models management
   updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
@@ -200,8 +233,17 @@ const initialState: SettingsState = {
   // MCP Servers
   mcpServers: [],
 
-  // Skills
+  // Skills (legacy)
   skills: [],
+
+  // Skills Marketplace
+  skillsSettings: {
+    managedDir: '', // Will be set to ~/.geminicowork/skills
+    customDirs: [],
+    showUnavailable: true,
+    autoCheckEligibility: true,
+  },
+  installedSkillConfigs: [],
 
   // UI State
   sidebarCollapsed: false,
@@ -236,6 +278,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           const state = useSettingsStore.getState();
           await state.syncMCPServers(state.mcpServers);
           await state.syncSkills(state.skills);
+          await state.syncInstalledSkills(); // Sync marketplace/installed skills
           await state.syncSpecializedModels();
           await state.loadGeminiExtensions();
         } catch (error) {
@@ -435,6 +478,87 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }
       },
 
+      // Skills marketplace management
+      updateSkillsSettings: (updates) => {
+        set((state) => ({
+          skillsSettings: { ...state.skillsSettings, ...updates },
+        }));
+      },
+
+      addCustomSkillDir: (path) => {
+        set((state) => ({
+          skillsSettings: {
+            ...state.skillsSettings,
+            customDirs: [
+              ...state.skillsSettings.customDirs.filter((p) => p !== path),
+              path,
+            ],
+          },
+        }));
+      },
+
+      removeCustomSkillDir: (path) => {
+        set((state) => ({
+          skillsSettings: {
+            ...state.skillsSettings,
+            customDirs: state.skillsSettings.customDirs.filter((p) => p !== path),
+          },
+        }));
+      },
+
+      addInstalledSkillConfig: (config) => {
+        set((state) => ({
+          installedSkillConfigs: [
+            ...state.installedSkillConfigs.filter((c) => c.id !== config.id),
+            config,
+          ],
+        }));
+        void useSettingsStore.getState().syncInstalledSkills();
+      },
+
+      removeInstalledSkillConfig: (skillId) => {
+        set((state) => ({
+          installedSkillConfigs: state.installedSkillConfigs.filter((c) => c.id !== skillId),
+        }));
+        void useSettingsStore.getState().syncInstalledSkills();
+      },
+
+      updateInstalledSkillConfig: (skillId, updates) => {
+        set((state) => ({
+          installedSkillConfigs: state.installedSkillConfigs.map((c) =>
+            c.id === skillId ? { ...c, ...updates } : c
+          ),
+        }));
+        void useSettingsStore.getState().syncInstalledSkills();
+      },
+
+      toggleInstalledSkillEnabled: (skillId) => {
+        set((state) => ({
+          installedSkillConfigs: state.installedSkillConfigs.map((c) =>
+            c.id === skillId ? { ...c, enabled: !c.enabled } : c
+          ),
+        }));
+        void useSettingsStore.getState().syncInstalledSkills();
+      },
+
+      syncInstalledSkills: async () => {
+        const { installedSkillConfigs } = useSettingsStore.getState();
+        // Convert to SkillConfig format for backend
+        const skills: SkillConfig[] = installedSkillConfigs.map((c) => ({
+          id: c.id,
+          name: c.name,
+          path: '', // Path is resolved by the backend skill service
+          description: '',
+          enabled: c.enabled,
+        }));
+
+        try {
+          await invoke('agent_set_skills', { skills });
+        } catch (error) {
+          console.warn('Failed to sync installed skills:', error);
+        }
+      },
+
       // Specialized models management
       updateSpecializedModel: async (key, value) => {
         set((state) => ({
@@ -586,6 +710,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
         mcpServers: state.mcpServers,
+        skillsSettings: state.skillsSettings,
+        installedSkillConfigs: state.installedSkillConfigs,
         sidebarCollapsed: state.sidebarCollapsed,
         rightPanelCollapsed: state.rightPanelCollapsed,
         rightPanelPinned: state.rightPanelPinned,
@@ -631,6 +757,16 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           selectedModel: validModel,
           specializedModels: validSpecializedModels,
         };
+      },
+      // Sync with backend when store rehydrates from storage
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Sync installed skills with backend on startup
+          // Use setTimeout to ensure it runs after store is fully initialized
+          setTimeout(() => {
+            void state.syncInstalledSkills();
+          }, 100);
+        }
       },
     }
   )

@@ -15,8 +15,17 @@ import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { CollapsibleSection } from './CollapsibleSection';
 import { motion, AnimatePresence } from 'framer-motion';
-import { open as shellOpen } from '@tauri-apps/plugin-shell';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { toast } from '../ui/Toast';
+
+/**
+ * Extract folder name from a path.
+ */
+function getFolderName(path: string | undefined): string {
+  if (!path) return 'Working folder';
+  const segments = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return segments[segments.length - 1] || 'Working folder';
+}
 
 /**
  * WorkingFolderSection - Displays file artifacts from agent-store
@@ -44,8 +53,8 @@ export function WorkingFolderSection() {
     }
 
     try {
-      // Open the folder in the system file manager
-      await shellOpen(workingDirectory);
+      // Reveal the folder in the system file manager
+      await revealItemInDir(workingDirectory);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to open folder', errorMessage);
@@ -65,7 +74,7 @@ export function WorkingFolderSection() {
   return (
     <CollapsibleSection
       id="workingFolder"
-      title="Working folder"
+      title={getFolderName(workingDirectory)}
       icon={Folder}
       badge={artifacts.length > 0 ? artifacts.length : undefined}
       actions={actions}

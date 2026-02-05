@@ -117,15 +117,30 @@ export class CoworkBackend implements SandboxBackendProtocol {
   private workingDirectory: string;
   private executor: CommandExecutor;
   private allowedPathProvider: () => string[];
+  private skillsDir: string | null;
 
-  constructor(workingDirectory: string, id: string, allowedPathProvider?: () => string[]) {
+  constructor(
+    workingDirectory: string,
+    id: string,
+    allowedPathProvider?: () => string[],
+    skillsDir?: string
+  ) {
     this.workingDirectory = resolve(workingDirectory);
     this.id = id;
     this.executor = new CommandExecutor();
     this.allowedPathProvider = allowedPathProvider || (() => []);
+    this.skillsDir = skillsDir || null;
+    if (this.skillsDir) {
+      console.error(`[CoworkBackend] Skills directory configured: ${this.skillsDir}`);
+    }
   }
 
   async lsInfo(path: string): Promise<FileInfo[]> {
+    // Handle /skills/ virtual path - list managed skills directory
+    if ((path === '/skills/' || path === '/skills') && this.skillsDir) {
+      return this.lsSkillsDir();
+    }
+
     const { absolutePath, virtualPath, error } = await this.resolvePath(path);
     if (error) return [];
 
@@ -159,7 +174,57 @@ export class CoworkBackend implements SandboxBackendProtocol {
     }
   }
 
+  /**
+   * List the managed skills directory.
+   * Returns FileInfo for each skill subdirectory.
+   */
+  private async lsSkillsDir(): Promise<FileInfo[]> {
+    if (!this.skillsDir) {
+      console.error('[CoworkBackend] lsSkillsDir: No skills directory configured');
+      return [];
+    }
+
+    console.error(`[CoworkBackend] lsSkillsDir: Listing ${this.skillsDir}`);
+
+    try {
+      const entries = await readdir(this.skillsDir, { withFileTypes: true });
+      const infos: FileInfo[] = [];
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+
+        const entryPath = join(this.skillsDir, entry.name);
+        let modifiedAt = '';
+        try {
+          const entryStats = await stat(entryPath);
+          modifiedAt = entryStats.mtime.toISOString();
+        } catch {
+          // ignore stat failures
+        }
+
+        // Return as virtual path /skills/skillname/
+        infos.push({
+          path: `/skills/${entry.name}/`,
+          is_dir: true,
+          size: 0,
+          modified_at: modifiedAt,
+        });
+      }
+
+      console.error(`[CoworkBackend] lsSkillsDir: Found ${infos.length} skills:`, infos.map(i => i.path));
+      return infos;
+    } catch (error) {
+      console.error('[CoworkBackend] Failed to list skills directory:', error);
+      return [];
+    }
+  }
+
   async read(filePath: string, offset = 0, limit = 500): Promise<string> {
+    // Handle skill virtual paths
+    if (filePath.startsWith('/skills/') && this.skillsDir) {
+      return this.readSkillFile(filePath, offset, limit);
+    }
+
     const raw = await this.readRaw(filePath).catch(() => null);
     if (!raw) return `Error: File '${filePath}' not found`;
 
@@ -170,6 +235,35 @@ export class CoworkBackend implements SandboxBackendProtocol {
     const end = Math.min(offset + limit, lines.length);
     const slice = lines.slice(offset, end);
     return formatContentWithLineNumbers(slice, offset + 1);
+  }
+
+  /**
+   * Read a skill file from the managed skills directory.
+   * Maps virtual path /skills/name/SKILL.md to actual filesystem path.
+   */
+  private async readSkillFile(virtualPath: string, offset = 0, limit = 500): Promise<string> {
+    if (!this.skillsDir) {
+      return `Error: Skills directory not configured`;
+    }
+
+    // Map /skills/github/SKILL.md → skillsDir/github/SKILL.md
+    const relativePath = virtualPath.replace('/skills/', '');
+    const realPath = join(this.skillsDir, relativePath);
+
+    try {
+      const buffer = await readFile(realPath);
+      const content = buffer.toString('utf-8');
+      const lines = splitLines(content);
+
+      if (offset >= lines.length) {
+        return `Error: Line offset ${offset} exceeds file length (${lines.length} lines)`;
+      }
+      const end = Math.min(offset + limit, lines.length);
+      const slice = lines.slice(offset, end);
+      return formatContentWithLineNumbers(slice, offset + 1);
+    } catch (error) {
+      return `Error: Skill file '${virtualPath}' not found`;
+    }
   }
 
   async readRaw(filePath: string): Promise<FileData> {
@@ -297,6 +391,11 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   async globInfo(pattern: string, path = '/'): Promise<FileInfo[]> {
+    // Handle skill glob patterns
+    if ((pattern.startsWith('/skills/') || path.startsWith('/skills/')) && this.skillsDir) {
+      return this.globSkillFiles(pattern);
+    }
+
     const { absolutePath, virtualPath, error } = await this.resolvePath(path);
     if (error) return [];
 
@@ -316,6 +415,44 @@ export class CoworkBackend implements SandboxBackendProtocol {
       } catch {
         // ignore stat failures
       }
+    }
+
+    return infos;
+  }
+
+  /**
+   * Glob skill files from the managed skills directory.
+   * Used by DeepAgents to discover available skills.
+   */
+  private async globSkillFiles(pattern: string): Promise<FileInfo[]> {
+    if (!this.skillsDir) return [];
+
+    const infos: FileInfo[] = [];
+    try {
+      const entries = await readdir(this.skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+
+        const skillMdPath = join(this.skillsDir, entry.name, 'SKILL.md');
+        try {
+          const stats = await stat(skillMdPath);
+          const virtualPath = `/skills/${entry.name}/SKILL.md`;
+
+          // Check if matches the glob pattern
+          if (micromatch.isMatch(virtualPath, pattern, { dot: true })) {
+            infos.push({
+              path: virtualPath,
+              is_dir: false,
+              size: stats.size,
+              modified_at: stats.mtime.toISOString(),
+            });
+          }
+        } catch {
+          // SKILL.md doesn't exist in this directory, skip
+        }
+      }
+    } catch {
+      // Skills directory doesn't exist
     }
 
     return infos;
