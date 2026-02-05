@@ -34,7 +34,7 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
           <p className="text-sm text-white/70 mb-4">
             The app hit a rendering error. Check the console for details.
           </p>
-          <div className="text-xs text-white/60 font-mono whitespace-pre-wrap rounded-lg bg-black/40 p-3 border border-white/10">
+          <div className="text-xs text-white/60 font-mono whitespace-pre-wrap break-all rounded-lg bg-black/40 p-3 border border-white/10 max-h-[300px] overflow-auto">
             {this.state.error?.message || 'Unknown error'}
             {this.state.error?.stack ? `\n\n${this.state.error.stack}` : ''}
             {this.state.componentStack ? `\n\nComponent stack:\n${this.state.componentStack}` : ''}
