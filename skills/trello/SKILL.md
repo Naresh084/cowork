@@ -13,7 +13,7 @@ metadata: {
 
 # Trello Skill
 
-Manage Trello boards, lists, and cards directly from OpenClaw.
+Manage Trello boards, lists, and cards directly from Gemini Cowork.
 
 ## Setup
 

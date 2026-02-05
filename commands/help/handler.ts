@@ -10,26 +10,27 @@ import type { CommandHandler, CommandResult } from '../../apps/desktop/src-sidec
 // This handler receives the command service through context
 
 export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
-  const { args } = ctx;
-  const specificCommand = (args._positional as string[])?.[0] || args.command as string;
+  try {
+    const { args } = ctx;
+    const specificCommand = (args._positional as string[])?.[0] || args.command as string;
 
-  // Get all commands from the registry (passed via emit/context)
-  // For now, return a static help message
-  // In production, this would query the command service
+    // Get all commands from the registry (passed via emit/context)
+    // For now, return a static help message
+    // In production, this would query the command service
 
-  if (specificCommand) {
-    // Show help for specific command
-    return {
-      success: true,
-      message: `Help for /${specificCommand}:\n\nUse "/${specificCommand}" to execute the command.\nRun "/help" to see all available commands.`,
-      data: {
-        command: specificCommand,
-      },
-    };
-  }
+    if (specificCommand) {
+      // Show help for specific command
+      return {
+        success: true,
+        message: `Help for /${specificCommand}:\n\nUse "/${specificCommand}" to execute the command.\nRun "/help" to see all available commands.`,
+        data: {
+          command: specificCommand,
+        },
+      };
+    }
 
-  // Show all commands
-  const helpText = `
+    // Show all commands
+    const helpText = `
 # Available Commands
 
 ## Setup
@@ -54,14 +55,23 @@ export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
 - Custom commands can be added in \`.cowork/commands/\`
 `.trim();
 
-  return {
-    success: true,
-    message: helpText,
-    data: {
-      categories: ['setup', 'memory', 'utility'],
-      commandCount: 4,
-    },
-  };
+    return {
+      success: true,
+      message: helpText,
+      data: {
+        categories: ['setup', 'memory', 'utility'],
+        commandCount: 4,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: 'HELP_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
 };
 
 export default handler;

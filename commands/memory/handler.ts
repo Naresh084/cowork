@@ -7,48 +7,49 @@
 import type { CommandHandler, CommandResult } from '../../apps/desktop/src-sidecar/src/commands/types.js';
 
 export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
-  const { args, memoryService } = ctx;
-  const positional = (args._positional as string[]) || [];
-  const action = (positional[0] || args.action) as string;
-  const query = (positional.slice(1).join(' ') || args.query) as string;
-  const group = args.group as string | undefined;
+  try {
+    const { args, memoryService } = ctx;
+    const positional = (args._positional as string[]) || [];
+    const action = (positional[0] || args.action) as string;
+    const query = (positional.slice(1).join(' ') || args.query) as string;
+    const group = args.group as string | undefined;
 
-  // Ensure memory service is initialized
-  if (!memoryService.isInitialized()) {
-    await memoryService.initialize();
-  }
+    // Ensure memory service is initialized
+    if (!memoryService.isInitialized()) {
+      await memoryService.initialize();
+    }
 
-  switch (action) {
-    case 'list':
-    case 'ls':
-      return await listMemories(memoryService, group);
+    switch (action) {
+      case 'list':
+      case 'ls':
+        return await listMemories(memoryService, group);
 
-    case 'add':
-    case 'create':
-      return await addMemory(ctx, query, group);
+      case 'add':
+      case 'create':
+        return await addMemory(ctx, query, group);
 
-    case 'remove':
-    case 'delete':
-    case 'rm':
-      return await removeMemory(memoryService, query);
+      case 'remove':
+      case 'delete':
+      case 'rm':
+        return await removeMemory(memoryService, query);
 
-    case 'search':
-    case 'find':
-      return await searchMemories(memoryService, query, group);
+      case 'search':
+      case 'find':
+        return await searchMemories(memoryService, query, group);
 
-    case 'groups':
-      return await listGroups(memoryService);
+      case 'groups':
+        return await listGroups(memoryService);
 
-    case 'show':
-    case 'get':
-      return await showMemory(memoryService, query);
+      case 'show':
+      case 'get':
+        return await showMemory(memoryService, query);
 
-    default:
-      // If no action, show help
-      if (!action) {
-        return {
-          success: true,
-          message: `
+      default:
+        // If no action, show help
+        if (!action) {
+          return {
+            success: true,
+            message: `
 **Memory Commands**
 
 - \`/memory list\` - List all memories
@@ -65,17 +66,26 @@ export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
 - context - Project architecture and decisions
 - instructions - Custom agent guidelines
 `.trim(),
-        };
-      }
+          };
+        }
 
-      return {
-        success: false,
-        error: {
-          code: 'UNKNOWN_ACTION',
-          message: `Unknown action: ${action}`,
-          suggestion: 'Use /memory list, add, remove, search, or groups',
-        },
-      };
+        return {
+          success: false,
+          error: {
+            code: 'UNKNOWN_ACTION',
+            message: `Unknown action: ${action}`,
+            suggestion: 'Use /memory list, add, remove, search, or groups',
+          },
+        };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: 'MEMORY_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
   }
 };
 

@@ -1,8 +1,8 @@
 import type { AuthStorage } from '../types.js';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ============================================================================
 // macOS Keychain Storage
@@ -29,8 +29,9 @@ export class KeychainStorage implements AuthStorage {
    */
   async get(key: string): Promise<string | null> {
     try {
-      const { stdout } = await execAsync(
-        `security find-generic-password -s "${this.serviceName}" -a "${key}" -w`,
+      const { stdout } = await execFileAsync(
+        'security',
+        ['find-generic-password', '-s', this.serviceName, '-a', key, '-w'],
         { encoding: 'utf8' }
       );
       return stdout.trim();
@@ -46,8 +47,9 @@ export class KeychainStorage implements AuthStorage {
   async set(key: string, value: string): Promise<void> {
     // First try to delete existing entry
     try {
-      await execAsync(
-        `security delete-generic-password -s "${this.serviceName}" -a "${key}" 2>/dev/null`
+      await execFileAsync(
+        'security',
+        ['delete-generic-password', '-s', this.serviceName, '-a', key]
       );
     } catch {
       // Ignore error if item doesn't exist
@@ -55,8 +57,9 @@ export class KeychainStorage implements AuthStorage {
 
     // Add new entry
     // Use -U flag to allow updates if it already exists
-    await execAsync(
-      `security add-generic-password -s "${this.serviceName}" -a "${key}" -w "${this.escapeValue(value)}" -U`
+    await execFileAsync(
+      'security',
+      ['add-generic-password', '-s', this.serviceName, '-a', key, '-w', value, '-U']
     );
   }
 
@@ -65,8 +68,9 @@ export class KeychainStorage implements AuthStorage {
    */
   async delete(key: string): Promise<void> {
     try {
-      await execAsync(
-        `security delete-generic-password -s "${this.serviceName}" -a "${key}"`
+      await execFileAsync(
+        'security',
+        ['delete-generic-password', '-s', this.serviceName, '-a', key]
       );
     } catch {
       // Ignore error if item doesn't exist
@@ -93,19 +97,11 @@ export class KeychainStorage implements AuthStorage {
   }
 
   /**
-   * Escape special characters for shell command.
-   */
-  private escapeValue(value: string): string {
-    // Escape backslashes and double quotes
-    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  }
-
-  /**
    * Check if keychain access is available.
    */
   static async isAvailable(): Promise<boolean> {
     try {
-      await execAsync('security help 2>&1');
+      await execFileAsync('security', ['help']);
       return true;
     } catch {
       return false;

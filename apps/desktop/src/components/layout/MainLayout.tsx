@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChatView } from '../chat/ChatView';
 import { Sidebar } from './Sidebar';
@@ -13,11 +13,14 @@ import { ToastContainer } from '../ui/Toast';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
 
+// Lazy load SettingsView for code splitting
+const SettingsView = React.lazy(() => import('../settings/SettingsView').then(m => ({ default: m.SettingsView })));
+
 export function MainLayout() {
   const { sidebarCollapsed, liveViewOpen, closeLiveView } = useSettingsStore();
   const { activeSessionId } = useSessionStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
-  const { showApiKeyModal, apiKeyError, setShowApiKeyModal } = useAppStore();
+  const { showApiKeyModal, apiKeyError, setShowApiKeyModal, currentView } = useAppStore();
 
   // Close live view when switching sessions
   useEffect(() => {
@@ -55,7 +58,13 @@ export function MainLayout() {
 
             {/* Main View */}
             <main className="flex-1 flex flex-col min-w-0 min-h-0 relative codex-grid codex-vignette overflow-x-hidden">
-              <ChatView />
+              {currentView === 'settings' ? (
+                <Suspense fallback={<div className="h-full flex items-center justify-center"><div className="animate-pulse text-white/40">Loading settings...</div></div>}>
+                  <SettingsView />
+                </Suspense>
+              ) : (
+                <ChatView />
+              )}
             </main>
 
             {/* Right Panel */}

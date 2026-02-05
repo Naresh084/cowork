@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rm, unlink } from 'fs/promises';
+import { mkdir, readFile, writeFile, rename, rm, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
@@ -681,6 +681,8 @@ export class SessionPersistence {
   }
 
   private async writeJson(path: string, data: unknown): Promise<void> {
-    await writeFile(path, JSON.stringify(data, null, 2), 'utf-8');
+    const tmpPath = path + '.tmp';
+    await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
+    await rename(tmpPath, path);
   }
 }

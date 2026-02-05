@@ -1,0 +1,97 @@
+import TelegramBot from 'node-telegram-bot-api';
+import { BaseAdapter } from './base-adapter.js';
+import type { TelegramConfig } from '../types.js';
+
+/**
+ * Telegram adapter using long-polling for real-time messaging.
+ * Requires a bot token from @BotFather.
+ */
+export class TelegramAdapter extends BaseAdapter {
+  private bot: TelegramBot | null = null;
+
+  constructor() {
+    super('telegram');
+  }
+
+  async connect(config: Record<string, unknown>): Promise<void> {
+    const telegramConfig = config as unknown as TelegramConfig;
+    void telegramConfig;
+
+    if (!telegramConfig.botToken) {
+      throw new Error('Telegram requires a botToken from @BotFather');
+    }
+
+    this.bot = new TelegramBot(telegramConfig.botToken, { polling: true });
+
+    // Get bot info for display name
+    const botInfo = await this.bot.getMe();
+    const botName = botInfo.first_name || botInfo.username || 'Gemini Cowork';
+
+    // Handle incoming messages
+    const allowedChatIds = telegramConfig.allowedChatIds;
+    this.bot.on('message', (msg) => {
+      try {
+        // Skip non-text messages
+        if (!msg.text) return;
+
+        // Skip /start and /help commands
+        if (msg.text === '/start' || msg.text === '/help') return;
+
+        // Check allowed chat IDs whitelist
+        const chatId = String(msg.chat.id);
+        if (allowedChatIds && allowedChatIds.length > 0) {
+          if (!allowedChatIds.includes(chatId)) return;
+        }
+
+        const senderId = String(msg.from?.id || msg.chat.id);
+        const senderName =
+          msg.from?.first_name
+            ? `${msg.from.first_name}${msg.from.last_name ? ' ' + msg.from.last_name : ''}`
+            : msg.from?.username || 'Unknown';
+
+        const message = this.buildIncomingMessage(
+          chatId,
+          senderId,
+          senderName,
+          msg.text,
+        );
+        this.emit('message', message);
+      } catch (err) {
+        this.emit('error', new Error(`Telegram message handler error: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    });
+
+    // Handle polling errors gracefully
+    this.bot.on('polling_error', (error) => {
+      this.emit('error', error);
+    });
+
+    this.setConnected(true, botName);
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.bot) {
+      await this.bot.stopPolling();
+      this.bot = null;
+    }
+    this.setConnected(false);
+  }
+
+  async sendMessage(chatId: string, text: string): Promise<void> {
+    if (!this.bot) {
+      throw new Error('Telegram adapter is not connected');
+    }
+
+    await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  }
+
+  async sendTypingIndicator(chatId: string): Promise<void> {
+    if (!this.bot) return;
+
+    try {
+      await this.bot.sendChatAction(chatId, 'typing');
+    } catch {
+      // Typing indicator is non-critical, ignore failures
+    }
+  }
+}

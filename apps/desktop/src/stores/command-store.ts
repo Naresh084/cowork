@@ -9,6 +9,7 @@
  * - Prompt expansion for sending as normal messages
  */
 
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from './settings-store';
@@ -578,6 +579,40 @@ export const useCommandStore = create<CommandState & CommandActions>()(
 // =============================================================================
 
 export const useCommands = () => useCommandStore((state) => state.commands);
+
+/**
+ * React-safe hook that subscribes to both command store and settings store,
+ * so changes to installedCommandConfigs properly trigger re-renders.
+ */
+export const useInstalledCommands = (): SlashCommand[] => {
+  const availableCommands = useCommandStore((s) => s.availableCommands);
+  const configs = useSettingsStore((s) => s.installedCommandConfigs);
+  return useMemo(() => {
+    const installedNames = new Set(configs.map((c) => c.name));
+    const commandMap = new Map<string, typeof availableCommands[0]>();
+    for (const cmd of availableCommands) {
+      if (!installedNames.has(cmd.frontmatter.name)) continue;
+      const existing = commandMap.get(cmd.frontmatter.name);
+      if (!existing || cmd.source.type === 'managed') {
+        commandMap.set(cmd.frontmatter.name, cmd);
+      }
+    }
+    return Array.from(commandMap.values())
+      .map((cmd) => ({
+        name: cmd.frontmatter.name,
+        displayName: cmd.frontmatter.displayName,
+        description: cmd.frontmatter.description,
+        aliases: cmd.frontmatter.aliases || [],
+        category: cmd.frontmatter.category,
+        icon: cmd.frontmatter.icon,
+        prompt: cmd.prompt,
+        action: cmd.frontmatter.action,
+        priority: cmd.frontmatter.priority,
+      }))
+      .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  }, [availableCommands, configs]);
+};
+
 export const useAvailableCommands = () => useCommandStore((state) => state.availableCommands);
 export const useIsDiscoveringCommands = () => useCommandStore((state) => state.isDiscovering);
 export const useIsPaletteOpen = () => useCommandStore((state) => state.isPaletteOpen);

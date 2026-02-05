@@ -43,6 +43,44 @@ export * from './chat-item.js';
 export * from './connector.js';
 
 // ============================================================================
+// Platform Integration Types
+// ============================================================================
+
+export type PlatformType = 'whatsapp' | 'slack' | 'telegram';
+
+export interface PlatformStatus {
+  platform: PlatformType;
+  connected: boolean;
+  displayName?: string;
+  error?: string;
+  connectedAt?: number;
+  lastMessageAt?: number;
+}
+
+export interface IncomingMessage {
+  platform: PlatformType;
+  chatId: string;
+  senderName: string;
+  senderId: string;
+  content: string;
+  timestamp: number;
+  replyToMessageId?: string;
+}
+
+export interface OutgoingMessage {
+  platform: PlatformType;
+  chatId: string;
+  content: string;
+  replyToMessageId?: string;
+}
+
+export interface PlatformConfig {
+  platform: PlatformType;
+  enabled: boolean;
+  config: Record<string, string>;
+}
+
+// ============================================================================
 // Message Types
 // ============================================================================
 
@@ -354,7 +392,7 @@ export type CompactionConfig = z.infer<typeof CompactionConfigSchema>;
  */
 export const EnhancedSessionMetadataSchema = z.object({
   id: z.string(),
-  type: z.enum(['main', 'isolated', 'cron', 'ephemeral']),
+  type: z.enum(['main', 'isolated', 'cron', 'ephemeral', 'integration']),
   prefix: z.string().describe('Session prefix (e.g., "main-abc123-001")'),
   title: z.string().nullable(),
   workingDirectory: z.string(),
@@ -385,8 +423,8 @@ export type EnhancedSessionMetadata = z.infer<typeof EnhancedSessionMetadataSche
  */
 export const SessionQueryOptionsSchema = z.object({
   type: z.union([
-    z.enum(['main', 'isolated', 'cron', 'ephemeral']),
-    z.array(z.enum(['main', 'isolated', 'cron', 'ephemeral'])),
+    z.enum(['main', 'isolated', 'cron', 'ephemeral', 'integration']),
+    z.array(z.enum(['main', 'isolated', 'cron', 'ephemeral', 'integration'])),
   ]).optional(),
   workingDirectory: z.string().optional(),
   search: z.string().optional(),

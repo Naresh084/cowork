@@ -5,6 +5,7 @@ import { useChatStore, type MediaActivityItem, type ReportActivityItem, type Des
 import { useAgentStore, type Task } from '../stores/agent-store';
 import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
+import { useIntegrationStore } from '../stores/integration-store';
 import { toast } from '../components/ui/Toast';
 import type { Message } from '@gemini-cowork/shared';
 
@@ -157,6 +158,10 @@ function buildDesignPreview(result: unknown, toolName: string): DesignActivityIt
   return null;
 }
 
+function isRecord(val: unknown): val is Record<string, unknown> {
+  return val !== null && typeof val === 'object' && !Array.isArray(val);
+}
+
 function normalizeTodoStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
   const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
   if (normalized === 'done' || normalized === 'complete' || normalized === 'completed') return 'completed';
@@ -254,6 +259,7 @@ export function useAgentEvents(sessionId: string | null): void {
 
   useEffect(() => {
     const handleEvent = (event: AgentEvent) => {
+      try {
       const chat = chatStoreRef.current;
       const agent = agentStoreRef.current;
       const activeId = activeSessionRef.current;
@@ -490,17 +496,22 @@ export function useAgentEvents(sessionId: string | null): void {
           chat.completeTurnThinking(eventSessionId);
           chat.endTurn(eventSessionId);
 
+          // Safely convert event.error to string
+          const errorMsg = typeof event.error === 'string'
+            ? event.error
+            : (isRecord(event.error) ? String((event.error as Record<string, unknown>).message || event.error) : String(event.error));
+
           // Check if it's an auth/API key error
           const isAuthError =
             event.code === 'INVALID_API_KEY' ||
-            event.error.toLowerCase().includes('api key') ||
-            event.error.includes('401') ||
-            event.error.toLowerCase().includes('authentication') ||
-            event.error.toLowerCase().includes('unauthorized');
+            errorMsg.toLowerCase().includes('api key') ||
+            errorMsg.includes('401') ||
+            errorMsg.toLowerCase().includes('authentication') ||
+            errorMsg.toLowerCase().includes('unauthorized');
 
           if (isAuthError) {
             // Show API key modal for auth errors
-            useAppStore.getState().setShowApiKeyModal(true, event.error);
+            useAppStore.getState().setShowApiKeyModal(true, errorMsg);
           } else {
             // Show error toast for other errors
             if (event.code === 'RATE_LIMIT') {
@@ -508,7 +519,7 @@ export function useAgentEvents(sessionId: string | null): void {
               const message = retry ? `Retry in ${Math.ceil(retry)}s` : 'Please retry shortly';
               toast.warning('Rate limit exceeded', message, 8000);
             } else {
-              toast.error('Agent Error', event.error, 8000);
+              toast.error('Agent Error', errorMsg, 8000);
             }
           }
 
@@ -520,7 +531,7 @@ export function useAgentEvents(sessionId: string | null): void {
               kind: 'error',
               code: event.code,
               details: event.details,
-              raw: event.error,
+              raw: errorMsg,
             },
             createdAt: Date.now(),
           });
@@ -590,6 +601,71 @@ export function useAgentEvents(sessionId: string | null): void {
           });
           break;
         }
+
+        // Integration events
+        case 'integration:status': {
+          const statusEvent = event as unknown as {
+            platform: string;
+            connected: boolean;
+            displayName?: string;
+            error?: string;
+            connectedAt?: number;
+            lastMessageAt?: number;
+          };
+          useIntegrationStore.getState().updatePlatformStatus({
+            platform: statusEvent.platform as 'whatsapp' | 'slack' | 'telegram',
+            connected: statusEvent.connected,
+            displayName: statusEvent.displayName,
+            error: statusEvent.error,
+            connectedAt: statusEvent.connectedAt,
+            lastMessageAt: statusEvent.lastMessageAt,
+          });
+          break;
+        }
+
+        case 'integration:qr': {
+          const qrEvent = event as unknown as { qrDataUrl: string };
+          useIntegrationStore.getState().setQRCode(qrEvent.qrDataUrl);
+          break;
+        }
+
+        case 'integration:message_in': {
+          const msgEvent = event as unknown as { platform: string; sender: string; content: string };
+          const platformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+          toast.info(
+            `${platformNames[msgEvent.platform] || msgEvent.platform}`,
+            `${msgEvent.sender}: ${msgEvent.content}`,
+            5000
+          );
+          break;
+        }
+
+        case 'integration:message_out': {
+          // Update last message timestamp on the platform
+          const outEvent = event as unknown as { platform: string; timestamp: number };
+          const currentStatus = useIntegrationStore.getState().platforms[outEvent.platform as 'whatsapp' | 'slack' | 'telegram'];
+          if (currentStatus) {
+            useIntegrationStore.getState().updatePlatformStatus({
+              ...currentStatus,
+              lastMessageAt: outEvent.timestamp || Date.now(),
+            });
+          }
+          break;
+        }
+
+        case 'integration:queued': {
+          const queuedEvent = event as unknown as { platform: string; queueSize: number };
+          const queuePlatformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+          toast.info(
+            `${queuePlatformNames[queuedEvent.platform] || queuedEvent.platform}`,
+            `Message queued (${queuedEvent.queueSize} waiting)`,
+            3000
+          );
+          break;
+        }
+      }
+      } catch (error) {
+        console.error('[useAgentEvents] Event handler error:', error);
       }
     };
 

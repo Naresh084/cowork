@@ -6,6 +6,15 @@ import { OAUTH_CALLBACK_PORT, OAUTH_REDIRECT_URI } from '../types.js';
 // OAuth Callback Server
 // ============================================================================
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 export interface OAuthCallbackServer {
   /**
    * Wait for the OAuth callback to complete.
@@ -211,7 +220,7 @@ const ERROR_HTML = (message: string) => `<!DOCTYPE html>
       </div>
       <h1>Authentication Failed</h1>
       <p>Something went wrong during sign in. Please try again.</p>
-      <div class="error-message">${message}</div>
+      <div class="error-message">${escapeHtml(message)}</div>
     </div>
   </body>
 </html>`;

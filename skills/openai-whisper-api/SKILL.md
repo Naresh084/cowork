@@ -37,7 +37,7 @@ Defaults:
 
 ## API key
 
-Set `OPENAI_API_KEY`, or configure it in `~/.openclaw/openclaw.json`:
+Set `OPENAI_API_KEY`, or configure it in `~/.geminicowork/geminicowork.json`:
 
 ```json5
 {

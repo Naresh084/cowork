@@ -531,9 +531,9 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       await sessionStore.waitForBackend();
     }
 
-    // Check if already loaded and not forcing reload
+    // Check if already loaded or currently loading (prevents duplicate concurrent loads)
     const sessionState = get().sessions[sessionId];
-    if (sessionState?.hasLoaded && !forceReload) {
+    if (!forceReload && (sessionState?.hasLoaded || sessionState?.isLoadingMessages)) {
       return null;
     }
 

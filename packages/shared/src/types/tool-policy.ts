@@ -108,7 +108,7 @@ export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 /**
  * Session type for condition matching
  */
-export const SessionTypeSchema = z.enum(['main', 'isolated', 'cron', 'ephemeral']);
+export const SessionTypeSchema = z.enum(['main', 'isolated', 'cron', 'ephemeral', 'integration']);
 export type SessionType = z.infer<typeof SessionTypeSchema>;
 
 /**

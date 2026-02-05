@@ -222,6 +222,54 @@ function parseTauriEvent(
         timestamp: (data.timestamp as number) ?? Date.now(),
       };
 
+    // Integration events
+    case 'integration:status':
+      return {
+        type: 'integration:status',
+        sessionId,
+        platform: (data.platform as string) ?? '',
+        connected: (data.connected as boolean) ?? false,
+        displayName: data.displayName as string | undefined,
+        error: data.error as string | undefined,
+        connectedAt: data.connectedAt as number | undefined,
+        lastMessageAt: data.lastMessageAt as number | undefined,
+      };
+
+    case 'integration:qr':
+      return {
+        type: 'integration:qr',
+        sessionId,
+        qrDataUrl: (data.qrDataUrl as string) ?? '',
+      };
+
+    case 'integration:message_in':
+      return {
+        type: 'integration:message_in',
+        sessionId,
+        platform: (data.platform as string) ?? '',
+        sender: (data.sender as string) ?? '',
+        content: (data.content as string) ?? '',
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'integration:message_out':
+      return {
+        type: 'integration:message_out',
+        sessionId,
+        platform: (data.platform as string) ?? '',
+        chatId: (data.chatId as string) ?? '',
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'integration:queued':
+      return {
+        type: 'integration:queued',
+        sessionId,
+        platform: (data.platform as string) ?? '',
+        queueSize: (data.queueSize as number) ?? 0,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
     default:
       console.warn('Unknown event type:', type);
       return null;
@@ -302,6 +350,11 @@ export function subscribeToAgentEvents(
     'agent:started',
     'agent:stopped',
     'agent:browserView:screenshot',
+    'agent:integration:status',
+    'agent:integration:qr',
+    'agent:integration:message_in',
+    'agent:integration:message_out',
+    'agent:integration:queued',
   ];
 
   // Set up listeners for each event type
@@ -335,6 +388,7 @@ export function subscribeToAgentEvents(
 
     if (flushTimeout) {
       clearTimeout(flushTimeout);
+      flushTimeout = null;
     }
 
     for (const unlisten of unlisteners) {
@@ -375,6 +429,11 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:started',
     'agent:stopped',
     'agent:browserView:screenshot',
+    'agent:integration:status',
+    'agent:integration:qr',
+    'agent:integration:message_in',
+    'agent:integration:message_out',
+    'agent:integration:queued',
   ];
 
   for (const eventType of eventTypes) {

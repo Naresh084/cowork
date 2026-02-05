@@ -265,6 +265,17 @@ impl SidecarManager {
         // Reset stdin health
         *self.stdin_healthy.lock().await = true;
 
+        // Drain pending requests and send errors so callers don't hang
+        let mut pending = self.pending_requests.lock().await;
+        for (_, sender) in pending.drain() {
+            let _ = sender.send(IpcResponse {
+                id: String::new(),
+                success: false,
+                result: None,
+                error: Some("Sidecar stopped".to_string()),
+            });
+        }
+
         Ok(())
     }
 
@@ -324,24 +335,53 @@ impl SidecarManager {
 
         // Wait for response with timeout
         // Uses DEFAULT_REQUEST_TIMEOUT_SECS (300s) to handle large context operations
-        let response = tokio::time::timeout(
+        match tokio::time::timeout(
             std::time::Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS),
-            response_rx
+            response_rx,
         )
-            .await
-            .map_err(|_| format!("Request timed out after {}s", DEFAULT_REQUEST_TIMEOUT_SECS))?
-            .map_err(|_| "Response channel closed")?;
-
-        if response.success {
-            Ok(response.result.unwrap_or(serde_json::Value::Null))
-        } else {
-            Err(response.error.unwrap_or_else(|| "Unknown error".to_string()))
+        .await
+        {
+            Err(_) => {
+                // Timeout - clean up pending request to prevent memory leak
+                self.pending_requests.lock().await.remove(&id);
+                Err(format!("Request timed out after {}s", DEFAULT_REQUEST_TIMEOUT_SECS))
+            }
+            Ok(Ok(response)) => {
+                if response.success {
+                    Ok(response.result.unwrap_or(serde_json::Value::Null))
+                } else {
+                    Err(response.error.unwrap_or_else(|| "Unknown error".to_string()))
+                }
+            }
+            Ok(Err(_)) => Err("Response channel closed".to_string()),
         }
     }
 
     /// Check if sidecar is running
     pub async fn is_running(&self) -> bool {
-        self.process.lock().await.is_some()
+        let mut guard = self.process.lock().await;
+        if let Some(ref mut child) = *guard {
+            match child.try_wait() {
+                Ok(None) => true,       // Still running
+                Ok(Some(_)) => {
+                    *guard = None;       // Process exited, clean up handle
+                    false
+                }
+                Err(_) => false,
+            }
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for SidecarManager {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.process.try_lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
     }
 }
 

@@ -4,7 +4,7 @@
  * Checks if skill requirements are met on the current system.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type {
   SkillRequirements,
@@ -14,7 +14,7 @@ import type {
 } from '@gemini-cowork/shared';
 import { getRequirements, getInstallOptions } from './skill-parser.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Cache for binary checks to avoid repeated lookups
 const binaryCache = new Map<string, { exists: boolean; path?: string }>();
@@ -30,6 +30,11 @@ const PLATFORM_MAP: Record<string, string> = {
  * Check if a binary exists in PATH
  */
 export async function checkBinary(name: string): Promise<{ exists: boolean; path?: string }> {
+  // Validate binary name to prevent command injection
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+    return { exists: false };
+  }
+
   // Check cache first
   const cached = binaryCache.get(name);
   if (cached !== undefined) {
@@ -38,8 +43,8 @@ export async function checkBinary(name: string): Promise<{ exists: boolean; path
 
   try {
     // Use 'which' on Unix, 'where' on Windows
-    const command = process.platform === 'win32' ? `where ${name}` : `which ${name}`;
-    const { stdout } = await execAsync(command, { timeout: 5000 });
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
+    const { stdout } = await execFileAsync(cmd, [name], { timeout: 5000 });
     const path = stdout.trim().split('\n')[0]; // Take first result
 
     const result = { exists: true, path };
