@@ -2,6 +2,18 @@
 
 An AI-powered desktop coding assistant built with Tauri, React, and Google's Gemini API.
 
+## Downloads
+
+| Platform | Download |
+|----------|----------|
+| Windows (64-bit) | [Download .exe](https://github.com/AiCodingBattle/geminicowork/releases/latest) |
+| macOS (Apple Silicon) | [Download .dmg (M1/M2/M3)](https://github.com/AiCodingBattle/geminicowork/releases/latest) |
+| macOS (Intel) | [Download .dmg (Intel)](https://github.com/AiCodingBattle/geminicowork/releases/latest) |
+| Linux (AppImage) | [Download .AppImage](https://github.com/AiCodingBattle/geminicowork/releases/latest) |
+| Linux (Debian) | [Download .deb](https://github.com/AiCodingBattle/geminicowork/releases/latest) |
+
+See the [Installation Guide](docs/INSTALLATION.md) for detailed instructions.
+
 ## Overview
 
 Gemini Cowork is a desktop application that provides an intelligent AI agent to assist with coding tasks. It features a modern chat interface where you can interact with the Gemini AI model to get help with code, file operations, shell commands, and more.

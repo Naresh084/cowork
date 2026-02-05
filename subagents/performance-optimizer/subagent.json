@@ -1,0 +1,12 @@
+{
+  "name": "performance-optimizer",
+  "displayName": "Performance Optimizer",
+  "description": "Identifies and resolves performance bottlenecks. Use for: profiling analysis, optimization recommendations, memory leak detection, latency reduction.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "analysis",
+  "icon": "zap",
+  "tags": ["performance", "optimization", "profiling", "memory", "latency"],
+  "priority": 82,
+  "source": "built-in"
+}

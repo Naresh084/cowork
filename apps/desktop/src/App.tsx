@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { Onboarding } from './components/onboarding/Onboarding';
+import { AutoUpdater } from './components/AutoUpdater';
 import { useAuthStore } from './stores/auth-store';
 import { useSessionStore } from './stores/session-store';
 import { useSettingsStore } from './stores/settings-store';
 import { useSkillStore } from './stores/skill-store';
+import { useCommandStore } from './stores/command-store';
+import { useSubagentStore } from './stores/subagent-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -12,6 +15,8 @@ export function App() {
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
   const { fetchModels, availableModels, modelsLoading } = useSettingsStore();
   const { discoverSkills } = useSkillStore();
+  const { discoverCommands } = useCommandStore();
+  const { loadSubagents } = useSubagentStore();
 
   useEffect(() => {
     let isMounted = true;
@@ -53,13 +58,38 @@ export function App() {
         console.log('[App] Loading skills...');
         await discoverSkills();
         console.log('[App] Skills loaded');
+
+        // Load commands after backend is ready
+        console.log('[App] Loading commands...');
+        await discoverCommands();
+        console.log('[App] Commands loaded');
+
+        // Auto-install /init command if not already installed
+        const commandStore = useCommandStore.getState();
+        const settingsStore = useSettingsStore.getState();
+        const initInstalled = settingsStore.installedCommandConfigs.some((c) => c.name === 'init');
+        if (!initInstalled) {
+          const initCommand = commandStore.availableCommands.find(
+            (c) => c.frontmatter.name === 'init' && c.source.type === 'bundled'
+          );
+          if (initCommand) {
+            console.log('[App] Auto-installing /init command...');
+            await commandStore.installCommand(initCommand.id);
+            console.log('[App] /init command installed');
+          }
+        }
+
+        // Load subagents after backend is ready
+        console.log('[App] Loading subagents...');
+        await loadSubagents();
+        console.log('[App] Subagents loaded');
       } catch (error) {
         console.error('[App] Failed to initialize backend:', error);
       }
     };
 
     initBackend();
-  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills]);
+  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents]);
 
   useEffect(() => {
     if (!apiKey || modelsLoading || availableModels.length > 0) return;
@@ -93,9 +123,18 @@ export function App() {
     );
   }
 
-  if (!isAuthenticated) {
+  // Get userName from settings store
+  const { userName } = useSettingsStore();
+
+  // Show onboarding if not authenticated OR if userName is not set
+  if (!isAuthenticated || !userName) {
     return <Onboarding />;
   }
 
-  return <MainLayout />;
+  return (
+    <>
+      <MainLayout />
+      <AutoUpdater />
+    </>
+  );
 }

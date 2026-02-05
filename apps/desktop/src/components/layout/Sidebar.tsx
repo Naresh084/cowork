@@ -84,13 +84,16 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const { getEnabledCount } = useSkillStore();
   const enabledSkillsCount = getEnabledCount();
 
-  // Commands store - show total command count (commands are now frontend-only, no install concept)
-  const { commands } = useCommandStore();
-  const commandCount = commands.length;
+  // Commands store - show INSTALLED command count
+  // Subscribe to availableCommands for reactivity
+  const availableCommands = useCommandStore((s) => s.availableCommands);
+  // Compute installed count - re-renders when availableCommands changes
+  const commandCount = availableCommands.filter((c) => c.source.type === 'managed').length;
 
   // Subagents store - show INSTALLED count, not total
-  const { getInstalledCount: getInstalledSubagentCount } = useSubagentStore();
-  const installedSubagentCount = getInstalledSubagentCount();
+  // Subscribe to subagents array for reactivity when it changes
+  const { subagents } = useSubagentStore();
+  const installedSubagentCount = subagents.filter((s) => s.installed).length;
 
   // Load sessions on mount
   useEffect(() => {
@@ -347,6 +350,8 @@ function SidebarRail({
   onOpenSubagents,
   subagentCount,
 }: SidebarRailProps) {
+  const { userName } = useSettingsStore();
+  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
@@ -516,7 +521,7 @@ function SidebarRail({
           title="Profile & Settings"
         >
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
-            <span className="text-white text-xs font-bold">N</span>
+            <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
           </div>
         </motion.button>
       </div>
@@ -590,6 +595,8 @@ function SidebarExpanded({
   onOpenSubagents,
   subagentCount,
 }: SidebarExpandedProps) {
+  const { userName } = useSettingsStore();
+  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -635,7 +642,7 @@ function SidebarExpanded({
       </div>
 
       {/* Recents */}
-      <div className="flex-1 overflow-y-auto px-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-2">
         <h3 className="text-[11px] font-semibold text-white/40 px-2 py-2 uppercase tracking-[0.16em]">Recents</h3>
 
         {isLoading ? (
@@ -798,10 +805,10 @@ function SidebarExpanded({
           )}
         >
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xs font-bold">N</span>
+            <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
           </div>
           <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium text-white/90 truncate">Naresh</div>
+            <div className="text-sm font-medium text-white/90 truncate">{userName || 'User'}</div>
             <div className="text-xs text-white/40 truncate">
               {apiKey ? 'API Connected' : 'Not configured'}
             </div>
@@ -969,11 +976,15 @@ interface ProfileMenuProps {
 function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuProps) {
   const [showApiKey, setShowApiKey] = useState(false);
   const [isEditingKey, setIsEditingKey] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
   const [newApiKey, setNewApiKey] = useState('');
+  const [newUserName, setNewUserName] = useState('');
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { setApiKey, clearApiKey } = useAuthStore();
+  const { userName, updateSetting } = useSettingsStore();
+  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
 
   const maskedApiKey = apiKey
     ? `${apiKey.slice(0, 6)}${'•'.repeat(20)}${apiKey.slice(-4)}`
@@ -1030,6 +1041,14 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
     }
   };
 
+  const handleSaveName = () => {
+    if (!newUserName.trim()) return;
+    updateSetting('userName', newUserName.trim());
+    setIsEditingName(false);
+    setNewUserName('');
+    toast.success('Name updated');
+  };
+
   const handleLogout = async () => {
     try {
       await clearApiKey();
@@ -1056,15 +1075,58 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
     >
       {/* Header */}
       <div className="px-4 py-3 border-b border-white/[0.08]">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
-            <span className="text-white text-xs font-bold">N</span>
+        {isEditingName ? (
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={newUserName}
+              onChange={(e) => setNewUserName(e.target.value)}
+              placeholder="Enter your name"
+              className={cn(
+                'w-full px-3 py-2 rounded-lg text-sm',
+                'bg-[#0B0C10] border border-white/[0.08]',
+                'text-white/90 placeholder:text-white/30',
+                'focus:outline-none focus:border-[#4C71FF]/50'
+              )}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveName}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#4C71FF] text-white"
+              >
+                <Check className="w-4 h-4" />
+                Save
+              </button>
+              <button
+                onClick={() => setIsEditingName(false)}
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
+              >
+                <X className="w-4 h-4" />
+                Cancel
+              </button>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-medium text-white/90">Naresh</div>
-            <div className="text-xs text-white/40">Local account</div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
+              <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
+            </div>
+            <div className="flex-1">
+              <div className="text-sm font-medium text-white/90">{userName || 'User'}</div>
+              <div className="text-xs text-white/40">Local account</div>
+            </div>
+            <button
+              onClick={() => {
+                setNewUserName(userName);
+                setIsEditingName(true);
+              }}
+              className="text-xs text-white/30 hover:text-white/50 transition-colors"
+            >
+              Edit
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {/* API Key Section */}

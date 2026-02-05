@@ -1,103 +1,73 @@
-use std::process::Command;
+use keyring::Entry;
+
+const SERVICE_NAME: &str = "com.gemini-cowork.app";
 
 #[tauri::command]
 pub async fn keychain_get(service: String, account: String) -> Result<Option<String>, String> {
     eprintln!("[keychain] Getting key for service: {}, account: {}", service, account);
-    #[cfg(target_os = "macos")]
-    {
-        let output = Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s", &service,
-                "-a", &account,
-                "-w",
-            ])
-            .output()
-            .map_err(|e| {
-                eprintln!("[keychain] Command error: {}", e);
-                e.to_string()
-            })?;
 
-        eprintln!("[keychain] Command completed, success: {}", output.status.success());
-        if output.status.success() {
-            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            eprintln!("[keychain] Found key, length: {}", value.len());
-            Ok(Some(value))
-        } else {
+    let full_service = format!("{}.{}", SERVICE_NAME, service);
+
+    let entry = Entry::new(&full_service, &account)
+        .map_err(|e| format!("Keyring initialization error: {}", e))?;
+
+    match entry.get_password() {
+        Ok(password) => {
+            eprintln!("[keychain] Found key, length: {}", password.len());
+            Ok(Some(password))
+        }
+        Err(keyring::Error::NoEntry) => {
             eprintln!("[keychain] Key not found");
             Ok(None)
         }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        eprintln!("[keychain] Not macOS, returning None");
-        // Fallback for non-macOS platforms
-        Ok(None)
+        Err(keyring::Error::Ambiguous(_)) => {
+            eprintln!("[keychain] Ambiguous entry, returning None");
+            Ok(None)
+        }
+        Err(e) => {
+            eprintln!("[keychain] Error getting key: {}", e);
+            Err(format!("Failed to get credential: {}", e))
+        }
     }
 }
 
 #[tauri::command]
 pub async fn keychain_set(service: String, account: String, value: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        // First try to delete existing entry
-        let _ = Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s", &service,
-                "-a", &account,
-            ])
-            .output();
+    eprintln!("[keychain] Setting key for service: {}, account: {}", service, account);
 
-        // Add new entry
-        let output = Command::new("security")
-            .args([
-                "add-generic-password",
-                "-s", &service,
-                "-a", &account,
-                "-w", &value,
-                "-U",
-            ])
-            .output()
-            .map_err(|e| e.to_string())?;
+    let full_service = format!("{}.{}", SERVICE_NAME, service);
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(String::from_utf8_lossy(&output.stderr).to_string())
-        }
-    }
+    let entry = Entry::new(&full_service, &account)
+        .map_err(|e| format!("Keyring initialization error: {}", e))?;
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("Keychain not supported on this platform".to_string())
-    }
+    entry.set_password(&value)
+        .map_err(|e| format!("Failed to set credential: {}", e))?;
+
+    eprintln!("[keychain] Key set successfully");
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn keychain_delete(service: String, account: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let output = Command::new("security")
-            .args([
-                "delete-generic-password",
-                "-s", &service,
-                "-a", &account,
-            ])
-            .output()
-            .map_err(|e| e.to_string())?;
+    eprintln!("[keychain] Deleting key for service: {}, account: {}", service, account);
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            // Ignore error if item doesn't exist
+    let full_service = format!("{}.{}", SERVICE_NAME, service);
+
+    let entry = Entry::new(&full_service, &account)
+        .map_err(|e| format!("Keyring initialization error: {}", e))?;
+
+    match entry.delete_credential() {
+        Ok(()) => {
+            eprintln!("[keychain] Key deleted successfully");
             Ok(())
         }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(())
+        Err(keyring::Error::NoEntry) => {
+            eprintln!("[keychain] Key not found, nothing to delete");
+            Ok(()) // Already deleted or never existed
+        }
+        Err(e) => {
+            eprintln!("[keychain] Error deleting key: {}", e);
+            Err(format!("Failed to delete credential: {}", e))
+        }
     }
 }

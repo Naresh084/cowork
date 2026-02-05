@@ -9,6 +9,9 @@ import type {
   ThinkingItem,
   ToolStartItem,
   ToolResultItem,
+  PermissionItem,
+  QuestionItem,
+  ErrorItem,
 } from '@gemini-cowork/shared';
 import { createDeepAgent } from 'deepagents';
 import { createMiddleware } from 'langchain';
@@ -116,6 +119,8 @@ interface ActiveSession {
   lastKnownPromptTokens: number;
   createdAt: number;
   updatedAt: number;
+  /** Last time the session was accessed/selected by the user */
+  lastAccessedAt: number;
 }
 
 // Specialized models configuration
@@ -378,6 +383,7 @@ export class AgentRunner {
       lastKnownPromptTokens: 0,
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
+      lastAccessedAt: data.metadata.lastAccessedAt,
     };
 
     return session;
@@ -621,6 +627,7 @@ export class AgentRunner {
       lastKnownPromptTokens: 0,
       createdAt: now,
       updatedAt: now,
+      lastAccessedAt: now,
     };
 
     const toolHandlers = this.buildToolHandlers(session);
@@ -640,6 +647,7 @@ export class AgentRunner {
       model: actualModel,
       createdAt: now,
       updatedAt: now,
+      lastAccessedAt: now,
       messageCount: 0,
     };
 
@@ -756,6 +764,8 @@ export class AgentRunner {
     session.chatItems.push(userChatItem);
     session.currentTurnId = userMessage.id;
     eventEmitter.chatItem(sessionId, userChatItem);
+    // V2: Immediate persistence for crash recovery
+    await this.persistence?.appendChatItem(sessionId, userChatItem);
 
     // Ensure agent is initialized (may be restored from disk without agent)
     if (!session.agent.invoke) {
@@ -818,6 +828,8 @@ export class AgentRunner {
                 };
                 session.chatItems.push(thinkingItem);
                 eventEmitter.chatItem(sessionId, thinkingItem);
+                // V2: Immediate persistence for crash recovery
+                this.persistence?.appendChatItem(sessionId, thinkingItem).catch(() => {});
               }
               accumulatedThinking += thinkingText;
               eventEmitter.thinkingChunk(sessionId, thinkingText);
@@ -838,6 +850,8 @@ export class AgentRunner {
                     thinkingItem.content = accumulatedThinking;
                     thinkingItem.status = 'done';
                     eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
+                    // V2: Immediate persistence for crash recovery
+                    this.persistence?.updateChatItem(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' }).catch(() => {});
                   }
                 }
               }
@@ -867,6 +881,8 @@ export class AgentRunner {
                 thinkingItem.content = accumulatedThinking;
                 thinkingItem.status = 'done';
                 eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
+                // V2: Immediate persistence for crash recovery
+                this.persistence?.updateChatItem(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' }).catch(() => {});
               }
             }
           }
@@ -965,6 +981,8 @@ export class AgentRunner {
         };
         session.chatItems.push(assistantChatItem);
         eventEmitter.chatItem(sessionId, assistantChatItem);
+        // V2: Immediate persistence for crash recovery
+        this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
       } else {
         eventEmitter.streamDone(sessionId, {
           id: generateMessageId(),
@@ -1000,6 +1018,8 @@ export class AgentRunner {
           };
           session.chatItems.push(assistantChatItem);
           eventEmitter.chatItem(sessionId, assistantChatItem);
+          // V2: Immediate persistence for crash recovery
+          this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
         } else {
           eventEmitter.streamDone(sessionId, {
             id: generateMessageId(),
@@ -1036,6 +1056,22 @@ export class AgentRunner {
       }
 
       const rateLimitDetails = errorCode === 'RATE_LIMIT' ? this.parseRateLimitDetails(errorMessage) : null;
+
+      // V2: Create and persist ErrorItem
+      const errorItem: ErrorItem = {
+        id: generateChatItemId(),
+        kind: 'error',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        message: errorMessage,
+        code: errorCode,
+        recoverable: errorCode !== 'INVALID_API_KEY',
+        details: rateLimitDetails ? { ...rateLimitDetails } : undefined,
+      };
+      session.chatItems.push(errorItem);
+      eventEmitter.chatItem(sessionId, errorItem);
+      this.persistence?.appendChatItem(sessionId, errorItem).catch(() => {});
+
       eventEmitter.error(sessionId, errorMessage, errorCode, rateLimitDetails ?? undefined);
       // Don't re-throw - error has been emitted to UI, re-throwing causes unhandled rejection
     } finally {
@@ -1147,6 +1183,23 @@ export class AgentRunner {
       timestamp: Date.now(),
     };
 
+    // V2: Create and persist QuestionItem
+    const questionItem: QuestionItem = {
+      id: generateChatItemId(),
+      kind: 'question',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      questionId: questionId,
+      question: question,
+      header: header,
+      options: options?.map(o => ({ label: o.label, description: o.description })),
+      multiSelect: multiSelect,
+      status: 'pending',
+    };
+    session.chatItems.push(questionItem);
+    eventEmitter.chatItem(sessionId, questionItem);
+    this.persistence?.appendChatItem(sessionId, questionItem).catch(() => {});
+
     return new Promise((resolve) => {
       // Store pending question
       session.pendingQuestions.set(questionId, {
@@ -1186,24 +1239,27 @@ export class AgentRunner {
   }
 
   /**
-   * Get all sessions.
+   * Get all sessions, sorted by lastAccessedAt (most recent first).
    */
   listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map(session => {
-      const firstMessage = this.getFirstMessagePreview(session);
+    return Array.from(this.sessions.values())
+      .map(session => {
+        const firstMessage = this.getFirstMessagePreview(session);
 
-      return {
-        id: session.id,
-        type: session.type,
-        title: session.title,
-        firstMessage,
-        workingDirectory: session.workingDirectory,
-        model: session.model,
-        createdAt: session.createdAt,
-        updatedAt: session.updatedAt,
-        messageCount: session.messages.length,
-      };
-    });
+        return {
+          id: session.id,
+          type: session.type,
+          title: session.title,
+          firstMessage,
+          workingDirectory: session.workingDirectory,
+          model: session.model,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          lastAccessedAt: session.lastAccessedAt,
+          messageCount: session.messages.length,
+        };
+      })
+      .sort((a, b) => b.lastAccessedAt - a.lastAccessedAt);
   }
 
   /**
@@ -1224,8 +1280,10 @@ export class AgentRunner {
       model: session.model,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
+      lastAccessedAt: session.updatedAt,
       messageCount: session.messages.length,
       messages: session.messages,
+      chatItems: session.chatItems,
       tasks: session.tasks,
       artifacts: session.artifacts,
       toolExecutions: session.toolExecutions,
@@ -1316,6 +1374,7 @@ export class AgentRunner {
             approvalMode: session.approvalMode,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
+            lastAccessedAt: session.lastAccessedAt,
           },
           chatItems: session.chatItems,
           tasks: session.tasks,
@@ -1361,6 +1420,7 @@ export class AgentRunner {
             approvalMode: session.approvalMode,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
+            lastAccessedAt: session.lastAccessedAt,
           },
           chatItems: session.chatItems,
           tasks: session.tasks,
@@ -1384,9 +1444,48 @@ export class AgentRunner {
       model: session.model,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
       messageCount: session.messages.length,
     };
     eventEmitter.sessionUpdated(sessionInfo);
+  }
+
+  /**
+   * Update session last accessed time.
+   */
+  async updateSessionLastAccessed(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const now = Date.now();
+    session.lastAccessedAt = now;
+
+    // Persist to disk using V2 format
+    if (this.persistence) {
+      try {
+        await this.persistence.saveSessionV2({
+          metadata: {
+            version: 2,
+            id: session.id,
+            type: session.type,
+            title: session.title,
+            workingDirectory: session.workingDirectory,
+            model: session.model,
+            approvalMode: session.approvalMode,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            lastAccessedAt: session.lastAccessedAt,
+          },
+          chatItems: session.chatItems,
+          tasks: session.tasks,
+          artifacts: session.artifacts,
+        });
+      } catch (error) {
+        console.error(`Failed to persist lastAccessedAt update for ${session.id}:`, error);
+      }
+    }
   }
 
   /**
@@ -1424,6 +1523,7 @@ export class AgentRunner {
             approvalMode: session.approvalMode,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt,
+            lastAccessedAt: session.lastAccessedAt,
           },
           chatItems: session.chatItems,
           tasks: session.tasks,
@@ -1446,6 +1546,7 @@ export class AgentRunner {
       model: session.model,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
       messageCount: session.messages.length,
     };
     eventEmitter.sessionUpdated(sessionInfo);
@@ -2180,6 +2281,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         };
         session.chatItems.push(toolStartItem);
         eventEmitter.chatItem(session.id, toolStartItem);
+        // V2: Immediate persistence for crash recovery
+        this.persistence?.appendChatItem(session.id, toolStartItem).catch(() => {});
 
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
@@ -2225,6 +2328,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
               };
               session.chatItems.push(toolResultItem);
               eventEmitter.chatItem(session.id, toolResultItem);
+              // V2: Immediate persistence for crash recovery
+              this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
 
               return { error: 'Permission denied' };
             }
@@ -2269,6 +2374,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           };
           session.chatItems.push(toolResultItem);
           eventEmitter.chatItem(session.id, toolResultItem);
+          // V2: Immediate persistence for crash recovery
+          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
 
           return result.data ?? result;
         } catch (error) {
@@ -2305,6 +2412,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           };
           session.chatItems.push(toolResultItem);
           eventEmitter.chatItem(session.id, toolResultItem);
+          // V2: Immediate persistence for crash recovery
+          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
 
           return { error: payload.error };
         }
@@ -2394,6 +2503,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
         };
         session.chatItems.push(toolStartItem);
         eventEmitter.chatItem(session.id, toolStartItem);
+        // V2: Immediate persistence for crash recovery
+        this.persistence?.appendChatItem(session.id, toolStartItem).catch(() => {});
 
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
@@ -2420,6 +2531,8 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           };
           session.chatItems.push(toolResultItem);
           eventEmitter.chatItem(session.id, toolResultItem);
+          // V2: Immediate persistence for crash recovery
+          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
         };
 
         // Step 1: Evaluate tool call against policy
@@ -2765,6 +2878,28 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
           }
         },
       });
+
+      // V2: Create and persist PermissionItem
+      const permissionItem: PermissionItem = {
+        id: generateChatItemId(),
+        kind: 'permission',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        permissionId: permissionId,
+        request: {
+          type: extendedRequest.type,
+          resource: extendedRequest.resource,
+          reason: extendedRequest.reason,
+          toolCallId: extendedRequest.toolCallId,
+          toolName: extendedRequest.toolName,
+          riskLevel: extendedRequest.riskLevel,
+          command: extendedRequest.command,
+        },
+        status: 'pending',
+      };
+      session.chatItems.push(permissionItem);
+      eventEmitter.chatItem(session.id, permissionItem);
+      this.persistence?.appendChatItem(session.id, permissionItem).catch(() => {});
 
       eventEmitter.permissionRequest(session.id, extendedRequest);
     });

@@ -1,0 +1,24 @@
+{
+  "name": "help",
+  "displayName": "Help",
+  "description": "Show available commands and their usage",
+  "version": "1.0.0",
+  "author": "Gemini Cowork",
+  "aliases": ["?", "commands"],
+  "category": "utility",
+  "icon": "help-circle",
+  "arguments": [
+    {
+      "name": "command",
+      "type": "string",
+      "required": false,
+      "description": "Specific command to get help for"
+    }
+  ],
+  "type": "system",
+  "requiresSession": false,
+  "requiresWorkingDir": false,
+  "autoSuggest": true,
+  "priority": 90,
+  "keywords": ["help", "usage", "commands", "list"]
+}

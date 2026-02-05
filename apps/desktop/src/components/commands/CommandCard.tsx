@@ -1,6 +1,6 @@
 import { Check, Download, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Command, CommandCategory } from '../../stores/command-store';
+import type { CommandManifest, CommandCategory } from '../../stores/command-store';
 import {
   FolderCog,
   Brain,
@@ -28,7 +28,8 @@ const CATEGORY_COLORS: Record<CommandCategory, string> = {
 };
 
 interface CommandCardProps {
-  command: Command;
+  command: CommandManifest;
+  isInstalled: boolean;
   isInstalling: boolean;
   onSelect: () => void;
   onInstall: () => void;
@@ -36,16 +37,18 @@ interface CommandCardProps {
 
 export function CommandCard({
   command,
+  isInstalled,
   isInstalling,
   onSelect,
   onInstall,
 }: CommandCardProps) {
-  const CategoryIcon = CATEGORY_ICONS[command.category] || FileText;
-  const categoryColor = CATEGORY_COLORS[command.category] || 'text-zinc-400';
+  const CategoryIcon = CATEGORY_ICONS[command.frontmatter.category] || FileText;
+  const categoryColor = CATEGORY_COLORS[command.frontmatter.category] || 'text-zinc-400';
+  const emoji = command.frontmatter.metadata?.emoji;
 
   const handleInstallClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!command.installed && !isInstalling) {
+    if (!isInstalled && !isInstalling) {
       onInstall();
     }
   };
@@ -56,18 +59,22 @@ export function CommandCard({
       className={cn(
         'p-4 rounded-lg border cursor-pointer transition-all hover:border-zinc-600',
         'bg-zinc-800/50 border-zinc-700',
-        command.installed && 'border-green-800/50 bg-green-950/20'
+        isInstalled && 'border-green-800/50 bg-green-950/20'
       )}
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center">
-            <CategoryIcon className={cn('w-4 h-4', categoryColor)} />
+            {emoji ? (
+              <span className="text-lg">{emoji}</span>
+            ) : (
+              <CategoryIcon className={cn('w-4 h-4', categoryColor)} />
+            )}
           </div>
-          <h3 className="font-medium text-zinc-100">/{command.name}</h3>
+          <h3 className="font-medium text-zinc-100">/{command.frontmatter.name}</h3>
         </div>
-        {command.installed && (
+        {isInstalled && (
           <span className="flex items-center gap-1 text-xs text-green-500 bg-green-950/50 px-2 py-0.5 rounded-full">
             <Check className="w-3 h-3" />
             Installed
@@ -76,17 +83,17 @@ export function CommandCard({
       </div>
 
       {/* Description */}
-      <p className="text-sm text-zinc-400 mb-3 line-clamp-2">{command.description}</p>
+      <p className="text-sm text-zinc-400 mb-3 line-clamp-2">{command.frontmatter.description}</p>
 
       {/* Status and Actions */}
       <div className="flex items-center justify-between">
         {/* Category */}
         <span className="text-xs text-zinc-500 capitalize">
-          {command.category}
+          {command.frontmatter.category}
         </span>
 
         {/* Install Button */}
-        {!command.installed && (
+        {!isInstalled && (
           <button
             onClick={handleInstallClick}
             disabled={isInstalling}

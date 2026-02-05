@@ -1,0 +1,12 @@
+{
+  "name": "code-architect",
+  "displayName": "Code Architect",
+  "description": "Designs system architecture and implementation strategies. Use for: planning new features, structuring codebases, designing APIs, creating technical specifications.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "development",
+  "icon": "building",
+  "tags": ["architecture", "design", "planning", "api", "structure"],
+  "priority": 95,
+  "source": "built-in"
+}

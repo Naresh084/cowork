@@ -64,3 +64,7 @@ keychain-*.json
 tmp/
 temp/
 *.tmp
+
+# Sidecar binaries (built during CI)
+apps/desktop/src-tauri/binaries/sidecar-*
+!apps/desktop/src-tauri/binaries/.gitkeep

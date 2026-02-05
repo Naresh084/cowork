@@ -273,7 +273,7 @@ export function InputArea({
 
       if (command) {
         // Action-only command (e.g., /clear)
-        if (command.action === 'clear_chat') {
+        if (command.frontmatter.action === 'clear_chat') {
           if (activeSessionId) {
             resetSession(activeSessionId);
           }

@@ -126,14 +126,38 @@ impl SidecarManager {
             ));
         }
 
-        let mut child = Command::new("npx")
-            .args(["tsx", "src/index.ts"])
-            .current_dir(&sidecar_path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+        // Determine how to run the sidecar based on build mode
+        let mut child = if cfg!(debug_assertions) {
+            // Development: Use npx tsx for hot reloading
+            let npx_cmd = if cfg!(windows) { "npx.cmd" } else { "npx" };
+            Command::new(npx_cmd)
+                .args(["tsx", "src/index.ts"])
+                .current_dir(&sidecar_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn sidecar (dev mode): {}", e))?
+        } else {
+            // Production: Use bundled binary
+            let binary_name = if cfg!(windows) { "sidecar.exe" } else { "sidecar" };
+            let binary_path = sidecar_path.join(binary_name);
+
+            if !binary_path.exists() {
+                return Err(format!(
+                    "Sidecar binary not found at: {:?}. Please reinstall the application.",
+                    binary_path
+                ));
+            }
+
+            Command::new(&binary_path)
+                .current_dir(&sidecar_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .spawn()
+                .map_err(|e| format!("Failed to spawn sidecar binary: {}", e))?
+        };
 
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();

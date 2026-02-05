@@ -10,7 +10,7 @@ import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
 import { SourcesCitation } from './SourcesCitation';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart, ChatItem, UserMessageItem, AssistantMessageItem } from '@gemini-cowork/shared';
 import { BrandMark } from '../icons/BrandMark';
 import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';
@@ -35,6 +35,7 @@ type ErrorMessageMetadata = {
 // Default empty session state for when no session is active
 const EMPTY_SESSION_STATE = {
   messages: [] as Message[],
+  chatItems: [] as ChatItem[],
   isStreaming: false,
   isThinking: false,
   thinkingContent: '',
@@ -49,6 +50,24 @@ const EMPTY_SESSION_STATE = {
   lastUpdatedAt: 0,
 };
 
+/**
+ * Convert chatItems to messages for backwards-compatible rendering.
+ * Only extracts user_message and assistant_message items.
+ */
+function chatItemsToMessages(chatItems: ChatItem[]): Message[] {
+  return chatItems
+    .filter((item): item is UserMessageItem | AssistantMessageItem =>
+      item.kind === 'user_message' || item.kind === 'assistant_message'
+    )
+    .map((item) => ({
+      id: item.id,
+      role: item.kind === 'user_message' ? 'user' : 'assistant',
+      content: item.content,
+      createdAt: item.timestamp,
+      metadata: item.kind === 'assistant_message' ? item.metadata : undefined,
+    } as Message));
+}
+
 export function MessageList() {
   const { activeSessionId } = useSessionStore();
   // Use direct selector to ensure Zustand properly tracks state changes
@@ -59,7 +78,8 @@ export function MessageList() {
   const agentState = useAgentStore((state) => state.getSessionState(activeSessionId));
   const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const {
-    messages,
+    messages: legacyMessages,
+    chatItems,
     isStreaming,
     isThinking,
     thinkingContent,
@@ -71,6 +91,11 @@ export function MessageList() {
     turnActivities,
     activeTurnId,
   } = sessionState;
+
+  // Use chatItems if available (V2), fallback to legacy messages (V1)
+  const messages = chatItems && chatItems.length > 0
+    ? chatItemsToMessages(chatItems)
+    : legacyMessages;
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 

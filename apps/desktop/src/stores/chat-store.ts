@@ -230,6 +230,7 @@ interface ChatActions {
 export interface SessionDetails {
   id: string;
   messages: Message[];
+  chatItems?: ChatItem[];
   tasks?: Task[];
   artifacts?: Artifact[];
   toolExecutions?: ToolExecution[];
@@ -580,16 +581,28 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
             }
           }
 
+          // Merge chatItems from V2 storage
+          const existingChatItems = existing.chatItems || [];
+          const incomingChatItems = session.chatItems || [];
+          const mergedChatItems = [...existingChatItems];
+          for (const item of incomingChatItems) {
+            if (!mergedChatItems.some((ci) => ci.id === item.id)) {
+              mergedChatItems.push(item);
+            }
+          }
+
           console.log('[ChatStore] Merge result:', {
             sessionId,
             existingCount: existingMessages.length,
             incomingCount: incoming.length,
             mergedCount: merged.length,
+            chatItemsCount: mergedChatItems.length,
           });
 
           return {
             ...existing,
             messages: merged,
+            chatItems: mergedChatItems,
             streamingToolCalls: session.toolExecutions || [],
             turnActivities: reconstructedActivities,
             isLoadingMessages: false,

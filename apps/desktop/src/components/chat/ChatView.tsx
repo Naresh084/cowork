@@ -339,11 +339,6 @@ export function ChatView() {
       {/* Session Header */}
       <SessionHeader />
 
-      {/* Debug indicator - REMOVE AFTER FIXING */}
-      <div className="bg-yellow-500/20 text-yellow-300 text-xs px-2 py-1">
-        DEBUG: sessionId={activeSessionId || 'none'} | messages={messages.length} | hasLoaded={sessionState?.hasLoaded ? 'yes' : 'no'} | isLoading={sessionState?.isLoadingMessages ? 'yes' : 'no'}
-      </div>
-
       {/* Messages or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {hasMessages ? (

@@ -33,22 +33,68 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/sidecar"],
+    "resources": ["binaries/*"],
     "icon": [
       "icons/icon.png",
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png"
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
     ],
     "macOS": {
       "minimumSystemVersion": "10.15",
       "exceptionDomain": "",
       "signingIdentity": null,
-      "entitlements": null
+      "entitlements": null,
+      "frameworks": []
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-2"
+        ],
+        "files": {}
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libappindicator-gtk3"
+        ]
+      }
     }
   },
   "plugins": {
     "shell": {
-      "open": true
+      "open": true,
+      "scope": [
+        {
+          "name": "binaries/sidecar",
+          "sidecar": true
+        }
+      ]
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/AiCodingBattle/geminicowork/releases/latest/download/latest.json"
+      ],
+      "pubkey": "YOUR_PUBLIC_KEY_HERE",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

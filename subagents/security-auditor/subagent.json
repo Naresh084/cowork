@@ -1,0 +1,12 @@
+{
+  "name": "security-auditor",
+  "displayName": "Security Auditor",
+  "description": "Reviews code for security vulnerabilities. Use for: security audits, vulnerability detection, secure coding review, OWASP compliance checks.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "analysis",
+  "icon": "shield",
+  "tags": ["security", "audit", "vulnerability", "owasp", "penetration-testing"],
+  "priority": 88,
+  "source": "built-in"
+}

@@ -129,9 +129,22 @@ function parseYaml(content: string): Record<string, unknown> {
         continue;
       }
 
-      // Simple value
+      // Simple value - with type coercion
       if (value) {
-        result[key] = value;
+        // Try to parse as number
+        if (/^-?\d+$/.test(value)) {
+          result[key] = parseInt(value, 10);
+        } else if (/^-?\d+\.\d+$/.test(value)) {
+          result[key] = parseFloat(value);
+        } else if (value === 'true') {
+          result[key] = true;
+        } else if (value === 'false') {
+          result[key] = false;
+        } else if (value === 'null') {
+          result[key] = null;
+        } else {
+          result[key] = value;
+        }
       } else {
         // Multiline value or nested object - store key for now
         currentKey = key;

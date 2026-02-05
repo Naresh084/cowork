@@ -10,17 +10,57 @@ pub struct FileInfo {
     size: u64,
 }
 
-/// Blocked system paths that should never be accessed
-const BLOCKED_PATHS: &[&str] = &[
-    "/etc",
-    "/System",
-    "/usr",
-    "/var",
-    "/bin",
-    "/sbin",
-    "/private",
-    "/Library",
-];
+/// Get blocked system paths based on current platform
+fn get_blocked_paths() -> &'static [&'static str] {
+    #[cfg(target_os = "macos")]
+    {
+        &[
+            "/etc",
+            "/System",
+            "/usr",
+            "/var",
+            "/bin",
+            "/sbin",
+            "/private",
+            "/Library",
+        ]
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        &[
+            "C:\\Windows",
+            "C:\\Program Files",
+            "C:\\Program Files (x86)",
+            "C:\\ProgramData",
+            "C:\\Recovery",
+            "C:\\$Recycle.Bin",
+        ]
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        &[
+            "/etc",
+            "/usr",
+            "/var",
+            "/bin",
+            "/sbin",
+            "/boot",
+            "/root",
+            "/sys",
+            "/proc",
+            "/dev",
+            "/lib",
+            "/lib64",
+        ]
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        &[] // No restrictions on unknown platforms
+    }
+}
 
 /// Validate that a path is safe to access
 fn validate_path(path: &str) -> Result<PathBuf, String> {
@@ -33,16 +73,28 @@ fn validate_path(path: &str) -> Result<PathBuf, String> {
 
     let canonical_str = canonical.to_string_lossy();
 
-    // Check against blocked paths
-    for blocked in BLOCKED_PATHS {
-        if canonical_str.starts_with(blocked) {
+    // Normalize for comparison (Windows uses backslashes)
+    let normalized = if cfg!(windows) {
+        canonical_str.replace('/', "\\")
+    } else {
+        canonical_str.to_string()
+    };
+
+    // Check against blocked paths (case-insensitive on Windows)
+    for blocked in get_blocked_paths() {
+        let matches = if cfg!(windows) {
+            normalized.to_lowercase().starts_with(&blocked.to_lowercase())
+        } else {
+            normalized.starts_with(blocked)
+        };
+
+        if matches {
             return Err(format!("Access denied: cannot access system directory ({})", blocked));
         }
     }
 
     // Check for path traversal in the original path
     if path.contains("..") {
-        // After canonicalization, check if we're still in a safe location
         if let Some(home) = dirs::home_dir() {
             let home_str = home.to_string_lossy();
             if !canonical_str.starts_with(home_str.as_ref()) {
@@ -67,9 +119,22 @@ fn validate_path_for_write(path: &str) -> Result<PathBuf, String> {
 
             let parent_str = canonical_parent.to_string_lossy();
 
-            // Check against blocked paths
-            for blocked in BLOCKED_PATHS {
-                if parent_str.starts_with(blocked) {
+            // Normalize for comparison (Windows uses backslashes)
+            let normalized = if cfg!(windows) {
+                parent_str.replace('/', "\\")
+            } else {
+                parent_str.to_string()
+            };
+
+            // Check against blocked paths (case-insensitive on Windows)
+            for blocked in get_blocked_paths() {
+                let matches = if cfg!(windows) {
+                    normalized.to_lowercase().starts_with(&blocked.to_lowercase())
+                } else {
+                    normalized.starts_with(blocked)
+                };
+
+                if matches {
                     return Err(format!("Access denied: cannot write to system directory ({})", blocked));
                 }
             }
