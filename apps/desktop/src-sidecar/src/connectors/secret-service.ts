@@ -157,12 +157,10 @@ export class SecretService {
     if (process.platform === 'darwin') {
       const available = await MacOSKeychainStorage.isAvailable();
       if (available) {
-        console.error('[SecretService] Using macOS Keychain storage');
         return new SecretService(new MacOSKeychainStorage());
       }
     }
 
-    console.warn('[SecretService] Keychain not available, using in-memory storage');
     return new SecretService(new MemoryStorage());
   }
 
@@ -193,8 +191,6 @@ export class SecretService {
     try {
       await this.storage.set(account, value);
       this.trackKey(connectorId, key);
-      // Note: Never log the value
-      console.error(`[SecretService] Set secret for ${connectorId}/${key}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       if (message.includes('permission')) {
@@ -211,8 +207,7 @@ export class SecretService {
     const account = this.getKey(connectorId, key);
     try {
       return await this.storage.get(account);
-    } catch (error) {
-      console.error(`[SecretService] Error getting secret for ${connectorId}/${key}:`, error);
+    } catch {
       return null;
     }
   }
@@ -229,10 +224,8 @@ export class SecretService {
       if (tracked) {
         tracked.delete(key);
       }
-      console.error(`[SecretService] Deleted secret for ${connectorId}/${key}`);
       return result;
-    } catch (error) {
-      console.error(`[SecretService] Error deleting secret for ${connectorId}/${key}:`, error);
+    } catch {
       return false;
     }
   }
@@ -255,8 +248,6 @@ export class SecretService {
     for (const cred of credentials) {
       await this.storage.delete(cred.account);
     }
-
-    console.error(`[SecretService] Deleted all secrets for ${connectorId}`);
   }
 
   /**

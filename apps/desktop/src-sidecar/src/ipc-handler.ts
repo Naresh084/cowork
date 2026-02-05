@@ -1,5 +1,4 @@
 import { agentRunner } from './agent-runner.js';
-import { mcpBridge } from './mcp-bridge.js';
 import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
@@ -237,14 +236,6 @@ registerHandler('respond_question', async (params) => {
   return { success: true };
 });
 
-// Sync MCP servers
-registerHandler('set_mcp_servers', async (params) => {
-  const p = params as { servers: Array<{ id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean; prompt?: string; contextFileName?: string }> };
-  if (!p.servers) throw new Error('servers are required');
-  await agentRunner.setMcpServers(p.servers);
-  return { success: true };
-});
-
 // Sync skills
 registerHandler('set_skills', async (params) => {
   const p = params as { skills: Array<{ id: string; name: string; path: string; description?: string; enabled?: boolean }> };
@@ -265,14 +256,6 @@ registerHandler('set_specialized_models', async (params) => {
   if (!p.models) throw new Error('models are required');
   agentRunner.setSpecializedModels(p.models);
   return { success: true };
-});
-
-// Call MCP tool
-registerHandler('mcp_call_tool', async (params) => {
-  const p = params as { serverId: string; toolName: string; args?: Record<string, unknown> };
-  if (!p.serverId || !p.toolName) throw new Error('serverId and toolName are required');
-  const result = await mcpBridge.callTool(p.serverId, p.toolName, p.args || {});
-  return result;
 });
 
 // Load Gemini CLI extensions

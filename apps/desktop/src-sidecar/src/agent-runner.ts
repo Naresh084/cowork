@@ -25,7 +25,6 @@ import { join, isAbsolute, resolve, sep } from 'path';
 import { homedir } from 'os';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
-import { mcpBridge } from './mcp-bridge.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
@@ -142,7 +141,6 @@ export class AgentRunner {
   private provider: GeminiProvider | null = null;
   private apiKey: string | null = null;
   private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
-  private mcpServers: Array<{ id: string; name: string; prompt?: string; contextFileName?: string; enabled?: boolean }> = [];
   private skills: SkillConfig[] = [];
   private enabledSkillIds: Set<string> = new Set();
   private persistence: SessionPersistence | null = null;
@@ -499,28 +497,6 @@ export class AgentRunner {
   isReady(): boolean {
     // Provider is ready if it's initialized (has API key set)
     return this.provider !== null;
-  }
-
-  /**
-   * Update MCP servers and refresh tools for all sessions.
-   */
-  async setMcpServers(servers: Array<{ id: string; name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean; prompt?: string; contextFileName?: string }>): Promise<void> {
-    await mcpBridge.setServers(servers.map((server) => ({
-      ...server,
-      enabled: server.enabled ?? true,
-    })));
-    this.mcpServers = servers.map((server) => ({
-      id: server.id,
-      name: server.name,
-      prompt: server.prompt,
-      contextFileName: server.contextFileName,
-      enabled: server.enabled ?? true,
-    }));
-
-    for (const session of this.sessions.values()) {
-      const toolHandlers = this.buildToolHandlers(session);
-      session.agent = await this.createDeepAgent(session, toolHandlers);
-    }
   }
 
   /**
@@ -1830,16 +1806,14 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     const subagentConfigs = getSubagentConfigs(session.model);
     const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
 
-    // Legacy skill and MCP prompts
+    // Legacy skill prompts
     const skillBlock = await this.buildSkillsPrompt(session);
-    const mcpBlock = await this.buildMcpPrompt(session);
 
     return buildFullSystemPrompt(basePrompt, [
       agentsMdPrompt,
       memoryPrompt,
       subagentPrompt,
       skillBlock,
-      mcpBlock,
     ].filter(Boolean));
   }
 
@@ -1948,35 +1922,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     }
 
     return blocks.length > 0 ? `## Skills\n${blocks.join('\n\n')}` : '';
-  }
-
-  private async buildMcpPrompt(session: ActiveSession): Promise<string> {
-    const enabledServers = this.mcpServers.filter((server) => server.enabled !== false);
-    if (enabledServers.length === 0) return '';
-
-    const promptLines: string[] = [];
-    for (const server of enabledServers) {
-      if (server.prompt) {
-        promptLines.push(`- ${server.name}: ${server.prompt}`);
-      }
-    }
-
-    const contextBlocks: string[] = [];
-    for (const server of enabledServers) {
-      if (!server.contextFileName) continue;
-      const contextPath = this.resolveInputPath(server.contextFileName, session.workingDirectory);
-      const content = await this.loadTextFile(contextPath, 12000);
-      if (!content) {
-        contextBlocks.push(`### ${server.name} (${server.contextFileName})\n[Unable to load context file]`);
-        continue;
-      }
-      contextBlocks.push(`### ${server.name} (${server.contextFileName})\n${content}`);
-    }
-
-    const promptSection = promptLines.length > 0 ? `## MCP Connector Prompts\n${promptLines.join('\n')}` : '';
-    const contextSection = contextBlocks.length > 0 ? `## MCP Connector Context\n${contextBlocks.join('\n\n')}` : '';
-
-    return [promptSection, contextSection].filter(Boolean).join('\n\n');
   }
 
   private resolveInputPath(inputPath: string, workingDirectory: string): string {
@@ -2126,7 +2071,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       () => this.apiKey,
       () => session.model  // Use session model for search
     );
-    const mcpTools = this.createMcpTools(session.id);
     const connectorTools = this.createConnectorTools(session.id);
 
     // Create view_file tool for multimodal content analysis
@@ -2211,7 +2155,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
       ...computerUseTools,
       ...mediaTools,
       ...groundingTools,
-      ...mcpTools,
       ...connectorTools,
     ];
   }
@@ -3701,23 +3644,6 @@ Assistant: "I can check for security updates every week. I suggest Monday mornin
     }
 
     return false;
-  }
-
-  private createMcpTools(_sessionId: string): ToolHandler[] {
-    const tools = mcpBridge.getTools();
-    return tools.map((tool) => ({
-      name: `mcp_${tool.serverId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
-      description: `[MCP:${tool.serverId}] ${tool.description || tool.name}`,
-      parameters: z.record(z.unknown()),
-      execute: async (args: unknown) => {
-        const result = await mcpBridge.callTool(
-          tool.serverId,
-          tool.name,
-          (args as Record<string, unknown>) || {}
-        );
-        return { success: true, data: result };
-      },
-    }));
   }
 
   private createConnectorTools(_sessionId: string): ToolHandler[] {

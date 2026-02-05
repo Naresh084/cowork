@@ -86,9 +86,6 @@ export function createGroundingTools(
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
 
-        // Log the full error for debugging
-        console.error('[grounding-tools] Search error:', error);
-
         // Handle known error cases
         if (errMsg.includes('google_search_retrieval')) {
           return {

@@ -92,8 +92,8 @@ export class MemoryService {
         }
 
         return index;
-      } catch (error) {
-        console.error('Failed to load memory index, creating new one:', error);
+      } catch {
+        // Failed to load memory index, creating new one
       }
     }
 
@@ -281,8 +281,7 @@ export class MemoryService {
       await this.saveIndex(this.index!);
 
       return memory;
-    } catch (error) {
-      console.error(`Failed to read memory ${id}:`, error);
+    } catch {
       return null;
     }
   }
@@ -362,8 +361,7 @@ export class MemoryService {
       await this.saveIndex(this.index!);
 
       return memory;
-    } catch (error) {
-      console.error(`Failed to update memory ${id}:`, error);
+    } catch {
       return null;
     }
   }
@@ -392,8 +390,7 @@ export class MemoryService {
       await this.saveIndex(this.index!);
 
       return true;
-    } catch (error) {
-      console.error(`Failed to delete memory ${id}:`, error);
+    } catch {
       return false;
     }
   }
@@ -778,8 +775,8 @@ export class MemoryService {
         memory.updatedAt = new Date().toISOString();
         writeFileSync(fullPath, this.memoryToFileContent(memory), 'utf-8');
       }
-    } catch (error) {
-      console.error(`Failed to add related session to memory ${memoryId}:`, error);
+    } catch {
+      // Failed to add related session - continue
     }
   }
 }

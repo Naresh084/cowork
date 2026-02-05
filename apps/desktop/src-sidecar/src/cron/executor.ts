@@ -155,8 +155,6 @@ export class CronExecutor {
   ): Promise<CronRun> {
     // For now, main session execution is a placeholder
     // When HeartbeatService is implemented, this will queue a system event
-    console.error(`[CronExecutor] Main session execution not yet implemented for job ${job.id}`);
-    console.error(`[CronExecutor] Job "${job.name}" would be queued for main session`);
 
     // Queue system event for processing in main session
     // This will be enabled when HeartbeatService is implemented:
@@ -272,12 +270,8 @@ export class CronExecutor {
    * Post summary to main session (optional cross-session communication)
    * Will be implemented when HeartbeatService is available
    */
-  async postSummaryToMain(job: CronJob, run: CronRun): Promise<void> {
+  async postSummaryToMain(_job: CronJob, run: CronRun): Promise<void> {
     if (!run.summary) return;
-
-    const message = `**Scheduled Task Completed: ${job.name}**\n\n${run.summary}\n\n_Run ID: ${run.id} | Duration: ${run.completedAt ? run.completedAt - run.startedAt : '?'}ms_`;
-
-    console.error(`[CronExecutor] Would post to main session:`, message);
 
     // Queue as system event when HeartbeatService is implemented:
     // heartbeatService.queueEvent({

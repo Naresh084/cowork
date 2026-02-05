@@ -154,8 +154,8 @@ export class MemoryMiddleware {
           confidence: memory.confidence,
         });
         saved++;
-      } catch (error) {
-        console.error('Failed to save extracted memory:', error);
+      } catch {
+        // Failed to save extracted memory - continue
       }
     }
 

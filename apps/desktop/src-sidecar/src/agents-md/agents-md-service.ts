@@ -53,8 +53,7 @@ export class AgentsMdService {
     try {
       const content = readFileSync(filePath, 'utf-8');
       return this.parseContent(content, filePath);
-    } catch (error) {
-      console.error('Failed to parse AGENTS.md:', error);
+    } catch {
       return null;
     }
   }

@@ -2,7 +2,7 @@
  * Connector Bridge
  *
  * Provides a singleton interface to the ConnectorManager for use across the sidecar.
- * Similar to mcp-bridge.ts but for connector-based MCP servers.
+ * Manages connections to MCP servers via connectors.
  */
 
 import { ConnectorManager, getSecretService } from './connectors/index.js';
