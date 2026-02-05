@@ -90,9 +90,7 @@ fn main() {
             commands::policy::policy_reset,
             commands::policy::policy_get_profiles,
             commands::policy::policy_get_groups,
-            // Deep Agents commands (slash commands & memory)
-            commands::deep::deep_command_list,
-            commands::deep::deep_command_execute,
+            // Deep Agents memory commands
             commands::deep::deep_memory_init,
             commands::deep::deep_memory_list,
             commands::deep::deep_memory_create,
@@ -103,15 +101,13 @@ fn main() {
             commands::deep::deep_memory_list_groups,
             commands::deep::deep_memory_create_group,
             commands::deep::deep_memory_delete_group,
-            // Marketplace commands
-            commands::deep::marketplace_search,
-            commands::deep::marketplace_get_command,
-            commands::deep::marketplace_install,
-            commands::deep::marketplace_uninstall,
-            commands::deep::marketplace_update,
-            commands::deep::marketplace_list_installed,
-            commands::deep::marketplace_is_installed,
-            commands::deep::marketplace_check_updates,
+            // Subagent commands
+            commands::subagent::deep_subagent_list,
+            commands::subagent::deep_subagent_install,
+            commands::subagent::deep_subagent_uninstall,
+            commands::subagent::deep_subagent_is_installed,
+            commands::subagent::deep_subagent_get,
+            commands::subagent::deep_subagent_create,
         ])
         .setup(|_app| {
             Ok(())

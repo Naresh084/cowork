@@ -9,7 +9,7 @@ import type { MemoryService } from '../memory/memory-service.js';
 import type { MemoryExtractor } from '../memory/memory-extractor.js';
 import type { AgentsMdConfig } from '../agents-md/types.js';
 import { MEMORY_SYSTEM_PROMPT } from '../memory/memory-middleware.js';
-import { buildSubagentPromptSection, getSubagentConfigs } from './subagent-prompts.js';
+import { createSubagentService } from '../subagents/index.js';
 
 /**
  * Extract text content from a message.
@@ -95,9 +95,11 @@ export async function createMiddlewareStack(
         }
       }
 
-      // 4. Add subagent information
-      const subagentConfigs = getSubagentConfigs(session.model);
-      additions.push(buildSubagentPromptSection(subagentConfigs));
+      // 4. Add subagent information (dynamically from installed subagents)
+      const subagentService = createSubagentService();
+      const subagentConfigs = await subagentService.getSubagentConfigs(session.model);
+      const subagentSection = subagentService.buildSubagentPromptSection(subagentConfigs);
+      additions.push(subagentSection);
 
       return {
         systemPromptAddition: additions.join('\n'),

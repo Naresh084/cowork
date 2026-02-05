@@ -79,23 +79,14 @@ export {
   type UpdateMemoryInput,
 } from './memory-store';
 
-// Command Store
+// Command Store (Simplified - frontend only)
 export {
   useCommandStore,
   useCommands,
-  useIsLoadingCommands,
-  useIsExecutingCommand,
   useIsPaletteOpen,
   usePaletteQuery,
-  useSelectedCommand,
-  useCommandError,
-  useLastCommandResult,
   parseCommandInput,
   isCommandInput,
-  type Command,
+  type SlashCommand,
   type CommandCategory,
-  type CommandType,
-  type CommandSource,
-  type CommandArgument,
-  type CommandResult,
 } from './command-store';

@@ -8,8 +8,7 @@ import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
-import { CommandService, createCommandService } from './commands/index.js';
-import { CommandMarketplace, createCommandMarketplace } from './commands/marketplace.js';
+import { SubagentService, createSubagentService } from './subagents/index.js';
 import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
@@ -37,10 +36,6 @@ import type {
   MemoryGetRelevantParams,
   MemoryGroupCreateParams,
   MemoryGroupDeleteParams,
-  // Command System params
-  CommandListParams,
-  CommandExecuteParams,
-  CommandGetParams,
   // AGENTS.md params
   AgentsMdLoadParams,
   AgentsMdGenerateParams,
@@ -49,6 +44,7 @@ import type {
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
 
 // ============================================================================
 // Service Instances (lazily initialized per working directory)
@@ -56,8 +52,7 @@ import { existsSync } from 'fs';
 
 const memoryServices: Map<string, MemoryService> = new Map();
 const agentsMdServices: Map<string, AgentsMdService> = new Map();
-let commandService: CommandService | null = null;
-let marketplace: CommandMarketplace | null = null;
+let subagentService: SubagentService | null = null;
 let appDataDirectory: string | null = null;
 
 /**
@@ -86,38 +81,16 @@ function getAgentsMdService(workingDirectory: string): AgentsMdService {
 }
 
 /**
- * Get or create the CommandService.
+ * Get or create the SubagentService.
  */
-async function getCommandService(workDir?: string): Promise<CommandService> {
-  if (!commandService) {
-    if (!appDataDirectory) {
-      throw new Error('App data directory not initialized. Call initialize first.');
-    }
-    commandService = createCommandService(appDataDirectory);
-
-    // Get services for initialization
-    const memoryService = workDir ? await getMemoryService(workDir) : null;
-    const agentsMdService = workDir ? getAgentsMdService(workDir) : null;
-
-    if (memoryService && agentsMdService) {
-      await commandService.initialize(memoryService, agentsMdService);
-    }
+async function getSubagentService(): Promise<SubagentService> {
+  if (!subagentService) {
+    // Use explicit app data dir if available, otherwise default to ~/.geminicowork
+    const appDataDir = appDataDirectory || join(homedir(), '.geminicowork');
+    subagentService = createSubagentService(appDataDir);
+    await subagentService.initialize();
   }
-  return commandService;
-}
-
-/**
- * Get or create the CommandMarketplace.
- */
-async function getMarketplace(): Promise<CommandMarketplace> {
-  if (!marketplace) {
-    if (!appDataDirectory) {
-      throw new Error('App data directory not initialized. Call initialize first.');
-    }
-    marketplace = createCommandMarketplace(appDataDirectory);
-    await marketplace.initialize();
-  }
-  return marketplace;
+  return subagentService;
 }
 
 // ============================================================================
@@ -945,174 +918,7 @@ registerHandler('deep_memory_build_prompt', async (params) => {
 });
 
 // ============================================================================
-// Command System Command Handlers (New)
-// ============================================================================
-
-// List available commands
-registerHandler('command_list', async (params) => {
-  const p = params as unknown as CommandListParams;
-  const service = await getCommandService(p.workingDirectory);
-  const commands = service.getAllCommands();
-  return { commands };
-});
-
-// Get a specific command
-registerHandler('command_get', async (params) => {
-  const p = params as unknown as CommandGetParams;
-  if (!p.commandName) {
-    throw new Error('commandName is required');
-  }
-  const service = await getCommandService(p.workingDirectory);
-  const command = service.getCommand(p.commandName);
-  if (!command) {
-    throw new Error(`Command not found: ${p.commandName}`);
-  }
-  return command.manifest;
-});
-
-// Execute a command
-registerHandler('command_execute', async (params) => {
-  const p = params as unknown as CommandExecuteParams;
-  if (!p.commandName || !p.workingDirectory) {
-    throw new Error('commandName and workingDirectory are required');
-  }
-  const service = await getCommandService(p.workingDirectory);
-
-  // Execute command - the service will use its internal context
-  const result = await service.execute(
-    p.commandName,
-    p.workingDirectory,
-    {
-      sessionId: p.sessionId,
-      workingDirectory: p.workingDirectory,
-    }
-  );
-
-  return result;
-});
-
-// Search commands
-registerHandler('command_search', async (params) => {
-  const p = params as unknown as { query: string; workingDirectory?: string };
-  if (!p.query) {
-    throw new Error('query is required');
-  }
-  const service = await getCommandService(p.workingDirectory);
-  const commands = service.search({ query: p.query });
-  return { commands };
-});
-
-// Get commands by category
-registerHandler('command_list_by_category', async (params) => {
-  const p = params as unknown as { category: string; workingDirectory?: string };
-  if (!p.category) {
-    throw new Error('category is required');
-  }
-  const service = await getCommandService(p.workingDirectory);
-  const commands = service.getByCategory(p.category as 'setup' | 'memory' | 'utility' | 'workflow' | 'custom');
-  return { commands };
-});
-
-// ============================================================================
-// Marketplace Command Handlers (New)
-// ============================================================================
-
-// Search marketplace
-registerHandler('marketplace_search', async (params) => {
-  const p = params as unknown as {
-    query?: string;
-    category?: string;
-    tags?: string[];
-    verified?: boolean;
-    limit?: number;
-    offset?: number;
-  };
-  const mp = await getMarketplace();
-  const commands = await mp.search({
-    query: p.query,
-    category: p.category as 'setup' | 'memory' | 'utility' | 'workflow' | 'custom' | undefined,
-    tags: p.tags,
-    verified: p.verified,
-    limit: p.limit,
-    offset: p.offset,
-  });
-  return { commands };
-});
-
-// Get marketplace command details
-registerHandler('marketplace_get_command', async (params) => {
-  const p = params as unknown as { commandId: string };
-  if (!p.commandId) {
-    throw new Error('commandId is required');
-  }
-  const mp = await getMarketplace();
-  const command = await mp.getCommand(p.commandId);
-  if (!command) {
-    throw new Error(`Command not found: ${p.commandId}`);
-  }
-  return command;
-});
-
-// Install command from marketplace
-registerHandler('marketplace_install', async (params) => {
-  const p = params as unknown as { commandId: string };
-  if (!p.commandId) {
-    throw new Error('commandId is required');
-  }
-  const mp = await getMarketplace();
-  const result = await mp.install(p.commandId);
-  return result;
-});
-
-// Uninstall command
-registerHandler('marketplace_uninstall', async (params) => {
-  const p = params as unknown as { commandId: string };
-  if (!p.commandId) {
-    throw new Error('commandId is required');
-  }
-  const mp = await getMarketplace();
-  const result = await mp.uninstall(p.commandId);
-  return result;
-});
-
-// Update installed command
-registerHandler('marketplace_update', async (params) => {
-  const p = params as unknown as { commandId: string };
-  if (!p.commandId) {
-    throw new Error('commandId is required');
-  }
-  const mp = await getMarketplace();
-  const result = await mp.update(p.commandId);
-  return result;
-});
-
-// List installed commands
-registerHandler('marketplace_list_installed', async (_params) => {
-  const mp = await getMarketplace();
-  const commands = await mp.listInstalled();
-  return { commands };
-});
-
-// Check if command is installed
-registerHandler('marketplace_is_installed', async (params) => {
-  const p = params as unknown as { commandId: string };
-  if (!p.commandId) {
-    throw new Error('commandId is required');
-  }
-  const mp = await getMarketplace();
-  const isInstalled = await mp.isInstalled(p.commandId);
-  return { isInstalled };
-});
-
-// Check for updates
-registerHandler('marketplace_check_updates', async (_params) => {
-  const mp = await getMarketplace();
-  const updates = await mp.checkForUpdates();
-  return { updates };
-});
-
-// ============================================================================
-// AGENTS.md Command Handlers (New)
+// AGENTS.md Command Handlers
 // ============================================================================
 
 // Load AGENTS.md configuration
@@ -1209,6 +1015,120 @@ registerHandler('agents_md_scan_project', async (params) => {
   const scanner = createProjectScanner(p.workingDirectory);
   const projectInfo = await scanner.scan();
   return projectInfo;
+});
+
+// ============================================================================
+// Subagent System Handlers
+// ============================================================================
+
+// List available subagents (discovers from all sources)
+// workingDirectory is OPTIONAL - only needed for workspace-specific subagents
+registerHandler('subagent_list', async (params) => {
+  const p = params as unknown as { workingDirectory?: string };
+  const service = await getSubagentService();
+  const subagents = await service.discoverAll(p.workingDirectory);
+  const subagentsWithStatus = subagents.map(sub => ({
+    ...sub,
+    installed: service.isInstalled(sub.name, p.workingDirectory),
+  }));
+  return { subagents: subagentsWithStatus };
+});
+
+// Install a subagent (copy from bundled to managed)
+registerHandler('subagent_install', async (params) => {
+  const p = params as unknown as { subagentName: string };
+  if (!p.subagentName) {
+    throw new Error('subagentName is required');
+  }
+  const service = await getSubagentService();
+  await service.discoverAll();
+  await service.installSubagent(p.subagentName);
+  return { success: true };
+});
+
+// Uninstall a subagent (remove from managed)
+registerHandler('subagent_uninstall', async (params) => {
+  const p = params as unknown as { subagentName: string };
+  if (!p.subagentName) {
+    throw new Error('subagentName is required');
+  }
+  const service = await getSubagentService();
+  await service.discoverAll();
+  await service.uninstallSubagent(p.subagentName);
+  return { success: true };
+});
+
+// Check if a subagent is installed
+registerHandler('subagent_is_installed', async (params) => {
+  const p = params as unknown as { subagentName: string; workingDirectory?: string };
+  if (!p.subagentName) {
+    throw new Error('subagentName is required');
+  }
+  const service = await getSubagentService();
+  return { installed: service.isInstalled(p.subagentName, p.workingDirectory) };
+});
+
+// Get a specific subagent
+registerHandler('subagent_get', async (params) => {
+  const p = params as unknown as { subagentName: string; workingDirectory?: string };
+  if (!p.subagentName) {
+    throw new Error('subagentName is required');
+  }
+  const service = await getSubagentService();
+  await service.discoverAll(p.workingDirectory);
+  const subagent = service.getSubagent(p.subagentName);
+  if (!subagent) {
+    throw new Error(`Subagent not found: ${p.subagentName}`);
+  }
+  return subagent.manifest;
+});
+
+// Create a custom subagent
+registerHandler('subagent_create', async (params) => {
+  const p = params as unknown as {
+    name: string;
+    displayName: string;
+    description: string;
+    systemPrompt: string;
+    category?: string;
+    tags?: string[];
+    tools?: string[];
+    model?: string;
+  };
+
+  if (!p.name || !p.displayName || !p.description || !p.systemPrompt) {
+    throw new Error('name, displayName, description, and systemPrompt are required');
+  }
+
+  const service = await getSubagentService();
+  const subagentName = await service.createSubagent({
+    name: p.name,
+    displayName: p.displayName,
+    description: p.description,
+    systemPrompt: p.systemPrompt,
+    category: (p.category as 'research' | 'development' | 'analysis' | 'productivity' | 'custom') || 'custom',
+    tags: p.tags,
+    tools: p.tools,
+    model: p.model,
+  });
+
+  return { subagentName };
+});
+
+// Get list of installed subagent names
+registerHandler('subagent_list_installed', async () => {
+  const service = await getSubagentService();
+  const names = await service.getInstalledSubagentNames();
+  return { subagents: names };
+});
+
+// Get subagent configs for middleware (replaces hardcoded function)
+registerHandler('subagent_get_configs', async (params) => {
+  const p = params as unknown as { sessionModel?: string; workingDirectory?: string };
+  const service = await getSubagentService();
+  await service.discoverAll(p.workingDirectory);
+  const configs = await service.getSubagentConfigs(p.sessionModel);
+  return { configs };
 });
 
 // ============================================================================

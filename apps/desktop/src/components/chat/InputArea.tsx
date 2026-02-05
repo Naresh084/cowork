@@ -14,9 +14,9 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAgentStore } from '../../stores/agent-store';
 import { useSessionStore } from '../../stores/session-store';
-import { useCommandStore, type Command } from '../../stores/command-store';
+import { useCommandStore, type SlashCommand } from '../../stores/command-store';
+import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
-import { type Attachment } from '../../stores/chat-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '../ui/Toast';
@@ -63,8 +63,12 @@ export function InputArea({
     openPalette,
     closePalette,
     setPaletteQuery,
-    executeCommand,
+    getCommandByAlias,
+    expandCommand,
   } = useCommandStore();
+
+  // Chat store for clearing session
+  const resetSession = useChatStore((state) => state.resetSession);
 
   // Handle initial message from quick actions
   useEffect(() => {
@@ -255,12 +259,48 @@ export function InputArea({
     };
   }, [isRecording]);
 
-  const handleSend = () => {
-    if ((!message.trim() && attachments.length === 0) || isStreaming) return;
+  const handleSend = useCallback(() => {
+    const trimmed = message.trim();
+    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+
+    // Check for slash command
+    if (trimmed.startsWith('/')) {
+      const spaceIndex = trimmed.indexOf(' ');
+      const cmdName = spaceIndex > 0 ? trimmed.slice(1, spaceIndex) : trimmed.slice(1);
+      const userAddition = spaceIndex > 0 ? trimmed.slice(spaceIndex + 1) : '';
+
+      const command = getCommandByAlias(cmdName);
+
+      if (command) {
+        // Action-only command (e.g., /clear)
+        if (command.action === 'clear_chat') {
+          if (activeSessionId) {
+            resetSession(activeSessionId);
+          }
+          setMessage('');
+          closePalette();
+          toast.success('Conversation cleared');
+          return;
+        }
+
+        // Prompt command - expand and send as normal message
+        const expanded = expandCommand(cmdName, userAddition);
+        if (expanded) {
+          onSend(expanded, attachments.length > 0 ? attachments : undefined);
+          setMessage('');
+          closePalette();
+          return;
+        }
+      }
+
+      // Unknown command - send as-is (let AI handle it)
+    }
+
+    // Normal message
     onSend(message, attachments.length > 0 ? attachments : undefined);
     setMessage('');
     closePalette();
-  };
+  }, [message, attachments, isStreaming, onSend, closePalette, getCommandByAlias, expandCommand, activeSessionId, resetSession]);
 
   // Handle "/" detection for command palette
   const handleInputChange = useCallback((value: string) => {
@@ -280,25 +320,14 @@ export function InputArea({
   }, [isPaletteOpen, openPalette, closePalette, setPaletteQuery]);
 
   // Handle command selection from palette
-  const handleCommandSelect = useCallback(async (command: Command) => {
-    // Check if command has required arguments
-    const hasRequiredArgs = command.arguments.some((arg) => arg.required);
-
-    if (!hasRequiredArgs) {
-      // Execute directly if no required args
-      const result = await executeCommand(command.name, {}, workingDirectory || undefined);
-      if (result.success && result.message) {
-        toast.success(`/${command.name}`, result.message);
-      } else if (!result.success && result.message) {
-        toast.error(`/${command.name} failed`, result.message);
-      }
-    } else {
-      // For now, insert the command into the input for user to complete args
-      setMessage(`/${command.name} `);
-    }
-
+  // Simply inserts the command into the input - user presses Enter to execute
+  const handleCommandSelect = useCallback((command: SlashCommand) => {
+    // Insert command into input, user can add more text and press Enter
+    setMessage(`/${command.name} `);
     closePalette();
-  }, [executeCommand, closePalette, workingDirectory]);
+    // Focus textarea so user can continue typing
+    textareaRef.current?.focus();
+  }, [closePalette]);
 
   // Handle closing command palette
   const handlePaletteClose = useCallback(() => {
