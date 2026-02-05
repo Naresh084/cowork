@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Chrome, Check, Eye } from 'lucide-react';
+import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Check, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
-import { useAppStore } from '../../stores/app-store';
 import { useChatStore } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
@@ -22,7 +21,6 @@ export function SessionHeader() {
   const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
   const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
-  const { setShowChromeExtensionModal } = useAppStore();
 
   // Check if computer_use tool is running
   const isComputerUseRunning = useChatStore((state) => {
@@ -40,29 +38,9 @@ export function SessionHeader() {
   const [pendingMode, setPendingMode] = useState<ApprovalMode | null>(null);
   const [modeDialogOpen, setModeDialogOpen] = useState(false);
   const [isModeDropdownOpen, setIsModeDropdownOpen] = useState(false);
-  const [extensionConnected, setExtensionConnected] = useState<boolean | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const modeDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Check Chrome extension status on mount and periodically
-  useEffect(() => {
-    const checkExtensionStatus = async () => {
-      try {
-        const result = await invoke<{ result: { connected: boolean } }>('agent_command', {
-          command: 'chrome_extension_status',
-          params: {},
-        });
-        setExtensionConnected(result.result?.connected ?? false);
-      } catch {
-        setExtensionConnected(false);
-      }
-    };
-
-    checkExtensionStatus();
-    const interval = setInterval(checkExtensionStatus, 30000); // Check every 30s
-    return () => clearInterval(interval);
-  }, []);
 
   // Close mode dropdown on click outside
   useEffect(() => {
@@ -358,25 +336,6 @@ export function SessionHeader() {
             </motion.button>
           )}
         </AnimatePresence>
-
-        {/* Chrome Extension Button - only shows if NOT connected */}
-        {extensionConnected === false && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            onClick={() => setShowChromeExtensionModal(true)}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
-              'bg-[#4C71FF]/10 text-[#8CA2FF] border border-[#4C71FF]/20',
-              'hover:bg-[#4C71FF]/20 hover:border-[#4C71FF]/30',
-              'transition-colors'
-            )}
-            title="Install Chrome extension for better browser control"
-          >
-            <Chrome className="w-3.5 h-3.5" />
-            <span>Add to Chrome</span>
-          </motion.button>
-        )}
 
         {/* Connection status */}
         <div className={cn(

@@ -19,8 +19,22 @@ export function ChatView() {
   const { sendMessage, stopGeneration, ensureSession } = useChatStore();
   const { activeSessionId, createSession, updateSessionTitle, sessions } = useSessionStore();
   const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
-  const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
-  const { messages, isStreaming } = sessionState;
+  // Use direct selector to ensure Zustand properly tracks state changes
+  const sessionState = useChatStore((state) => {
+    if (!activeSessionId) return null;
+    return state.sessions[activeSessionId] ?? null;
+  });
+  const messages = sessionState?.messages ?? [];
+  const isStreaming = sessionState?.isStreaming ?? false;
+
+  // Debug: log messages on every render
+  console.log('[ChatView] Render with:', {
+    activeSessionId,
+    messageCount: messages.length,
+    hasLoaded: sessionState?.hasLoaded,
+    isStreaming,
+    hasSessionState: !!sessionState,
+  });
 
   // Subscribe to agent events
   useAgentEvents(activeSessionId);
@@ -324,6 +338,11 @@ export function ChatView() {
 
       {/* Session Header */}
       <SessionHeader />
+
+      {/* Debug indicator - REMOVE AFTER FIXING */}
+      <div className="bg-yellow-500/20 text-yellow-300 text-xs px-2 py-1">
+        DEBUG: sessionId={activeSessionId || 'none'} | messages={messages.length} | hasLoaded={sessionState?.hasLoaded ? 'yes' : 'no'} | isLoading={sessionState?.isLoadingMessages ? 'yes' : 'no'}
+      </div>
 
       {/* Messages or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">

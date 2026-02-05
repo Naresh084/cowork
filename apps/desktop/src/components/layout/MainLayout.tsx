@@ -12,13 +12,12 @@ import { useAppStore } from '../../stores/app-store';
 import { ToastContainer } from '../ui/Toast';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
-import { ChromeExtensionModal } from '../modals/ChromeExtensionModal';
 
 export function MainLayout() {
   const { sidebarCollapsed, liveViewOpen, closeLiveView } = useSettingsStore();
   const { activeSessionId } = useSessionStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
-  const { showApiKeyModal, apiKeyError, setShowApiKeyModal, showChromeExtensionModal, setShowChromeExtensionModal } = useAppStore();
+  const { showApiKeyModal, apiKeyError, setShowApiKeyModal } = useAppStore();
 
   // Close live view when switching sessions
   useEffect(() => {
@@ -86,12 +85,6 @@ export function MainLayout() {
         isOpen={showApiKeyModal}
         onClose={() => setShowApiKeyModal(false)}
         errorMessage={apiKeyError}
-      />
-
-      {/* Chrome Extension Modal */}
-      <ChromeExtensionModal
-        isOpen={showChromeExtensionModal}
-        onClose={() => setShowChromeExtensionModal(false)}
       />
     </div>
   );

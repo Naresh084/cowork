@@ -2,15 +2,54 @@ import { z } from 'zod';
 import { GoogleGenAI, Environment } from '@google/genai';
 import { chromium, type Browser, type Page } from 'playwright';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
-import { chromeBridge } from '../chrome-bridge.js';
-import { ChromeCDPDriver, checkChromeAvailable } from './chrome-cdp-driver.js';
-import { ensureChromeWithDebugging } from './chrome-launcher.js';
+import { ChromeCDPDriver } from './chrome-cdp-driver.js';
 import { eventEmitter } from '../event-emitter.js';
 
 interface ComputerUseAction extends Record<string, unknown> {
   name: string;
   args: Record<string, unknown>;
 }
+
+interface ActionHistoryEntry {
+  action: string;
+  args: Record<string, unknown>;
+  url: string;
+}
+
+const COMPUTER_USE_SYSTEM_PROMPT = `You are an expert browser research agent. Efficiently gather information and complete the task.
+
+## TASK
+{goal}
+
+## CRITICAL RULES
+1. **NO LOOPS**: If you see the same action repeated in recent history, STOP and provide your analysis immediately.
+2. **LOGIN/PAYWALL**: If you see a login form, paywall, or "sign in required" - DO NOT try to login. Instead, describe what you can see and provide analysis with available information.
+3. **BLOCKED CONTENT**: If content is blocked, restricted, or requires authentication - report this and analyze whatever IS visible.
+4. **MAX 3 SCROLLS**: Only scroll a page 3 times max in one direction, then conclude or navigate elsewhere.
+5. **SIMPLE GOALS**: For simple goals like "open X and confirm", just navigate and confirm - no need for extensive exploration.
+
+## WHEN TO STOP IMMEDIATELY
+- The page has loaded and you can confirm the goal is achieved
+- You see a login/signup form blocking content
+- You've scrolled the same page 3+ times
+- You're repeating the same actions
+- You have enough information to answer the query
+- The page shows "access denied", "please login", "subscribe to view", etc.
+
+## ACTIONS (coordinates use 0-1000 normalized grid)
+**Navigation:** navigate(url), go_back(), go_forward(), open_web_browser(url)
+**Mouse:** click_at(x, y), hover_at(x, y), drag_and_drop(x, y, destination_x, destination_y)
+**Keyboard:** type_text_at(x, y, text, press_enter, clear_before_typing), key_combination(keys)
+**Scrolling:** scroll_document(direction), scroll_at(x, y, direction, magnitude)
+**Waiting:** wait_5_seconds()
+
+## OUTPUT
+When task is complete OR you've exhausted options, respond with ONLY text analysis (NO function calls):
+- What you found relevant to the goal
+- What content was visible
+- Any limitations encountered
+- Confirmation of goal achievement (if applicable)
+`;
 
 interface BrowserDriver {
   getScreenshot(): Promise<{ data: string; mimeType: string; url?: string }>;
@@ -148,54 +187,8 @@ export class PlaywrightDriver implements BrowserDriver {
   }
 }
 
-class ChromeExtensionDriver implements BrowserDriver {
-  private lastWidth = 0;
-  private lastHeight = 0;
-
-  async getScreenshot(): Promise<{ data: string; mimeType: string; url?: string }> {
-    const result = await chromeBridge.requestScreenshot();
-    this.lastWidth = result.width ?? this.lastWidth;
-    this.lastHeight = result.height ?? this.lastHeight;
-    return {
-      data: result.data,
-      mimeType: result.mimeType || 'image/png',
-      url: result.url,
-    };
-  }
-
-  async getUrl(): Promise<string> {
-    const result = await chromeBridge.requestScreenshot();
-    return result.url || '';
-  }
-
-  async performAction(action: ComputerUseAction): Promise<void> {
-    const adjusted = this.denormalizeAction(action);
-    await chromeBridge.performAction(adjusted);
-  }
-
-  async close(): Promise<void> {
-    // No-op for extension driver
-  }
-
-  private denormalizeAction(action: ComputerUseAction): ComputerUseAction {
-    const width = this.lastWidth || 1000;
-    const height = this.lastHeight || 1000;
-    const args = { ...action.args };
-
-    const mapCoord = (value: unknown, max: number) => {
-      const num = Number(value);
-      if (!Number.isFinite(num)) return value;
-      return Math.round((num / 1000) * max);
-    };
-
-    if ('x' in args) args.x = mapCoord(args.x, width);
-    if ('y' in args) args.y = mapCoord(args.y, height);
-    if ('to_x' in args) args.to_x = mapCoord(args.to_x, width);
-    if ('to_y' in args) args.to_y = mapCoord(args.to_y, height);
-
-    return { ...action, args };
-  }
-}
+// ChromeExtensionDriver removed - now using session-based CDP instances
+// Each session gets its own Chrome instance via ChromeCDPDriver.forSession()
 
 export function createComputerUseTool(
   getApiKey: () => string | null,
@@ -231,73 +224,36 @@ export function createComputerUseTool(
       }
 
       let driver: BrowserDriver | null = null;
-      let driverType: 'cdp' | 'chrome_extension' | 'playwright' = 'cdp';
-      let usingFallback = false;
 
-      // Strategy 1: Try Chrome Extension first (best UX - works with user's existing Chrome)
-      console.error('[computer_use] Attempting to connect to Chrome extension...');
-      const extensionConnected = await chromeBridge.waitForConnection(2000);
+      // Get or create a Chrome instance for this session
+      // Each session gets its own isolated Chrome with a dedicated profile
+      // User's main browser is never touched
+      console.error(`[computer_use] Getting Chrome instance for session ${_context.sessionId}...`);
 
-      if (extensionConnected) {
-        console.error('[computer_use] Chrome extension connected! Using extension driver.');
-        driver = new ChromeExtensionDriver();
-        driverType = 'chrome_extension';
+      try {
+        driver = await ChromeCDPDriver.forSession(_context.sessionId);
+        console.error(`[computer_use] Chrome ready for session ${_context.sessionId}`);
+
         if (startUrl) {
           await driver.performAction({ name: 'navigate', args: { url: startUrl } });
         }
-      } else {
-        console.error('[computer_use] Chrome extension not available, falling back to CDP...');
-      }
-
-      // Strategy 2: Fallback to Chrome CDP (auto-launch/restart Chrome if needed)
-      if (!driver) {
-        usingFallback = true;
-        try {
-          let cdpAvailable = await checkChromeAvailable(9222);
-
-          if (!cdpAvailable) {
-            // Auto-launch Chrome with debugging using user's profile
-            // This will also auto-restart Chrome if it's running without debugging
-            const launchResult = await ensureChromeWithDebugging();
-            if (launchResult.success) {
-              // Wait a bit for Chrome to be fully ready
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              cdpAvailable = await checkChromeAvailable(9222);
-            } else if (launchResult.error) {
-              // Chrome couldn't be launched or restarted
-              return {
-                success: false,
-                error: launchResult.error + '\n\n💡 Tip: Install the Chrome Extension for seamless browser control.',
-              };
-            }
-          }
-
-          if (cdpAvailable) {
-            driver = await ChromeCDPDriver.connect(9222);
-            driverType = 'cdp';
-            if (startUrl) {
-              await driver.performAction({ name: 'navigate', args: { url: startUrl } });
-            }
-          }
-        } catch (error) {
-          console.error('CDP connection failed:', error);
-        }
-      }
-
-      // If still no driver, Chrome is likely not installed
-      if (!driver) {
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('[computer_use] Failed to get Chrome instance:', errorMsg);
         return {
           success: false,
-          error: `Google Chrome is required for browser automation but could not be found.\n\n` +
-                 `Please install Google Chrome from:\n` +
-                 `https://www.google.com/chrome/\n\n` +
-                 `After installing, try again.`,
+          error: `Failed to start Chrome for browser automation:\n${errorMsg}\n\n` +
+                 `Please ensure Google Chrome is installed.`,
         };
       }
 
-      // Log suggestion to install extension if using fallback (non-blocking)
-      if (usingFallback) {
-        console.error('[computer_use] Using CDP fallback. For better experience, install the Gemini Cowork Chrome Extension.');
+      if (!driver) {
+        return {
+          success: false,
+          error: `Google Chrome is required for browser automation but could not be started.\n\n` +
+                 `Please install Google Chrome from:\n` +
+                 `https://www.google.com/chrome/`,
+        };
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -306,13 +262,26 @@ export function createComputerUseTool(
       let blocked = false;
       let blockedReason: string | undefined;
       const actions: string[] = [];
+      const actionHistory: ActionHistoryEntry[] = [];
+      const pagesVisited: string[] = [];
+      let finalAnalysis = '';
+
+      // Initial URL tracking
+      if (startUrl) {
+        pagesVisited.push(startUrl);
+      }
 
       try {
         while (steps < maxSteps) {
           const screenshot = await driver.getScreenshot();
+          const currentUrl = screenshot.url || await driver.getUrl();
+
+          // Track visited pages
+          if (currentUrl && !pagesVisited.includes(currentUrl)) {
+            pagesVisited.push(currentUrl);
+          }
 
           // Emit screenshot for live browser view
-          const currentUrl = screenshot.url || await driver.getUrl();
           eventEmitter.browserViewScreenshot(_context.sessionId, {
             data: screenshot.data,
             mimeType: screenshot.mimeType,
@@ -320,13 +289,35 @@ export function createComputerUseTool(
             timestamp: Date.now(),
           });
 
+          // Build prompt with system instructions and action history
+          let prompt = COMPUTER_USE_SYSTEM_PROMPT.replace('{goal}', goal);
+          prompt += `\n\nCurrent URL: ${currentUrl}`;
+
+          // Add recent action history for context
+          if (actionHistory.length > 0) {
+            const recent = actionHistory.slice(-5);
+            prompt += '\n\n## RECENT ACTIONS';
+            for (const entry of recent) {
+              prompt += `\n- ${entry.action}: ${JSON.stringify(entry.args)}`;
+            }
+
+            // Detect loops - if last 3 actions are the same type, warn strongly
+            if (actionHistory.length >= 3) {
+              const lastThree = actionHistory.slice(-3).map(a => a.action);
+              if (lastThree.every(a => a === lastThree[0])) {
+                prompt += `\n\n⚠️ WARNING: You are STUCK IN A LOOP repeating '${lastThree[0]}'. ` +
+                  `STOP and provide your final analysis NOW with NO function calls.`;
+              }
+            }
+          }
+
           const response = await ai.models.generateContent({
             model: getComputerUseModel(),
             contents: [
               {
                 role: 'user',
                 parts: [
-                  { text: `Goal: ${goal}\n\nCurrent URL: ${await driver.getUrl()}` },
+                  { text: prompt },
                   {
                     inlineData: {
                       mimeType: screenshot.mimeType,
@@ -345,6 +336,7 @@ export function createComputerUseTool(
             },
           });
 
+          // Check for safety blocks
           const finishReason = response.candidates?.[0]?.finishReason;
           if (finishReason && String(finishReason).toLowerCase().includes('safety')) {
             blocked = true;
@@ -353,20 +345,55 @@ export function createComputerUseTool(
             break;
           }
 
+          // Extract text response (analysis/reasoning)
+          let textResponse = '';
+          const candidate = response.candidates?.[0];
+          if (candidate?.content?.parts) {
+            for (const part of candidate.content.parts) {
+              if ('text' in part && part.text) {
+                textResponse = part.text;
+              }
+            }
+          }
+
+          // Check if task is complete (no function calls = Gemini decided to stop)
           const functionCalls = response.functionCalls;
           if (!functionCalls?.length) {
             completed = true;
+            // Store the analysis if Gemini provided one
+            if (textResponse && textResponse.length > 20) {
+              finalAnalysis = textResponse;
+              actions.push(`[Analysis]: ${textResponse}`);
+            }
             break;
           }
 
+          // Execute actions
           for (const call of functionCalls) {
             const name = call.name || 'unknown';
-            const action = { name, args: call.args || {} };
+            const actionArgs = call.args || {};
+            const action = { name, args: actionArgs };
+
             await driver.performAction(action);
-            actions.push(`${name}(${JSON.stringify(call.args || {})})`);
+            actions.push(`${name}(${JSON.stringify(actionArgs)})`);
+
+            // Track action history
+            actionHistory.push({
+              action: name,
+              args: actionArgs,
+              url: currentUrl,
+            });
           }
 
           steps += 1;
+
+          // Small delay between iterations to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        // If we exited the loop without a proper completion, log it
+        if (!completed && steps >= maxSteps) {
+          console.error('[computer_use] Max steps reached, task incomplete');
         }
 
         // Emit final screenshot to show the end state
@@ -390,9 +417,11 @@ export function createComputerUseTool(
             blocked,
             blockedReason,
             actions,
+            pagesVisited,
             finalUrl: await driver.getUrl(),
             steps,
-            driver: driverType,
+            sessionId: _context.sessionId,
+            ...(finalAnalysis && { analysis: finalAnalysis }),
           },
         };
       } catch (error) {
@@ -400,9 +429,9 @@ export function createComputerUseTool(
           success: false,
           error: error instanceof Error ? error.message : String(error),
         };
-      } finally {
-        await driver.close().catch(() => undefined);
       }
+      // Note: We don't close the driver here - it's reused for the entire session
+      // The Chrome instance will be cleaned up when the session ends
     },
   };
 }

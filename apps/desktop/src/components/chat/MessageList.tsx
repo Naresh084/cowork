@@ -32,9 +32,30 @@ type ErrorMessageMetadata = {
   raw?: string;
 };
 
+// Default empty session state for when no session is active
+const EMPTY_SESSION_STATE = {
+  messages: [] as Message[],
+  isStreaming: false,
+  isThinking: false,
+  thinkingContent: '',
+  streamingContent: '',
+  isLoadingMessages: false,
+  pendingQuestions: [] as Array<{ id: string; question: string; options: string[] }>,
+  pendingPermissions: [] as ExtendedPermissionRequest[],
+  streamingToolCalls: [] as ToolExecution[],
+  turnActivities: {} as Record<string, Array<{ type: string; id: string; [key: string]: unknown }>>,
+  activeTurnId: undefined as string | undefined,
+  hasLoaded: false,
+  lastUpdatedAt: 0,
+};
+
 export function MessageList() {
   const { activeSessionId } = useSessionStore();
-  const sessionState = useChatStore((state) => state.getSessionState(activeSessionId));
+  // Use direct selector to ensure Zustand properly tracks state changes
+  const sessionState = useChatStore((state) => {
+    if (!activeSessionId) return EMPTY_SESSION_STATE;
+    return state.sessions[activeSessionId] ?? EMPTY_SESSION_STATE;
+  });
   const agentState = useAgentStore((state) => state.getSessionState(activeSessionId));
   const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const {
@@ -52,6 +73,15 @@ export function MessageList() {
   } = sessionState;
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
+
+  // Debug: log messages on every render
+  console.log('[MessageList] Render with:', {
+    messageCount: messages.length,
+    isLoadingMessages,
+    hasLoaded: 'hasLoaded' in sessionState ? sessionState.hasLoaded : false,
+    isStreaming,
+    firstMessageId: messages[0]?.id,
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);

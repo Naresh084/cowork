@@ -1,13 +1,26 @@
-import { spawn, exec, execSync } from 'child_process';
+import { spawn, exec, type ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { fileURLToPath } from 'url';
 
 const execAsync = promisify(exec);
 
 const CDP_PORT = 9222;
+
+// Session-based Chrome instance management
+// Each session gets its own Chrome instance with a dedicated profile
+interface SessionChromeInstance {
+  sessionId: string;
+  port: number;
+  profileDir: string;
+  process: ChildProcess | null;
+  startedAt: number;
+}
+
+// Track all session Chrome instances
+const sessionInstances = new Map<string, SessionChromeInstance>();
+let nextPort = 9300; // Start session ports from 9300 to avoid conflicts
 
 /**
  * Get the Chrome executable path based on the platform
@@ -261,109 +274,183 @@ export async function ensureChromeWithDebugging(): Promise<{ success: boolean; e
 }
 
 /**
- * Get the path to the Chrome extension folder
+ * Get or create a Chrome instance for a specific session.
+ * Each session gets exactly ONE Chrome instance with its own profile.
+ * Reuses existing instance if already running for this session.
  */
-export function getExtensionPath(): string {
-  // The extension is in the apps/chrome-extension folder relative to the monorepo root
-  // In production, this would be bundled differently
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  // Navigate from src-sidecar/src/tools to apps/chrome-extension
-  return path.resolve(currentDir, '..', '..', '..', '..', 'chrome-extension');
-}
+export async function getOrCreateSessionChrome(sessionId: string): Promise<{
+  success: boolean;
+  port?: number;
+  error?: string;
+  reused?: boolean;
+}> {
+  // Check if we already have an instance for this session
+  const existing = sessionInstances.get(sessionId);
+  if (existing) {
+    // Verify it's still running
+    const isRunning = await hasDebuggingEnabled(existing.port);
+    if (isRunning) {
+      console.error(`[chrome-launcher] Reusing existing Chrome instance for session ${sessionId} on port ${existing.port}`);
+      return { success: true, port: existing.port, reused: true };
+    }
+    // Instance died, clean up and create new
+    console.error(`[chrome-launcher] Session ${sessionId} Chrome instance died, creating new one`);
+    sessionInstances.delete(sessionId);
+  }
 
-/**
- * Open Chrome to the extensions page for installing the extension
- */
-export async function openChromeExtensionsPage(): Promise<{ success: boolean; error?: string }> {
+  // Create new Chrome instance for this session
+  const port = nextPort++;
+  const profileDir = getSessionProfileDir(sessionId);
+
+  // Ensure profile directory exists
+  if (!fs.existsSync(profileDir)) {
+    fs.mkdirSync(profileDir, { recursive: true });
+  }
+
   const chromePath = getChromePath();
-
-  // Check if Chrome executable exists
   if (process.platform !== 'linux' && !fs.existsSync(chromePath)) {
-    return {
-      success: false,
-      error: `Chrome not found at: ${chromePath}`,
-    };
+    return { success: false, error: `Chrome not found at: ${chromePath}` };
   }
 
   try {
-    // Open Chrome to the extensions page
-    const args = ['chrome://extensions/'];
+    const args = [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--new-window',
+      'about:blank', // Start with blank page
+    ];
 
-    if (process.platform === 'darwin') {
-      // On macOS, use 'open' to open URL in existing Chrome
-      execSync(`open -a "Google Chrome" "chrome://extensions/"`);
-    } else if (process.platform === 'win32') {
-      // On Windows, use start
-      execSync(`start "" "${chromePath}" "chrome://extensions/"`);
-    } else {
-      // On Linux
-      spawn(chromePath, args, { detached: true, stdio: 'ignore' }).unref();
+    console.error(`[chrome-launcher] Launching Chrome for session ${sessionId} on port ${port}`);
+
+    const chromeProcess = spawn(chromePath, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    chromeProcess.unref();
+
+    // Track this instance
+    const instance: SessionChromeInstance = {
+      sessionId,
+      port,
+      profileDir,
+      process: chromeProcess,
+      startedAt: Date.now(),
+    };
+    sessionInstances.set(sessionId, instance);
+
+    // Wait for Chrome to be ready
+    const maxWaitMs = 10000;
+    const pollIntervalMs = 500;
+    let waited = 0;
+
+    while (waited < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      waited += pollIntervalMs;
+
+      const ready = await hasDebuggingEnabled(port);
+      if (ready) {
+        console.error(`[chrome-launcher] Chrome ready for session ${sessionId} on port ${port}`);
+        return { success: true, port, reused: false };
+      }
     }
 
+    // Failed to start
+    sessionInstances.delete(sessionId);
+    return { success: false, error: 'Chrome launched but not responding' };
+  } catch (error) {
+    sessionInstances.delete(sessionId);
+    return {
+      success: false,
+      error: `Failed to launch Chrome: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Get the profile directory for a specific session
+ */
+function getSessionProfileDir(sessionId: string): string {
+  const baseDir = process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support')
+    : process.platform === 'win32'
+      ? process.env.LOCALAPPDATA || os.homedir()
+      : path.join(os.homedir(), '.config');
+
+  // Use a sanitized session ID for the folder name
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
+  return path.join(baseDir, 'GeminiCowork', 'ChromeSessions', safeSessionId);
+}
+
+/**
+ * Close the Chrome instance for a specific session
+ */
+export async function closeSessionChrome(sessionId: string): Promise<{ success: boolean; error?: string }> {
+  const instance = sessionInstances.get(sessionId);
+  if (!instance) {
+    return { success: true }; // No instance to close
+  }
+
+  console.error(`[chrome-launcher] Closing Chrome for session ${sessionId}`);
+
+  try {
+    // Try to close gracefully via CDP
+    try {
+      const response = await fetch(`http://127.0.0.1:${instance.port}/json/close`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (response.ok) {
+        sessionInstances.delete(sessionId);
+        return { success: true };
+      }
+    } catch {
+      // CDP close failed, try process kill
+    }
+
+    // Kill the process if it's tracked
+    if (instance.process && instance.process.pid) {
+      try {
+        process.kill(instance.process.pid);
+      } catch {
+        // Process might already be dead
+      }
+    }
+
+    sessionInstances.delete(sessionId);
     return { success: true };
   } catch (error) {
     return {
       success: false,
-      error: `Failed to open Chrome: ${error instanceof Error ? error.message : String(error)}`,
+      error: `Failed to close Chrome: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
 
 /**
- * Open the extension folder in the system file browser
+ * Get the CDP port for an existing session Chrome instance
  */
-export async function openExtensionFolder(): Promise<{ success: boolean; error?: string; path?: string }> {
-  const extensionPath = getExtensionPath();
-
-  if (!fs.existsSync(extensionPath)) {
-    return {
-      success: false,
-      error: `Extension folder not found at: ${extensionPath}`,
-    };
-  }
-
-  try {
-    if (process.platform === 'darwin') {
-      execSync(`open "${extensionPath}"`);
-    } else if (process.platform === 'win32') {
-      execSync(`explorer "${extensionPath}"`);
-    } else {
-      execSync(`xdg-open "${extensionPath}"`);
-    }
-
-    return { success: true, path: extensionPath };
-  } catch (error) {
-    return {
-      success: false,
-      error: `Failed to open folder: ${error instanceof Error ? error.message : String(error)}`,
-      path: extensionPath,
-    };
-  }
+export function getSessionChromePort(sessionId: string): number | null {
+  const instance = sessionInstances.get(sessionId);
+  return instance?.port ?? null;
 }
 
 /**
- * Open Chrome extensions page AND the extension folder for easy installation
+ * Check if a session has an active Chrome instance
  */
-export async function openExtensionInstallHelper(): Promise<{ success: boolean; error?: string; extensionPath?: string }> {
-  const extensionPath = getExtensionPath();
+export async function hasSessionChrome(sessionId: string): Promise<boolean> {
+  const instance = sessionInstances.get(sessionId);
+  if (!instance) return false;
+  return hasDebuggingEnabled(instance.port);
+}
 
-  // First open the extension folder
-  const folderResult = await openExtensionFolder();
-
-  // Then open Chrome extensions page
-  const chromeResult = await openChromeExtensionsPage();
-
-  if (!folderResult.success && !chromeResult.success) {
-    return {
-      success: false,
-      error: `${folderResult.error}\n${chromeResult.error}`,
-    };
-  }
-
-  return {
-    success: true,
-    extensionPath,
-  };
+/**
+ * Clean up all session Chrome instances (call on app shutdown)
+ */
+export async function cleanupAllSessionChromes(): Promise<void> {
+  console.error(`[chrome-launcher] Cleaning up ${sessionInstances.size} session Chrome instances`);
+  const promises = Array.from(sessionInstances.keys()).map(sessionId => closeSessionChrome(sessionId));
+  await Promise.allSettled(promises);
 }
 
 export { CDP_PORT, isChromeRunning, hasDebuggingEnabled, closeChrome };

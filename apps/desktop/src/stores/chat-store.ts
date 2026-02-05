@@ -560,6 +560,15 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
         }
 
         console.log('[ChatStore] Loaded', session.messages?.length || 0, 'messages for session:', sessionId);
+
+        // Verify state was updated
+        const updatedState = get().sessions[sessionId];
+        console.log('[ChatStore] After update - store state:', {
+          sessionId,
+          messageCount: updatedState?.messages.length,
+          hasLoaded: updatedState?.hasLoaded,
+        });
+
         return session;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

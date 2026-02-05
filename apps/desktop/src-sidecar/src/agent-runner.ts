@@ -15,7 +15,6 @@ import { homedir } from 'os';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
 import { mcpBridge } from './mcp-bridge.js';
-import { chromeBridge } from './chrome-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
 import { toolPolicyService } from './tool-policy.js';
@@ -127,10 +126,7 @@ export class AgentRunner {
   private appDataDir: string | null = null;
 
   constructor() {
-    // Start WebSocket server for Chrome extension communication
-    chromeBridge.start().catch(err => {
-      console.error('[AgentRunner] Failed to start Chrome bridge:', err);
-    });
+    // Session-based Chrome instances are created on-demand by ChromeCDPDriver.forSession()
   }
 
   /**
