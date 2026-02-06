@@ -158,6 +158,12 @@ export interface RightPanelSections {
   scheduled: boolean;
 }
 
+export interface SessionListFilters {
+  chat: boolean;
+  shared: boolean;
+  cron: boolean;
+}
+
 interface SettingsState {
   // User
   userName: string;
@@ -206,6 +212,7 @@ interface SettingsState {
   rightPanelTab: 'tasks' | 'artifacts' | 'memory';
   viewMode: ViewMode;
   rightPanelSections: RightPanelSections;
+  sessionListFilters: SessionListFilters;
 
   // Live Browser View
   liveViewOpen: boolean;
@@ -289,6 +296,8 @@ interface SettingsActions {
   setRightPanelTab: (tab: 'tasks' | 'artifacts' | 'memory') => void;
   setViewMode: (mode: ViewMode) => void;
   toggleRightPanelSection: (section: keyof RightPanelSections) => void;
+  toggleSessionListFilter: (filter: keyof SessionListFilters) => void;
+  setSessionListFilters: (filters: Partial<SessionListFilters>) => void;
 
   // Live Browser View
   setLiveViewOpen: (open: boolean) => void;
@@ -367,6 +376,11 @@ const initialState: SettingsState = {
     toolsUsed: true,
     context: true,
     scheduled: true,
+  },
+  sessionListFilters: {
+    chat: true,
+    shared: true,
+    cron: false,
   },
 
   // Live Browser View
@@ -880,6 +894,24 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }));
       },
 
+      toggleSessionListFilter: (filter) => {
+        set((state) => ({
+          sessionListFilters: {
+            ...state.sessionListFilters,
+            [filter]: !state.sessionListFilters[filter],
+          },
+        }));
+      },
+
+      setSessionListFilters: (filters) => {
+        set((state) => ({
+          sessionListFilters: {
+            ...state.sessionListFilters,
+            ...filters,
+          },
+        }));
+      },
+
       clearError: () => {
         set({ error: null });
       },
@@ -921,6 +953,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         rightPanelTab: state.rightPanelTab,
         viewMode: state.viewMode,
         rightPanelSections: state.rightPanelSections,
+        sessionListFilters: state.sessionListFilters,
         // liveViewOpen is intentionally NOT persisted - should always start closed
         liveViewSplitRatio: state.liveViewSplitRatio,
       }),
@@ -958,6 +991,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           })
         );
 
+        const persistedSessionListFilters = persisted?.sessionListFilters;
+        const validSessionListFilters: SessionListFilters = {
+          chat: persistedSessionListFilters?.chat ?? initialState.sessionListFilters.chat,
+          shared: persistedSessionListFilters?.shared ?? initialState.sessionListFilters.shared,
+          cron: persistedSessionListFilters?.cron ?? initialState.sessionListFilters.cron,
+        };
+
         return {
           ...currentState,
           ...persisted,
@@ -965,6 +1005,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           selectedModel: validModel,
           specializedModels: validSpecializedModels,
           installedCommandConfigs: migratedCommandConfigs,
+          sessionListFilters: validSessionListFilters,
         };
       },
       // Sync with backend when store rehydrates from storage

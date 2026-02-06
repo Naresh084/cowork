@@ -2431,12 +2431,14 @@ Proactively suggest scheduling when the user:
 - Mentions specific future times ("on Friday", "next week", "at 3 PM")
 
 ### How schedule_task Works
-- Creates a background job managed by the cron service that runs automatically on schedule
-- The \`prompt\` field is the FULL instruction executed each time - make it detailed
-- The isolated agent has access to ALL tools (search, file operations, etc.)
-- Results are delivered to the user's chat when each run completes
-- \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit
-- Use \`manage_scheduled_task\` to list, pause, resume, run, delete, or view history
+- Creates a background job managed by the cron service that runs automatically on schedule.
+- The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
+- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected platforms (WhatsApp, Slack, Telegram). If a messaging platform is connected at the time the task runs, the cron agent can use \`send_notification_whatsapp\` / \`send_notification_slack\` / \`send_notification_telegram\` to deliver results.
+- When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack"), include that instruction in the prompt. Example: "After searching, send a summary of the results to the user via send_notification_whatsapp."
+- Results are also delivered to the user's chat when each run completes.
+- \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
+- The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due job, fires it, then re-arms for the next one. No wasted CPU cycles.
+- Use \`manage_scheduled_task\` to list, pause, resume, run, delete, or view history.
 
 ### Schedule Types Reference
 - **once**: One-time future execution
@@ -2502,18 +2504,32 @@ schedule_task({
 \`\`\`
 Result: Runs every Monday at 8 AM indefinitely.
 
-**Example 5: Monitoring with limit - "Check if my API is responding every 5 minutes for the next hour"**
+**Example 5: Search + WhatsApp notification - "Google latest news every 5 min and send to my WhatsApp"**
 \`\`\`
 schedule_task({
-  name: "API Health Check",
-  prompt: "Use google_grounded_search or make a request to check if https://api.example.com/health is responding. Report the status and response time. If down, provide details about the error.",
+  name: "News to WhatsApp",
+  prompt: "Use google_grounded_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_whatsapp.",
+  schedule: { type: "interval", every: 5 }
+})
+\`\`\`
+Result: Searches every 5 min, sends results to WhatsApp each time. The cron agent has access to all connected platform notification tools automatically.
+
+**Example 6: Monitoring + Slack alert - "Check API health every 5 min for 1 hour, alert on Slack if down"**
+\`\`\`
+schedule_task({
+  name: "API Health Monitor",
+  prompt: "Use google_grounded_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_slack with the error details. If it's up, just log the status.",
   schedule: { type: "interval", every: 5 },
   maxRuns: 12
 })
 \`\`\`
-Result: Checks every 5 minutes, stops after 12 checks (= 1 hour).
+Result: Checks every 5 minutes, alerts on Slack only if issues found, stops after 12 checks (= 1 hour).
 
-**Example 6: Cron expression - "Run tests every weekday at 6 PM"**
+**Example 7: Cron expression - "Run tests every weekday at 6 PM"**
+Cron expressions follow the format: \`minute hour day-of-month month day-of-week\`
+- \`0 18 * * MON-FRI\` = at minute 0, hour 18, any day, any month, Monday through Friday
+- \`*/15 * * * *\` = every 15 minutes
+- \`0 9 1 * *\` = 9 AM on the 1st of every month
 \`\`\`
 schedule_task({
   name: "Weekday Test Run",
@@ -2523,7 +2539,7 @@ schedule_task({
 \`\`\`
 Result: Runs at 6 PM Monday through Friday.
 
-**Example 7: Quick repeated task - "Search for Bitcoin price 3 times, once every 2 minutes"**
+**Example 8: Quick repeated task - "Search for Bitcoin price 3 times, once every 2 minutes"**
 \`\`\`
 schedule_task({
   name: "Bitcoin Price Check",
@@ -2534,7 +2550,7 @@ schedule_task({
 \`\`\`
 Result: Checks every 2 minutes, stops after 3 checks.
 
-**Example 8: Delayed one-time - "In 30 minutes, summarize my git changes"**
+**Example 9: Delayed one-time - "In 30 minutes, summarize my git changes"**
 \`\`\`
 schedule_task({
   name: "Git Summary",
@@ -2543,6 +2559,17 @@ schedule_task({
 })
 \`\`\`
 Result: Fires once, 30 minutes from now.
+
+**Example 10: Search + Telegram with limit - "Fetch weather every hour for 8 hours, send to Telegram"**
+\`\`\`
+schedule_task({
+  name: "Weather Updates",
+  prompt: "Use google_grounded_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_telegram.",
+  schedule: { type: "interval", every: 60 },
+  maxRuns: 8
+})
+\`\`\`
+Result: Searches weather every hour, sends to Telegram, auto-stops after 8 updates.
 
 ### Managing Existing Tasks
 Use \`manage_scheduled_task\` to:
