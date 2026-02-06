@@ -251,6 +251,7 @@ impl SidecarManager {
     }
 
     /// Stop the sidecar process
+    #[allow(dead_code)]
     pub async fn stop(&self) -> Result<(), String> {
         let mut process_guard = self.process.lock().await;
 

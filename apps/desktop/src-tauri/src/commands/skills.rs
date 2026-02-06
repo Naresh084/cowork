@@ -87,6 +87,7 @@ pub struct SkillEligibility {
     pub found_bins: Option<std::collections::HashMap<String, String>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledSkill {

@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 // Integration Types
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlatformStatus {

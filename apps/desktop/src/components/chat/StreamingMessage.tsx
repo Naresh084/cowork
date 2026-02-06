@@ -3,6 +3,7 @@ import { cn } from '../../lib/utils';
 import { motion } from 'framer-motion';
 import { BrandMark } from '../icons/BrandMark';
 import remarkGfm from 'remark-gfm';
+import { fixNestedCodeFences } from '../../lib/fix-markdown';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -37,7 +38,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
             <div className="w-fit max-w-full text-[13px]">
               <Suspense fallback={
                 <pre className="whitespace-pre-wrap font-sans text-white/80 w-fit max-w-full select-text">
-                  {content}
+                  {fixNestedCodeFences(content)}
                 </pre>
               }>
                 <ReactMarkdown
@@ -127,7 +128,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
                     },
                   }}
                 >
-                  {content}
+                  {fixNestedCodeFences(content)}
                 </ReactMarkdown>
               </Suspense>
             </div>

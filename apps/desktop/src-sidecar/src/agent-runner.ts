@@ -385,7 +385,7 @@ export class AgentRunner {
     for (const item of chatItems) {
       if (item.kind === 'user_message') {
         messages.push({
-          id: item.id.replace('ci-', ''),
+          id: item.turnId || item.id.replace('ci-', ''),
           role: 'user',
           content: item.content as Message['content'],
           createdAt: item.timestamp,
@@ -426,7 +426,8 @@ export class AgentRunner {
           status: item.status === 'running' ? 'running' : item.status === 'error' ? 'error' : 'success',
           startedAt: item.timestamp,
           parentToolId: item.parentToolId,
-        });
+          turnMessageId: item.turnId,
+        } as ToolExecution & { turnMessageId?: string });
       } else if (item.kind === 'tool_result') {
         const existing = toolMap.get(item.toolId);
         if (existing) {

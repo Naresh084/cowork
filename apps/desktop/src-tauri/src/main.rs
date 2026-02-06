@@ -5,7 +5,6 @@ mod commands;
 mod sidecar;
 
 use commands::agent::AgentState;
-use tauri::Manager;
 
 fn main() {
     tauri::Builder::default()

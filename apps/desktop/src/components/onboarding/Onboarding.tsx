@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { KeyRound, ArrowRight, Loader2, ExternalLink, AlertCircle, User, Sparkles } from 'lucide-react';
+import { KeyRound, ArrowRight, Loader2, ExternalLink, AlertCircle, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { BrandMark } from '../icons/BrandMark';
 
 export function Onboarding() {
   const [userName, setUserName] = useState('');
@@ -135,16 +136,9 @@ export function Onboarding() {
               variants={itemVariants}
               className="relative mx-auto mb-6"
             >
-              <div className={cn(
-                'w-20 h-20 rounded-2xl mx-auto',
-                'bg-gradient-to-br from-[#2B48BE] to-[#4C71FF]',
-                'flex items-center justify-center',
-                'shadow-lg shadow-[#4C71FF]/30'
-              )}>
-                <Sparkles className="w-10 h-10 text-white" />
+              <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
+                <BrandMark className="w-16 h-16" />
               </div>
-              {/* Glow effect */}
-              <div className="absolute inset-0 w-20 h-20 mx-auto rounded-2xl bg-[#4C71FF]/20 blur-xl" />
             </motion.div>
 
             {/* Title */}
