@@ -12,7 +12,10 @@
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "clean": "turbo run clean && rm -rf node_modules",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "icons:sync": "pnpm --filter @gemini-cowork/desktop icon:sync",
+    "version:check": "node scripts/version-sync.mjs check",
+    "version:sync": "node scripts/version-sync.mjs sync"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

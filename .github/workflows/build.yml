@@ -55,6 +55,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Verify synchronized versions
+        run: pnpm version:check
+
+      - name: Sync desktop icons
+        run: pnpm --filter @gemini-cowork/desktop icon:sync
+
       - name: Build sidecar
         run: pnpm build
         working-directory: apps/desktop/src-sidecar
