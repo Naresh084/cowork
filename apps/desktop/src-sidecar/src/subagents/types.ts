@@ -20,7 +20,8 @@ export type SubagentCategory =
  */
 export type SubagentSource =
   | 'built-in' // Bundled with app
-  | 'custom'; // User-created
+  | 'custom' // User-created
+  | 'platform'; // Discovered from .agent/ or .claude/ directories
 
 /**
  * Subagent manifest stored in subagent.json

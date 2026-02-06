@@ -47,14 +47,15 @@ export interface InstalledSkillConfig {
   name: string;
   enabled: boolean;
   installedAt: number;
-  source: 'bundled' | 'managed' | 'workspace' | 'custom';
+  source: 'bundled' | 'managed' | 'workspace' | 'custom' | 'platform';
 }
 
 export interface InstalledCommandConfig {
   id: string;
   name: string;
+  enabled: boolean;
   installedAt: number;
-  source: 'bundled' | 'managed';
+  source: 'bundled' | 'managed' | 'platform';
 }
 
 export interface InstalledConnectorConfig {
@@ -94,9 +95,60 @@ export interface SpecializedModels {
 
 export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
   imageGeneration: 'imagen-4.0-generate-001',
-  videoGeneration: 'veo-2.0-generate-001',
+  videoGeneration: 'veo-3.1-generate-preview',
   computerUse: 'gemini-2.5-computer-use-preview-10-2025',
 };
+
+const SPECIALIZED_MODEL_MIGRATIONS: Record<keyof SpecializedModels, Record<string, string>> = {
+  imageGeneration: {
+    'imagen-3.0-generate-001': 'imagen-4.0-generate-001',
+    'imagen-3.0-generate-002': 'imagen-4.0-generate-001',
+    'imagen-3.0-capability-001': 'imagen-4.0-generate-001',
+  },
+  videoGeneration: {
+    'veo-2.0-generate-001': 'veo-3.1-generate-preview',
+    'veo-3.0-generate-preview': 'veo-3.1-generate-preview',
+    'veo-3.0-fast-generate-preview': 'veo-3.1-generate-preview',
+  },
+  computerUse: {
+    'gemini-2.5-computer-use-preview': 'gemini-2.5-computer-use-preview-10-2025',
+  },
+};
+
+function normalizeSpecializedModelValue(
+  key: keyof SpecializedModels,
+  value: string | undefined
+): string {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) {
+    return DEFAULT_SPECIALIZED_MODELS[key];
+  }
+
+  const migrated = SPECIALIZED_MODEL_MIGRATIONS[key][trimmed] ?? trimmed;
+
+  // Keep user-entered custom model IDs, but reject malformed values.
+  if (migrated.includes(':') || !/^[\w.-]+$/.test(migrated)) {
+    return DEFAULT_SPECIALIZED_MODELS[key];
+  }
+
+  if (key === 'videoGeneration' && (migrated.startsWith('veo-2.') || migrated.startsWith('veo-3.0-'))) {
+    return DEFAULT_SPECIALIZED_MODELS.videoGeneration;
+  }
+
+  if (key === 'imageGeneration' && migrated.startsWith('imagen-3.')) {
+    return DEFAULT_SPECIALIZED_MODELS.imageGeneration;
+  }
+
+  return migrated;
+}
+
+function normalizeSpecializedModels(models: Partial<SpecializedModels> | undefined): SpecializedModels {
+  return {
+    imageGeneration: normalizeSpecializedModelValue('imageGeneration', models?.imageGeneration),
+    videoGeneration: normalizeSpecializedModelValue('videoGeneration', models?.videoGeneration),
+    computerUse: normalizeSpecializedModelValue('computerUse', models?.computerUse),
+  };
+}
 
 export interface RightPanelSections {
   progress: boolean;
@@ -205,6 +257,8 @@ interface SettingsActions {
   // Commands marketplace management
   addInstalledCommandConfig: (config: InstalledCommandConfig) => void;
   removeInstalledCommandConfig: (commandId: string) => void;
+  updateInstalledCommandConfig: (commandId: string, updates: Partial<InstalledCommandConfig>) => void;
+  toggleInstalledCommandEnabled: (commandId: string) => void;
 
   // Connectors marketplace management
   addInstalledConnectorConfig: (config: InstalledConnectorConfig) => void;
@@ -639,6 +693,22 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }));
       },
 
+      updateInstalledCommandConfig: (commandId, updates) => {
+        set((state) => ({
+          installedCommandConfigs: state.installedCommandConfigs.map((c) =>
+            c.id === commandId ? { ...c, ...updates } : c
+          ),
+        }));
+      },
+
+      toggleInstalledCommandEnabled: (commandId) => {
+        set((state) => ({
+          installedCommandConfigs: state.installedCommandConfigs.map((c) =>
+            c.id === commandId ? { ...c, enabled: !c.enabled } : c
+          ),
+        }));
+      },
+
       // Connectors marketplace management
       addInstalledConnectorConfig: (config) => {
         set((state) => ({
@@ -683,8 +753,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
 
       // Specialized models management
       updateSpecializedModel: async (key, value) => {
+        const normalized = normalizeSpecializedModelValue(key, value);
         set((state) => ({
-          specializedModels: { ...state.specializedModels, [key]: value },
+          specializedModels: { ...state.specializedModels, [key]: normalized },
         }));
         await useSettingsStore.getState().syncSpecializedModels();
       },
@@ -877,11 +948,15 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           ? persistedMode
           : initialState.approvalMode;
 
-        // Merge specialized models with defaults (ensure all keys exist)
-        const validSpecializedModels = {
-          ...DEFAULT_SPECIALIZED_MODELS,
-          ...(persisted?.specializedModels || {}),
-        };
+        const validSpecializedModels = normalizeSpecializedModels(persisted?.specializedModels);
+
+        // Migrate installedCommandConfigs to include enabled field (backward compat)
+        const migratedCommandConfigs = (persisted?.installedCommandConfigs || []).map(
+          (c: InstalledCommandConfig & { enabled?: boolean }) => ({
+            ...c,
+            enabled: c.enabled !== undefined ? c.enabled : true,
+          })
+        );
 
         return {
           ...currentState,
@@ -889,6 +964,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           approvalMode: validMode,
           selectedModel: validModel,
           specializedModels: validSpecializedModels,
+          installedCommandConfigs: migratedCommandConfigs,
         };
       },
       // Sync with backend when store rehydrates from storage

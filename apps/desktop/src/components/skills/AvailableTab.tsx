@@ -11,6 +11,7 @@ export function AvailableTab() {
     getFilteredSkills,
     selectSkill,
     installSkill,
+    enableSkill,
   } = useSkillStore();
 
   const { installedSkillConfigs } = useSettingsStore();
@@ -36,6 +37,7 @@ export function AvailableTab() {
         installingIds={isInstalling}
         onSelect={selectSkill}
         onInstall={installSkill}
+        onEnable={enableSkill}
       />
     </div>
   );

@@ -8,6 +8,7 @@ interface SkillGridProps {
   installingIds: Set<string>;
   onSelect: (skillId: string) => void;
   onInstall: (skillId: string) => void;
+  onEnable?: (skillId: string) => void;
 }
 
 export function SkillGrid({
@@ -17,6 +18,7 @@ export function SkillGrid({
   installingIds,
   onSelect,
   onInstall,
+  onEnable,
 }: SkillGridProps) {
   if (skills.length === 0) {
     return (
@@ -39,6 +41,7 @@ export function SkillGrid({
           isInstalling={installingIds.has(skill.id)}
           onSelect={() => onSelect(skill.id)}
           onInstall={() => onInstall(skill.id)}
+          onEnable={onEnable ? () => onEnable(skill.id) : undefined}
         />
       ))}
     </div>

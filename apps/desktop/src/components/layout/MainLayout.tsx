@@ -9,6 +9,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useAppStore } from '../../stores/app-store';
+import { useAgentEvents } from '../../hooks/useAgentEvents';
 import { ToastContainer } from '../ui/Toast';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
@@ -30,6 +31,9 @@ export function MainLayout() {
     // Only run when activeSessionId changes, not when liveViewOpen changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSessionId]);
+
+  // Keep sidecar event subscription alive across all app views
+  useAgentEvents(activeSessionId);
 
   const handlePreviewArtifact = (artifact: Artifact) => {
     setPreviewArtifact(artifact);

@@ -1,4 +1,4 @@
-import { Check, Download, Loader2 } from 'lucide-react';
+import { Check, Download, Loader2, FolderOpen, ToggleRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { CommandManifest, CommandCategory } from '../../stores/command-store';
 import {
@@ -33,6 +33,7 @@ interface CommandCardProps {
   isInstalling: boolean;
   onSelect: () => void;
   onInstall: () => void;
+  onEnable?: () => void;
 }
 
 export function CommandCard({
@@ -41,14 +42,18 @@ export function CommandCard({
   isInstalling,
   onSelect,
   onInstall,
+  onEnable,
 }: CommandCardProps) {
   const CategoryIcon = CATEGORY_ICONS[command.frontmatter.category] || FileText;
   const categoryColor = CATEGORY_COLORS[command.frontmatter.category] || 'text-zinc-400';
   const emoji = command.frontmatter.metadata?.emoji;
+  const isPlatform = command.source.type === 'platform';
 
   const handleInstallClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!isInstalled && !isInstalling) {
+    if (isPlatform && onEnable) {
+      onEnable();
+    } else if (!isInstalled && !isInstalling) {
       onInstall();
     }
   };
@@ -59,7 +64,8 @@ export function CommandCard({
       className={cn(
         'p-4 rounded-lg border cursor-pointer transition-all hover:border-zinc-600',
         'bg-zinc-800/50 border-zinc-700',
-        isInstalled && 'border-green-800/50 bg-green-950/20'
+        isInstalled && 'border-green-800/50 bg-green-950/20',
+        isPlatform && !isInstalled && 'border-violet-800/30 bg-violet-950/10'
       )}
     >
       {/* Header */}
@@ -74,12 +80,20 @@ export function CommandCard({
           </div>
           <h3 className="font-medium text-zinc-100">/{command.frontmatter.name}</h3>
         </div>
-        {isInstalled && (
-          <span className="flex items-center gap-1 text-xs text-green-500 bg-green-950/50 px-2 py-0.5 rounded-full">
-            <Check className="w-3 h-3" />
-            Installed
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {isPlatform && (
+            <span className="flex items-center gap-1 text-xs text-violet-400 bg-violet-950/50 px-2 py-0.5 rounded-full">
+              <FolderOpen className="w-3 h-3" />
+              Platform
+            </span>
+          )}
+          {isInstalled && (
+            <span className="flex items-center gap-1 text-xs text-green-500 bg-green-950/50 px-2 py-0.5 rounded-full">
+              <Check className="w-3 h-3" />
+              {isPlatform ? 'Enabled' : 'Installed'}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Description */}
@@ -92,7 +106,7 @@ export function CommandCard({
           {command.frontmatter.category}
         </span>
 
-        {/* Install Button */}
+        {/* Install/Enable Button */}
         {!isInstalled && (
           <button
             onClick={handleInstallClick}
@@ -101,15 +115,19 @@ export function CommandCard({
               'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
               isInstalling
                 ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
-                : 'bg-blue-600 text-white hover:bg-blue-500'
+                : isPlatform
+                  ? 'bg-violet-600 text-white hover:bg-violet-500'
+                  : 'bg-blue-600 text-white hover:bg-blue-500'
             )}
           >
             {isInstalling ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : isPlatform ? (
+              <ToggleRight className="w-3.5 h-3.5" />
             ) : (
               <Download className="w-3.5 h-3.5" />
             )}
-            {isInstalling ? 'Installing...' : 'Install'}
+            {isInstalling ? 'Installing...' : isPlatform ? 'Enable' : 'Install'}
           </button>
         )}
       </div>

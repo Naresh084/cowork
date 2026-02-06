@@ -389,9 +389,7 @@ function SidebarRail({
     >
       {/* Brand */}
       <div className="p-2">
-        <div className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
-          <BrandMark className="w-6 h-6" />
-        </div>
+        <BrandMark className="mx-auto h-7 w-7" />
       </div>
 
       {/* New Task Button */}
@@ -589,9 +587,7 @@ function SidebarExpanded({
       {/* Brand */}
       <div className="px-4 pt-4 pb-2">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center">
-            <BrandMark className="w-5 h-5" />
-          </div>
+          <BrandMark className="h-7 w-7" />
           <div>
             <div className="text-sm font-semibold text-white/90">Cowork</div>
             <div className="text-xs text-white/40">Command center</div>

@@ -22,7 +22,7 @@ import type { InstalledCommandConfig } from './settings-store';
 export type CommandCategory = 'setup' | 'memory' | 'utility' | 'workflow' | 'custom';
 
 export interface CommandSource {
-  type: 'bundled' | 'managed';
+  type: 'bundled' | 'managed' | 'platform';
   path: string;
   priority: number;
 }
@@ -109,7 +109,7 @@ interface CommandState {
 
 interface CommandActions {
   // Discovery
-  discoverCommands: () => Promise<void>;
+  discoverCommands: (workingDirectory?: string) => Promise<void>;
 
   // Installation
   installCommand: (commandId: string) => Promise<void>;
@@ -177,16 +177,24 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const { availableCommands } = get();
       const { installedCommandConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
+      const enabledNames = new Set(
+        installedCommandConfigs.filter((c) => c.enabled).map((c) => c.name)
+      );
 
-      // Build a map of commands, preferring managed over bundled
+      // Build a map of commands, preferring managed over bundled/platform
       const commandMap = new Map<string, typeof availableCommands[0]>();
 
       for (const cmd of availableCommands) {
-        // Only include commands that are tracked in installedCommandConfigs
-        if (!installedNames.has(cmd.frontmatter.name)) continue;
+        // Include managed commands tracked in configs
+        // Include platform commands that are enabled
+        if (cmd.source.type === 'platform') {
+          if (!enabledNames.has(cmd.frontmatter.name)) continue;
+        } else {
+          if (!installedNames.has(cmd.frontmatter.name)) continue;
+        }
 
         const existing = commandMap.get(cmd.frontmatter.name);
-        // Prefer managed over bundled
+        // Prefer managed over platform/bundled
         if (!existing || cmd.source.type === 'managed') {
           commandMap.set(cmd.frontmatter.name, cmd);
         }
@@ -212,23 +220,42 @@ export const useCommandStore = create<CommandState & CommandActions>()(
     // Discovery
     // ========================================================================
 
-    discoverCommands: async () => {
+    discoverCommands: async (workingDirectory) => {
       set({ isDiscovering: true, error: null });
 
       try {
-        const commands = await invoke<CommandManifest[]>('deep_command_list');
+        const commands = await invoke<CommandManifest[]>('deep_command_list', {
+          workingDirectory,
+        });
         set({ availableCommands: commands, isDiscovering: false });
 
         // Sync installed configs with actual managed commands
+        // Skip platform configs during stale cleanup
         const managedCommandNames = new Set(
           commands
             .filter((c) => c.source.type === 'managed')
             .map((c) => c.frontmatter.name)
         );
-        const { installedCommandConfigs, removeInstalledCommandConfig } = useSettingsStore.getState();
+        const { installedCommandConfigs, removeInstalledCommandConfig, addInstalledCommandConfig } = useSettingsStore.getState();
         for (const config of installedCommandConfigs) {
+          if (config.source === 'platform') continue;
           if (!managedCommandNames.has(config.name)) {
             removeInstalledCommandConfig(config.id);
+          }
+        }
+
+        // Auto-create disabled configs for newly discovered platform commands
+        const existingConfigNames = new Set(installedCommandConfigs.map((c) => c.name));
+        const platformCommands = commands.filter((c) => c.source.type === 'platform');
+        for (const cmd of platformCommands) {
+          if (!existingConfigNames.has(cmd.frontmatter.name)) {
+            addInstalledCommandConfig({
+              id: cmd.id,
+              name: cmd.frontmatter.name,
+              enabled: false,
+              installedAt: Date.now(),
+              source: 'platform',
+            });
           }
         }
       } catch (error) {
@@ -262,6 +289,7 @@ export const useCommandStore = create<CommandState & CommandActions>()(
           const config: InstalledCommandConfig = {
             id: managedCommandId,
             name: command.frontmatter.name,
+            enabled: true,
             installedAt: Date.now(),
             source: 'managed',
           };
@@ -365,6 +393,7 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         const config: InstalledCommandConfig = {
           id: commandId,
           name: params.name,
+          enabled: true,
           installedAt: Date.now(),
           source: 'managed',
         };
@@ -434,23 +463,30 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const { availableCommands, searchQuery, selectedCategory, activeTab } = get();
       const { installedCommandConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
+      const enabledPlatformNames = new Set(
+        installedCommandConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
+      );
 
       let commands = availableCommands;
 
       // Filter by tab
       if (activeTab === 'available') {
-        // Show bundled commands (available for installation)
-        // Exclude commands that are already installed (in installedCommandConfigs)
+        // Show bundled + platform commands (not managed)
+        // Hide enabled platform commands (they show in installed tab)
         commands = commands.filter((c) => {
           if (c.source.type === 'managed') return false;
+          if (c.source.type === 'platform' && enabledPlatformNames.has(c.frontmatter.name)) return false;
           // Show bundled commands that are NOT yet installed
-          return !installedNames.has(c.frontmatter.name);
+          if (c.source.type === 'bundled' && installedNames.has(c.frontmatter.name)) return false;
+          return true;
         });
       } else if (activeTab === 'installed') {
-        // Show only managed commands that are in installed configs
-        commands = commands.filter(
-          (c) => c.source.type === 'managed' && installedNames.has(c.frontmatter.name)
-        );
+        // Show managed commands + enabled platform commands
+        commands = commands.filter((c) => {
+          if (c.source.type === 'managed' && installedNames.has(c.frontmatter.name)) return true;
+          if (c.source.type === 'platform' && enabledPlatformNames.has(c.frontmatter.name)) return true;
+          return false;
+        });
       }
 
       // Filter by search query
@@ -477,14 +513,18 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const { availableCommands } = get();
       const { installedCommandConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
-
-      return availableCommands.filter(
-        (c) => c.source.type === 'managed' && installedNames.has(c.frontmatter.name)
+      const enabledPlatformNames = new Set(
+        installedCommandConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
       );
+
+      return availableCommands.filter((c) => {
+        if (c.source.type === 'managed' && installedNames.has(c.frontmatter.name)) return true;
+        if (c.source.type === 'platform' && enabledPlatformNames.has(c.frontmatter.name)) return true;
+        return false;
+      });
     },
 
     getInstalledCount: () => {
-      // Count only managed commands that are in installedCommandConfigs
       return get().getInstalledCommands().length;
     },
 
@@ -496,9 +536,13 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const command = availableCommands.find((c) => c.id === commandId);
       if (!command) return false;
 
-      // A command is installed if:
-      // 1. A managed version exists on disk AND
-      // 2. It's tracked in installedCommandConfigs
+      // Platform commands are "installed" when their config is enabled
+      if (command.source.type === 'platform') {
+        const config = installedCommandConfigs.find((c) => c.name === command.frontmatter.name);
+        return config?.enabled ?? false;
+      }
+
+      // A managed command is installed if it exists on disk + tracked in configs
       const managedCommandExists = availableCommands.some(
         (c) => c.source.type === 'managed' && c.frontmatter.name === command.frontmatter.name
       );
@@ -510,14 +554,18 @@ export const useCommandStore = create<CommandState & CommandActions>()(
       const { availableCommands } = get();
       const { installedCommandConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedCommandConfigs.map((c) => c.name));
+      const enabledPlatformNames = new Set(
+        installedCommandConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
+      );
 
       const lowerAlias = alias.toLowerCase();
 
-      // First try to find in installed/managed commands
+      // First try to find in installed/managed commands or enabled platform commands
       const installedMatch = availableCommands.find((cmd) => {
-        if (cmd.source.type !== 'managed' && !installedNames.has(cmd.frontmatter.name)) {
-          return false;
-        }
+        const isActive =
+          (cmd.source.type === 'managed' && installedNames.has(cmd.frontmatter.name)) ||
+          (cmd.source.type === 'platform' && enabledPlatformNames.has(cmd.frontmatter.name));
+        if (!isActive) return false;
         return (
           cmd.frontmatter.name.toLowerCase() === lowerAlias ||
           cmd.frontmatter.aliases?.some((a) => a.toLowerCase() === lowerAlias)
@@ -526,9 +574,9 @@ export const useCommandStore = create<CommandState & CommandActions>()(
 
       if (installedMatch) return installedMatch;
 
-      // Fallback to bundled commands (if no managed version)
+      // Fallback to bundled commands (if no managed/platform version)
       return availableCommands.find((cmd) => {
-        if (cmd.source.type === 'managed') return false;
+        if (cmd.source.type === 'managed' || cmd.source.type === 'platform') return false;
         return (
           cmd.frontmatter.name.toLowerCase() === lowerAlias ||
           cmd.frontmatter.aliases?.some((a) => a.toLowerCase() === lowerAlias)
@@ -589,9 +637,17 @@ export const useInstalledCommands = (): SlashCommand[] => {
   const configs = useSettingsStore((s) => s.installedCommandConfigs);
   return useMemo(() => {
     const installedNames = new Set(configs.map((c) => c.name));
+    const enabledPlatformNames = new Set(
+      configs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
+    );
     const commandMap = new Map<string, typeof availableCommands[0]>();
     for (const cmd of availableCommands) {
-      if (!installedNames.has(cmd.frontmatter.name)) continue;
+      // Include managed commands tracked in configs + enabled platform commands
+      if (cmd.source.type === 'platform') {
+        if (!enabledPlatformNames.has(cmd.frontmatter.name)) continue;
+      } else {
+        if (!installedNames.has(cmd.frontmatter.name)) continue;
+      }
       const existing = commandMap.get(cmd.frontmatter.name);
       if (!existing || cmd.source.type === 'managed') {
         commandMap.set(cmd.frontmatter.name, cmd);

@@ -1,4 +1,4 @@
-import { Trash2, Check, Loader2 } from 'lucide-react';
+import { Trash2, Check, Loader2, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Subagent, SubagentCategory } from '../../stores/subagent-store';
 import {
@@ -42,6 +42,7 @@ export function InstalledSubagentItem({
 }: InstalledSubagentItemProps) {
   const CategoryIcon = CATEGORY_ICONS[subagent.category] || FileText;
   const categoryColor = CATEGORY_COLORS[subagent.category] || 'text-zinc-400';
+  const isPlatform = subagent.source === 'platform';
 
   return (
     <div
@@ -56,7 +57,15 @@ export function InstalledSubagentItem({
           <CategoryIcon className={cn('w-4 h-4', categoryColor)} />
         </div>
         <div className="min-w-0">
-          <span className="font-medium text-zinc-100 truncate block">{subagent.displayName}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-zinc-100 truncate">{subagent.displayName}</span>
+            {isPlatform && (
+              <span className="flex items-center gap-1 text-[10px] text-violet-400 bg-violet-950/50 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                <FolderOpen className="w-2.5 h-2.5" />
+                Platform
+              </span>
+            )}
+          </div>
           <span className="text-xs text-zinc-500 truncate block">{subagent.description}</span>
         </div>
       </div>
@@ -76,27 +85,29 @@ export function InstalledSubagentItem({
 
       {/* Actions */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Uninstall */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onUninstall();
-          }}
-          disabled={isUninstalling}
-          className={cn(
-            'p-1.5 rounded-md transition-colors',
-            isUninstalling
-              ? 'text-zinc-600 cursor-not-allowed'
-              : 'text-zinc-500 hover:text-red-400 hover:bg-zinc-800'
-          )}
-          title="Uninstall"
-        >
-          {isUninstalling ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Trash2 className="w-4 h-4" />
-          )}
-        </button>
+        {/* Uninstall - hidden for platform subagents (read-only) */}
+        {!isPlatform && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onUninstall();
+            }}
+            disabled={isUninstalling}
+            className={cn(
+              'p-1.5 rounded-md transition-colors',
+              isUninstalling
+                ? 'text-zinc-600 cursor-not-allowed'
+                : 'text-zinc-500 hover:text-red-400 hover:bg-zinc-800'
+            )}
+            title="Uninstall"
+          >
+            {isUninstalling ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+          </button>
+        )}
       </div>
     </div>
   );

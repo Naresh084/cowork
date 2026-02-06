@@ -26,6 +26,7 @@ export class IntegrationBridgeService {
   private router: MessageRouter;
   private store: IntegrationStore;
   private initialized = false;
+  private platformOpInFlight: Set<PlatformType> = new Set();
 
   constructor() {
     this.router = new MessageRouter();
@@ -115,6 +116,31 @@ export class IntegrationBridgeService {
     platform: PlatformType,
     config: Record<string, string> = {},
   ): Promise<void> {
+    // Serialize platform operations to avoid concurrent connect/disconnect races.
+    while (this.platformOpInFlight.has(platform)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    try {
+    // Ensure previous adapter/browser for this platform is fully torn down before reconnecting.
+    // This prevents profile lock conflicts (e.g. WhatsApp LocalAuth userDataDir in use).
+    if (this.adapters.has(platform)) {
+      const existing = this.adapters.get(platform)!;
+      existing.removeAllListeners();
+      this.router.unregisterAdapter(platform);
+      try {
+        await existing.disconnect();
+      } catch {
+        // Best effort cleanup
+      }
+      this.adapters.delete(platform);
+    }
+
+    if (platform === 'whatsapp') {
+      // Chromium profile locks may persist briefly after teardown.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
     const adapter = this.createAdapter(platform);
 
     // Wire adapter status events to integration event emitter
@@ -134,7 +160,7 @@ export class IntegrationBridgeService {
       );
     });
 
-    // Attempt connection first - only tear down old adapter after success
+    // Attempt connection
     try {
       await adapter.connect(config);
     } catch (err) {
@@ -142,14 +168,6 @@ export class IntegrationBridgeService {
       adapter.removeAllListeners();
       try { await adapter.disconnect(); } catch { /* ignore cleanup errors */ }
       throw err;
-    }
-
-    // Connection succeeded - now safely disconnect old adapter if any
-    if (this.adapters.has(platform)) {
-      const old = this.adapters.get(platform)!;
-      old.removeAllListeners();
-      this.router.unregisterAdapter(platform);
-      try { await old.disconnect(); } catch { /* ignore old cleanup errors */ }
     }
 
     // Register new adapter
@@ -162,10 +180,18 @@ export class IntegrationBridgeService {
       enabled: true,
       config,
     });
+    } finally {
+      this.platformOpInFlight.delete(platform);
+    }
   }
 
   /** Disconnect a platform */
   async disconnect(platform: PlatformType): Promise<void> {
+    while (this.platformOpInFlight.has(platform)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    try {
     const adapter = this.adapters.get(platform);
     if (adapter) {
       await adapter.disconnect();
@@ -173,6 +199,9 @@ export class IntegrationBridgeService {
       this.adapters.delete(platform);
     }
     await this.store.removeConfig(platform);
+    } finally {
+      this.platformOpInFlight.delete(platform);
+    }
   }
 
   /** Get statuses of all platforms */

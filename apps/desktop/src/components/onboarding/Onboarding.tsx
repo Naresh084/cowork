@@ -94,7 +94,7 @@ export function Onboarding() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(147,197,253,0.25),transparent_45%),radial-gradient(circle_at_70%_80%,rgba(29,78,216,0.2),transparent_40%)]" />
 
           <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-14">
-            <div className="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-black/20 px-4 py-2 backdrop-blur-sm w-fit">
+            <div className="inline-flex items-center gap-3 w-fit">
               <BrandMark className="h-6 w-6" />
               <span className="text-sm font-semibold tracking-wide text-white/90">Cowork</span>
             </div>

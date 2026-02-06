@@ -104,6 +104,31 @@ export class SkillService {
       }
     }
 
+    // Priority 1.5: Platform directories (.agent/ and .claude/)
+    const platformSkillDirs: string[] = [];
+    if (workingDirectory) {
+      platformSkillDirs.push(
+        join(workingDirectory, '.agent', 'skills'),
+        join(workingDirectory, '.claude', 'skills'),
+      );
+    }
+    platformSkillDirs.push(
+      join(homedir(), '.agent', 'skills'),
+      join(homedir(), '.claude', 'skills'),
+    );
+
+    for (const dir of platformSkillDirs) {
+      if (existsSync(dir)) {
+        const skills = await this.discoverFromDirectory(dir, 'platform', 1);
+        for (const skill of skills) {
+          if (!seenNames.has(skill.frontmatter.name)) {
+            seenNames.add(skill.frontmatter.name);
+            allSkills.push(skill);
+          }
+        }
+      }
+    }
+
     // Priority 2: Managed skills (installed from marketplace)
     if (existsSync(this.managedSkillsDir)) {
       const skills = await this.discoverFromDirectory(this.managedSkillsDir, 'managed', 2);
@@ -232,7 +257,7 @@ export class SkillService {
       throw new Error(`Skill not found: ${skillId}`);
     }
 
-    // Only install bundled skills
+    // Only install bundled skills (platform skills use enable/disable)
     if (skill.source.type !== 'bundled') {
       throw new Error(`Can only install bundled skills. Skill ${skillId} is ${skill.source.type}`);
     }
@@ -267,7 +292,7 @@ export class SkillService {
       throw new Error(`Skill not found: ${skillId}`);
     }
 
-    // Only uninstall managed skills
+    // Only uninstall managed skills (platform skills are managed externally)
     if (skill.source.type !== 'managed') {
       throw new Error(`Can only uninstall managed skills. Skill ${skillId} is ${skill.source.type}`);
     }

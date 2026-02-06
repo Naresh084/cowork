@@ -55,6 +55,28 @@ const initialState: IntegrationState = {
   },
 };
 
+const statusPollTimers: Partial<Record<PlatformType, ReturnType<typeof setInterval>>> = {};
+
+function clearStatusPolling(platform: PlatformType): void {
+  const timer = statusPollTimers[platform];
+  if (timer) {
+    clearInterval(timer);
+    delete statusPollTimers[platform];
+  }
+}
+
+function normalizeStatusesResponse(result: unknown): PlatformStatus[] {
+  if (Array.isArray(result)) {
+    return result as PlatformStatus[];
+  }
+
+  if (result && typeof result === 'object' && Array.isArray((result as { statuses?: unknown }).statuses)) {
+    return (result as { statuses: PlatformStatus[] }).statuses;
+  }
+
+  return [];
+}
+
 // ============================================================================
 // Store
 // ============================================================================
@@ -64,6 +86,12 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
     ...initialState,
 
     connect: async (platform, config) => {
+      if (get().isConnecting[platform]) {
+        return;
+      }
+
+      clearStatusPolling(platform);
+
       // Clear previous error and mark as connecting
       set((state) => ({
         isConnecting: { ...state.isConnecting, [platform]: true },
@@ -74,21 +102,56 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
       }));
 
       try {
-        await invoke('agent_integration_connect', { platform, config: config || {} });
+        const status = await invoke<PlatformStatus | null>('agent_integration_connect', {
+          platform,
+          config: config || {},
+        });
+        if (status) {
+          get().updatePlatformStatus(status);
+        }
+        await get().refreshStatuses();
 
         // For WhatsApp, QR code arrives via integration:qr event (handled in useAgentEvents).
         // Also do a delayed poll as a fallback in case the event was missed.
         if (platform === 'whatsapp') {
-          setTimeout(async () => {
+          let attempts = 0;
+          statusPollTimers.whatsapp = setInterval(async () => {
+            attempts += 1;
             try {
+              await get().refreshStatuses();
+              const current = get().platforms.whatsapp;
+              if (current.connected || attempts >= 45) {
+                clearStatusPolling('whatsapp');
+                if (!current.connected) {
+                  set((state) => ({
+                    isConnecting: { ...state.isConnecting, whatsapp: false },
+                  }));
+                }
+                return;
+              }
+
               const result = await invoke<{ qrDataUrl: string | null }>('agent_integration_get_qr');
-              if (result?.qrDataUrl) {
+              if (result?.qrDataUrl && !get().whatsappQR) {
                 set({ whatsappQR: result.qrDataUrl });
               }
             } catch {
-              // QR will arrive via event, this is just a fallback
+              // QR/status may still arrive via events
             }
           }, 2000);
+        } else {
+          let attempts = 0;
+          statusPollTimers[platform] = setInterval(async () => {
+            attempts += 1;
+            try {
+              await get().refreshStatuses();
+              const current = get().platforms[platform];
+              if (current.connected || attempts >= 20) {
+                clearStatusPolling(platform);
+              }
+            } catch {
+              // ignore and keep polling briefly
+            }
+          }, 1000);
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -100,15 +163,19 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
               error: errorMessage,
             },
           },
-        }));
-      } finally {
-        set((state) => ({
           isConnecting: { ...state.isConnecting, [platform]: false },
         }));
+      } finally {
+        if (platform !== 'whatsapp') {
+          set((state) => ({
+            isConnecting: { ...state.isConnecting, [platform]: false },
+          }));
+        }
       }
     },
 
     disconnect: async (platform) => {
+      clearStatusPolling(platform);
       try {
         await invoke('agent_integration_disconnect', { platform });
 
@@ -129,16 +196,26 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
 
     refreshStatuses: async () => {
       try {
-        const result = await invoke<{ statuses: PlatformStatus[] }>('agent_integration_list_statuses');
+        const result = await invoke<unknown>('agent_integration_list_statuses');
+        const statuses = normalizeStatusesResponse(result);
 
         set((state) => {
           const updated = { ...state.platforms };
-          for (const status of result.statuses) {
+          for (const status of statuses) {
             if (status.platform in updated) {
-              updated[status.platform] = status;
+              updated[status.platform] = {
+                ...updated[status.platform],
+                ...status,
+              };
+              if (status.connected) {
+                clearStatusPolling(status.platform);
+              }
             }
           }
-          return { platforms: updated };
+          return {
+            platforms: updated,
+            whatsappQR: updated.whatsapp.connected ? null : state.whatsappQR,
+          };
         });
       } catch (error) {
         console.warn('Failed to refresh integration statuses:', error);
@@ -146,16 +223,34 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
     },
 
     updatePlatformStatus: (status) => {
+      if (status.connected || status.error) {
+        clearStatusPolling(status.platform);
+      }
       set((state) => ({
         platforms: {
           ...state.platforms,
-          [status.platform]: status,
+          [status.platform]: {
+            ...state.platforms[status.platform],
+            ...status,
+          },
         },
+        isConnecting: {
+          ...state.isConnecting,
+          [status.platform]:
+            status.connected || !!status.error
+              ? false
+              : state.isConnecting[status.platform],
+        },
+        whatsappQR:
+          status.platform === 'whatsapp' && status.connected ? null : state.whatsappQR,
       }));
     },
 
     setQRCode: (qr) => {
-      set({ whatsappQR: qr });
+      set((state) => ({
+        whatsappQR: qr,
+        isConnecting: { ...state.isConnecting, whatsapp: qr ? false : state.isConnecting.whatsapp },
+      }));
     },
 
     sendTestMessage: async (platform, message) => {

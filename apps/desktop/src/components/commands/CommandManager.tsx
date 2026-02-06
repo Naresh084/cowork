@@ -9,6 +9,7 @@ import { useState, useEffect } from 'react';
 import { X, Terminal, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCommandStore } from '../../stores/command-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { CommandsHeader } from './CommandsHeader';
 import { CommandGrid } from './CommandGrid';
 import { CommandDetailsPanel } from './CommandDetailsPanel';
@@ -30,14 +31,15 @@ export function CommandManager({ isOpen, onClose }: CommandManagerProps) {
     error,
   } = useCommandStore();
 
+  const { defaultWorkingDirectory } = useSettingsStore();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Discover commands when modal opens
   useEffect(() => {
     if (isOpen) {
-      discoverCommands();
+      discoverCommands(defaultWorkingDirectory || undefined);
     }
-  }, [isOpen, discoverCommands]);
+  }, [isOpen, defaultWorkingDirectory, discoverCommands]);
 
   // Handle escape key
   useEffect(() => {

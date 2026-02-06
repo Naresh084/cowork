@@ -120,6 +120,7 @@ export const SkillSourceTypeSchema = z.enum([
   'managed',   // Installed from marketplace
   'workspace', // Project-local skills
   'custom',    // User-added directories
+  'platform',  // Discovered from .agent/ or .claude/ directories
 ]);
 
 export type SkillSourceType = z.infer<typeof SkillSourceTypeSchema>;

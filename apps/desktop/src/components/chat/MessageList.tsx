@@ -61,7 +61,7 @@ function chatItemsToMessages(chatItems: ChatItem[]): Message[] {
       item.kind === 'user_message' || item.kind === 'assistant_message'
     )
     .map((item) => ({
-      id: item.id,
+      id: item.kind === 'user_message' ? (item.turnId || item.id) : item.id,
       role: item.kind === 'user_message' ? 'user' : 'assistant',
       content: item.content,
       createdAt: item.timestamp,
@@ -93,10 +93,10 @@ export function MessageList() {
     activeTurnId,
   } = sessionState;
 
-  // Prefer legacy messages (correct IDs matching turnActivities keys), fallback to chatItems
-  const messages = legacyMessages.length > 0
-    ? legacyMessages
-    : (chatItems && chatItems.length > 0 ? chatItemsToMessages(chatItems) : []);
+  // Prefer chatItems (single source of truth with correct turnId-based IDs), fallback to legacy messages
+  const messages = chatItems && chatItems.length > 0
+    ? chatItemsToMessages(chatItems)
+    : legacyMessages;
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 
