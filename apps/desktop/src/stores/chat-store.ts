@@ -33,18 +33,6 @@ export interface ToolExecution {
   parentToolId?: string;
 }
 
-// Extended types for persistence
-interface PersistedMessage extends Message {
-  toolExecutionIds?: string[];
-}
-
-interface PersistedToolExecution extends ToolExecution {
-  turnMessageId?: string;
-  turnOrder?: number;
-  /** If set, this tool is a sub-tool executed within a parent task tool */
-  parentToolId?: string;
-}
-
 export interface MediaActivityItem {
   kind: 'image' | 'video';
   path?: string;
@@ -118,19 +106,12 @@ export interface UserQuestion {
 
 export interface SessionChatState {
   // ============================================================================
-  // V2 Unified Storage (primary)
+  // V2 Unified Storage (sole source of truth)
   // ============================================================================
-  /** Unified chat items array - the single source of truth for V2 */
+  /** Unified chat items array - the single source of truth */
   chatItems: ChatItem[];
   /** Context usage info (persisted) */
   contextUsage: ContextUsage | null;
-
-  // ============================================================================
-  // V1 Legacy Storage (for backwards compatibility during transition)
-  // ============================================================================
-  messages: Message[];
-  streamingToolCalls: ToolExecution[];
-  turnActivities: Record<string, TurnActivityItem[]>;
 
   // ============================================================================
   // Streaming State (temporary, not persisted)
@@ -192,14 +173,6 @@ interface ChatActions {
   // Internal actions for event handling
   appendStreamChunk: (sessionId: string, chunk: string) => void;
   setStreamingTool: (sessionId: string, tool: ToolExecution | null) => void;
-  addMessage: (sessionId: string, message: Message) => void;
-  updateToolExecution: (sessionId: string, toolId: string, updates: Partial<ToolExecution>) => void;
-  addToolExecution: (sessionId: string, tool: ToolExecution) => void;
-  resetToolExecutions: (sessionId: string) => void;
-  startTurn: (sessionId: string, userMessageId: string) => void;
-  addTurnActivity: (sessionId: string, activity: Omit<TurnActivityItem, 'id' | 'createdAt'> & { id?: string; createdAt?: number }) => void;
-  completeTurnThinking: (sessionId: string) => void;
-  endTurn: (sessionId: string) => void;
   addPermissionRequest: (sessionId: string, request: ExtendedPermissionRequest) => void;
   removePermissionRequest: (sessionId: string, id: string) => void;
   addQuestion: (sessionId: string, question: UserQuestion) => void;
@@ -237,14 +210,9 @@ export interface SessionDetails {
 }
 
 const createSessionState = (): SessionChatState => ({
-  // V2 unified storage
+  // V2 unified storage (sole source of truth)
   chatItems: [],
   contextUsage: null,
-
-  // V1 legacy storage (backwards compatibility)
-  messages: [],
-  streamingToolCalls: [],
-  turnActivities: {},
 
   // Streaming state
   isStreaming: false,
@@ -268,187 +236,6 @@ const createSessionState = (): SessionChatState => ({
   browserViewScreenshot: null,
 });
 
-// Helper functions for extracting activity data from tool results
-function extractMediaFromToolResult(result: unknown): MediaActivityItem[] {
-  const items: MediaActivityItem[] = [];
-  const r = result as Record<string, unknown> | null;
-
-  if (r?.images && Array.isArray(r.images)) {
-    for (const img of r.images) {
-      if (img?.path || img?.url) {
-        items.push({ kind: 'image', path: img.path, url: img.url, mimeType: img.mimeType });
-      }
-    }
-  }
-
-  if (r?.videos && Array.isArray(r.videos)) {
-    for (const vid of r.videos) {
-      if (vid?.path || vid?.url) {
-        items.push({ kind: 'video', path: vid.path, url: vid.url, mimeType: vid.mimeType });
-      }
-    }
-  }
-
-  return items;
-}
-
-function extractReportFromToolResult(result: unknown): ReportActivityItem | null {
-  const r = result as Record<string, unknown> | null;
-  if (!r?.reportPath && !r?.report) return null;
-
-  return {
-    title: 'Research Report',
-    path: r.reportPath as string | undefined,
-    snippet: r.report ? String(r.report).slice(0, 240) : undefined,
-  };
-}
-
-function extractDesignFromToolResult(result: unknown, toolName: string): DesignActivityItem | null {
-  const r = result as Record<string, unknown> | null;
-  if (!r) return null;
-
-  const html = r.html as string | undefined;
-  const css = r.css as string | undefined;
-  const svg = r.svg as string | undefined;
-
-  if (!html && !css && !svg) return null;
-
-  const content = html || (css ? `<style>${css}</style>` : svg);
-
-  return {
-    title: 'Design Preview',
-    preview: { name: `${toolName}-preview.html`, content },
-  };
-}
-
-/**
- * Reconstructs turnActivities from persisted messages and tool executions.
- * Called when loading a session from disk to restore the activity timeline.
- * Note: Tools with parentToolId are sub-tools rendered inside their parent TaskToolCard,
- * so we skip adding them as top-level activities.
- */
-function reconstructTurnActivities(
-  messages: PersistedMessage[],
-  toolExecutions: PersistedToolExecution[]
-): Record<string, TurnActivityItem[]> {
-  const turnActivities: Record<string, TurnActivityItem[]> = {};
-
-  // Get user messages sorted by createdAt for fallback association
-  const userMessages = messages
-    .filter(m => m.role === 'user')
-    .sort((a, b) => a.createdAt - b.createdAt);
-
-
-  // Group tool executions by turn message ID
-  const toolsByTurn = new Map<string, PersistedToolExecution[]>();
-  let orphanedTools = 0;
-
-  for (const tool of toolExecutions) {
-    // Skip sub-tools - they render inside their parent
-    if (tool.parentToolId) continue;
-
-    let turnId = tool.turnMessageId;
-
-    // Fallback: find user message that precedes this tool by timestamp
-    if (!turnId) {
-      const preceding = [...userMessages].reverse().find(m => m.createdAt <= tool.startedAt);
-      turnId = preceding?.id;
-      if (turnId) {
-        orphanedTools++;
-      }
-    }
-
-    // Last resort: use the last user message
-    if (!turnId && userMessages.length > 0) {
-      turnId = userMessages[userMessages.length - 1].id;
-      orphanedTools++;
-    }
-
-    if (turnId) {
-      const tools = toolsByTurn.get(turnId) || [];
-      tools.push(tool);
-      toolsByTurn.set(turnId, tools);
-    }
-  }
-
-
-  // Build activities for each user message (turn)
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    if (msg.role !== 'user') continue;
-
-    const activities: TurnActivityItem[] = [];
-
-    // Get tool executions for this turn, sorted by order
-    const turnTools = (toolsByTurn.get(msg.id) || [])
-      .sort((a, b) => (a.turnOrder ?? 0) - (b.turnOrder ?? 0));
-
-    // Add tool activities
-    for (const tool of turnTools) {
-      activities.push({
-        id: `act-tool-${tool.id}`,
-        type: 'tool',
-        status: 'done',
-        toolId: tool.id,
-        createdAt: tool.startedAt,
-      });
-
-      // Check for media activities (images/videos from tool results)
-      const mediaItems = extractMediaFromToolResult(tool.result);
-      if (mediaItems.length > 0) {
-        activities.push({
-          id: `act-media-${tool.id}`,
-          type: 'media',
-          status: 'done',
-          mediaItems,
-          createdAt: tool.completedAt || tool.startedAt,
-        });
-      }
-
-      // Check for report activities
-      const report = extractReportFromToolResult(tool.result);
-      if (report) {
-        activities.push({
-          id: `act-report-${tool.id}`,
-          type: 'report',
-          status: 'done',
-          report,
-          createdAt: tool.completedAt || tool.startedAt,
-        });
-      }
-
-      // Check for design activities
-      const design = extractDesignFromToolResult(tool.result, tool.name);
-      if (design) {
-        activities.push({
-          id: `act-design-${tool.id}`,
-          type: 'design',
-          status: 'done',
-          design,
-          createdAt: tool.completedAt || tool.startedAt,
-        });
-      }
-    }
-
-    // Find the assistant message that follows this user message
-    const assistantMsg = messages.slice(i + 1).find(m => m.role === 'assistant');
-    if (assistantMsg) {
-      activities.push({
-        id: `act-assistant-${assistantMsg.id}`,
-        type: 'assistant',
-        status: 'done',
-        messageId: assistantMsg.id,
-        createdAt: assistantMsg.createdAt,
-      });
-    }
-
-    // ALWAYS add turn activities, even if empty (prevents messages from being hidden)
-    turnActivities[msg.id] = activities;
-  }
-
-  return turnActivities;
-}
-
 const EMPTY_SESSION_STATE = createSessionState();
 
 const updateSession = (
@@ -469,6 +256,331 @@ const updateSession = (
   };
 };
 
+// ============================================================================
+// V2 Legacy Conversion - Convert old V1 data to V2 ChatItems
+// ============================================================================
+
+/**
+ * Convert legacy V1 messages to V2 ChatItems for backward compatibility.
+ * Used when loading old sessions that only have V1 messages and no chatItems.
+ */
+function convertLegacyToV2(messages: Message[], toolExecutions?: ToolExecution[]): ChatItem[] {
+  const items: ChatItem[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      items.push({
+        id: msg.id,
+        kind: 'user_message',
+        content: msg.content,
+        turnId: msg.id,
+        timestamp: msg.createdAt,
+      } as ChatItem);
+    } else if (msg.role === 'assistant') {
+      // Find the preceding user message to set as turnId
+      const precedingUser = [...messages]
+        .filter(m => m.role === 'user' && m.createdAt <= msg.createdAt)
+        .pop();
+      items.push({
+        id: msg.id,
+        kind: 'assistant_message',
+        content: msg.content,
+        metadata: msg.metadata,
+        turnId: precedingUser?.id,
+        timestamp: msg.createdAt,
+      } as ChatItem);
+    } else if (msg.role === 'system') {
+      const errMeta = msg.metadata as { kind?: string; code?: string; raw?: string; details?: Record<string, unknown> } | undefined;
+      if (errMeta?.kind === 'error') {
+        items.push({
+          id: msg.id,
+          kind: 'error',
+          message: errMeta.raw || (typeof msg.content === 'string' ? msg.content : 'Error'),
+          code: errMeta.code,
+          details: errMeta.details,
+          timestamp: msg.createdAt,
+        } as ChatItem);
+      } else {
+        items.push({
+          id: msg.id,
+          kind: 'system_message',
+          content: typeof msg.content === 'string' ? msg.content : 'System message',
+          metadata: msg.metadata,
+          timestamp: msg.createdAt,
+        } as ChatItem);
+      }
+    }
+  }
+
+  // Convert tool executions to tool_start + tool_result pairs
+  if (toolExecutions) {
+    for (const tool of toolExecutions) {
+      // Find the user message that preceded this tool
+      const precedingUser = messages
+        .filter(m => m.role === 'user' && m.createdAt <= tool.startedAt)
+        .pop();
+      const turnId = precedingUser?.id;
+
+      items.push({
+        id: `ts-${tool.id}`,
+        kind: 'tool_start',
+        toolId: tool.id,
+        name: tool.name,
+        args: tool.args,
+        status: tool.status === 'running' ? 'running' : tool.status === 'error' ? 'error' : 'completed',
+        parentToolId: tool.parentToolId,
+        turnId,
+        timestamp: tool.startedAt,
+      } as ChatItem);
+
+      if (tool.status !== 'running' && tool.status !== 'pending') {
+        items.push({
+          id: `tr-${tool.id}`,
+          kind: 'tool_result',
+          toolId: tool.id,
+          name: tool.name,
+          status: tool.status === 'error' ? 'error' : 'success',
+          result: tool.result,
+          error: tool.error,
+          parentToolId: tool.parentToolId,
+          turnId,
+          timestamp: tool.completedAt || tool.startedAt,
+        } as ChatItem);
+      }
+    }
+  }
+
+  // Sort by timestamp
+  items.sort((a, b) => a.timestamp - b.timestamp);
+  return items;
+}
+
+// ============================================================================
+// V2 Derivation Functions - Derive V1-shaped structures from chatItems
+// ============================================================================
+
+/**
+ * Derive Message[] from chatItems for rendering.
+ * Extracts user_message, assistant_message, and system_message items.
+ */
+export function deriveMessagesFromItems(chatItems: ChatItem[]): Message[] {
+  const messages: Message[] = [];
+  for (const item of chatItems) {
+    if (item.kind === 'user_message') {
+      messages.push({
+        id: item.turnId || item.id,
+        role: 'user',
+        content: item.content,
+        createdAt: item.timestamp,
+      });
+    } else if (item.kind === 'assistant_message') {
+      messages.push({
+        id: item.id,
+        role: 'assistant',
+        content: item.content,
+        createdAt: item.timestamp,
+        metadata: item.metadata,
+      });
+    } else if (item.kind === 'system_message') {
+      messages.push({
+        id: item.id,
+        role: 'system',
+        content: item.content,
+        createdAt: item.timestamp,
+        metadata: item.metadata,
+      });
+    } else if (item.kind === 'error') {
+      messages.push({
+        id: item.id,
+        role: 'system',
+        content: item.message,
+        createdAt: item.timestamp,
+        metadata: {
+          kind: 'error',
+          code: item.code,
+          details: item.details,
+          raw: item.message,
+        },
+      });
+    }
+  }
+  return messages;
+}
+
+/**
+ * Derive Map<toolId, ToolExecution> from chatItems.
+ * Merges tool_start and tool_result items into ToolExecution objects.
+ */
+export function deriveToolMapFromItems(chatItems: ChatItem[]): Map<string, ToolExecution> {
+  const map = new Map<string, ToolExecution>();
+
+  for (const item of chatItems) {
+    if (item.kind === 'tool_start') {
+      map.set(item.toolId, {
+        id: item.toolId,
+        name: item.name,
+        args: item.args as Record<string, unknown>,
+        status: item.status === 'running' ? 'running' : item.status === 'error' ? 'error' : 'success',
+        startedAt: item.timestamp,
+        parentToolId: item.parentToolId,
+      });
+    } else if (item.kind === 'tool_result') {
+      const existing = map.get(item.toolId);
+      if (existing) {
+        existing.status = item.status === 'success' ? 'success' : 'error';
+        existing.result = item.result;
+        existing.error = item.error;
+        existing.completedAt = item.timestamp;
+      } else {
+        // tool_result arrived without tool_start (edge case)
+        map.set(item.toolId, {
+          id: item.toolId,
+          name: item.name,
+          args: {},
+          status: item.status === 'success' ? 'success' : 'error',
+          result: item.result,
+          error: item.error,
+          startedAt: item.timestamp,
+          completedAt: item.timestamp,
+          parentToolId: item.parentToolId,
+        });
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Derive turnActivities from chatItems for rendering.
+ * Groups items by turnId and builds TurnActivityItem[] for each turn.
+ */
+export function deriveTurnActivitiesFromItems(
+  chatItems: ChatItem[],
+  pendingPermissions: ExtendedPermissionRequest[],
+  pendingQuestions: UserQuestion[]
+): Record<string, TurnActivityItem[]> {
+  const turnActivities: Record<string, TurnActivityItem[]> = {};
+  const pendingPermissionIds = new Set(pendingPermissions.map(p => p.id));
+  const pendingQuestionIds = new Set(pendingQuestions.map(q => q.id));
+
+  // Collect all user message turn IDs to ensure every turn has an entry
+  for (const item of chatItems) {
+    if (item.kind === 'user_message') {
+      const turnId = item.turnId || item.id;
+      if (!turnActivities[turnId]) {
+        turnActivities[turnId] = [];
+      }
+    }
+  }
+
+  for (const item of chatItems) {
+    const turnId = item.turnId || (item.kind === 'user_message' ? item.id : undefined);
+    if (!turnId) continue;
+    if (!turnActivities[turnId]) {
+      turnActivities[turnId] = [];
+    }
+    const activities = turnActivities[turnId];
+
+    switch (item.kind) {
+      case 'tool_start': {
+        // Skip sub-tools - they render inside their parent task card
+        if (item.parentToolId) break;
+        activities.push({
+          id: `act-tool-${item.toolId}`,
+          type: 'tool',
+          status: item.status === 'running' ? 'active' : 'done',
+          toolId: item.toolId,
+          createdAt: item.timestamp,
+        });
+        break;
+      }
+      case 'media': {
+        activities.push({
+          id: `act-media-${item.id}`,
+          type: 'media',
+          status: 'done',
+          mediaItems: [{
+            kind: item.mediaType,
+            path: item.path,
+            url: item.url,
+            mimeType: item.mimeType,
+            data: item.data,
+          }],
+          createdAt: item.timestamp,
+        });
+        break;
+      }
+      case 'report': {
+        activities.push({
+          id: `act-report-${item.id}`,
+          type: 'report',
+          status: 'done',
+          report: {
+            title: item.title,
+            path: item.path,
+            snippet: item.snippet,
+          },
+          createdAt: item.timestamp,
+        });
+        break;
+      }
+      case 'design': {
+        activities.push({
+          id: `act-design-${item.id}`,
+          type: 'design',
+          status: 'done',
+          design: {
+            title: item.title,
+            preview: item.preview,
+          },
+          createdAt: item.timestamp,
+        });
+        break;
+      }
+      case 'permission': {
+        // Only show if still pending
+        if (item.status === 'pending' || pendingPermissionIds.has(item.permissionId)) {
+          activities.push({
+            id: `act-perm-${item.id}`,
+            type: 'permission',
+            status: item.status === 'pending' ? 'active' : 'done',
+            permissionId: item.permissionId,
+            createdAt: item.timestamp,
+          });
+        }
+        break;
+      }
+      case 'question': {
+        // Only show if still pending
+        if (item.status === 'pending' || pendingQuestionIds.has(item.questionId)) {
+          activities.push({
+            id: `act-question-${item.id}`,
+            type: 'question',
+            status: item.status === 'pending' ? 'active' : 'done',
+            questionId: item.questionId,
+            createdAt: item.timestamp,
+          });
+        }
+        break;
+      }
+      case 'assistant_message': {
+        activities.push({
+          id: `act-assistant-${item.id}`,
+          type: 'assistant',
+          status: 'done',
+          messageId: item.id,
+          createdAt: item.timestamp,
+        });
+        break;
+      }
+      // user_message, thinking, tool_result, error, system_message: skip (not rendered as activities)
+    }
+  }
+
+  return turnActivities;
+}
+
 export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   sessions: {},
   error: null,
@@ -484,8 +596,8 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     const state = get();
     const session = state.sessions[sessionId];
     if (!session) return false;
-    return session.streamingToolCalls.some(
-      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
+    return session.chatItems.some(
+      (ci) => ci.kind === 'tool_start' && ci.name.toLowerCase() === 'computer_use' && ci.status === 'running'
     );
   },
 
@@ -548,25 +660,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
         const session = await invoke<SessionDetails>('agent_get_session', { sessionId });
         const agentStore = useAgentStore.getState();
 
-        // Reconstruct turn activities from persisted data
-        const reconstructedActivities = reconstructTurnActivities(
-          (session.messages || []) as PersistedMessage[],
-          (session.toolExecutions || []) as PersistedToolExecution[]
-        );
-
         set((state) => updateSession(state, sessionId, (existing) => {
-          const existingMessages = existing.messages;
-          const incoming = session.messages || [];
-          const merged = [...existingMessages];
-          for (const msg of incoming) {
-            if (!merged.some((m) => m.id === msg.id)) {
-              merged.push(msg);
-            }
+          // V2: Merge chatItems as sole source of truth
+          const existingChatItems = existing.chatItems || [];
+          let incomingChatItems = session.chatItems || [];
+
+          // Backward compat: if backend has V1 messages but no chatItems, convert
+          if (incomingChatItems.length === 0 && session.messages && session.messages.length > 0) {
+            incomingChatItems = convertLegacyToV2(session.messages, session.toolExecutions);
           }
 
-          // Merge chatItems from V2 storage
-          const existingChatItems = existing.chatItems || [];
-          const incomingChatItems = session.chatItems || [];
           const mergedChatItems = [...existingChatItems];
           for (const item of incomingChatItems) {
             if (!mergedChatItems.some((ci) => ci.id === item.id)) {
@@ -576,10 +679,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
           return {
             ...existing,
-            messages: merged,
             chatItems: mergedChatItems,
-            streamingToolCalls: session.toolExecutions || [],
-            turnActivities: reconstructedActivities,
             isLoadingMessages: false,
             hasLoaded: true,
           };
@@ -612,7 +712,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
         if (msgLower.includes('session not found')) {
           set((state) => updateSession(state, sessionId, (existing) => ({
             ...existing,
-            messages: [],
+            chatItems: [],
             isLoadingMessages: false,
             error: null,
             hasLoaded: true,
@@ -708,16 +808,28 @@ ${attachment.data}`,
       }
     }
 
-    const userMessage: Message = {
-      id: `temp-${Date.now()}`,
-      role: 'user',
+    const tempId = `temp-${Date.now()}`;
+
+    // V2: Create UserMessageItem as the sole data entry
+    const userChatItem: ChatItem = {
+      id: tempId,
+      kind: 'user_message',
       content: userContent,
-      createdAt: Date.now(),
+      turnId: tempId,
+      timestamp: Date.now(),
+      attachments: attachments?.map(a => ({
+        type: a.type,
+        name: a.name,
+        path: a.path,
+        mimeType: a.mimeType,
+        data: a.data,
+        size: a.size,
+      })),
     };
 
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
-      messages: [...session.messages, userMessage],
+      chatItems: [...session.chatItems, userChatItem],
       isStreaming: true,
       isThinking: true,
       thinkingStartedAt: Date.now(),
@@ -727,11 +839,7 @@ ${attachment.data}`,
         content,
         attachments,
       },
-      activeTurnId: userMessage.id,
-      turnActivities: {
-        ...session.turnActivities,
-        [userMessage.id]: [],
-      },
+      activeTurnId: tempId,
     })));
 
     try {
@@ -812,158 +920,6 @@ ${attachment.data}`,
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
       currentTool: tool,
-    })));
-  },
-
-  addMessage: (sessionId: string, message: Message) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => {
-      const exists = session.messages.some(
-        (m) =>
-          m.id === message.id ||
-          (m.id.startsWith('temp-') && message.role === 'user' && m.content === message.content)
-      );
-
-      if (exists) {
-        return {
-          ...session,
-          streamingContent: '',
-          isStreaming: false,
-          isThinking: false,
-        };
-      }
-
-      return {
-        ...session,
-        messages: [...session.messages, message],
-        streamingContent: '',
-        isStreaming: false,
-        isThinking: false,
-      };
-    }));
-  },
-
-  updateToolExecution: (sessionId: string, toolId: string, updates: Partial<ToolExecution>) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => {
-      const exists = session.streamingToolCalls.some((t) => t.id === toolId);
-      const updatedList = exists
-        ? session.streamingToolCalls.map((t) =>
-            t.id === toolId ? { ...t, ...updates } : t
-          )
-        : [
-            ...session.streamingToolCalls,
-            {
-              id: toolId,
-              name: updates.name || 'Tool',
-              args: (updates as { args?: Record<string, unknown> }).args || {},
-              status: updates.status || 'running',
-              startedAt: updates.startedAt || Date.now(),
-              completedAt: updates.completedAt,
-              result: updates.result,
-              error: updates.error,
-            },
-          ];
-
-      return {
-        ...session,
-        streamingToolCalls: updatedList,
-        currentTool:
-          session.currentTool?.id === toolId
-            ? { ...session.currentTool, ...updates }
-            : session.currentTool,
-      };
-    }));
-  },
-
-  addToolExecution: (sessionId: string, tool: ToolExecution) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      streamingToolCalls: [...session.streamingToolCalls, tool],
-      isThinking: false,
-    })));
-  },
-
-  resetToolExecutions: (sessionId: string) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      streamingToolCalls: [],
-      currentTool: null,
-    })));
-  },
-
-  startTurn: (sessionId: string, userMessageId: string) => {
-    if (!sessionId || !userMessageId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      activeTurnId: userMessageId,
-      turnActivities: {
-        ...session.turnActivities,
-        [userMessageId]: session.turnActivities[userMessageId] || [],
-      },
-    })));
-  },
-
-  addTurnActivity: (
-    sessionId: string,
-    activity: Omit<TurnActivityItem, 'id' | 'createdAt'> & { id?: string; createdAt?: number }
-  ) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => {
-      const turnId = session.activeTurnId;
-      if (!turnId) return session;
-      const nextActivity: TurnActivityItem = {
-        id: activity.id || `act-${Date.now()}`,
-        type: activity.type,
-        status: activity.status,
-        toolId: activity.toolId,
-        permissionId: activity.permissionId,
-        questionId: activity.questionId,
-        messageId: activity.messageId,
-        mediaItems: activity.mediaItems,
-        report: activity.report,
-        design: activity.design,
-        createdAt: activity.createdAt || Date.now(),
-      };
-      return {
-        ...session,
-        turnActivities: {
-          ...session.turnActivities,
-          [turnId]: [...(session.turnActivities[turnId] || []), nextActivity],
-        },
-      };
-    }));
-  },
-
-  completeTurnThinking: (sessionId: string) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => {
-      const turnId = session.activeTurnId;
-      if (!turnId) return session;
-      const activities = session.turnActivities[turnId] || [];
-      const index = [...activities].reverse().findIndex((item) => item.type === 'thinking' && item.status === 'active');
-      if (index === -1) return session;
-      const actualIndex = activities.length - 1 - index;
-      const nextActivities: TurnActivityItem[] = activities.map((item, i) =>
-        i === actualIndex ? { ...item, status: 'done' as const } : item
-      );
-      return {
-        ...session,
-        turnActivities: {
-          ...session.turnActivities,
-          [turnId]: nextActivities,
-        },
-      };
-    }));
-  },
-
-  endTurn: (sessionId: string) => {
-    if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      activeTurnId: undefined,
     })));
   },
 
@@ -1071,10 +1027,25 @@ ${attachment.data}`,
 
   appendChatItem: (sessionId: string, item: ChatItem) => {
     if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      chatItems: [...session.chatItems, item],
-    })));
+    set((state) => updateSession(state, sessionId, (session) => {
+      // Dedup: if incoming user_message matches a temp- item by content, replace it
+      if (item.kind === 'user_message') {
+        const tempIdx = session.chatItems.findIndex(
+          (ci) => ci.kind === 'user_message' && ci.id.startsWith('temp-') &&
+                  JSON.stringify(ci.content) === JSON.stringify(item.content)
+        );
+        if (tempIdx !== -1) {
+          const updated = [...session.chatItems];
+          updated[tempIdx] = item;
+          return { ...session, chatItems: updated };
+        }
+      }
+      // Dedup: skip if item with same ID already exists
+      if (session.chatItems.some((ci) => ci.id === item.id)) {
+        return session;
+      }
+      return { ...session, chatItems: [...session.chatItems, item] };
+    }));
   },
 
   updateChatItem: (sessionId: string, itemId: string, updates: Partial<ChatItem>) => {

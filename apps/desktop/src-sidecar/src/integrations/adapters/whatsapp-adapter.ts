@@ -112,11 +112,54 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!this.client || !this._connected) return;
 
     try {
-      const chat = await this.client.getChatById(chatId);
+      const resolvedChatId = this.resolveOutboundChatId(chatId);
+      const chat = await this.client.getChatById(resolvedChatId);
       await chat.sendStateTyping();
     } catch {
       // Typing indicator is best-effort, don't throw
     }
+  }
+
+  override async sendProcessingPlaceholder(
+    chatId: string,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.client || !this._connected) {
+      throw new Error('WhatsApp client is not connected');
+    }
+    const resolvedChatId = this.resolveOutboundChatId(chatId);
+    return this.client.sendMessage(resolvedChatId, text);
+  }
+
+  override async replaceProcessingPlaceholder(
+    chatId: string,
+    placeholderHandle: unknown,
+    text: string,
+  ): Promise<void> {
+    if (!this.client || !this._connected) {
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    const sentMessage = placeholderHandle as
+      | {
+          edit?: (content: string) => Promise<unknown>;
+        }
+      | null;
+
+    if (sentMessage && typeof sentMessage.edit === 'function') {
+      try {
+        await sentMessage.edit(text);
+        return;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[whatsapp-send] failed to edit placeholder, falling back to sendMessage: ${errMsg}\n`,
+        );
+      }
+    }
+
+    const resolvedChatId = this.resolveOutboundChatId(chatId);
+    await this.client.sendMessage(resolvedChatId, text);
   }
 
   // ---------------------------------------------------------------------------

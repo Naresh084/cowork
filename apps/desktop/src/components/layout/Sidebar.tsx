@@ -66,7 +66,9 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const isLiveSession = (sessionId: string) => {
     const session = chatSessions[sessionId];
     if (!session) return false;
-    const hasRunningTool = session.streamingToolCalls.some((tool) => tool.status === 'running');
+    const hasRunningTool = session.chatItems.some(
+      (ci) => ci.kind === 'tool_start' && ci.status === 'running'
+    );
     return session.isStreaming || session.pendingPermissions.length > 0 || hasRunningTool;
   };
 

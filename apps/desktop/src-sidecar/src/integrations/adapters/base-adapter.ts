@@ -43,6 +43,27 @@ export abstract class BaseAdapter extends EventEmitter {
   /** Send a typing indicator on the platform. */
   abstract sendTypingIndicator(chatId: string): Promise<void>;
 
+  /**
+   * Send a temporary "processing" placeholder message.
+   * Returns a platform-specific handle that can be used to replace/edit it.
+   */
+  async sendProcessingPlaceholder(chatId: string, text: string): Promise<unknown> {
+    await this.sendMessage(chatId, text);
+    return null;
+  }
+
+  /**
+   * Replace the processing placeholder with the final response.
+   * Default behavior sends a new message if in-place replacement is unsupported.
+   */
+  async replaceProcessingPlaceholder(
+    chatId: string,
+    _placeholderHandle: unknown,
+    text: string,
+  ): Promise<void> {
+    await this.sendMessage(chatId, text);
+  }
+
   /** Get the current connection status. */
   getStatus(): PlatformStatus {
     return {

@@ -79,9 +79,15 @@ export class IntegrationBridgeService {
 
   /**
    * Subscribe to agent events to route responses back to platforms.
-   * Intercepts the eventEmitter.streamDone to also call our router.
+   * Intercepts stream events to route responses back to platforms.
    */
   private subscribeToAgentEvents(): void {
+    const originalStreamChunk = eventEmitter.streamChunk.bind(eventEmitter);
+    eventEmitter.streamChunk = (sessionId: string, content: string) => {
+      originalStreamChunk(sessionId, content);
+      this.router.onStreamChunk(sessionId, content);
+    };
+
     const originalStreamDone = eventEmitter.streamDone.bind(eventEmitter);
     eventEmitter.streamDone = (sessionId: string, message: unknown) => {
       // Call the original first
@@ -104,14 +110,12 @@ export class IntegrationBridgeService {
           .join('\n');
       }
 
-      if (finalText) {
-        this.router.onStreamDone(sessionId, finalText).catch((err) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          process.stderr.write(
-            `[integration] Error routing response: ${errMsg}\n`,
-          );
-        });
-      }
+      this.router.onStreamDone(sessionId, finalText).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error routing response: ${errMsg}\n`,
+        );
+      });
     };
   }
 

@@ -82,7 +82,7 @@ export class TelegramAdapter extends BaseAdapter {
       throw new Error('Telegram adapter is not connected');
     }
 
-    await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    await this.bot.sendMessage(chatId, text);
   }
 
   async sendTypingIndicator(chatId: string): Promise<void> {
@@ -93,5 +93,57 @@ export class TelegramAdapter extends BaseAdapter {
     } catch {
       // Typing indicator is non-critical, ignore failures
     }
+  }
+
+  override async sendProcessingPlaceholder(
+    chatId: string,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.bot) {
+      throw new Error('Telegram adapter is not connected');
+    }
+
+    const sent = await this.bot.sendMessage(chatId, text);
+    return {
+      chatId: String(sent.chat.id),
+      messageId: sent.message_id,
+    };
+  }
+
+  override async replaceProcessingPlaceholder(
+    chatId: string,
+    placeholderHandle: unknown,
+    text: string,
+  ): Promise<void> {
+    if (!this.bot) {
+      throw new Error('Telegram adapter is not connected');
+    }
+
+    const handle = placeholderHandle as
+      | {
+          chatId?: string;
+          messageId?: number;
+        }
+      | null;
+
+    if (typeof handle?.messageId === 'number') {
+      try {
+        await this.bot.editMessageText(text, {
+          chat_id: handle.chatId ?? chatId,
+          message_id: handle.messageId,
+        });
+        return;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        this.emit(
+          'error',
+          new Error(
+            `Telegram placeholder edit failed, sending fallback message: ${errMsg}`,
+          ),
+        );
+      }
+    }
+
+    await this.sendMessage(chatId, text);
   }
 }

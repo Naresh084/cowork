@@ -3,6 +3,10 @@ import type { IncomingMessage, PlatformType } from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
 import { eventEmitter } from '../event-emitter.js';
 
+const INTEGRATION_SESSION_TITLE = 'Shared Session';
+const LEGACY_INTEGRATION_SESSION_TITLE = 'Messaging Integration';
+const THINKING_PLACEHOLDER_TEXT = 'Thinking...';
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -11,6 +15,7 @@ interface PendingOrigin {
   platform: PlatformType;
   chatId: string;
   senderName: string;
+  thinkingHandle: unknown;
 }
 
 interface SessionProcessingState {
@@ -65,15 +70,20 @@ export class MessageRouter extends EventEmitter {
   }
 
   /** Get or create the shared integration session (with lock to prevent duplicates) */
-  private async getOrCreateSession(): Promise<string> {
+  private async getOrCreateSession(seedMessage?: IncomingMessage): Promise<string> {
     if (this.integrationSessionId) {
       // Verify session still exists
       try {
-        await this.agentRunner.getSession(this.integrationSessionId);
+        await Promise.resolve(this.agentRunner.getSession(this.integrationSessionId));
         return this.integrationSessionId;
       } catch {
         this.integrationSessionId = null;
       }
+    }
+
+    const existingSessionId = await this.findExistingIntegrationSessionId();
+    if (existingSessionId) {
+      return existingSessionId;
     }
 
     // Prevent concurrent session creation - reuse in-flight promise
@@ -81,7 +91,7 @@ export class MessageRouter extends EventEmitter {
       return this.sessionCreationPromise;
     }
 
-    this.sessionCreationPromise = this.createNewSession();
+    this.sessionCreationPromise = this.createNewSession(seedMessage);
     try {
       const id = await this.sessionCreationPromise;
       return id;
@@ -90,15 +100,184 @@ export class MessageRouter extends EventEmitter {
     }
   }
 
+  private async findExistingIntegrationSessionId(): Promise<string | null> {
+    if (!this.agentRunner || typeof this.agentRunner.listSessions !== 'function') {
+      return null;
+    }
+
+    try {
+      const sessions = await Promise.resolve(this.agentRunner.listSessions());
+      if (!Array.isArray(sessions) || sessions.length === 0) {
+        return null;
+      }
+
+      const integrationSession = sessions.find((session: unknown) => {
+        const sessionAny = session as { type?: string; title?: string };
+        if (sessionAny?.type === 'integration') {
+          return true;
+        }
+        return (
+          sessionAny?.title === INTEGRATION_SESSION_TITLE ||
+          sessionAny?.title === LEGACY_INTEGRATION_SESSION_TITLE
+        );
+      }) as { id?: string; title?: string; messageCount?: number } | undefined;
+
+      if (!integrationSession?.id) {
+        return null;
+      }
+
+      await Promise.resolve(this.agentRunner.getSession(integrationSession.id));
+
+      this.integrationSessionId = integrationSession.id;
+
+      eventEmitter.sessionUpdated({
+        id: integrationSession.id,
+        title: integrationSession.title ?? undefined,
+        messageCount:
+          typeof integrationSession.messageCount === 'number'
+            ? integrationSession.messageCount
+            : undefined,
+      });
+
+      return integrationSession.id;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `[message-router] Failed to restore integration session: ${errMsg}\n`,
+      );
+      return null;
+    }
+  }
+
   /** Actually create the session (called only once even with concurrent requests) */
-  private async createNewSession(): Promise<string> {
-    const session = await this.agentRunner.createSession({
-      workingDirectory: process.cwd(),
-      title: 'Messaging Integration',
-      type: 'integration',
+  private async createNewSession(seedMessage?: IncomingMessage): Promise<string> {
+    const initialTitle = this.buildSessionTitleFromMessage(seedMessage?.content);
+    const session = await Promise.resolve(
+      this.agentRunner.createSession(
+        process.cwd(),
+        null,
+        initialTitle,
+        'integration',
+      ),
+    );
+    const sessionId = (session as { id?: string } | null)?.id;
+    if (!sessionId) {
+      throw new Error('Failed to create shared integration session');
+    }
+
+    eventEmitter.sessionUpdated({
+      id: sessionId,
+      title:
+        (session as { title?: string | null } | null)?.title ?? initialTitle,
+      messageCount:
+        (session as { messageCount?: number } | null)?.messageCount ?? 0,
     });
-    this.integrationSessionId = session.id;
-    return session.id;
+
+    this.integrationSessionId = sessionId;
+    return sessionId;
+  }
+
+  onStreamChunk(sessionId: string, chunk: string): void {
+    if (sessionId !== this.integrationSessionId) return;
+    if (!chunk) return;
+
+    const state = this.getState(sessionId);
+    if (!state.pendingOrigin) return;
+
+    state.accumulatedResponse += chunk;
+    if (state.accumulatedResponse.length > 16000) {
+      state.accumulatedResponse = state.accumulatedResponse.slice(-16000);
+    }
+  }
+
+  private getFallbackResponseText(): string {
+    return 'I received your message, but I could not generate a text reply. Please try again.';
+  }
+
+  private buildSessionTitleFromMessage(content: string | undefined): string {
+    const normalized = (content ?? '').replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return INTEGRATION_SESSION_TITLE;
+    }
+    if (normalized.length <= 80) {
+      return normalized;
+    }
+    return `${normalized.slice(0, 77).trimEnd()}...`;
+  }
+
+  private async maybeNameSessionFromFirstMessage(
+    sessionId: string,
+    content: string,
+  ): Promise<void> {
+    if (
+      !this.agentRunner ||
+      typeof this.agentRunner.getSession !== 'function' ||
+      typeof this.agentRunner.updateSessionTitle !== 'function'
+    ) {
+      return;
+    }
+
+    try {
+      const session = (await Promise.resolve(
+        this.agentRunner.getSession(sessionId),
+      )) as
+        | {
+            title?: string | null;
+            messages?: unknown[];
+            messageCount?: number;
+          }
+        | null;
+      if (!session) return;
+
+      const messageCount = Array.isArray(session.messages)
+        ? session.messages.length
+        : typeof session.messageCount === 'number'
+          ? session.messageCount
+          : 0;
+
+      if (messageCount > 0) {
+        return;
+      }
+
+      const existingTitle = session.title?.trim() ?? '';
+      const hasCustomTitle =
+        existingTitle.length > 0 &&
+        existingTitle !== INTEGRATION_SESSION_TITLE &&
+        existingTitle !== LEGACY_INTEGRATION_SESSION_TITLE;
+
+      if (hasCustomTitle) {
+        return;
+      }
+
+      const newTitle = this.buildSessionTitleFromMessage(content);
+      if (!newTitle || newTitle === existingTitle) {
+        return;
+      }
+
+      await Promise.resolve(this.agentRunner.updateSessionTitle(sessionId, newTitle));
+      eventEmitter.sessionUpdated({
+        id: sessionId,
+        title: newTitle,
+      });
+    } catch {
+      // Best-effort title update only.
+    }
+  }
+
+  private async sendPlatformReply(
+    adapter: BaseAdapter | undefined,
+    platform: PlatformType,
+    chatId: string,
+    thinkingHandle: unknown,
+    text: string,
+  ): Promise<void> {
+    if (!adapter) {
+      return;
+    }
+
+    const cleanText = this.formatForPlatform(text, platform);
+    await adapter.replaceProcessingPlaceholder(chatId, thinkingHandle, cleanText);
+    eventEmitter.integrationMessageOut(platform, chatId);
   }
 
   /** Get or create processing state for a session */
@@ -123,8 +302,11 @@ export class MessageRouter extends EventEmitter {
       return;
     }
 
-    const sessionId = await this.getOrCreateSession();
+    const sessionId = await this.getOrCreateSession(msg);
     const state = this.getState(sessionId);
+    process.stderr.write(
+      `[message-router] incoming platform=${msg.platform} chatId=${msg.chatId} session=${sessionId}\n`,
+    );
 
     // Emit event for desktop UI
     eventEmitter.integrationMessageIn(msg.platform, msg.senderName, msg.content);
@@ -165,6 +347,7 @@ export class MessageRouter extends EventEmitter {
       platform: msg.platform,
       chatId: msg.chatId,
       senderName: msg.senderName,
+      thinkingHandle: null,
     };
     state.accumulatedResponse = '';
 
@@ -178,6 +361,25 @@ export class MessageRouter extends EventEmitter {
       }
     }
 
+    if (adapter) {
+      try {
+        const handle = await adapter.sendProcessingPlaceholder(
+          msg.chatId,
+          THINKING_PLACEHOLDER_TEXT,
+        );
+        if (state.pendingOrigin) {
+          state.pendingOrigin.thinkingHandle = handle;
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[message-router] Failed to send thinking placeholder: ${errMsg}\n`,
+        );
+      }
+    }
+
+    await this.maybeNameSessionFromFirstMessage(sessionId, msg.content);
+
     // Tag message with platform info
     const platformLabel =
       msg.platform.charAt(0).toUpperCase() + msg.platform.slice(1);
@@ -186,6 +388,18 @@ export class MessageRouter extends EventEmitter {
     try {
       await this.agentRunner.sendMessage(sessionId, taggedContent);
     } catch (err) {
+      if (adapter && state.pendingOrigin) {
+        try {
+          await adapter.replaceProcessingPlaceholder(
+            msg.chatId,
+            state.pendingOrigin.thinkingHandle,
+            'Sorry, there was an error while processing your message.',
+          );
+          eventEmitter.integrationMessageOut(msg.platform, msg.chatId);
+        } catch {
+          // Best-effort error reply.
+        }
+      }
       state.isProcessing = false;
       state.pendingOrigin = null;
       throw err;
@@ -202,25 +416,38 @@ export class MessageRouter extends EventEmitter {
     const state = this.getState(sessionId);
     if (!state.pendingOrigin) return;
 
-    const { platform, chatId } = state.pendingOrigin;
+    const { platform, chatId, thinkingHandle } = state.pendingOrigin;
     const adapter = this.adapters.get(platform);
+    const responseText = finalText.trim() || state.accumulatedResponse.trim();
 
-    if (adapter && finalText) {
-      try {
-        // Send clean response text (no thinking, no tools, just final text)
-        const cleanText = this.formatForPlatform(finalText, platform);
-        await adapter.sendMessage(chatId, cleanText);
-
-        // Emit outgoing event
-        eventEmitter.integrationMessageOut(platform, chatId);
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        eventEmitter.error(
-          undefined,
-          `Failed to send to ${platform}: ${errorMsg}`,
-          'INTEGRATION_SEND_ERROR',
+    try {
+      if (responseText) {
+        await this.sendPlatformReply(
+          adapter,
+          platform,
+          chatId,
+          thinkingHandle,
+          responseText,
+        );
+      } else {
+        process.stderr.write(
+          `[message-router] Empty final response for session=${sessionId}, sending fallback text\n`,
+        );
+        await this.sendPlatformReply(
+          adapter,
+          platform,
+          chatId,
+          thinkingHandle,
+          this.getFallbackResponseText(),
         );
       }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      eventEmitter.error(
+        undefined,
+        `Failed to send to ${platform}: ${errorMsg}`,
+        'INTEGRATION_SEND_ERROR',
+      );
     }
 
     // Clear processing state
