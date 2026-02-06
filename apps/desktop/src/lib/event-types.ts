@@ -225,6 +225,12 @@ export type AgentEvent =
       platform: string;
       queueSize: number;
       timestamp: number;
+    }
+  // Message queue events
+  | {
+      type: 'queue:update';
+      sessionId: string;
+      queue: Array<{ id: string; content: string; queuedAt: number }>;
     };
 
 /**
@@ -282,6 +288,8 @@ export const TAURI_EVENT_NAMES = [
   'agent:integration:message_in',
   'agent:integration:message_out',
   'agent:integration:queued',
+  // Message queue events
+  'agent:queue:update',
 ] as const;
 
 export type TauriEventName = (typeof TAURI_EVENT_NAMES)[number];

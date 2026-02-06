@@ -220,11 +220,10 @@ export interface SessionInfo {
 }
 
 export interface SessionDetails extends SessionInfo {
-  messages: Message[];
-  chatItems?: import('@gemini-cowork/shared').ChatItem[];
-  tasks?: Task[];
-  artifacts?: Artifact[];
-  toolExecutions?: ToolExecution[];
+  messages: Message[];               // Kept for Rust IPC compat (derived from chatItems)
+  chatItems: import('@gemini-cowork/shared').ChatItem[];  // V2: sole source of truth
+  tasks: Task[];
+  artifacts: Artifact[];
 }
 
 export interface Attachment {
@@ -280,6 +279,7 @@ export type AgentEventType =
   | 'chat:item'
   | 'chat:update'
   | 'chat:items'
+  | 'queue:update'
   | 'integration:status'
   | 'integration:qr'
   | 'integration:message_in'

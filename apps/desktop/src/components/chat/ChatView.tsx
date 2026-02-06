@@ -3,6 +3,7 @@ import { MessageList } from './MessageList';
 import { SessionHeader } from './SessionHeader';
 import { WelcomeScreen, type QuickAction } from './WelcomeScreen';
 import { InputArea } from './InputArea';
+import { MessageQueue } from './MessageQueue';
 import { DropZone } from './AttachmentPreview';
 import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
@@ -157,7 +158,7 @@ export function ChatView() {
 
   // Handle send message — opens modal if no working directory is set
   const handleSend = useCallback(async (message: string, messageAttachments?: Attachment[]) => {
-    if ((!message.trim() && (!messageAttachments || messageAttachments.length === 0)) || isStreaming) return;
+    if (!message.trim() && (!messageAttachments || messageAttachments.length === 0)) return;
 
     // If no working directory, store the pending message and open the modal
     if (!activeSessionId && !defaultWorkingDirectory) {
@@ -331,6 +332,9 @@ export function ChatView() {
           <WelcomeScreen onQuickAction={handleQuickAction} />
         )}
       </div>
+
+      {/* Message Queue */}
+      {activeSessionId && <MessageQueue sessionId={activeSessionId} />}
 
       {/* Input Area */}
       <InputArea

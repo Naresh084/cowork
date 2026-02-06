@@ -90,7 +90,7 @@ export class IntegrationBridgeService {
 
     // Intercept chatItem events to route assistant messages to integrations
     const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
-    eventEmitter.chatItem = (sessionId: string, item: unknown) => {
+    eventEmitter.chatItem = (sessionId: string, item: import('@gemini-cowork/shared').ChatItem) => {
       originalChatItem(sessionId, item);
 
       // Route assistant messages to integrations

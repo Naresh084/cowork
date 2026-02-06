@@ -195,9 +195,9 @@ export class CronExecutor {
       throw new Error('AgentRunner not set');
     }
 
-    // Get session messages before sending
+    // Get session chatItems count before sending (V2 architecture)
     const sessionBefore = this.agentRunner.getSession(sessionId);
-    const messageCountBefore = sessionBefore?.messages.length ?? 0;
+    const itemCountBefore = (sessionBefore as { chatItems?: unknown[] })?.chatItems?.length ?? 0;
 
     // Send message and wait for completion
     // sendMessage is async and waits for the agent to finish
@@ -209,20 +209,21 @@ export class CronExecutor {
       throw new Error('Session not found after sending message');
     }
 
-    // Find the assistant's response message(s)
-    const newMessages = sessionAfter.messages.slice(messageCountBefore);
-    const assistantMessages = newMessages.filter(
-      (m: { role: string }) => m.role === 'assistant'
+    // Find the assistant's response chatItems (V2 architecture)
+    const allItems = ((sessionAfter as { chatItems?: Array<{ kind: string; content: string | Array<{ type: string; text?: string }> }> })?.chatItems ?? []);
+    const newItems = allItems.slice(itemCountBefore);
+    const assistantItems = newItems.filter(
+      (ci: { kind: string }) => ci.kind === 'assistant_message'
     );
 
     // Combine all assistant message content
-    const content = assistantMessages
-      .map((m: { content: string | Array<{ type: string; text?: string }> }) => {
-        if (typeof m.content === 'string') {
-          return m.content;
+    const content = assistantItems
+      .map((ci: { content: string | Array<{ type: string; text?: string }> }) => {
+        if (typeof ci.content === 'string') {
+          return ci.content;
         }
         // Handle content parts array
-        return m.content
+        return ci.content
           .filter((p: { type: string }) => p.type === 'text')
           .map((p: { text?: string }) => p.text ?? '')
           .join('\n');

@@ -29,8 +29,7 @@ function hashWorkingDirectory(workingDirectory: string): string {
     .substring(0, 16);
 }
 
-// Re-export types for convenience
-export type { PersistedMessage, PersistedToolExecution };
+// PersistedMessage and PersistedToolExecution types used internally for V1→V2 migration
 
 interface SessionMetadataV1 {
   version: 1;
