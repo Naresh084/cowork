@@ -9,6 +9,16 @@ import type {
 // Re-export shared types for convenience within integrations
 export type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, PlatformConfig };
 
+export interface IntegrationMediaPayload {
+  mediaType: 'image' | 'video';
+  path?: string;
+  url?: string;
+  mimeType?: string;
+  data?: string;
+  caption?: string;
+  itemId?: string;
+}
+
 // ============================================================================
 // Platform-Specific Config Interfaces
 // ============================================================================

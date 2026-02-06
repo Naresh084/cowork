@@ -1,17 +1,21 @@
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import type WAWebJS from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import { rm } from 'fs/promises';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { BaseAdapter } from './base-adapter.js';
 import {
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  type IntegrationMediaPayload,
   type WhatsAppConfig,
 } from '../types.js';
 
 const DEFAULT_SESSION_DIR = join(homedir(), '.cowork', 'integrations', 'whatsapp');
+const DEBUG_WHATSAPP_AUTH =
+  process.env.COWORK_DEBUG_WHATSAPP_AUTH === '1' ||
+  process.env.COWORK_DEBUG_WHATSAPP_AUTH === 'true';
 
 function normalizeE164Like(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -162,6 +166,75 @@ export class WhatsAppAdapter extends BaseAdapter {
     await this.client.sendMessage(resolvedChatId, text);
   }
 
+  override async updateStreamingMessage(
+    chatId: string,
+    handle: unknown,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.client || !this._connected) {
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    const sentMessage = handle as
+      | {
+          edit?: (content: string) => Promise<unknown>;
+        }
+      | null;
+
+    if (sentMessage && typeof sentMessage.edit === 'function') {
+      try {
+        await sentMessage.edit(text);
+        return sentMessage;
+      } catch {
+        // Fall back to send-new below.
+      }
+    }
+
+    const resolvedChatId = this.resolveOutboundChatId(chatId);
+    return this.client.sendMessage(resolvedChatId, text);
+  }
+
+  override async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
+    if (!this.client || !this._connected) {
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    const resolvedChatId = this.resolveOutboundChatId(chatId);
+    const caption = media.caption?.trim();
+
+    if (media.path) {
+      try {
+        const messageMedia = MessageMedia.fromFilePath(media.path);
+        return this.client.sendMessage(
+          resolvedChatId,
+          messageMedia,
+          caption ? ({ caption } as WAWebJS.MessageSendOptions) : undefined,
+        );
+      } catch {
+        // Fall through to next source.
+      }
+    }
+
+    if (media.data && media.mimeType) {
+      const filename =
+        (media.path ? basename(media.path) : undefined) ||
+        `${media.mediaType}-${Date.now()}`;
+      try {
+        const messageMedia = new MessageMedia(media.mimeType, media.data, filename);
+        return this.client.sendMessage(
+          resolvedChatId,
+          messageMedia,
+          caption ? ({ caption } as WAWebJS.MessageSendOptions) : undefined,
+        );
+      } catch {
+        // Fall through to text fallback.
+      }
+    }
+
+    const fallbackText = `${caption || `Sent ${media.mediaType}`}${media.url ? `\n${media.url}` : ''}`;
+    return this.client.sendMessage(resolvedChatId, fallbackText);
+  }
+
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
@@ -188,10 +261,12 @@ export class WhatsAppAdapter extends BaseAdapter {
       ? denial.slice(0, 280)
       : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
 
-    const allowlist = Array.from(this.allowFrom).join(', ') || '(empty)';
-    process.stderr.write(
-      `[whatsapp-auth] config updated policy=${this.senderPolicy} allowFrom=${allowlist}\n`
-    );
+    if (DEBUG_WHATSAPP_AUTH) {
+      const allowlist = Array.from(this.allowFrom).join(', ') || '(empty)';
+      process.stderr.write(
+        `[whatsapp-auth] config updated policy=${this.senderPolicy} allowFrom=${allowlist}\n`
+      );
+    }
   }
 
   private registerEvents(client: WAWebJS.Client): void {
@@ -238,9 +313,11 @@ export class WhatsAppAdapter extends BaseAdapter {
         const senderPhones = this.collectSenderPhoneCandidates(message, contact);
         const authorized = this.isSenderAuthorized(senderPhones);
 
-        process.stderr.write(
-          `[whatsapp-auth] from=${message.from} contactId=${contact?.id?._serialized ?? '-'} contactNumber=${contact?.number ?? '-'} candidates=${senderPhones.join('|') || '-'} allowlist=${Array.from(this.allowFrom).join('|') || '-'} aliases=${this.senderAliasToPhone.size} authorized=${authorized}\n`
-        );
+        if (DEBUG_WHATSAPP_AUTH) {
+          process.stderr.write(
+            `[whatsapp-auth] from=${message.from} contactId=${contact?.id?._serialized ?? '-'} contactNumber=${contact?.number ?? '-'} candidates=${senderPhones.join('|') || '-'} allowlist=${Array.from(this.allowFrom).join('|') || '-'} aliases=${this.senderAliasToPhone.size} authorized=${authorized}\n`
+          );
+        }
 
         if (!authorized) {
           await this.sendUnauthorizedReply(message.from);

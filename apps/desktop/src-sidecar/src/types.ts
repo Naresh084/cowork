@@ -224,6 +224,7 @@ export interface SessionDetails extends SessionInfo {
   chatItems: import('@gemini-cowork/shared').ChatItem[];  // V2: sole source of truth
   tasks: Task[];
   artifacts: Artifact[];
+  contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
 }
 
 export interface Attachment {

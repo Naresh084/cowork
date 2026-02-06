@@ -11,6 +11,7 @@ export const ChatItemBaseSchema = z.object({
   id: z.string(),
   timestamp: z.number(),
   turnId: z.string().optional(), // Links to user message that started this turn
+  sequence: z.number().int().nonnegative().optional(), // Stable ordering within a session
 });
 
 export type ChatItemBase = z.infer<typeof ChatItemBaseSchema>;
@@ -38,10 +39,19 @@ export type UserMessageItem = z.infer<typeof UserMessageItemSchema>;
 // Assistant Message Item
 // ============================================================================
 
+export const AssistantMessageStreamSchema = z.object({
+  phase: z.enum(['intermediate', 'final']),
+  status: z.enum(['streaming', 'done']),
+  segmentIndex: z.number().int().nonnegative(),
+});
+
+export type AssistantMessageStream = z.infer<typeof AssistantMessageStreamSchema>;
+
 export const AssistantMessageItemSchema = ChatItemBaseSchema.extend({
   kind: z.literal('assistant_message'),
   content: z.union([z.string(), z.array(z.any())]), // string | MessageContentPart[]
   metadata: z.record(z.unknown()).optional(),
+  stream: AssistantMessageStreamSchema.optional(),
 });
 
 export type AssistantMessageItem = z.infer<typeof AssistantMessageItemSchema>;

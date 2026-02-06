@@ -22,6 +22,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '../ui/Toast';
 import { CommandPalette } from './CommandPalette';
+import { AttachmentPreview } from './AttachmentPreview';
 
 interface InputAreaProps {
   onSend: (message: string, attachments?: Attachment[]) => void;
@@ -262,7 +263,7 @@ export function InputArea({
 
   const handleSend = useCallback(() => {
     const trimmed = message.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+    if (!trimmed && attachments.length === 0) return;
 
     // Check for slash command
     if (trimmed.startsWith('/')) {
@@ -446,10 +447,10 @@ export function InputArea({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="flex flex-wrap gap-2 mb-3"
+              className="mb-3"
             >
               {isRecording && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20 mb-2 w-fit">
                   <span className="w-2 h-2 rounded-full bg-[#FF5449] animate-pulse" />
                   <span className="text-sm text-white/80">
                     Recording {formatRecordingTime(recordingTime)}
@@ -464,43 +465,15 @@ export function InputArea({
               )}
 
               {recordingError && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20 text-xs text-[#FF5449]">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20 text-xs text-[#FF5449] mb-2 w-fit">
                   {recordingError}
                 </div>
               )}
 
-              {attachments.map((attachment, index) => {
-                const isAudio = attachment.type === 'audio' && attachment.data;
-                const audioSrc = isAudio && attachment.data
-                  ? `data:${attachment.mimeType || 'audio/webm'};base64,${attachment.data}`
-                  : null;
-
-                return (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className={cn(
-                      'flex items-center gap-2 px-3 py-2 rounded-xl',
-                      'bg-white/[0.04] border border-white/[0.08]'
-                    )}
-                  >
-                    {isAudio && audioSrc ? (
-                      <audio controls src={audioSrc} className="h-8" />
-                    ) : (
-                      <span className="text-sm text-white/70 truncate max-w-[150px]">
-                        {attachment.name}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => onAttachmentRemove(index)}
-                      className="text-white/40 hover:text-[#FF5449] transition-colors"
-                    >
-                      ×
-                    </button>
-                  </motion.div>
-                );
-              })}
+              <AttachmentPreview
+                attachments={attachments}
+                onRemove={onAttachmentRemove}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -570,46 +543,52 @@ export function InputArea({
                 <Plus className="w-4 h-4" />
               </motion.button>
 
-              {/* Send/Stop Buttons */}
-              {isStreaming && (
-                <motion.button
-                  key="stop"
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={onStop}
-                  className={cn(
-                    'p-2 rounded-full',
-                    'bg-[#FF5449]/20 text-[#FF5449] border border-[#FF5449]/30',
-                    'hover:bg-[#FF5449]/30',
-                    'transition-colors'
-                  )}
-                  title="Stop"
-                >
-                  <StopCircle className="w-4 h-4" />
-                </motion.button>
-              )}
-              <motion.button
-                key="send"
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSend}
-                disabled={!message.trim() && attachments.length === 0}
-                className={cn(
-                  'p-2 rounded-full',
-                  'transition-all duration-200',
-                  message.trim() || attachments.length > 0
-                    ? isStreaming
-                      ? 'bg-gradient-to-r from-[#1E3A8A]/70 to-[#1D4ED8]/70 text-white/80 shadow-md shadow-[#1D4ED8]/15 hover:shadow-lg hover:shadow-[#1D4ED8]/25'
-                      : 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
-                    : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
+              {/* Single Send/Stop Button */}
+              <AnimatePresence mode="wait">
+                {isStreaming ? (
+                  <motion.button
+                    key="stop"
+                    initial={{ opacity: 0, scale: 0.8, rotate: -90 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, rotate: 90 }}
+                    transition={{ duration: 0.2 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={onStop}
+                    className={cn(
+                      'p-2 rounded-full',
+                      'bg-[#FF5449]/20 text-[#FF5449] border border-[#FF5449]/30',
+                      'hover:bg-[#FF5449]/30',
+                      'transition-colors'
+                    )}
+                    title="Stop generation (Enter to queue message)"
+                  >
+                    <StopCircle className="w-4 h-4" />
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    key="send"
+                    initial={{ opacity: 0, scale: 0.8, rotate: 90 }}
+                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, rotate: -90 }}
+                    transition={{ duration: 0.2 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleSend}
+                    disabled={!message.trim() && attachments.length === 0}
+                    className={cn(
+                      'p-2 rounded-full',
+                      'transition-all duration-200',
+                      message.trim() || attachments.length > 0
+                        ? 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
+                        : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
+                    )}
+                    title="Send"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </motion.button>
                 )}
-                title={isStreaming ? 'Queue message' : 'Send'}
-              >
-                <ArrowUp className="w-4 h-4" />
-              </motion.button>
+              </AnimatePresence>
             </div>
           </div>
 

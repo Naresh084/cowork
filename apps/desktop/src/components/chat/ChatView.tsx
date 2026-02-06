@@ -219,13 +219,15 @@ export function ChatView() {
         size: file.size,
       };
 
+      const objectUrl = URL.createObjectURL(file);
+
       if (isImage) {
         const reader = new FileReader();
         reader.onload = () => {
           const base64 = (reader.result as string).split(',')[1];
           setAttachments((prev) => [
             ...prev,
-            { ...attachment, data: base64 },
+            { ...attachment, data: base64, objectUrl },
           ]);
         };
         reader.readAsDataURL(file);
@@ -235,7 +237,7 @@ export function ChatView() {
       if (isAudio || isVideo || isPdf) {
         if (file.size > maxMediaSize) {
           toast.error('File too large', `${file.name} exceeds 25MB and will not be sent to the model.`);
-          setAttachments((prev) => [...prev, { ...attachment, type: 'file' }]);
+          setAttachments((prev) => [...prev, { ...attachment, type: 'file', objectUrl }]);
           return;
         }
 
@@ -244,7 +246,7 @@ export function ChatView() {
           const base64 = (reader.result as string).split(',')[1];
           setAttachments((prev) => [
             ...prev,
-            { ...attachment, data: base64 },
+            { ...attachment, data: base64, objectUrl },
           ]);
         };
         reader.readAsDataURL(file);
@@ -254,7 +256,7 @@ export function ChatView() {
       if (isText) {
         if (file.size > maxTextSize) {
           toast.error('File too large', `${file.name} exceeds 200KB and will not be sent to the model.`);
-          setAttachments((prev) => [...prev, { ...attachment, type: 'file' }]);
+          setAttachments((prev) => [...prev, { ...attachment, type: 'file', objectUrl }]);
           return;
         }
 
@@ -263,19 +265,23 @@ export function ChatView() {
           const text = reader.result as string;
           setAttachments((prev) => [
             ...prev,
-            { ...attachment, data: text, mimeType: attachment.mimeType || 'text/plain' },
+            { ...attachment, data: text, mimeType: attachment.mimeType || 'text/plain', objectUrl },
           ]);
         };
         reader.readAsText(file);
         return;
       }
 
-      setAttachments((prev) => [...prev, attachment]);
+      setAttachments((prev) => [...prev, { ...attachment, objectUrl }]);
     });
   }, []);
 
   const handleRemoveAttachment = useCallback((index: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setAttachments((prev) => {
+      const removed = prev[index];
+      if (removed?.objectUrl) URL.revokeObjectURL(removed.objectUrl);
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   const handleAttachmentCreate = useCallback((attachment: Attachment) => {

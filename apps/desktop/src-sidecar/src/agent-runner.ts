@@ -11,6 +11,7 @@ import type {
   ToolResultItem,
   PermissionItem,
   QuestionItem,
+  MediaItem,
   ErrorItem,
 } from '@gemini-cowork/shared';
 import { createDeepAgent } from 'deepagents';
@@ -121,6 +122,18 @@ interface ActiveSession {
   }>;
   /** Last known prompt tokens from API response (for accurate context tracking) */
   lastKnownPromptTokens: number;
+  /** Monotonic sequence counter for chat item ordering */
+  nextSequence: number;
+  /** Active assistant streaming segment item ID for the current turn */
+  activeAssistantSegmentItemId?: string;
+  /** Active assistant streaming segment content buffer */
+  activeAssistantSegmentText: string;
+  /** Current assistant segment index in this turn */
+  assistantSegmentIndex: number;
+  /** Last completed assistant segment text (for final dedupe) */
+  lastCompletedAssistantSegmentText?: string;
+  /** Whether any assistant text has been emitted in this turn */
+  hasAssistantTextThisTurn: boolean;
   /** Thread ID for checkpointer (same as session ID) */
   threadId: string;
   /** Message queue for messages sent while agent is busy */
@@ -352,6 +365,11 @@ export class AgentRunner {
    * Agent will be recreated lazily on first message.
    */
   private async recreateSession(data: PersistedSessionDataV2): Promise<ActiveSession> {
+    const maxSequence = data.chatItems.reduce((max, item) => {
+      const seq = typeof item.sequence === 'number' ? item.sequence : -1;
+      return seq > max ? seq : max;
+    }, -1);
+
     const session: ActiveSession = {
       id: data.metadata.id,
       type: (data.metadata as { type?: SessionType }).type || 'main',
@@ -372,7 +390,13 @@ export class AgentRunner {
       pendingQuestions: new Map(),
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
-      lastKnownPromptTokens: 0,
+      lastKnownPromptTokens: data.contextUsage?.usedTokens ?? 0,
+      nextSequence: maxSequence + 1,
+      activeAssistantSegmentItemId: undefined,
+      activeAssistantSegmentText: '',
+      assistantSegmentIndex: 0,
+      lastCompletedAssistantSegmentText: undefined,
+      hasAssistantTextThisTurn: false,
       threadId: data.metadata.id,
       messageQueue: [],
       createdAt: data.metadata.createdAt,
@@ -415,6 +439,243 @@ export class AgentRunner {
       }
     }
     return messages;
+  }
+
+  private getNextSequence(session: ActiveSession): number {
+    const sequence = session.nextSequence;
+    session.nextSequence += 1;
+    return sequence;
+  }
+
+  private appendChatItem(session: ActiveSession, item: ChatItem): ChatItem {
+    const withSequence = {
+      ...item,
+      sequence: typeof item.sequence === 'number' ? item.sequence : this.getNextSequence(session),
+    } as ChatItem;
+    session.chatItems.push(withSequence);
+    eventEmitter.chatItem(session.id, withSequence);
+    this.persistence?.appendChatItem(session.id, withSequence).catch(() => {});
+    return withSequence;
+  }
+
+  private updateChatItem(
+    session: ActiveSession,
+    itemId: string,
+    updates: Partial<ChatItem>,
+  ): void {
+    const index = session.chatItems.findIndex((item) => item.id === itemId);
+    if (index < 0) return;
+
+    const existing = session.chatItems[index]!;
+    const merged = {
+      ...existing,
+      ...updates,
+      sequence:
+        typeof existing.sequence === 'number'
+          ? existing.sequence
+          : this.getNextSequence(session),
+    } as ChatItem;
+    session.chatItems[index] = merged;
+    eventEmitter.chatItemUpdate(session.id, itemId, updates);
+    this.persistence?.updateChatItem(session.id, itemId, updates).catch(() => {});
+  }
+
+  private resetAssistantStreamingState(session: ActiveSession): void {
+    session.activeAssistantSegmentItemId = undefined;
+    session.activeAssistantSegmentText = '';
+    session.assistantSegmentIndex = 0;
+    session.lastCompletedAssistantSegmentText = undefined;
+    session.hasAssistantTextThisTurn = false;
+  }
+
+  private getTextFromMessageContent(content: Message['content']): string {
+    if (typeof content === 'string') return content;
+    return content
+      .filter((part): part is MessageContentPart & { type: 'text'; text: string } => {
+        return typeof part === 'object' && part !== null && part.type === 'text' && typeof part.text === 'string';
+      })
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+  }
+
+  private appendAssistantSegmentChunk(session: ActiveSession, chunkText: string): void {
+    if (!chunkText) return;
+
+    const nextContent = `${session.activeAssistantSegmentText}${chunkText}`;
+    session.activeAssistantSegmentText = nextContent;
+    session.hasAssistantTextThisTurn = true;
+
+    if (!session.activeAssistantSegmentItemId) {
+      const assistantItem: AssistantMessageItem = {
+        id: generateChatItemId(),
+        kind: 'assistant_message',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        content: nextContent,
+        stream: {
+          phase: 'intermediate',
+          status: 'streaming',
+          segmentIndex: session.assistantSegmentIndex,
+        },
+      };
+      const appended = this.appendChatItem(session, assistantItem) as AssistantMessageItem;
+      session.activeAssistantSegmentItemId = appended.id;
+      return;
+    }
+
+    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
+      content: nextContent,
+      stream: {
+        phase: 'intermediate',
+        status: 'streaming',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    });
+  }
+
+  private finalizeAssistantSegment(session: ActiveSession): void {
+    if (!session.activeAssistantSegmentItemId) return;
+
+    const finalText = session.activeAssistantSegmentText.trim();
+    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
+      stream: {
+        phase: 'intermediate',
+        status: 'done',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    });
+
+    session.lastCompletedAssistantSegmentText = finalText;
+    session.activeAssistantSegmentItemId = undefined;
+    session.activeAssistantSegmentText = '';
+    session.assistantSegmentIndex += 1;
+  }
+
+  private emitFinalAssistantSegment(session: ActiveSession, assistantMessage: Message): boolean {
+    const content = assistantMessage.content;
+    const finalText = this.getTextFromMessageContent(content);
+    const normalizedFinal = finalText.trim();
+    const normalizedLast = (session.lastCompletedAssistantSegmentText || '').trim();
+
+    if (normalizedFinal && normalizedFinal === normalizedLast) {
+      return false;
+    }
+
+    const hasContent =
+      typeof content === 'string' ? content.trim().length > 0 : content.length > 0;
+    if (!hasContent) {
+      return false;
+    }
+
+    session.hasAssistantTextThisTurn = true;
+
+    const assistantItem: AssistantMessageItem = {
+      id: generateChatItemId(),
+      kind: 'assistant_message',
+      timestamp: assistantMessage.createdAt || Date.now(),
+      turnId: session.currentTurnId,
+      content,
+      metadata: assistantMessage.metadata,
+      stream: {
+        phase: 'final',
+        status: 'done',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    };
+
+    this.appendChatItem(session, assistantItem);
+    session.lastCompletedAssistantSegmentText = normalizedFinal || normalizedLast;
+    session.assistantSegmentIndex += 1;
+    return true;
+  }
+
+  private extractMediaDescriptorsFromResult(result: unknown): Array<{
+    mediaType: 'image' | 'video';
+    path?: string;
+    url?: string;
+    mimeType?: string;
+    data?: string;
+  }> {
+    const resultAny = result as
+      | {
+          data?: {
+            images?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+            videos?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+          };
+          images?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+          videos?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+        }
+      | null;
+
+    const images = resultAny?.data?.images || resultAny?.images || [];
+    const videos = resultAny?.data?.videos || resultAny?.videos || [];
+    const descriptors: Array<{
+      mediaType: 'image' | 'video';
+      path?: string;
+      url?: string;
+      mimeType?: string;
+      data?: string;
+    }> = [];
+
+    for (const image of images) {
+      if (!image?.path && !image?.url && !image?.data) continue;
+      descriptors.push({
+        mediaType: 'image',
+        path: image.path,
+        url: image.url,
+        mimeType: image.mimeType,
+        data: image.data,
+      });
+    }
+
+    for (const video of videos) {
+      if (!video?.path && !video?.url && !video?.data) continue;
+      descriptors.push({
+        mediaType: 'video',
+        path: video.path,
+        url: video.url,
+        mimeType: video.mimeType,
+        data: video.data,
+      });
+    }
+
+    return descriptors;
+  }
+
+  private emitMediaChatItemsForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    const lowerTool = toolName.toLowerCase();
+    if (
+      lowerTool !== 'generate_image' &&
+      lowerTool !== 'edit_image' &&
+      lowerTool !== 'generate_video'
+    ) {
+      return;
+    }
+
+    const descriptors = this.extractMediaDescriptorsFromResult(result);
+    if (descriptors.length === 0) return;
+
+    for (const descriptor of descriptors) {
+      const mediaItem: MediaItem = {
+        id: generateChatItemId(),
+        kind: 'media',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        mediaType: descriptor.mediaType,
+        path: descriptor.path,
+        url: descriptor.url,
+        mimeType: descriptor.mimeType,
+        data: descriptor.data,
+        toolId,
+      };
+      this.appendChatItem(session, mediaItem);
+    }
   }
 
 
@@ -565,6 +826,12 @@ export class AgentRunner {
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
       lastKnownPromptTokens: 0,
+      nextSequence: 0,
+      activeAssistantSegmentItemId: undefined,
+      activeAssistantSegmentText: '',
+      assistantSegmentIndex: 0,
+      lastCompletedAssistantSegmentText: undefined,
+      hasAssistantTextThisTurn: false,
       threadId: sessionId,
       messageQueue: [],
       createdAt: now,
@@ -751,11 +1018,9 @@ export class AgentRunner {
       content: messageContent,
       attachments: chatItemAttachments,
     };
-    session.chatItems.push(userChatItem);
+    this.appendChatItem(session, userChatItem);
     session.currentTurnId = turnId;
-    eventEmitter.chatItem(sessionId, userChatItem);
-    // V2: Immediate persistence for crash recovery
-    await this.persistence?.appendChatItem(sessionId, userChatItem);
+    this.resetAssistantStreamingState(session);
 
     // Ensure agent is initialized (may be restored from disk without agent)
     if (!session.agent.invoke) {
@@ -823,10 +1088,7 @@ export class AgentRunner {
                   content: '',
                   status: 'active',
                 };
-                session.chatItems.push(thinkingItem);
-                eventEmitter.chatItem(sessionId, thinkingItem);
-                // V2: Immediate persistence for crash recovery
-                this.persistence?.appendChatItem(sessionId, thinkingItem).catch(() => {});
+                this.appendChatItem(session, thinkingItem);
               }
               accumulatedThinking += thinkingText;
               eventEmitter.thinkingChunk(sessionId, thinkingText);
@@ -842,17 +1104,14 @@ export class AgentRunner {
 
                 // V2: Update ThinkingItem to done with full content
                 if (thinkingItemId) {
-                  const thinkingItem = session.chatItems.find(i => i.id === thinkingItemId) as ThinkingItem | undefined;
-                  if (thinkingItem) {
-                    thinkingItem.content = accumulatedThinking;
-                    thinkingItem.status = 'done';
-                    eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
-                    // V2: Immediate persistence for crash recovery
-                    this.persistence?.updateChatItem(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' }).catch(() => {});
-                  }
+                  this.updateChatItem(session, thinkingItemId, {
+                    content: accumulatedThinking,
+                    status: 'done',
+                  });
                 }
               }
               streamedText += chunkText;
+              this.appendAssistantSegmentChunk(session, chunkText);
               eventEmitter.streamChunk(sessionId, chunkText);
             }
 
@@ -873,14 +1132,10 @@ export class AgentRunner {
 
             // V2: Update ThinkingItem to done
             if (thinkingItemId) {
-              const thinkingItem = session.chatItems.find(i => i.id === thinkingItemId) as ThinkingItem | undefined;
-              if (thinkingItem) {
-                thinkingItem.content = accumulatedThinking;
-                thinkingItem.status = 'done';
-                eventEmitter.chatItemUpdate(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' });
-                // V2: Immediate persistence for crash recovery
-                this.persistence?.updateChatItem(sessionId, thinkingItemId, { content: accumulatedThinking, status: 'done' }).catch(() => {});
-              }
+              this.updateChatItem(session, thinkingItemId, {
+                content: accumulatedThinking,
+                status: 'done',
+              });
             }
           }
 
@@ -935,6 +1190,7 @@ export class AgentRunner {
             if (assistantMessage) {
               const textContent = this.extractTextContent(assistantMessage);
               if (textContent) {
+                this.appendAssistantSegmentChunk(session, textContent);
                 eventEmitter.streamChunk(sessionId, textContent);
               }
             }
@@ -959,27 +1215,18 @@ export class AgentRunner {
         if (assistantMessage) {
           const textContent = this.extractTextContent(assistantMessage);
           if (textContent) {
+            this.appendAssistantSegmentChunk(session, textContent);
             eventEmitter.streamChunk(sessionId, textContent);
           }
         }
       }
 
+      this.finalizeAssistantSegment(session);
       if (assistantMessage) {
+        this.emitFinalAssistantSegment(session, assistantMessage);
+      }
+      if (assistantMessage || session.hasAssistantTextThisTurn) {
         session.updatedAt = Date.now();
-
-        // V2: Create and emit AssistantMessageItem
-        const assistantChatItem: AssistantMessageItem = {
-          id: generateChatItemId(),
-          kind: 'assistant_message',
-          timestamp: assistantMessage.createdAt,
-          turnId: session.currentTurnId,
-          content: assistantMessage.content,
-          metadata: assistantMessage.metadata,
-        };
-        session.chatItems.push(assistantChatItem);
-        eventEmitter.chatItem(sessionId, assistantChatItem);
-        // Immediate persistence for crash recovery
-        this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
       }
       // Signal stream completion (frontend uses this for streaming state)
       eventEmitter.streamDone(sessionId, null);
@@ -989,20 +1236,17 @@ export class AgentRunner {
       await this.maybeCompactContext(session);
     } catch (error) {
       if (this.isAbortError(error) || session.stopRequested) {
-        if (streamedText) {
-          session.updatedAt = Date.now();
-
-          // Create and emit AssistantMessageItem for abort case
-          const assistantChatItem: AssistantMessageItem = {
-            id: generateChatItemId(),
-            kind: 'assistant_message',
-            timestamp: now(),
-            turnId: session.currentTurnId,
+        this.finalizeAssistantSegment(session);
+        if (streamedText && !session.hasAssistantTextThisTurn) {
+          this.emitFinalAssistantSegment(session, {
+            id: generateMessageId(),
+            role: 'assistant',
             content: streamedText,
-          };
-          session.chatItems.push(assistantChatItem);
-          eventEmitter.chatItem(sessionId, assistantChatItem);
-          this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
+            createdAt: now(),
+          });
+        }
+        if (streamedText || session.hasAssistantTextThisTurn) {
+          session.updatedAt = Date.now();
         }
         // Signal stream completion
         eventEmitter.streamDone(sessionId, null);
@@ -1046,9 +1290,7 @@ export class AgentRunner {
         recoverable: errorCode !== 'INVALID_API_KEY',
         details: rateLimitDetails ? { ...rateLimitDetails } : undefined,
       };
-      session.chatItems.push(errorItem);
-      eventEmitter.chatItem(sessionId, errorItem);
-      this.persistence?.appendChatItem(sessionId, errorItem).catch(() => {});
+      this.appendChatItem(session, errorItem);
 
       eventEmitter.error(sessionId, errorMessage, errorCode, rateLimitDetails ?? undefined);
       // Don't re-throw - error has been emitted to UI, re-throwing causes unhandled rejection
@@ -1258,9 +1500,7 @@ export class AgentRunner {
       multiSelect: multiSelect,
       status: 'pending',
     };
-    session.chatItems.push(questionItem);
-    eventEmitter.chatItem(sessionId, questionItem);
-    this.persistence?.appendChatItem(sessionId, questionItem).catch(() => {});
+    this.appendChatItem(session, questionItem);
 
     return new Promise((resolve) => {
       // Store pending question
@@ -1333,6 +1573,13 @@ export class AgentRunner {
 
     const firstMessage = this.getFirstMessagePreview(session);
 
+    // Build context usage from in-memory state
+    const ctxWindow = getModelContextWindow(session.model);
+    const usedTokens = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+    const percentUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
+
     return {
       id: session.id,
       type: session.type,
@@ -1348,6 +1595,11 @@ export class AgentRunner {
       chatItems: session.chatItems,
       tasks: session.tasks,
       artifacts: session.artifacts,
+      contextUsage: {
+        usedTokens,
+        maxTokens: ctxWindow.input,
+        percentUsed,
+      },
     };
   }
 
@@ -1406,7 +1658,13 @@ export class AgentRunner {
     // Persist to disk using V2 format
     if (this.persistence) {
       try {
-        // Use new V2 save method that stores chatItems
+        // Compute context usage for persistence
+        const ctxWindow = getModelContextWindow(session.model);
+        const usedTokens = session.lastKnownPromptTokens > 0
+          ? session.lastKnownPromptTokens
+          : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+        const pctUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
+
         await this.persistence.saveSessionV2({
           metadata: {
             version: 2,
@@ -1423,6 +1681,12 @@ export class AgentRunner {
           chatItems: session.chatItems,
           tasks: session.tasks,
           artifacts: session.artifacts,
+          contextUsage: {
+            usedTokens,
+            maxTokens: ctxWindow.input,
+            percentUsed: pctUsed,
+            lastUpdated: Date.now(),
+          },
         });
       } catch {
         // Failed to persist session
@@ -2426,6 +2690,7 @@ ${toolList}
         const toolCall = { id: toolCallId, name: tool.name, args, parentToolId };
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
+        this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCall);
 
         // Create and emit ToolStartItem
@@ -2440,10 +2705,7 @@ ${toolList}
           status: 'running',
           parentToolId,
         };
-        session.chatItems.push(toolStartItem);
-        eventEmitter.chatItem(session.id, toolStartItem);
-        // V2: Immediate persistence for crash recovery
-        this.persistence?.appendChatItem(session.id, toolStartItem).catch(() => {});
+        this.appendChatItem(session, toolStartItem);
 
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
@@ -2468,7 +2730,7 @@ ${toolList}
               eventEmitter.toolResult(session.id, toolCall, payload);
               // Update ToolStartItem and emit ToolResultItem
               toolStartItem.status = 'error';
-              eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
+              this.updateChatItem(session, toolStartItem.id, { status: 'error' });
 
               const toolResultItem: ToolResultItem = {
                 id: generateChatItemId(),
@@ -2481,10 +2743,7 @@ ${toolList}
                 error: 'Permission denied',
                 duration,
               };
-              session.chatItems.push(toolResultItem);
-              eventEmitter.chatItem(session.id, toolResultItem);
-              // V2: Immediate persistence for crash recovery
-              this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
+              this.appendChatItem(session, toolResultItem);
 
               return { error: 'Permission denied' };
             }
@@ -2507,7 +2766,7 @@ ${toolList}
 
           // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = result.success ? 'completed' : 'error';
-          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: toolStartItem.status });
+          this.updateChatItem(session, toolStartItem.id, { status: toolStartItem.status });
 
           const toolResultItem: ToolResultItem = {
             id: generateChatItemId(),
@@ -2521,10 +2780,10 @@ ${toolList}
             error: result.error,
             duration,
           };
-          session.chatItems.push(toolResultItem);
-          eventEmitter.chatItem(session.id, toolResultItem);
-          // V2: Immediate persistence for crash recovery
-          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
+          this.appendChatItem(session, toolResultItem);
+          if (result.success) {
+            this.emitMediaChatItemsForToolResult(session, tool.name, toolCallId, result.data);
+          }
 
           return result.data ?? result;
         } catch (error) {
@@ -2540,7 +2799,7 @@ ${toolList}
           eventEmitter.toolResult(session.id, toolCall, payload);
           // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = 'error';
-          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
+          this.updateChatItem(session, toolStartItem.id, { status: 'error' });
 
           const toolResultItem: ToolResultItem = {
             id: generateChatItemId(),
@@ -2553,10 +2812,7 @@ ${toolList}
             error: payload.error,
             duration,
           };
-          session.chatItems.push(toolResultItem);
-          eventEmitter.chatItem(session.id, toolResultItem);
-          // V2: Immediate persistence for crash recovery
-          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
+          this.appendChatItem(session, toolResultItem);
 
           return { error: payload.error };
         }
@@ -2622,6 +2878,7 @@ ${toolList}
 
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
+        this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCallPayload);
 
         // Create and emit ToolStartItem
@@ -2636,10 +2893,7 @@ ${toolList}
           status: 'running',
           parentToolId,
         };
-        session.chatItems.push(toolStartItem);
-        eventEmitter.chatItem(session.id, toolStartItem);
-        // V2: Immediate persistence for crash recovery
-        this.persistence?.appendChatItem(session.id, toolStartItem).catch(() => {});
+        this.appendChatItem(session, toolStartItem);
 
         // Track tool in current turn for persistence
         const turnInfo = this.currentTurnInfo.get(session.id);
@@ -2650,7 +2904,7 @@ ${toolList}
         // Helper to emit V2 tool result
         const emitToolResult = (status: 'success' | 'error', result?: unknown, error?: string, duration?: number) => {
           toolStartItem.status = status === 'success' ? 'completed' : 'error';
-          eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: toolStartItem.status });
+          this.updateChatItem(session, toolStartItem.id, { status: toolStartItem.status });
 
           const toolResultItem: ToolResultItem = {
             id: generateChatItemId(),
@@ -2664,10 +2918,10 @@ ${toolList}
             error,
             duration,
           };
-          session.chatItems.push(toolResultItem);
-          eventEmitter.chatItem(session.id, toolResultItem);
-          // V2: Immediate persistence for crash recovery
-          this.persistence?.appendChatItem(session.id, toolResultItem).catch(() => {});
+          this.appendChatItem(session, toolResultItem);
+          if (status === 'success') {
+            this.emitMediaChatItemsForToolResult(session, toolName, toolCallId, result);
+          }
         };
 
         // Step 1: Evaluate tool call against policy
@@ -2987,9 +3241,7 @@ ${toolList}
         },
         status: 'pending',
       };
-      session.chatItems.push(permissionItem);
-      eventEmitter.chatItem(session.id, permissionItem);
-      this.persistence?.appendChatItem(session.id, permissionItem).catch(() => {});
+      this.appendChatItem(session, permissionItem);
 
       eventEmitter.permissionRequest(session.id, extendedRequest);
     });
