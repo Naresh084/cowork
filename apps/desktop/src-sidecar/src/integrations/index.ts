@@ -2,7 +2,7 @@ import { WhatsAppAdapter } from './adapters/whatsapp-adapter.js';
 import { SlackAdapter } from './adapters/slack-adapter.js';
 import { TelegramAdapter } from './adapters/telegram-adapter.js';
 import { MessageRouter } from './message-router.js';
-import { IntegrationStore } from './store.js';
+import { IntegrationStore, type IntegrationGeneralSettings } from './store.js';
 import { eventEmitter } from '../event-emitter.js';
 import {
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
@@ -29,6 +29,7 @@ export class IntegrationBridgeService {
   private adapters: Map<PlatformType, BaseAdapter> = new Map();
   private router: MessageRouter;
   private store: IntegrationStore;
+  private agentRunner: any = null;
   private initialized = false;
   private platformOpInFlight: Set<PlatformType> = new Set();
 
@@ -44,8 +45,12 @@ export class IntegrationBridgeService {
   async initialize(agentRunner: any): Promise<void> {
     if (this.initialized) return;
 
+    this.agentRunner = agentRunner;
     this.router.setAgentRunner(agentRunner);
     await this.store.load();
+    this.router.setSharedSessionWorkingDirectory(
+      this.store.getSettings().sharedSessionWorkingDirectory,
+    );
 
     // Subscribe to stream:done events for response routing
     this.subscribeToAgentEvents();
@@ -334,6 +339,47 @@ export class IntegrationBridgeService {
     return this.store;
   }
 
+  getSettings(): IntegrationGeneralSettings {
+    return this.store.getSettings();
+  }
+
+  async updateSettings(settings: IntegrationGeneralSettings): Promise<void> {
+    const normalized = this.normalizeIntegrationSettings(settings);
+    await this.store.setSettings(normalized);
+    this.router.setSharedSessionWorkingDirectory(
+      normalized.sharedSessionWorkingDirectory,
+    );
+
+    const sessionId = this.router.getSessionId();
+    if (!sessionId) {
+      return;
+    }
+
+    if (
+      normalized.sharedSessionWorkingDirectory &&
+      this.agentRunner &&
+      typeof this.agentRunner.updateSessionWorkingDirectory === 'function'
+    ) {
+      try {
+        await Promise.resolve(
+          this.agentRunner.updateSessionWorkingDirectory(
+            sessionId,
+            normalized.sharedSessionWorkingDirectory,
+          ),
+        );
+        eventEmitter.sessionUpdated({
+          id: sessionId,
+          workingDirectory: normalized.sharedSessionWorkingDirectory,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[integration] Failed to apply shared session working directory: ${message}\n`,
+        );
+      }
+    }
+  }
+
   private normalizePlatformConfig(
     platform: PlatformType,
     config: Record<string, unknown>,
@@ -373,6 +419,19 @@ export class IntegrationBridgeService {
       return null;
     }
     return `+${digits}`;
+  }
+
+  private normalizeIntegrationSettings(
+    settings: IntegrationGeneralSettings,
+  ): IntegrationGeneralSettings {
+    const sharedSessionWorkingDirectory =
+      typeof settings.sharedSessionWorkingDirectory === 'string'
+        ? settings.sharedSessionWorkingDirectory.trim()
+        : '';
+
+    return sharedSessionWorkingDirectory
+      ? { sharedSessionWorkingDirectory }
+      : {};
   }
 }
 

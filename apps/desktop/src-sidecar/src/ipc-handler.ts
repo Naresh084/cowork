@@ -1731,6 +1731,27 @@ registerHandler('integration_get_config', async (params) => {
   return store.getConfig(platform as any);
 });
 
+registerHandler('integration_get_settings', async () => {
+  const { integrationBridge } = await import('./integrations/index.js');
+  return integrationBridge.getSettings();
+});
+
+registerHandler('integration_update_settings', async (params) => {
+  const { settings } = params as { settings?: Record<string, unknown> };
+  const { integrationBridge } = await import('./integrations/index.js');
+  const safeSettings =
+    settings && typeof settings === 'object' && !Array.isArray(settings)
+      ? settings
+      : {};
+  await integrationBridge.updateSettings({
+    sharedSessionWorkingDirectory:
+      typeof safeSettings.sharedSessionWorkingDirectory === 'string'
+        ? safeSettings.sharedSessionWorkingDirectory
+        : undefined,
+  });
+  return { success: true };
+});
+
 registerHandler('integration_send_test', async (params) => {
   const { platform, message } = params as { platform: string; message?: string };
   if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {

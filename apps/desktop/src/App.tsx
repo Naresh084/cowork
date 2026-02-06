@@ -9,6 +9,7 @@ import { useSettingsStore } from './stores/settings-store';
 import { useSkillStore } from './stores/skill-store';
 import { useCommandStore } from './stores/command-store';
 import { useSubagentStore } from './stores/subagent-store';
+import { useCronStore } from './stores/cron-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -18,6 +19,7 @@ export function App() {
   const { discoverSkills } = useSkillStore();
   const { discoverCommands } = useCommandStore();
   const { loadSubagents } = useSubagentStore();
+  const { loadJobs: loadCronJobs } = useCronStore();
 
   // Initialize auth + wait for settings hydration, then hide loading
   useEffect(() => {
@@ -61,13 +63,14 @@ export function App() {
         await discoverSkills();
         await discoverCommands();
         await loadSubagents();
+        await loadCronJobs();
       } catch {
         // Backend initialization failed - UI will show appropriate error state
       }
     };
 
     initBackend();
-  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents]);
+  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents, loadCronJobs]);
 
   useEffect(() => {
     if (!apiKey || modelsLoading || availableModels.length > 0) return;

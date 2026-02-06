@@ -24,6 +24,10 @@ export interface WhatsAppSenderControlConfig {
   denialMessage: string;
 }
 
+export interface IntegrationGeneralSettings {
+  sharedSessionWorkingDirectory: string;
+}
+
 export const DEFAULT_WHATSAPP_DENIAL_MESSAGE =
   'This Cowork bot is private. You are not authorized to chat with it.';
 
@@ -32,9 +36,13 @@ interface IntegrationState {
   whatsappQR: string | null;
   isConnecting: Record<PlatformType, boolean>;
   whatsappConfig: WhatsAppSenderControlConfig;
+  integrationSettings: IntegrationGeneralSettings;
   isConfigLoading: boolean;
   isConfigSaving: boolean;
   configError: string | null;
+  isIntegrationSettingsLoading: boolean;
+  isIntegrationSettingsSaving: boolean;
+  integrationSettingsError: string | null;
 }
 
 interface IntegrationActions {
@@ -45,6 +53,8 @@ interface IntegrationActions {
   setQRCode: (qr: string | null) => void;
   loadConfig: (platform: PlatformType) => Promise<void>;
   saveConfig: (platform: PlatformType, config: Record<string, unknown>) => Promise<void>;
+  loadIntegrationSettings: () => Promise<void>;
+  saveIntegrationSettings: (settings: IntegrationGeneralSettings) => Promise<void>;
   sendTestMessage: (platform: PlatformType, message?: string) => Promise<void>;
   getConnectedPlatforms: () => PlatformType[];
 }
@@ -75,9 +85,15 @@ const initialState: IntegrationState = {
     allowFrom: [],
     denialMessage: DEFAULT_WHATSAPP_DENIAL_MESSAGE,
   },
+  integrationSettings: {
+    sharedSessionWorkingDirectory: '',
+  },
   isConfigLoading: false,
   isConfigSaving: false,
   configError: null,
+  isIntegrationSettingsLoading: false,
+  isIntegrationSettingsSaving: false,
+  integrationSettingsError: null,
 };
 
 const statusPollTimers: Partial<Record<PlatformType, ReturnType<typeof setInterval>>> = {};
@@ -148,6 +164,18 @@ function normalizeWhatsAppConfig(rawConfig: unknown): WhatsAppSenderControlConfi
     senderPolicy: 'allowlist',
     allowFrom: allowFromResult.normalized,
     denialMessage,
+  };
+}
+
+function normalizeIntegrationSettings(rawSettings: unknown): IntegrationGeneralSettings {
+  const settings = isRecord(rawSettings) ? rawSettings : {};
+  const sharedSessionWorkingDirectory =
+    typeof settings.sharedSessionWorkingDirectory === 'string'
+      ? settings.sharedSessionWorkingDirectory.trim()
+      : '';
+
+  return {
+    sharedSessionWorkingDirectory,
   };
 }
 
@@ -403,6 +431,56 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
         set({
           isConfigSaving: false,
           configError: message,
+        });
+        throw error;
+      }
+    },
+
+    loadIntegrationSettings: async () => {
+      set({
+        isIntegrationSettingsLoading: true,
+        integrationSettingsError: null,
+      });
+
+      try {
+        const result = await invoke<unknown>('agent_integration_get_settings');
+        const normalizedSettings = normalizeIntegrationSettings(result);
+        set({
+          integrationSettings: normalizedSettings,
+          isIntegrationSettingsLoading: false,
+          integrationSettingsError: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          isIntegrationSettingsLoading: false,
+          integrationSettingsError: message,
+        });
+      }
+    },
+
+    saveIntegrationSettings: async (settings) => {
+      set({
+        isIntegrationSettingsSaving: true,
+        integrationSettingsError: null,
+      });
+
+      try {
+        const normalizedSettings = normalizeIntegrationSettings(settings);
+        await invoke('agent_integration_update_settings', {
+          settings: normalizedSettings,
+        });
+
+        set({
+          integrationSettings: normalizedSettings,
+          isIntegrationSettingsSaving: false,
+          integrationSettingsError: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          isIntegrationSettingsSaving: false,
+          integrationSettingsError: message,
         });
         throw error;
       }
