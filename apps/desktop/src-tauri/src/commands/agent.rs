@@ -55,9 +55,21 @@ pub struct SessionDetails {
     #[serde(default)]
     pub tool_executions: Option<Vec<serde_json::Value>>,
     #[serde(default)]
+    pub context_usage: Option<ContextUsage>,
+    #[serde(default)]
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsage {
+    pub used_tokens: i64,
+    pub max_tokens: i64,
+    pub percent_used: f64,
+    #[serde(default)]
+    pub last_updated: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

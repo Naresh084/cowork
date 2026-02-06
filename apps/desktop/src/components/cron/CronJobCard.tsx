@@ -66,6 +66,18 @@ function formatDuration(ms?: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
+function getRemainingRuns(job: CronJob): number | null {
+  if (!job.maxRuns || job.maxRuns <= 0) return null;
+  return Math.max(job.maxRuns - (job.runCount || 0), 0);
+}
+
+function getRemainingTurnBudget(job: CronJob): number | null {
+  if (!job.maxTurns || job.maxTurns <= 0) return null;
+  const remainingRuns = getRemainingRuns(job);
+  if (remainingRuns === null) return null;
+  return Math.max(remainingRuns * job.maxTurns, 0);
+}
+
 export function CronJobCard({ job, compact = false }: CronJobCardProps) {
   const { pauseJob, resumeJob, triggerJob, deleteJob, startEdit, viewHistory } =
     useCronStore();
@@ -74,6 +86,8 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
 
   const isActive = job.status === 'active';
   const isPaused = job.status === 'paused';
+  const remainingRuns = getRemainingRuns(job);
+  const remainingTurnBudget = getRemainingTurnBudget(job);
 
   const handleTrigger = async () => {
     setIsRunning(true);
@@ -124,6 +138,22 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
             {formatNextRun(job.nextRunAt)}
           </span>
         </div>
+        {(remainingRuns !== null || remainingTurnBudget !== null || job.maxTurns) && (
+          <div className="mt-1 text-[10px] text-white/40">
+            {remainingRuns !== null && (
+              <span>{remainingRuns} run{remainingRuns !== 1 ? 's' : ''} left</span>
+            )}
+            {remainingTurnBudget !== null && (
+              <span>
+                {remainingRuns !== null ? ' · ' : ''}
+                up to {remainingTurnBudget} turn{remainingTurnBudget !== 1 ? 's' : ''} left
+              </span>
+            )}
+            {remainingRuns === null && remainingTurnBudget === null && job.maxTurns && (
+              <span>max {job.maxTurns} turns/run</span>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -214,7 +244,19 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
           <RefreshCw className="w-4 h-4 flex-shrink-0" />
           <span>
             {formatSchedule(job.schedule)}
-            {job.maxTurns && <span className="text-white/40"> · {job.maxTurns} turns max</span>}
+            {job.maxTurns && <span className="text-white/40"> · {job.maxTurns} turns/run</span>}
+            {remainingRuns !== null && (
+              <span className="text-white/40">
+                {' '}
+                · {remainingRuns} run{remainingRuns !== 1 ? 's' : ''} left
+              </span>
+            )}
+            {remainingTurnBudget !== null && (
+              <span className="text-white/40">
+                {' '}
+                · up to {remainingTurnBudget} turn{remainingTurnBudget !== 1 ? 's' : ''} left
+              </span>
+            )}
           </span>
         </div>
         <div className="flex items-center gap-2 text-sm text-white/60">

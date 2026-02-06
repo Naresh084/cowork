@@ -1,6 +1,7 @@
 import { Layers } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAgentStore } from '../../stores/agent-store';
+import { useChatStore } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { CollapsibleSection } from './CollapsibleSection';
 
@@ -11,7 +12,18 @@ import { CollapsibleSection } from './CollapsibleSection';
  */
 export function ContextSection() {
   const { activeSessionId } = useSessionStore();
-  const contextUsage = useAgentStore((state) => state.getSessionState(activeSessionId).contextUsage);
+  const agentContextUsage = useAgentStore((state) => state.getSessionState(activeSessionId).contextUsage);
+  const persistedContextUsage = useChatStore((state) =>
+    activeSessionId ? state.sessions[activeSessionId]?.contextUsage ?? null : null
+  );
+
+  const contextUsage = persistedContextUsage
+    ? {
+        used: persistedContextUsage.usedTokens,
+        total: persistedContextUsage.maxTokens,
+        percentage: persistedContextUsage.percentUsed,
+      }
+    : agentContextUsage;
 
   return (
     <CollapsibleSection id="context" title="Context" icon={Layers}>

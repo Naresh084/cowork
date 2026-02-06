@@ -30,8 +30,22 @@ function formatNextRun(timestamp?: number): string {
   return `In ${days}d`;
 }
 
+function getRemainingRuns(job: CronJob): number | null {
+  if (!job.maxRuns || job.maxRuns <= 0) return null;
+  return Math.max(job.maxRuns - (job.runCount || 0), 0);
+}
+
+function getRemainingTurnBudget(job: CronJob): number | null {
+  if (!job.maxTurns || job.maxTurns <= 0) return null;
+  const remainingRuns = getRemainingRuns(job);
+  if (remainingRuns === null) return null;
+  return Math.max(remainingRuns * job.maxTurns, 0);
+}
+
 function AutomationsJobItem({ job }: { job: CronJob }) {
   const { triggerJob, openModal } = useCronStore();
+  const remainingRuns = getRemainingRuns(job);
+  const remainingTurnBudget = getRemainingTurnBudget(job);
 
   const handleRun = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -72,6 +86,22 @@ function AutomationsJobItem({ job }: { job: CronJob }) {
               {formatNextRun(job.nextRunAt)}
             </span>
           </div>
+          {(remainingRuns !== null || remainingTurnBudget !== null || job.maxTurns) && (
+            <div className="mt-0.5 text-[10px] text-white/35">
+              {remainingRuns !== null && (
+                <span>{remainingRuns} run{remainingRuns !== 1 ? 's' : ''} left</span>
+              )}
+              {remainingTurnBudget !== null && (
+                <span>
+                  {remainingRuns !== null ? ' · ' : ''}
+                  up to {remainingTurnBudget} turn{remainingTurnBudget !== 1 ? 's' : ''} left
+                </span>
+              )}
+              {remainingRuns === null && remainingTurnBudget === null && job.maxTurns && (
+                <span>max {job.maxTurns} turns/run</span>
+              )}
+            </div>
+          )}
         </div>
         <button
           onClick={handleRun}

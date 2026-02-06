@@ -2423,6 +2423,7 @@ You can create automated scheduled tasks that run in the background. Use the \`s
 2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
 3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use google_grounded_search to search the web").
 4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
+5. **Notification channel confirmation is required when available**. If at least one messaging integration is connected and the user requests a scheduled task without naming a delivery channel, ask a single clarifying question to pick the channel (WhatsApp/Slack/Telegram) before creating the task.
 
 ### When to Suggest Scheduling
 Proactively suggest scheduling when the user:
@@ -2431,12 +2432,19 @@ Proactively suggest scheduling when the user:
 - Asks to do something repeatedly or a specific number of times
 - Wants monitoring, reporting, or periodic checks
 - Mentions specific future times ("on Friday", "next week", "at 3 PM")
+- Repeats similar requests across recent conversation history (same task pattern done manually multiple times)
+
+### Confirmation Before Creation
+- When you detect a likely recurring workflow from the latest message + recent conversation history, proactively suggest automation and ask a direct confirmation question before creating it.
+- Use a short confirmation question such as: "Should I create an automation for this?"
+- If the user clearly asked to schedule already ("set up a cron job", "schedule this", "run every..."), you may create directly.
 
 ### How schedule_task Works
 - Creates a background job managed by the cron service that runs automatically on schedule.
 - The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
 - The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected platforms (WhatsApp, Slack, Telegram). If a messaging platform is connected at the time the task runs, the cron agent can use \`send_notification_whatsapp\` / \`send_notification_slack\` / \`send_notification_telegram\` to deliver results.
 - When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack"), include that instruction in the prompt. Example: "After searching, send a summary of the results to the user via send_notification_whatsapp."
+- If messaging integrations are connected and the user did not choose a delivery channel for the scheduled task, ask which channel to use before creating the task. If no integrations are connected, proceed without asking and keep delivery in-app.
 - Results are also delivered to the user's chat when each run completes.
 - \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
 - The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due job, fires it, then re-arms for the next one. No wasted CPU cycles.
@@ -2572,6 +2580,23 @@ schedule_task({
 })
 \`\`\`
 Result: Searches weather every hour, sends to Telegram, auto-stops after 8 updates.
+
+**Example 11: Conversation-history suggestion + confirmation**
+Conversation pattern:
+- User asks multiple times over chat to "check latest errors and summarize"
+- User manually repeats this every morning
+
+Assistant should ask first:
+"I can automate this as a scheduled task so you don't need to ask each day. Should I create it?"
+
+If user confirms:
+\`\`\`
+schedule_task({
+  name: "Daily Error Summary",
+  prompt: "Check latest production errors, summarize top issues, and send the summary to the selected notification channel.",
+  schedule: { type: "daily", time: "09:00" }
+})
+\`\`\`
 
 ### Managing Existing Tasks
 Use \`manage_scheduled_task\` to:
@@ -3873,32 +3898,123 @@ ${toolList}
     return Array.from(roots);
   }
 
-  private extractAssistantMessage(result: unknown): Message | null {
-    const resultAny = result as {
-      messages?: Array<{ role?: string; content?: unknown; text?: string }>;
-      output?: unknown;
+  private getMessageRole(candidate: unknown): string | null {
+    if (!candidate || typeof candidate !== 'object') return null;
+    const candidateAny = candidate as {
+      role?: unknown;
+      type?: unknown;
+      _getType?: () => string;
+      constructor?: { name?: string };
     };
 
-    const messages = resultAny.messages;
-    if (messages && messages.length > 0) {
-      const last = [...messages].reverse().find((m) => m.role === 'assistant' || m.role === 'ai' || m.role === 'model');
-      if (last) {
+    const rawRole =
+      (typeof candidateAny.role === 'string' && candidateAny.role) ||
+      (typeof candidateAny.type === 'string' && candidateAny.type) ||
+      (typeof candidateAny._getType === 'function' ? candidateAny._getType() : '') ||
+      (typeof candidateAny.constructor?.name === 'string'
+        ? candidateAny.constructor.name.replace(/message$/i, '').toLowerCase()
+        : '');
+
+    if (!rawRole) return null;
+    const normalized = rawRole.toLowerCase();
+
+    if (normalized === 'ai' || normalized === 'assistant' || normalized === 'model') {
+      return 'assistant';
+    }
+    if (normalized === 'human' || normalized === 'user') {
+      return 'user';
+    }
+    if (normalized === 'system') {
+      return 'system';
+    }
+
+    return normalized;
+  }
+
+  private extractMessageContentCandidate(candidate: unknown): unknown {
+    if (!candidate || typeof candidate !== 'object') return candidate;
+    const candidateAny = candidate as {
+      content?: unknown;
+      text?: unknown;
+      message?: unknown;
+      output?: unknown;
+      kwargs?: { content?: unknown; text?: unknown };
+      lc_kwargs?: { content?: unknown; text?: unknown };
+      additional_kwargs?: { content?: unknown; text?: unknown };
+    };
+
+    if (candidateAny.content !== undefined) return candidateAny.content;
+    if (candidateAny.text !== undefined) return candidateAny.text;
+    if (candidateAny.kwargs?.content !== undefined) return candidateAny.kwargs.content;
+    if (candidateAny.kwargs?.text !== undefined) return candidateAny.kwargs.text;
+    if (candidateAny.lc_kwargs?.content !== undefined) return candidateAny.lc_kwargs.content;
+    if (candidateAny.lc_kwargs?.text !== undefined) return candidateAny.lc_kwargs.text;
+    if (candidateAny.additional_kwargs?.content !== undefined) return candidateAny.additional_kwargs.content;
+    if (candidateAny.additional_kwargs?.text !== undefined) return candidateAny.additional_kwargs.text;
+    if (candidateAny.message !== undefined) return this.extractMessageContentCandidate(candidateAny.message);
+    if (candidateAny.output !== undefined) return this.extractMessageContentCandidate(candidateAny.output);
+    return candidate;
+  }
+
+  private extractAssistantMessage(result: unknown): Message | null {
+    const resultAny = result as {
+      messages?: unknown;
+      output?: unknown;
+      message?: unknown;
+      content?: unknown;
+      text?: unknown;
+    };
+
+    const messageLists: unknown[][] = [];
+    if (Array.isArray(resultAny.messages)) {
+      messageLists.push(resultAny.messages);
+    }
+    if (Array.isArray(resultAny.output)) {
+      messageLists.push(resultAny.output);
+    }
+    if (resultAny.output && typeof resultAny.output === 'object') {
+      const outputAny = resultAny.output as { messages?: unknown };
+      if (Array.isArray(outputAny.messages)) {
+        messageLists.push(outputAny.messages);
+      }
+    }
+
+    for (const messages of messageLists) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const candidate = messages[i];
+        const role = this.getMessageRole(candidate);
+        if (role !== 'assistant') continue;
+
+        const content = this.extractMessageContentCandidate(candidate);
         return {
           id: generateMessageId(),
           role: 'assistant',
-          content: this.normalizeContent(last.content ?? last.text ?? ''),
+          content: this.normalizeContent(content ?? ''),
           createdAt: now(),
         };
       }
     }
 
-    if (typeof resultAny.output === 'string') {
-      return {
-        id: generateMessageId(),
-        role: 'assistant',
-        content: resultAny.output,
-        createdAt: now(),
-      };
+    const directContent =
+      resultAny.content ??
+      resultAny.text ??
+      resultAny.message ??
+      resultAny.output;
+
+    if (directContent !== undefined && directContent !== null) {
+      const normalized = this.normalizeContent(this.extractMessageContentCandidate(directContent));
+      const hasText =
+        typeof normalized === 'string'
+          ? normalized.trim().length > 0
+          : normalized.length > 0;
+      if (hasText) {
+        return {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: normalized,
+          createdAt: now(),
+        };
+      }
     }
 
     return null;
@@ -4193,13 +4309,49 @@ ${toolList}
   }
 
   private extractStateFromStreamEvent(event: unknown): unknown | null {
-    const eventAny = event as { data?: { output?: unknown } };
-    const output = eventAny.data?.output;
-    if (!output || typeof output !== 'object') return null;
-    const outputAny = output as { messages?: unknown };
-    if (Array.isArray(outputAny.messages)) {
-      return output;
+    const eventAny = event as {
+      event?: string;
+      name?: string;
+      data?: { output?: unknown; messages?: unknown; message?: unknown };
+    };
+    const eventName = String(eventAny.event || eventAny.name || '').toLowerCase();
+    const data = eventAny.data;
+    if (!data || typeof data !== 'object') return null;
+
+    const output = data.output;
+    if (output !== undefined && output !== null) {
+      if (typeof output === 'string') return { output };
+      if (Array.isArray(output)) return { messages: output };
+      if (typeof output === 'object') {
+        const outputAny = output as {
+          messages?: unknown;
+          message?: unknown;
+          content?: unknown;
+          text?: unknown;
+        };
+        if (
+          Array.isArray(outputAny.messages) ||
+          outputAny.message !== undefined ||
+          outputAny.content !== undefined ||
+          outputAny.text !== undefined
+        ) {
+          return output;
+        }
+      }
     }
+
+    if (Array.isArray(data.messages)) {
+      return { messages: data.messages };
+    }
+    if (data.message !== undefined) {
+      return { message: data.message };
+    }
+
+    // Some stream implementations only provide useful final payload on *end events.
+    if (eventName.includes('end') && data.output !== undefined) {
+      return data.output;
+    }
+
     return null;
   }
 

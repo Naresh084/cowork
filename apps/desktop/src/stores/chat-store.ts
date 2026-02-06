@@ -751,6 +751,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
               percentUsed: session.contextUsage!.percentUsed,
             },
           })));
+        } else {
+          // Fallback for older payloads missing contextUsage from get_session.
+          // This keeps right-panel context visible after persistence restore.
+          await agentStore.refreshContextUsage(sessionId);
         }
 
         return session;
