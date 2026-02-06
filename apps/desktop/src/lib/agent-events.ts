@@ -279,6 +279,53 @@ function parseTauriEvent(
         queue: (data.queue as Array<{ id: string; content: string; queuedAt: number }>) ?? [],
       };
 
+    // V2 unified chat item events
+    case 'chat:item':
+      return {
+        type: 'chat:item',
+        sessionId,
+        item: data.item as AgentEvent & { type: 'chat:item' } extends { item: infer I } ? I : never,
+      };
+
+    case 'chat:update':
+      return {
+        type: 'chat:update',
+        sessionId,
+        itemId: (data.itemId as string) ?? '',
+        updates: (data.updates as Record<string, unknown>) ?? {},
+      };
+
+    case 'chat:items':
+      return {
+        type: 'chat:items',
+        sessionId,
+        items: (data.items as AgentEvent & { type: 'chat:items' } extends { items: infer I } ? I : never) ?? [],
+      };
+
+    // Thinking events
+    case 'thinking:start':
+      return { type: 'thinking:start', sessionId };
+
+    case 'thinking:chunk':
+      return {
+        type: 'thinking:chunk',
+        sessionId,
+        content: (data.content as string) ?? '',
+      };
+
+    case 'thinking:done':
+      return { type: 'thinking:done', sessionId };
+
+    // Context usage
+    case 'context:usage':
+      return {
+        type: 'context:usage',
+        sessionId,
+        usedTokens: (data.usedTokens as number) ?? 0,
+        maxTokens: (data.maxTokens as number) ?? 1048576,
+        percentUsed: (data.percentUsed as number) ?? 0,
+      };
+
     default:
       console.warn('Unknown event type:', type);
       return null;
@@ -340,6 +387,9 @@ export function subscribeToAgentEvents(
     'agent:stream:start',
     'agent:stream:chunk',
     'agent:stream:done',
+    'agent:thinking:start',
+    'agent:thinking:chunk',
+    'agent:thinking:done',
     'agent:tool:start',
     'agent:tool:result',
     'agent:permission:request',
@@ -349,16 +399,21 @@ export function subscribeToAgentEvents(
     'agent:task:create',
     'agent:task:update',
     'agent:task:delete',
+    'agent:task:set',
     'agent:artifact:created',
     'agent:artifact:updated',
     'agent:artifact:deleted',
     'agent:context:update',
+    'agent:context:usage',
     'agent:research:progress',
     'agent:error',
     'agent:session:updated',
     'agent:started',
     'agent:stopped',
     'agent:browserView:screenshot',
+    'agent:chat:item',
+    'agent:chat:update',
+    'agent:chat:items',
     'agent:integration:status',
     'agent:integration:qr',
     'agent:integration:message_in',
@@ -420,6 +475,9 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:stream:start',
     'agent:stream:chunk',
     'agent:stream:done',
+    'agent:thinking:start',
+    'agent:thinking:chunk',
+    'agent:thinking:done',
     'agent:tool:start',
     'agent:tool:result',
     'agent:permission:request',
@@ -429,16 +487,21 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:task:create',
     'agent:task:update',
     'agent:task:delete',
+    'agent:task:set',
     'agent:artifact:created',
     'agent:artifact:updated',
     'agent:artifact:deleted',
     'agent:context:update',
+    'agent:context:usage',
     'agent:research:progress',
     'agent:error',
     'agent:session:updated',
     'agent:started',
     'agent:stopped',
     'agent:browserView:screenshot',
+    'agent:chat:item',
+    'agent:chat:update',
+    'agent:chat:items',
     'agent:integration:status',
     'agent:integration:qr',
     'agent:integration:message_in',
