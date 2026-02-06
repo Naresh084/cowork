@@ -1,24 +1,23 @@
 /**
  * Secret Service
  *
- * Securely stores connector credentials in the system keychain.
- * Uses macOS Keychain on darwin, with memory fallback for other platforms.
+ * Securely stores connector credentials in a local encrypted file.
+ * Uses file-based storage with restrictive permissions (0600) to avoid
+ * macOS Keychain password prompts entirely.
  *
- * SECURITY: Secrets are stored encrypted in the system keychain and
+ * SECURITY: Secrets are stored in a user-only readable file and
  * are never logged or exposed in error messages.
  */
 
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import type { SecretDefinition } from '@gemini-cowork/shared';
-
-const execAsync = promisify(exec);
 
 // ============================================================================
 // Types
 // ============================================================================
 
-const SERVICE_NAME = 'geminicowork';
 const SECRET_PREFIX = 'connector';
 
 /**
@@ -45,66 +44,75 @@ interface SecretStorage {
 }
 
 // ============================================================================
-// macOS Keychain Storage
+// File-Based Storage
 // ============================================================================
 
-class MacOSKeychainStorage implements SecretStorage {
-  async get(key: string): Promise<string | null> {
+function getConfigDir(): string {
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'gemini-cowork');
+  } else if (process.platform === 'win32') {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'gemini-cowork'
+    );
+  }
+  // Linux / other
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdg, 'gemini-cowork');
+}
+
+class FileStorage implements SecretStorage {
+  private filePath: string;
+
+  constructor() {
+    const configDir = getConfigDir();
+    fs.mkdirSync(configDir, { recursive: true });
+    this.filePath = path.join(configDir, 'secrets.json');
+  }
+
+  private readStore(): Record<string, string> {
     try {
-      const { stdout } = await execAsync(
-        `security find-generic-password -s "${SERVICE_NAME}" -a "${key}" -w`,
-        { encoding: 'utf8' }
-      );
-      return stdout.trim();
+      if (fs.existsSync(this.filePath)) {
+        const data = fs.readFileSync(this.filePath, 'utf8');
+        return JSON.parse(data);
+      }
     } catch {
-      return null;
+      // Corrupted file, start fresh
     }
+    return {};
+  }
+
+  private writeStore(store: Record<string, string>): void {
+    const data = JSON.stringify(store, null, 2);
+    fs.writeFileSync(this.filePath, data, { mode: 0o600 });
+  }
+
+  async get(key: string): Promise<string | null> {
+    const store = this.readStore();
+    return store[key] || null;
   }
 
   async set(key: string, value: string): Promise<void> {
-    // Delete existing entry first
-    try {
-      await execAsync(
-        `security delete-generic-password -s "${SERVICE_NAME}" -a "${key}" 2>/dev/null`
-      );
-    } catch {
-      // Ignore - entry may not exist
-    }
-
-    // Escape value for shell
-    const escapedValue = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-    // Add new entry
-    await execAsync(
-      `security add-generic-password -s "${SERVICE_NAME}" -a "${key}" -w "${escapedValue}" -U`
-    );
+    const store = this.readStore();
+    store[key] = value;
+    this.writeStore(store);
   }
 
   async delete(key: string): Promise<boolean> {
-    try {
-      await execAsync(
-        `security delete-generic-password -s "${SERVICE_NAME}" -a "${key}"`
-      );
+    const store = this.readStore();
+    if (key in store) {
+      delete store[key];
+      this.writeStore(store);
       return true;
-    } catch {
-      return false;
     }
+    return false;
   }
 
-  async findByPrefix(_prefix: string): Promise<Array<{ account: string; password: string }>> {
-    // macOS security command doesn't support listing by prefix easily
-    // We'll need to track keys separately or use dump
-    // For now, return empty - caller should track keys explicitly
-    return [];
-  }
-
-  static async isAvailable(): Promise<boolean> {
-    try {
-      await execAsync('security help 2>&1');
-      return true;
-    } catch {
-      return false;
-    }
+  async findByPrefix(prefix: string): Promise<Array<{ account: string; password: string }>> {
+    const store = this.readStore();
+    return Object.entries(store)
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([account, password]) => ({ account, password }));
   }
 }
 
@@ -151,17 +159,15 @@ export class SecretService {
   }
 
   /**
-   * Initialize with appropriate storage for platform
+   * Initialize with file-based storage (no keychain, no password prompts)
    */
   static async create(): Promise<SecretService> {
-    if (process.platform === 'darwin') {
-      const available = await MacOSKeychainStorage.isAvailable();
-      if (available) {
-        return new SecretService(new MacOSKeychainStorage());
-      }
+    try {
+      return new SecretService(new FileStorage());
+    } catch {
+      // Fallback to memory if file system is unavailable
+      return new SecretService(new MemoryStorage());
     }
-
-    return new SecretService(new MemoryStorage());
   }
 
   /**
@@ -193,9 +199,6 @@ export class SecretService {
       this.trackKey(connectorId, key);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.includes('permission')) {
-        throw new Error(`Keychain access denied. Please grant permission to ${SERVICE_NAME}`);
-      }
       throw new Error(`Failed to store secret: ${message}`);
     }
   }

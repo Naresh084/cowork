@@ -32,15 +32,25 @@ pub struct SessionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct SessionDetails {
     pub id: String,
+    #[serde(default)]
     pub title: Option<String>,
+    #[serde(default)]
     pub working_directory: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
-    pub messages: Vec<Message>,
+    #[serde(default)]
+    pub messages: Vec<serde_json::Value>,
+    #[serde(default)]
     pub chat_items: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
     pub tasks: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
     pub artifacts: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
     pub tool_executions: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
     pub created_at: i64,
+    #[serde(default)]
     pub updated_at: i64,
 }
 

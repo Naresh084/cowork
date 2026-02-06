@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MainLayout } from './components/layout/MainLayout';
 import { Onboarding } from './components/onboarding/Onboarding';
 import { AutoUpdater } from './components/AutoUpdater';
+import { BrandMark } from './components/icons/BrandMark';
 import { useAuthStore } from './stores/auth-store';
 import { useSessionStore } from './stores/session-store';
 import { useSettingsStore } from './stores/settings-store';
@@ -87,7 +88,7 @@ export function App() {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-10 h-10 border-4 border-white/40 border-t-transparent rounded-full animate-spin" />
+          <BrandMark className="w-12 h-12 animate-pulse" />
           <p className="text-sm text-white/70">Initializing…</p>
         </div>
       </div>

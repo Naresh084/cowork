@@ -16,6 +16,7 @@ import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import remarkGfm from 'remark-gfm';
+import { fixNestedCodeFences } from '../../lib/fix-markdown';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -92,10 +93,10 @@ export function MessageList() {
     activeTurnId,
   } = sessionState;
 
-  // Use chatItems if available (V2), fallback to legacy messages (V1)
-  const messages = chatItems && chatItems.length > 0
-    ? chatItemsToMessages(chatItems)
-    : legacyMessages;
+  // Prefer legacy messages (correct IDs matching turnActivities keys), fallback to chatItems
+  const messages = legacyMessages.length > 0
+    ? legacyMessages
+    : (chatItems && chatItems.length > 0 ? chatItemsToMessages(chatItems) : []);
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 
@@ -1773,9 +1774,10 @@ function ErrorMessageCard({ metadata }: { metadata: ErrorMessageMetadata }) {
 
 // Markdown content renderer for assistant messages
 function MarkdownContent({ content }: { content: string }) {
+  const fixedContent = fixNestedCodeFences(content);
   return (
     <div className="px-3 py-2 text-[13px]">
-      <Suspense fallback={<div className="text-sm text-white/70">{content}</div>}>
+      <Suspense fallback={<div className="text-sm text-white/70">{fixedContent}</div>}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
@@ -1881,7 +1883,7 @@ function MarkdownContent({ content }: { content: string }) {
             },
           }}
         >
-          {content}
+          {fixedContent}
         </ReactMarkdown>
       </Suspense>
     </div>

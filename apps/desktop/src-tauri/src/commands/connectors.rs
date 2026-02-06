@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 // Connector Types
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorSource {
@@ -15,6 +16,7 @@ pub struct ConnectorSource {
     pub priority: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransportConfig {
@@ -26,6 +28,7 @@ pub struct TransportConfig {
     pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecretDefinition {
@@ -38,6 +41,7 @@ pub struct SecretDefinition {
     pub link: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthConfig {
@@ -48,6 +52,7 @@ pub struct OAuthConfig {
     pub token_url: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthConfig {
@@ -57,6 +62,7 @@ pub struct AuthConfig {
     pub oauth: Option<OAuthConfig>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorManifest {
@@ -117,6 +123,7 @@ pub struct SecretsStatus {
     pub provided: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorState {
@@ -535,6 +542,7 @@ pub async fn revoke_oauth_tokens(
 // ============================================================================
 
 /// MCP App definition
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MCPApp {
