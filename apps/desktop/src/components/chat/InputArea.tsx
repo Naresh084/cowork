@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowUp,
   Plus,
@@ -645,121 +646,119 @@ export function InputArea({
                 </motion.button>
 
                 {/* Folder Selector Modal */}
-                <AnimatePresence>
-                  {folderSelectorOpen && (
-                    <>
-                      {/* Backdrop */}
+                {folderSelectorOpen && createPortal(
+                  <AnimatePresence>
+                    {folderSelectorOpen && (
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-                        onClick={() => setFolderSelectorOpen(false)}
-                      />
-
-                      {/* Modal */}
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                        transition={{ type: 'spring', duration: 0.3, bounce: 0.2 }}
-                        className={cn(
-                          'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50',
-                          'w-[420px] rounded-2xl overflow-hidden',
-                          'bg-[#1C1C20] border border-white/[0.10]',
-                          'shadow-2xl shadow-black/60'
-                        )}
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                        onClick={(e) => { if (e.target === e.currentTarget) setFolderSelectorOpen(false); }}
                       >
-                        {/* Header */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/20 flex items-center justify-center">
-                              <Folder className="w-5 h-5 text-[#93C5FD]" />
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                          transition={{ type: 'spring', duration: 0.3, bounce: 0.2 }}
+                          className={cn(
+                            'w-[420px] rounded-2xl overflow-hidden',
+                            'bg-[#1C1C20] border border-white/[0.10]',
+                            'shadow-2xl shadow-black/60'
+                          )}
+                        >
+                          {/* Header */}
+                          <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/20 flex items-center justify-center">
+                                <Folder className="w-5 h-5 text-[#93C5FD]" />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-semibold text-white">Working Directory</h3>
+                                <p className="text-xs text-white/40">Select your project folder</p>
+                              </div>
                             </div>
-                            <div>
-                              <h3 className="text-base font-semibold text-white">Working Directory</h3>
-                              <p className="text-xs text-white/40">Select your project folder</p>
-                            </div>
+                            <button
+                              onClick={() => setFolderSelectorOpen(false)}
+                              className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/[0.06] transition-colors"
+                            >
+                              ×
+                            </button>
                           </div>
-                          <button
-                            onClick={() => setFolderSelectorOpen(false)}
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/[0.06] transition-colors"
-                          >
-                            ×
-                          </button>
-                        </div>
 
-                        {/* Content */}
-                        <div className="p-5">
-                          {/* Current Path Display */}
-                          <div className="mb-4">
-                            <label className="text-xs font-medium text-white/50 mb-2 block">
-                              Current Path
-                            </label>
-                            <div className={cn(
-                              'flex items-center gap-3 px-4 py-3 rounded-xl',
-                              'bg-[#0D0D0F] border border-white/[0.06]'
-                            )}>
-                              <FolderOpen className="w-5 h-5 text-[#1D4ED8] flex-shrink-0" />
-                              {workingDirectory ? (
-                                <span className="text-sm text-white/80 font-mono truncate">
-                                  {workingDirectory}
-                                </span>
-                              ) : (
-                                <span className="text-sm text-white/30 italic">
-                                  No folder selected yet
-                                </span>
+                          {/* Content */}
+                          <div className="p-5">
+                            {/* Current Path Display */}
+                            <div className="mb-4">
+                              <label className="text-xs font-medium text-white/50 mb-2 block">
+                                Current Path
+                              </label>
+                              <div className={cn(
+                                'flex items-center gap-3 px-4 py-3 rounded-xl',
+                                'bg-[#0D0D0F] border border-white/[0.06]'
+                              )}>
+                                <FolderOpen className="w-5 h-5 text-[#1D4ED8] flex-shrink-0" />
+                                {workingDirectory ? (
+                                  <span className="text-sm text-white/80 font-mono truncate">
+                                    {workingDirectory}
+                                  </span>
+                                ) : (
+                                  <span className="text-sm text-white/30 italic">
+                                    No folder selected yet
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Error Message */}
+                            <AnimatePresence>
+                              {folderError && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  className="mb-4 px-4 py-3 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20"
+                                >
+                                  <p className="text-sm text-[#FF5449]">{folderError}</p>
+                                </motion.div>
                               )}
+                            </AnimatePresence>
+
+                            {/* Select Button */}
+                            <motion.button
+                              whileHover={{ scale: 1.01 }}
+                              whileTap={{ scale: 0.99 }}
+                              onClick={handleSelectFolder}
+                              className={cn(
+                                'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl',
+                                'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
+                                'text-white font-medium',
+                                'shadow-lg shadow-[#1D4ED8]/25',
+                                'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
+                                'transition-shadow duration-200'
+                              )}
+                            >
+                              <FolderOpen className="w-5 h-5" />
+                              {workingDirectory ? 'Change Folder' : 'Select Folder'}
+                            </motion.button>
+
+                            {/* Security Note */}
+                            <div className="mt-4 flex items-start gap-2 px-1">
+                              <div className="w-4 h-4 rounded-full bg-[#1D4ED8]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <span className="text-[10px] text-[#93C5FD]">i</span>
+                              </div>
+                              <p className="text-xs text-white/40 leading-relaxed">
+                                For security, only folders within your home directory (~) are accessible.
+                                This protects system files and other sensitive areas.
+                              </p>
                             </div>
                           </div>
-
-                          {/* Error Message */}
-                          <AnimatePresence>
-                            {folderError && (
-                              <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                exit={{ opacity: 0, height: 0 }}
-                                className="mb-4 px-4 py-3 rounded-xl bg-[#FF5449]/10 border border-[#FF5449]/20"
-                              >
-                                <p className="text-sm text-[#FF5449]">{folderError}</p>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-
-                          {/* Select Button */}
-                          <motion.button
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.99 }}
-                            onClick={handleSelectFolder}
-                            className={cn(
-                              'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl',
-                              'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
-                              'text-white font-medium',
-                              'shadow-lg shadow-[#1D4ED8]/25',
-                              'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
-                              'transition-shadow duration-200'
-                            )}
-                          >
-                            <FolderOpen className="w-5 h-5" />
-                            {workingDirectory ? 'Change Folder' : 'Select Folder'}
-                          </motion.button>
-
-                          {/* Security Note */}
-                          <div className="mt-4 flex items-start gap-2 px-1">
-                            <div className="w-4 h-4 rounded-full bg-[#1D4ED8]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <span className="text-[10px] text-[#93C5FD]">i</span>
-                            </div>
-                            <p className="text-xs text-white/40 leading-relaxed">
-                              For security, only folders within your home directory (~) are accessible.
-                              This protects system files and other sensitive areas.
-                            </p>
-                          </div>
-                        </div>
+                        </motion.div>
                       </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                    )}
+                  </AnimatePresence>,
+                  document.body
+                )}
               </div>
 
               <div

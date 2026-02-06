@@ -1035,9 +1035,16 @@ ${attachment.data}`,
                   JSON.stringify(ci.content) === JSON.stringify(item.content)
         );
         if (tempIdx !== -1) {
+          const oldItem = session.chatItems[tempIdx];
           const updated = [...session.chatItems];
           updated[tempIdx] = item;
-          return { ...session, chatItems: updated };
+          // Update activeTurnId if it was pointing to the temp item's turnId
+          const newTurnId = item.turnId || item.id;
+          const oldTurnId = oldItem.kind === 'user_message' ? (oldItem.turnId || oldItem.id) : undefined;
+          const newActiveTurnId = (session.activeTurnId && oldTurnId && session.activeTurnId === oldTurnId)
+            ? newTurnId
+            : session.activeTurnId;
+          return { ...session, chatItems: updated, activeTurnId: newActiveTurnId };
         }
       }
       // Dedup: skip if item with same ID already exists

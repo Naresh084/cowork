@@ -88,34 +88,31 @@ export class IntegrationBridgeService {
       this.router.onStreamChunk(sessionId, content);
     };
 
-    const originalStreamDone = eventEmitter.streamDone.bind(eventEmitter);
-    eventEmitter.streamDone = (sessionId: string, message: unknown) => {
-      // Call the original first
-      originalStreamDone(sessionId, message);
+    // Intercept chatItem events to route assistant messages to integrations
+    const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
+    eventEmitter.chatItem = (sessionId: string, item: unknown) => {
+      originalChatItem(sessionId, item);
 
-      // Extract final text from the message
-      const msg = message as {
-        content?: string | Array<{ type: string; text?: string }>;
-        role?: string;
-      } | null;
-      let finalText = '';
+      // Route assistant messages to integrations
+      const chatItem = item as { kind?: string; content?: string | Array<{ type: string; text?: string }> } | null;
+      if (chatItem?.kind === 'assistant_message') {
+        let finalText = '';
+        if (typeof chatItem.content === 'string') {
+          finalText = chatItem.content;
+        } else if (Array.isArray(chatItem.content)) {
+          finalText = chatItem.content
+            .filter((p) => p.type === 'text' && p.text)
+            .map((p) => p.text!)
+            .join('\n');
+        }
 
-      if (typeof msg?.content === 'string') {
-        finalText = msg.content;
-      } else if (Array.isArray(msg?.content)) {
-        // Extract text from content parts array
-        finalText = msg.content
-          .filter((p) => p.type === 'text' && p.text)
-          .map((p) => p.text!)
-          .join('\n');
+        this.router.onStreamDone(sessionId, finalText).catch((err) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(
+            `[integration] Error routing response: ${errMsg}\n`,
+          );
+        });
       }
-
-      this.router.onStreamDone(sessionId, finalText).catch((err) => {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(
-          `[integration] Error routing response: ${errMsg}\n`,
-        );
-      });
     };
   }
 

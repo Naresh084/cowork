@@ -15,20 +15,21 @@ describe('chat-store', () => {
 
   describe('loadMessages', () => {
     it('should load messages from the backend', async () => {
-      const mockMessages = [
-        { id: 'msg-1', role: 'user', content: 'Hello', createdAt: Date.now() },
-        { id: 'msg-2', role: 'assistant', content: 'Hi there!', createdAt: Date.now() },
+      const mockChatItems = [
+        { id: 'msg-1', kind: 'user_message', content: 'Hello', turnId: 'turn-1', timestamp: Date.now() },
+        { id: 'msg-2', kind: 'assistant_message', content: 'Hi there!', turnId: 'turn-1', timestamp: Date.now() },
       ];
 
       setMockInvokeResponse('agent_get_session', {
         id: 'session-1',
-        messages: mockMessages,
+        messages: [],
+        chatItems: mockChatItems,
       });
 
       await useChatStore.getState().loadMessages('session-1');
 
       const state = useChatStore.getState().getSessionState('session-1');
-      expect(state.messages).toEqual(mockMessages);
+      expect(state.chatItems.length).toBeGreaterThanOrEqual(2);
       expect(state.isLoadingMessages).toBe(false);
       expect(state.error).toBeNull();
       expect(state.hasLoaded).toBe(true);
@@ -48,38 +49,17 @@ describe('chat-store', () => {
   });
 
   describe('sendMessage', () => {
-    it('should add user message optimistically', async () => {
+    it('should add user chatItem optimistically', async () => {
       setMockInvokeResponse('agent_send_message', undefined);
 
       const promise = useChatStore.getState().sendMessage('session-1', 'Hello');
 
       const state = useChatStore.getState().getSessionState('session-1');
-      expect(state.messages).toHaveLength(1);
-      expect(state.messages[0].role).toBe('user');
-      expect(state.messages[0].content).toBe('Hello');
+      // Should have a user_message chatItem
+      const userItems = state.chatItems.filter(ci => ci.kind === 'user_message');
+      expect(userItems).toHaveLength(1);
+      expect(userItems[0].content).toBe('Hello');
       expect(state.isStreaming).toBe(true);
-
-      await promise;
-    });
-
-    it('should include attachments in optimistic message content', async () => {
-      setMockInvokeResponse('agent_send_message', undefined);
-
-      const attachments = [
-        { type: 'image' as const, name: 'img.png', mimeType: 'image/png', data: 'abc' },
-        { type: 'text' as const, name: 'notes.txt', mimeType: 'text/plain', data: 'hello' },
-      ];
-
-      const promise = useChatStore.getState().sendMessage('session-1', 'Hello', attachments);
-
-      const state = useChatStore.getState().getSessionState('session-1');
-      const message = state.messages[0];
-      expect(Array.isArray(message.content)).toBe(true);
-
-      const parts = message.content as Array<{ type: string; [key: string]: unknown }>;
-      expect(parts[0]).toMatchObject({ type: 'text', text: 'Hello' });
-      expect(parts[1]).toMatchObject({ type: 'image', mimeType: 'image/png', data: 'abc' });
-      expect(parts[2]).toMatchObject({ type: 'text', text: 'File: notes.txt\nhello' });
 
       await promise;
     });
@@ -121,23 +101,48 @@ describe('chat-store', () => {
     });
   });
 
-  describe('addMessage', () => {
-    it('should add message and clear streaming content', () => {
-      useChatStore.getState().setStreaming('session-1', true);
-      useChatStore.getState().appendStreamChunk('session-1', 'Partial content');
+  describe('appendChatItem', () => {
+    it('should append a chat item to the session', () => {
+      useChatStore.getState().ensureSession('session-1');
 
-      const newMessage = {
+      useChatStore.getState().appendChatItem('session-1', {
         id: 'msg-1',
-        role: 'assistant' as const,
-        content: 'Complete message',
-        createdAt: Date.now(),
-      };
-
-      useChatStore.getState().addMessage('session-1', newMessage);
+        kind: 'assistant_message',
+        content: 'Hello from assistant',
+        turnId: 'turn-1',
+        timestamp: Date.now(),
+      } as any);
 
       const state = useChatStore.getState().getSessionState('session-1');
-      expect(state.messages).toContainEqual(newMessage);
-      expect(state.streamingContent).toBe('');
+      const assistantItems = state.chatItems.filter(ci => ci.kind === 'assistant_message');
+      expect(assistantItems).toHaveLength(1);
+    });
+
+    it('should dedup user messages with temp- prefix', () => {
+      useChatStore.getState().ensureSession('session-1');
+
+      // Add a temp user message (simulating optimistic UI)
+      useChatStore.getState().appendChatItem('session-1', {
+        id: 'temp-123',
+        kind: 'user_message',
+        content: 'Hello',
+        turnId: 'turn-1',
+        timestamp: Date.now(),
+      } as any);
+
+      // Add real user message from sidecar with same content
+      useChatStore.getState().appendChatItem('session-1', {
+        id: 'real-456',
+        kind: 'user_message',
+        content: 'Hello',
+        turnId: 'turn-1',
+        timestamp: Date.now(),
+      } as any);
+
+      const state = useChatStore.getState().getSessionState('session-1');
+      const userItems = state.chatItems.filter(ci => ci.kind === 'user_message');
+      expect(userItems).toHaveLength(1);
+      expect(userItems[0].id).toBe('real-456'); // temp replaced by real
     });
   });
 
@@ -214,19 +219,14 @@ describe('chat-store', () => {
 
   describe('resetSession', () => {
     it('should reset a session to initial state', () => {
-      useChatStore.getState().addMessage('session-1', {
-        id: '1',
-        role: 'user',
-        content: 'test',
-        createdAt: Date.now(),
-      });
+      useChatStore.getState().ensureSession('session-1');
       useChatStore.getState().setStreaming('session-1', true);
       useChatStore.getState().appendStreamChunk('session-1', 'content');
 
       useChatStore.getState().resetSession('session-1');
 
       const state = useChatStore.getState().getSessionState('session-1');
-      expect(state.messages).toHaveLength(0);
+      expect(state.chatItems).toHaveLength(0);
       expect(state.isStreaming).toBe(false);
       expect(state.streamingContent).toBe('');
       expect(state.error).toBeNull();

@@ -26,7 +26,7 @@ export function ChatView() {
     if (!activeSessionId) return null;
     return state.sessions[activeSessionId] ?? null;
   });
-  const messages = sessionState?.messages ?? [];
+  const chatItems = sessionState?.chatItems ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
 
   // Reset chat and load messages when session changes
@@ -80,7 +80,7 @@ export function ChatView() {
     };
   }, [activeSessionId]);
 
-  const hasMessages = messages.length > 0;
+  const hasMessages = chatItems.some(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message');
 
   const deriveTitle = (text: string) => {
     const trimmed = text.trim().replace(/\s+/g, ' ');

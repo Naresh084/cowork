@@ -7,7 +7,7 @@ import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
 import { toast } from '../components/ui/Toast';
-// Message type no longer needed - V2 uses ChatItems directly
+import type { MediaActivityItem, ReportActivityItem, DesignActivityItem } from '../stores/chat-store';
 
 function extractMediaItems(result: unknown): MediaActivityItem[] {
   const items: MediaActivityItem[] = [];

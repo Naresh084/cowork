@@ -80,15 +80,13 @@ interface ActiveSession {
   agent: DeepAgentInstance;
   abortController?: AbortController;
   stopRequested?: boolean;
-  messages: Message[];
-  /** Unified chat items array (V2 architecture) */
+  /** Unified chat items array - sole source of truth */
   chatItems: ChatItem[];
   /** Current turn ID for associating items with user message */
   currentTurnId?: string;
   tasks: Task[];
   lastTodosSignature?: string;
   artifacts: Artifact[];
-  toolExecutions: ToolExecution[];
   permissionCache: Map<string, PermissionDecision>;
   permissionScopes: Map<string, Set<string>>;
   toolStartTimes: Map<string, number>;
@@ -343,10 +341,6 @@ export class AgentRunner {
    * Agent will be recreated lazily on first message.
    */
   private async recreateSession(data: PersistedSessionDataV2): Promise<ActiveSession> {
-    // Convert chatItems back to legacy messages for backwards compatibility
-    const messages = this.chatItemsToMessages(data.chatItems);
-    const toolExecutions = this.chatItemsToToolExecutions(data.chatItems);
-
     const session: ActiveSession = {
       id: data.metadata.id,
       type: (data.metadata as { type?: SessionType }).type || 'main',
@@ -355,13 +349,11 @@ export class AgentRunner {
       title: data.metadata.title,
       approvalMode: data.metadata.approvalMode,
       agent: {} as DeepAgentInstance, // Will be recreated on first message
-      messages,
       chatItems: data.chatItems,
       currentTurnId: undefined,
       tasks: data.tasks,
       lastTodosSignature: undefined,
       artifacts: data.artifacts,
-      toolExecutions,
       permissionCache: new Map(),
       permissionScopes: new Map(),
       toolStartTimes: new Map(),
@@ -379,9 +371,9 @@ export class AgentRunner {
   }
 
   /**
-   * Convert ChatItems to legacy Message format for backwards compatibility.
+   * Derive Message[] from ChatItems for LLM prompt building and API responses.
    */
-  private chatItemsToMessages(chatItems: ChatItem[]): Message[] {
+  private deriveMessagesFromChatItems(chatItems: ChatItem[]): Message[] {
     const messages: Message[] = [];
     for (const item of chatItems) {
       if (item.kind === 'user_message') {
@@ -412,36 +404,6 @@ export class AgentRunner {
     return messages;
   }
 
-  /**
-   * Convert ChatItems to legacy ToolExecution format for backwards compatibility.
-   */
-  private chatItemsToToolExecutions(chatItems: ChatItem[]): ToolExecution[] {
-    const toolMap = new Map<string, ToolExecution>();
-
-    for (const item of chatItems) {
-      if (item.kind === 'tool_start') {
-        toolMap.set(item.toolId, {
-          id: item.toolId,
-          name: item.name,
-          args: item.args,
-          status: item.status === 'running' ? 'running' : item.status === 'error' ? 'error' : 'success',
-          startedAt: item.timestamp,
-          parentToolId: item.parentToolId,
-          turnMessageId: item.turnId,
-        } as ToolExecution & { turnMessageId?: string });
-      } else if (item.kind === 'tool_result') {
-        const existing = toolMap.get(item.toolId);
-        if (existing) {
-          existing.status = item.status === 'error' ? 'error' : 'success';
-          existing.result = item.result;
-          existing.error = item.error;
-          existing.completedAt = item.timestamp;
-        }
-      }
-    }
-
-    return Array.from(toolMap.values());
-  }
 
   /**
    * Initialize the provider with API key.
@@ -577,13 +539,11 @@ export class AgentRunner {
       title: title || null,
       approvalMode: 'auto',
       agent: {} as DeepAgentInstance,
-      messages: [],
       chatItems: [],
       currentTurnId: undefined,
       tasks: [],
       lastTodosSignature: undefined,
       artifacts: [],
-      toolExecutions: [],
       permissionCache: new Map(),
       permissionScopes: new Map(),
       toolStartTimes: new Map(),
@@ -698,23 +658,16 @@ export class AgentRunner {
       }
     }
 
-    // Persist user message
-    const userMessage: Message = {
-      id: generateMessageId(),
-      role: 'user',
-      content: messageContent,
-      createdAt: now(),
-    };
-    session.messages.push(userMessage);
+    // Generate turn ID and create V2 UserMessageItem
+    const turnId = generateMessageId();
     session.updatedAt = Date.now();
 
     // Track turn info for tool association
     this.currentTurnInfo.set(sessionId, {
-      turnMessageId: userMessage.id,
+      turnMessageId: turnId,
       toolIds: [],
     });
 
-    // V2: Create and emit UserMessageItem
     // Filter attachments to only include supported types (exclude 'other')
     const chatItemAttachments = attachments?.filter(
       (a): a is typeof a & { type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf' } =>
@@ -723,13 +676,13 @@ export class AgentRunner {
     const userChatItem: UserMessageItem = {
       id: generateChatItemId(),
       kind: 'user_message',
-      timestamp: userMessage.createdAt,
-      turnId: userMessage.id,
+      timestamp: now(),
+      turnId,
       content: messageContent,
       attachments: chatItemAttachments,
     };
     session.chatItems.push(userChatItem);
-    session.currentTurnId = userMessage.id;
+    session.currentTurnId = turnId;
     eventEmitter.chatItem(sessionId, userChatItem);
     // V2: Immediate persistence for crash recovery
     await this.persistence?.appendChatItem(sessionId, userChatItem);
@@ -744,7 +697,7 @@ export class AgentRunner {
     // Emit stream start
     eventEmitter.streamStart(sessionId);
 
-    const lcMessages = this.toLangChainMessages(session.messages, session);
+    const lcMessages = this.toLangChainMessages(this.deriveMessagesFromChatItems(session.chatItems), session);
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
     let streamedText = '';
@@ -932,9 +885,7 @@ export class AgentRunner {
       }
 
       if (assistantMessage) {
-        session.messages.push(assistantMessage);
         session.updatedAt = Date.now();
-        eventEmitter.streamDone(sessionId, assistantMessage);
 
         // V2: Create and emit AssistantMessageItem
         const assistantChatItem: AssistantMessageItem = {
@@ -947,16 +898,11 @@ export class AgentRunner {
         };
         session.chatItems.push(assistantChatItem);
         eventEmitter.chatItem(sessionId, assistantChatItem);
-        // V2: Immediate persistence for crash recovery
+        // Immediate persistence for crash recovery
         this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
-      } else {
-        eventEmitter.streamDone(sessionId, {
-          id: generateMessageId(),
-          role: 'assistant',
-          content: '',
-          createdAt: now(),
-        });
       }
+      // Signal stream completion (frontend uses this for streaming state)
+      eventEmitter.streamDone(sessionId, null);
 
       // Update context usage and compact if needed
       this.emitContextUsage(session);
@@ -964,36 +910,22 @@ export class AgentRunner {
     } catch (error) {
       if (this.isAbortError(error) || session.stopRequested) {
         if (streamedText) {
-          const assistantMessage: Message = {
-            id: generateMessageId(),
-            role: 'assistant',
-            content: streamedText,
-            createdAt: now(),
-          };
-          session.messages.push(assistantMessage);
           session.updatedAt = Date.now();
-          eventEmitter.streamDone(sessionId, assistantMessage);
 
-          // V2: Create and emit AssistantMessageItem for abort case
+          // Create and emit AssistantMessageItem for abort case
           const assistantChatItem: AssistantMessageItem = {
             id: generateChatItemId(),
             kind: 'assistant_message',
-            timestamp: assistantMessage.createdAt,
+            timestamp: now(),
             turnId: session.currentTurnId,
-            content: assistantMessage.content,
+            content: streamedText,
           };
           session.chatItems.push(assistantChatItem);
           eventEmitter.chatItem(sessionId, assistantChatItem);
-          // V2: Immediate persistence for crash recovery
           this.persistence?.appendChatItem(sessionId, assistantChatItem).catch(() => {});
-        } else {
-          eventEmitter.streamDone(sessionId, {
-            id: generateMessageId(),
-            role: 'assistant',
-            content: '',
-            createdAt: now(),
-          });
         }
+        // Signal stream completion
+        eventEmitter.streamDone(sessionId, null);
         return;
       }
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1222,7 +1154,7 @@ export class AgentRunner {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           lastAccessedAt: session.lastAccessedAt,
-          messageCount: session.messages.length,
+          messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
         };
       })
       .sort((a, b) => b.lastAccessedAt - a.lastAccessedAt);
@@ -1247,12 +1179,11 @@ export class AgentRunner {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastAccessedAt: session.lastAccessedAt,
-      messageCount: session.messages.length,
-      messages: session.messages,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
+      messages: this.deriveMessagesFromChatItems(session.chatItems),
       chatItems: session.chatItems,
       tasks: session.tasks,
       artifacts: session.artifacts,
-      toolExecutions: session.toolExecutions,
     };
   }
 
@@ -1301,22 +1232,6 @@ export class AgentRunner {
   private async finalizeAndPersistTurn(session: ActiveSession): Promise<void> {
     const turnInfo = this.currentTurnInfo.get(session.id);
     if (!turnInfo) return;
-
-    // Find the user message for this turn (for legacy compatibility)
-    const userMessage = session.messages.find(m => m.id === turnInfo.turnMessageId) as PersistedMessage | undefined;
-    if (userMessage) {
-      userMessage.toolExecutionIds = [...turnInfo.toolIds];
-    }
-
-    // Update tool executions with turn info (for legacy compatibility)
-    let turnOrder = 0;
-    for (const toolId of turnInfo.toolIds) {
-      const execution = session.toolExecutions.find(t => t.id === toolId) as PersistedToolExecution | undefined;
-      if (execution) {
-        execution.turnMessageId = turnInfo.turnMessageId;
-        execution.turnOrder = turnOrder++;
-      }
-    }
 
     // Update session timestamp
     session.updatedAt = Date.now();
@@ -1404,7 +1319,7 @@ export class AgentRunner {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastAccessedAt: session.lastAccessedAt,
-      messageCount: session.messages.length,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
     };
     eventEmitter.sessionUpdated(sessionInfo);
   }
@@ -1506,7 +1421,7 @@ export class AgentRunner {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       lastAccessedAt: session.lastAccessedAt,
-      messageCount: session.messages.length,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
     };
     eventEmitter.sessionUpdated(sessionInfo);
   }
@@ -1542,7 +1457,7 @@ export class AgentRunner {
     // Prefer API-tracked usage if available (more accurate than estimation)
     const used = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
-      : this.estimateTokens(session.messages);
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
 
     // Get context window from model configuration
     const contextWindow = getModelContextWindow(session.model);
@@ -2151,7 +2066,7 @@ ${toolList}
     const middlewareStack = await createMiddlewareStack(
       {
         id: session.id,
-        messages: session.messages,
+        messages: this.deriveMessagesFromChatItems(session.chatItems),
         model: session.model,
       },
       memoryService,
@@ -2341,17 +2256,9 @@ ${toolList}
         const toolCall = { id: toolCallId, name: tool.name, args, parentToolId };
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
-        session.toolExecutions.push({
-          id: toolCallId,
-          name: tool.name,
-          args,
-          status: 'running',
-          startedAt,
-          parentToolId,
-        });
         eventEmitter.toolStart(session.id, toolCall);
 
-        // V2: Create and emit ToolStartItem
+        // Create and emit ToolStartItem
         const toolStartItem: ToolStartItem = {
           id: generateChatItemId(),
           kind: 'tool_start',
@@ -2389,13 +2296,7 @@ ${toolList}
                 parentToolId,
               };
               eventEmitter.toolResult(session.id, toolCall, payload);
-              this.updateToolExecution(session, toolCallId, {
-                status: 'error',
-                error: payload.error,
-                completedAt: Date.now(),
-              });
-
-              // V2: Update ToolStartItem and emit ToolResultItem
+              // Update ToolStartItem and emit ToolResultItem
               toolStartItem.status = 'error';
               eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
 
@@ -2432,15 +2333,9 @@ ${toolList}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCall, payload);
-          this.updateToolExecution(session, toolCallId, {
-            status: result.success ? 'success' : 'error',
-            result: result.data,
-            error: result.error,
-            completedAt: Date.now(),
-          });
           this.recordArtifactForTool(session, tool.name, args, result.data);
 
-          // V2: Update ToolStartItem and emit ToolResultItem
+          // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = result.success ? 'completed' : 'error';
           eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: toolStartItem.status });
 
@@ -2473,13 +2368,7 @@ ${toolList}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCall, payload);
-          this.updateToolExecution(session, toolCallId, {
-            status: 'error',
-            error: payload.error,
-            completedAt: Date.now(),
-          });
-
-          // V2: Update ToolStartItem and emit ToolResultItem
+          // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = 'error';
           eventEmitter.chatItemUpdate(session.id, toolStartItem.id, { status: 'error' });
 
@@ -2563,17 +2452,9 @@ ${toolList}
 
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
-        session.toolExecutions.push({
-          id: toolCallId,
-          name: toolName,
-          args,
-          status: 'running',
-          startedAt,
-          parentToolId,
-        });
         eventEmitter.toolStart(session.id, toolCallPayload);
 
-        // V2: Create and emit ToolStartItem
+        // Create and emit ToolStartItem
         const toolStartItem: ToolStartItem = {
           id: generateChatItemId(),
           kind: 'tool_start',
@@ -2641,13 +2522,7 @@ ${toolList}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
-          this.updateToolExecution(session, toolCallId, {
-            status: 'error',
-            error: errorMsg,
-            completedAt: Date.now(),
-          });
-
-          // V2: Emit tool result
+          // Emit tool result
           emitToolResult('error', null, errorMsg, duration);
 
           return new ToolMessage({
@@ -2677,13 +2552,7 @@ ${toolList}
                 parentToolId,
               };
               eventEmitter.toolResult(session.id, toolCallPayload, payload);
-              this.updateToolExecution(session, toolCallId, {
-                status: 'error',
-                error: payload.error,
-                completedAt: Date.now(),
-              });
-
-              // V2: Emit tool result
+              // Emit tool result
               emitToolResult('error', null, 'Permission denied by user', duration);
 
               return new ToolMessage({
@@ -2713,15 +2582,9 @@ ${toolList}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
-          this.updateToolExecution(session, toolCallId, {
-            status: normalized.success ? 'success' : 'error',
-            result: normalized.output,
-            error: normalized.error,
-            completedAt: Date.now(),
-          });
           this.recordArtifactForTool(session, toolName, args, normalized.output);
 
-          // V2: Emit tool result
+          // Emit tool result
           emitToolResult(normalized.success ? 'success' : 'error', normalized.output, normalized.error, duration);
 
           return result;
@@ -2736,13 +2599,8 @@ ${toolList}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
-          this.updateToolExecution(session, toolCallId, {
-            status: 'error',
-            error: payload.error,
-            completedAt: Date.now(),
-          });
 
-          // V2: Emit tool result
+          // Emit tool result
           emitToolResult('error', null, payload.error, duration);
 
           throw error;
@@ -2876,28 +2734,6 @@ ${toolList}
     return startTime ? Date.now() - startTime : undefined;
   }
 
-  private updateToolExecution(
-    session: ActiveSession,
-    toolCallId: string,
-    updates: Partial<ToolExecution>
-  ): void {
-    const existing = session.toolExecutions.find((tool) => tool.id === toolCallId);
-    if (existing) {
-      Object.assign(existing, updates);
-      return;
-    }
-
-    session.toolExecutions.push({
-      id: toolCallId,
-      name: updates.name ?? 'tool',
-      args: updates.args ?? {},
-      status: updates.status ?? 'pending',
-      startedAt: updates.startedAt ?? Date.now(),
-      result: updates.result,
-      error: updates.error,
-      completedAt: updates.completedAt,
-    });
-  }
 
   private async requestPermission(
     session: ActiveSession,
@@ -3406,7 +3242,7 @@ ${toolList}
     // Prefer API-reported token count (accurate) over character-based estimation
     const used = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
-      : this.estimateTokens(session.messages);
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
     const contextWindow = getModelContextWindow(session.model);
     eventEmitter.contextUpdate(session.id, used, contextWindow.input);
 
@@ -3749,12 +3585,12 @@ ${toolList}
   }
 
   private getFirstMessagePreview(session: ActiveSession): string | null {
-    const firstUserMsg = session.messages.find(m => m.role === 'user');
-    if (!firstUserMsg) return null;
+    const firstUserItem = session.chatItems.find(ci => ci.kind === 'user_message');
+    if (!firstUserItem || firstUserItem.kind !== 'user_message') return null;
 
-    const content = typeof firstUserMsg.content === 'string'
-      ? firstUserMsg.content
-      : this.extractTextContent(firstUserMsg);
+    const content = typeof firstUserItem.content === 'string'
+      ? firstUserItem.content
+      : this.extractTextContent({ content: firstUserItem.content } as Message);
 
     return content ? content.slice(0, 100) : null;
   }
@@ -4147,27 +3983,38 @@ ${toolList}
   private async maybeCompactContext(session: ActiveSession): Promise<void> {
     if (!this.provider) return;
     const contextWindow = getModelContextWindow(session.model);
+    const messages = this.deriveMessagesFromChatItems(session.chatItems);
     const used = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
-      : this.estimateTokens(session.messages);
+      : this.estimateTokens(messages);
     const ratio = contextWindow.input > 0 ? used / contextWindow.input : 0;
     if (ratio < 0.7) return;
 
     const keepLast = 6;
-    if (session.messages.length <= keepLast + 2) return;
+    if (messages.length <= keepLast + 2) return;
 
-    const toSummarize = session.messages.slice(0, -keepLast);
+    const toSummarize = messages.slice(0, -keepLast);
     const summary = await this.summarizeMessages(toSummarize, session.model);
     if (!summary) return;
 
-    const summaryMessage: Message = {
-      id: generateMessageId(),
-      role: 'system',
+    // Create a system_message chatItem with the summary and remove old items
+    const summaryItem: ChatItem = {
+      id: generateChatItemId(),
+      kind: 'system_message',
       content: `Summary of earlier conversation:\n${summary}`,
-      createdAt: now(),
-    };
+      timestamp: now(),
+    } as ChatItem;
 
-    session.messages = [summaryMessage, ...session.messages.slice(-keepLast)];
+    // Keep only recent chatItems (those from the last keepLast messages) + summary
+    const keepMessageIds = new Set(messages.slice(-keepLast).map(m => m.id));
+    const recentChatItems = session.chatItems.filter(ci => {
+      if (ci.kind === 'user_message') return keepMessageIds.has(ci.turnId || ci.id);
+      if (ci.kind === 'assistant_message') return keepMessageIds.has(ci.id);
+      // Keep all non-message items that are recent (tool_start, tool_result, etc.)
+      const turnId = ci.turnId;
+      return turnId ? keepMessageIds.has(turnId) : false;
+    });
+    session.chatItems = [summaryItem, ...recentChatItems];
     await this.persistSummary(session.workingDirectory, summary);
     this.emitContextUsage(session);
   }
