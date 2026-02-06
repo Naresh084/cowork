@@ -128,8 +128,10 @@ export function ChatView() {
 
       ensureSession(sessionId);
 
-      await sendMessage(sessionId, message, messageAttachments);
+      // Clear attachments immediately so preview disappears right away
+      // (don't wait for sendMessage which blocks until agent finishes)
       setAttachments([]);
+      await sendMessage(sessionId, message, messageAttachments);
 
       if (createdNew) {
         const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;

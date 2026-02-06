@@ -1915,9 +1915,15 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
       return <MarkdownContent content={part.text} />;
 
     case 'image': {
-      const imgSrc = (part as any).filePath
-        ? convertFileSrc((part as any).filePath)
-        : `data:${part.mimeType};base64,${part.data}`;
+      const p = part as any;
+      const imgSrc = p.filePath
+        ? convertFileSrc(p.filePath)
+        : p.objectUrl
+          ? p.objectUrl
+          : p.data
+            ? `data:${part.mimeType};base64,${p.data}`
+            : '';
+      if (!imgSrc) return null;
       return (
         <div className="mt-2 px-4">
           <img
@@ -1930,9 +1936,15 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     }
 
     case 'audio': {
-      const audioSrc = (part as any).filePath
-        ? convertFileSrc((part as any).filePath)
-        : `data:${part.mimeType};base64,${part.data}`;
+      const p = part as any;
+      const audioSrc = p.filePath
+        ? convertFileSrc(p.filePath)
+        : p.objectUrl
+          ? p.objectUrl
+          : p.data
+            ? `data:${part.mimeType};base64,${p.data}`
+            : '';
+      if (!audioSrc) return null;
       return (
         <div className="mt-2 px-4">
           <div className={cn(
@@ -1949,9 +1961,15 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     }
 
     case 'video': {
-      const videoSrc = (part as any).filePath
-        ? convertFileSrc((part as any).filePath)
-        : `data:${part.mimeType};base64,${part.data}`;
+      const p = part as any;
+      const videoSrc = p.filePath
+        ? convertFileSrc(p.filePath)
+        : p.objectUrl
+          ? p.objectUrl
+          : p.data
+            ? `data:${part.mimeType};base64,${p.data}`
+            : '';
+      if (!videoSrc) return null;
       return (
         <div className="mt-2 px-4">
           <video
