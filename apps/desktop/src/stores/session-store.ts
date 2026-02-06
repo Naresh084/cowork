@@ -4,11 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../components/ui/Toast';
 import { useChatStore } from './chat-store';
 
-export type SessionKind = 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
-
 export interface SessionSummary {
   id: string;
-  type?: SessionKind;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string | null;
@@ -21,7 +18,6 @@ export interface SessionSummary {
 
 export interface SessionInfo {
   id: string;
-  type?: SessionKind;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -158,7 +154,6 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           // Add to sessions list (new sessions are most recently accessed)
           const newSummary: SessionSummary = {
             id: session.id,
-            type: session.type,
             title: session.title,
             firstMessage: null,
             workingDirectory: session.workingDirectory,

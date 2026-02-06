@@ -1,14 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft,
   Folder,
+  FolderOpen,
   Sparkles,
   AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { open } from '@tauri-apps/plugin-dialog';
+import { homeDir } from '@tauri-apps/api/path';
+import { toast } from '@/components/ui/Toast';
 import type {
   CronSchedule,
   CronSessionTarget,
@@ -68,12 +72,20 @@ function getUserTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
+const inputCls = cn(
+  'w-full px-3 py-2 rounded-lg text-sm',
+  'bg-white/[0.04] border border-white/[0.08]',
+  'text-white/90 placeholder:text-white/30',
+  'focus:outline-none focus:border-[#1D4ED8]/50'
+);
+
 export function CronJobEditor() {
   const { editorMode, selectedJobId, getJob, createJob, updateJob, closeEditor, isLoading, error, clearError } =
     useCronStore();
-  const { defaultWorkingDirectory } = useSettingsStore();
+  const { defaultWorkingDirectory, updateSetting } = useSettingsStore();
 
   const editingJob = editorMode === 'edit' && selectedJobId ? getJob(selectedJobId) : null;
+  const hasAutoOpened = useRef(false);
 
   const [form, setForm] = useState<FormState>({
     name: '',
@@ -95,8 +107,8 @@ export function CronJobEditor() {
     postSummary: false,
   });
 
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isSelectingDir, setIsSelectingDir] = useState(false);
 
   // Load existing job data when editing
   useEffect(() => {
@@ -176,10 +188,46 @@ export function CronJobEditor() {
     }
   }, [editingJob]);
 
+  // Auto-open directory picker if no working directory is set (new task only)
+  useEffect(() => {
+    if (!editingJob && !form.workingDirectory && !hasAutoOpened.current) {
+      hasAutoOpened.current = true;
+      handleSelectDirectory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const updateField = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     setValidationError(null);
     clearError();
+  };
+
+  const handleSelectDirectory = async () => {
+    setIsSelectingDir(true);
+    try {
+      const userHome = await homeDir().catch(() => null);
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: form.workingDirectory || userHome || undefined,
+        title: 'Select project folder for automation',
+      });
+
+      if (selected && typeof selected === 'string') {
+        updateField('workingDirectory', selected);
+        // Also set as default if none exists
+        if (!defaultWorkingDirectory) {
+          updateSetting('defaultWorkingDirectory', selected);
+          toast.success('Default directory set', selected);
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to select folder', msg);
+    } finally {
+      setIsSelectingDir(false);
+    }
   };
 
   const buildSchedule = (): CronSchedule => {
@@ -288,10 +336,10 @@ export function CronJobEditor() {
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      className="flex flex-col h-full"
+      className="flex flex-col h-full max-h-[85vh]"
     >
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/[0.08]">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-white/[0.08] flex-shrink-0">
         <button
           onClick={closeEditor}
           className="p-2 -ml-2 rounded-lg hover:bg-white/[0.06] text-white/60 hover:text-white/90 transition-colors"
@@ -303,8 +351,8 @@ export function CronJobEditor() {
         </h2>
       </div>
 
-      {/* Form */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* Form - scrollable */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
         {/* Name */}
         <div>
           <label className="block text-sm font-medium text-white/70 mb-2">
@@ -315,12 +363,7 @@ export function CronJobEditor() {
             value={form.name}
             onChange={(e) => updateField('name', e.target.value)}
             placeholder="Daily Code Review"
-            className={cn(
-              'w-full px-4 py-2.5 rounded-lg text-sm',
-              'bg-white/[0.04] border border-white/[0.08]',
-              'text-white/90 placeholder:text-white/30',
-              'focus:outline-none focus:border-[#1D4ED8]/50'
-            )}
+            className={cn(inputCls, 'px-4 py-2.5')}
           />
         </div>
 
@@ -333,18 +376,42 @@ export function CronJobEditor() {
             value={form.prompt}
             onChange={(e) => updateField('prompt', e.target.value)}
             placeholder="Review yesterday's commits and summarize changes. Focus on code quality, missing tests, and security issues."
-            rows={4}
-            className={cn(
-              'w-full px-4 py-2.5 rounded-lg text-sm resize-none',
-              'bg-white/[0.04] border border-white/[0.08]',
-              'text-white/90 placeholder:text-white/30',
-              'focus:outline-none focus:border-[#1D4ED8]/50'
-            )}
+            rows={3}
+            className={cn(inputCls, 'px-4 py-2.5 resize-none')}
           />
           <p className="mt-1.5 text-xs text-white/40 flex items-center gap-1">
             <Sparkles className="w-3 h-3" />
             Tip: Be specific about what you want the agent to check or do
           </p>
+        </div>
+
+        {/* Working Directory */}
+        <div>
+          <label className="block text-sm font-medium text-white/70 mb-2 flex items-center gap-1.5">
+            <Folder className="w-3.5 h-3.5" />
+            Working Directory *
+          </label>
+          <button
+            type="button"
+            onClick={handleSelectDirectory}
+            disabled={isSelectingDir}
+            className={cn(
+              'w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-left',
+              'bg-white/[0.04] border border-white/[0.08]',
+              'hover:bg-white/[0.06] hover:border-white/[0.12] transition-colors',
+              'focus:outline-none focus:border-[#1D4ED8]/50',
+              isSelectingDir && 'opacity-50 cursor-not-allowed'
+            )}
+          >
+            <FolderOpen className="w-4 h-4 text-white/40 flex-shrink-0" />
+            {form.workingDirectory ? (
+              <span className="text-white/90 truncate">{form.workingDirectory}</span>
+            ) : (
+              <span className="text-white/30">
+                {isSelectingDir ? 'Opening...' : 'Click to select project folder'}
+              </span>
+            )}
+          </button>
         </div>
 
         {/* Schedule Type */}
@@ -381,12 +448,7 @@ export function CronJobEditor() {
                     type="date"
                     value={form.onceDate}
                     onChange={(e) => updateField('onceDate', e.target.value)}
-                    className={cn(
-                      'w-full px-3 py-2 rounded-lg text-sm',
-                      'bg-white/[0.04] border border-white/[0.08]',
-                      'text-white/90',
-                      'focus:outline-none focus:border-[#1D4ED8]/50'
-                    )}
+                    className={inputCls}
                   />
                 </div>
                 <div className="w-32">
@@ -395,12 +457,7 @@ export function CronJobEditor() {
                     type="time"
                     value={form.onceTime}
                     onChange={(e) => updateField('onceTime', e.target.value)}
-                    className={cn(
-                      'w-full px-3 py-2 rounded-lg text-sm',
-                      'bg-white/[0.04] border border-white/[0.08]',
-                      'text-white/90',
-                      'focus:outline-none focus:border-[#1D4ED8]/50'
-                    )}
+                    className={inputCls}
                   />
                 </div>
               </div>
@@ -413,12 +470,7 @@ export function CronJobEditor() {
                   type="time"
                   value={form.dailyTime}
                   onChange={(e) => updateField('dailyTime', e.target.value)}
-                  className={cn(
-                    'w-full px-3 py-2 rounded-lg text-sm',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
+                  className={inputCls}
                 />
               </div>
             )}
@@ -430,12 +482,7 @@ export function CronJobEditor() {
                   <select
                     value={form.weeklyDay}
                     onChange={(e) => updateField('weeklyDay', e.target.value)}
-                    className={cn(
-                      'w-full px-3 py-2 rounded-lg text-sm',
-                      'bg-white/[0.04] border border-white/[0.08]',
-                      'text-white/90',
-                      'focus:outline-none focus:border-[#1D4ED8]/50'
-                    )}
+                    className={inputCls}
                   >
                     {WEEKDAYS.map((day) => (
                       <option key={day.value} value={day.value}>
@@ -450,12 +497,7 @@ export function CronJobEditor() {
                     type="time"
                     value={form.weeklyTime}
                     onChange={(e) => updateField('weeklyTime', e.target.value)}
-                    className={cn(
-                      'w-full px-3 py-2 rounded-lg text-sm',
-                      'bg-white/[0.04] border border-white/[0.08]',
-                      'text-white/90',
-                      'focus:outline-none focus:border-[#1D4ED8]/50'
-                    )}
+                    className={inputCls}
                   />
                 </div>
               </div>
@@ -472,12 +514,7 @@ export function CronJobEditor() {
                     onChange={(e) =>
                       updateField('intervalValue', parseInt(e.target.value) || 1)
                     }
-                    className={cn(
-                      'w-full px-3 py-2 rounded-lg text-sm',
-                      'bg-white/[0.04] border border-white/[0.08]',
-                      'text-white/90',
-                      'focus:outline-none focus:border-[#1D4ED8]/50'
-                    )}
+                    className={inputCls}
                   />
                 </div>
                 <select
@@ -488,12 +525,7 @@ export function CronJobEditor() {
                       e.target.value as 'minutes' | 'hours' | 'days'
                     )
                   }
-                  className={cn(
-                    'px-3 py-2 rounded-lg text-sm',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
+                  className={cn(inputCls, 'w-auto')}
                 >
                   <option value="minutes">Minute(s)</option>
                   <option value="hours">Hour(s)</option>
@@ -512,12 +544,7 @@ export function CronJobEditor() {
                   value={form.cronExpression}
                   onChange={(e) => updateField('cronExpression', e.target.value)}
                   placeholder="0 9 * * MON-FRI"
-                  className={cn(
-                    'w-full px-3 py-2 rounded-lg text-sm font-mono',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
+                  className={cn(inputCls, 'font-mono')}
                 />
                 <p className="mt-1 text-xs text-white/40">
                   Format: minute hour day-of-month month day-of-week
@@ -534,126 +561,83 @@ export function CronJobEditor() {
                   value={form.timezone}
                   onChange={(e) => updateField('timezone', e.target.value)}
                   placeholder={getUserTimezone()}
-                  className={cn(
-                    'w-full px-3 py-2 rounded-lg text-sm',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
+                  className={inputCls}
                 />
               </div>
             )}
           </div>
         </div>
 
-        {/* Advanced Options */}
+        {/* Execution Mode */}
         <div>
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="text-sm text-white/50 hover:text-white/70 transition-colors"
-          >
-            {showAdvanced ? 'Hide' : 'Show'} Advanced Options
-          </button>
-
-          {showAdvanced && (
-            <div className="mt-4 space-y-4 p-4 rounded-lg bg-white/[0.02] border border-white/[0.06]">
-              {/* Working Directory */}
+          <label className="block text-sm font-medium text-white/70 mb-2">
+            Execution Mode
+          </label>
+          <div className="space-y-2">
+            <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04] transition-colors">
+              <input
+                type="radio"
+                name="sessionTarget"
+                checked={form.sessionTarget === 'isolated'}
+                onChange={() => updateField('sessionTarget', 'isolated')}
+                className="mt-0.5"
+              />
               <div>
-                <label className="block text-xs text-white/50 mb-1 flex items-center gap-1">
-                  <Folder className="w-3 h-3" />
-                  Working Directory
-                </label>
-                <input
-                  type="text"
-                  value={form.workingDirectory}
-                  onChange={(e) => updateField('workingDirectory', e.target.value)}
-                  placeholder="/Users/you/project"
-                  className={cn(
-                    'w-full px-3 py-2 rounded-lg text-sm',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
-                />
-              </div>
-
-              {/* Session Target */}
-              <div>
-                <label className="block text-xs text-white/50 mb-2">
-                  Execution Mode
-                </label>
-                <div className="space-y-2">
-                  <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04]">
-                    <input
-                      type="radio"
-                      name="sessionTarget"
-                      checked={form.sessionTarget === 'isolated'}
-                      onChange={() => updateField('sessionTarget', 'isolated')}
-                      className="mt-0.5"
-                    />
-                    <div>
-                      <div className="text-sm text-white/80">
-                        Isolated session (recommended)
-                      </div>
-                      <div className="text-xs text-white/40">
-                        Fresh context each run. Best for background tasks.
-                      </div>
-                    </div>
-                  </label>
-                  <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04]">
-                    <input
-                      type="radio"
-                      name="sessionTarget"
-                      checked={form.sessionTarget === 'main'}
-                      onChange={() => updateField('sessionTarget', 'main')}
-                      className="mt-0.5"
-                    />
-                    <div>
-                      <div className="text-sm text-white/80">Main session</div>
-                      <div className="text-xs text-white/40">
-                        Uses current conversation context.
-                      </div>
-                    </div>
-                  </label>
+                <div className="text-sm text-white/80">
+                  Isolated session
+                  <span className="ml-2 text-xs text-[#60A5FA]">recommended</span>
+                </div>
+                <div className="text-xs text-white/40">
+                  Fresh context each run. Best for background tasks.
                 </div>
               </div>
-
-              {/* Model Override */}
+            </label>
+            <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04] transition-colors">
+              <input
+                type="radio"
+                name="sessionTarget"
+                checked={form.sessionTarget === 'main'}
+                onChange={() => updateField('sessionTarget', 'main')}
+                className="mt-0.5"
+              />
               <div>
-                <label className="block text-xs text-white/50 mb-1">
-                  Model Override (optional)
-                </label>
-                <input
-                  type="text"
-                  value={form.model}
-                  onChange={(e) => updateField('model', e.target.value)}
-                  placeholder="gemini-2.0-flash (uses session default)"
-                  className={cn(
-                    'w-full px-3 py-2 rounded-lg text-sm',
-                    'bg-white/[0.04] border border-white/[0.08]',
-                    'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#1D4ED8]/50'
-                  )}
-                />
+                <div className="text-sm text-white/80">Main session</div>
+                <div className="text-xs text-white/40">
+                  Uses current conversation context.
+                </div>
               </div>
-
-              {/* Delete after run (for one-time) */}
-              {form.scheduleType === 'once' && (
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.deleteAfterRun}
-                    onChange={(e) => updateField('deleteAfterRun', e.target.checked)}
-                    className="rounded"
-                  />
-                  <span className="text-sm text-white/70">
-                    Delete task after successful completion
-                  </span>
-                </label>
-              )}
-            </div>
-          )}
+            </label>
+          </div>
         </div>
+
+        {/* Model Override */}
+        <div>
+          <label className="block text-sm font-medium text-white/70 mb-2">
+            Model Override
+          </label>
+          <input
+            type="text"
+            value={form.model}
+            onChange={(e) => updateField('model', e.target.value)}
+            placeholder="Uses session default if empty"
+            className={cn(inputCls, 'px-4 py-2.5')}
+          />
+        </div>
+
+        {/* Delete after run (for one-time) */}
+        {form.scheduleType === 'once' && (
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.deleteAfterRun}
+              onChange={(e) => updateField('deleteAfterRun', e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm text-white/70">
+              Delete task after successful completion
+            </span>
+          </label>
+        )}
 
         {/* Error Display */}
         {displayError && (
@@ -667,7 +651,7 @@ export function CronJobEditor() {
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/[0.08]">
+      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/[0.08] flex-shrink-0">
         <button
           onClick={closeEditor}
           className="px-4 py-2 rounded-lg text-sm bg-white/[0.06] text-white/70 hover:bg-white/[0.10] transition-colors"

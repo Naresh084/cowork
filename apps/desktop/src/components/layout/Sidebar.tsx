@@ -678,8 +678,6 @@ function SidebarExpanded({
                   id={session.id}
                   title={session.title || 'New task'}
                   firstMessage={session.firstMessage}
-                  sessionType={session.type}
-                  sourceLabel={inferIntegrationSourceLabel(session)}
                   createdAt={session.createdAt}
                   isActive={activeSessionId === session.id}
                   isLive={isLiveSession(session.id)}
@@ -786,29 +784,10 @@ function formatRelativeDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function inferIntegrationSourceLabel(session: Pick<SessionSummary, 'type' | 'firstMessage' | 'title'>): string | null {
-  if (session.type !== 'integration') return null;
-
-  const tagMatch = session.firstMessage?.match(/^\[([^\]|]+)\s*\|/);
-  const labelFromTag = tagMatch?.[1]?.trim();
-  if (labelFromTag) return labelFromTag;
-
-  const titleMatch = session.title?.match(/\b(whatsapp|telegram|slack|twitter)\b/i);
-  if (titleMatch?.[1]) {
-    const normalized = titleMatch[1].toLowerCase();
-    if (normalized === 'whatsapp') return 'WhatsApp';
-    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  }
-
-  return 'Integration';
-}
-
 interface SessionItemProps {
   id: string;
   title: string;
   firstMessage: string | null;
-  sessionType?: string;
-  sourceLabel?: string | null;
   createdAt: number;
   isActive: boolean;
   isLive: boolean;
@@ -824,8 +803,6 @@ interface SessionItemProps {
 function SessionItem({
   title,
   firstMessage,
-  sessionType,
-  sourceLabel,
   createdAt,
   isActive,
   isLive,
@@ -838,7 +815,6 @@ function SessionItem({
   onDelete,
 }: SessionItemProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const isSharedSession = sessionType === 'integration';
   const baseTitle = title !== 'New task'
     ? title
     : (firstMessage ? firstMessage : 'New conversation');
@@ -886,19 +862,7 @@ function SessionItem({
             </span>
           )}
         </span>
-        <span className="flex items-center gap-1.5 min-w-0">
-          {isSharedSession ? (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#1D4ED8]/15 text-[#93C5FD] text-[10px] font-medium uppercase tracking-wide flex-shrink-0">
-              Shared
-            </span>
-          ) : null}
-          {isSharedSession && sourceLabel ? (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-white/[0.06] text-white/55 text-[10px] font-medium flex-shrink-0">
-              From {sourceLabel}
-            </span>
-          ) : null}
-          <span className="text-xs text-white/40 truncate">{dateStr}</span>
-        </span>
+        <span className="text-xs text-white/40">{dateStr}</span>
       </button>
 
       {/* Actions menu trigger */}
