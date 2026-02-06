@@ -15,6 +15,8 @@ export abstract class BaseAdapter extends EventEmitter {
   protected platform: PlatformType;
   protected _connected: boolean = false;
   protected _displayName: string | undefined;
+  protected _identityPhone: string | undefined;
+  protected _identityName: string | undefined;
   protected _lastActiveChat: string | undefined;
   protected _connectedAt: number | undefined;
   protected _lastMessageAt: number | undefined;
@@ -30,6 +32,11 @@ export abstract class BaseAdapter extends EventEmitter {
   /** Disconnect from the platform. */
   abstract disconnect(): Promise<void>;
 
+  /** Update adapter runtime config without reconnect (optional override). */
+  async updateConfig(_config: Record<string, unknown>): Promise<void> {
+    // No-op by default.
+  }
+
   /** Send a text message to the platform. */
   abstract sendMessage(chatId: string, text: string): Promise<void>;
 
@@ -42,6 +49,8 @@ export abstract class BaseAdapter extends EventEmitter {
       platform: this.platform,
       connected: this._connected,
       displayName: this._displayName,
+      identityPhone: this._identityPhone,
+      identityName: this._identityName,
       connectedAt: this._connectedAt,
       lastMessageAt: this._lastMessageAt,
     };
@@ -53,12 +62,21 @@ export abstract class BaseAdapter extends EventEmitter {
   }
 
   /** Update status and emit event. */
-  protected setConnected(connected: boolean, displayName?: string): void {
+  protected setConnected(
+    connected: boolean,
+    displayName?: string,
+    identityName?: string,
+    identityPhone?: string,
+  ): void {
     this._connected = connected;
     if (displayName) this._displayName = displayName;
+    if (identityName) this._identityName = identityName;
+    if (identityPhone) this._identityPhone = identityPhone;
     if (connected) this._connectedAt = Date.now();
     if (!connected) {
       this._connectedAt = undefined;
+      this._identityName = undefined;
+      this._identityPhone = undefined;
     }
     this.emit('status', this.getStatus());
   }

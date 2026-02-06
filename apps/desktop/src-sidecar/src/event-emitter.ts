@@ -18,6 +18,10 @@ export class EventEmitter {
   private eventBuffer: SidecarEvent[] = [];
   private flushTimeout: NodeJS.Timeout | null = null;
   private flushIntervalMs = 10; // Batch events every 10ms for performance
+  private stdoutQueue: string[] = [];
+  private stdoutQueueOffset = 0;
+  private stdoutBackpressured = false;
+  private stdoutFlushing = false;
 
   /**
    * Emit an event to the Rust backend.
@@ -264,7 +268,16 @@ export class EventEmitter {
   /**
    * Emit platform connection status change.
    */
-  integrationStatus(status: { platform: string; connected: boolean; displayName?: string; error?: string; connectedAt?: number; lastMessageAt?: number }): void {
+  integrationStatus(status: {
+    platform: string;
+    connected: boolean;
+    displayName?: string;
+    identityPhone?: string;
+    identityName?: string;
+    error?: string;
+    connectedAt?: number;
+    lastMessageAt?: number;
+  }): void {
     this.emit('integration:status', undefined, status);
   }
 
@@ -342,17 +355,18 @@ export class EventEmitter {
     this.eventBuffer = [];
 
     for (const event of events) {
-      // Write event directly as JSON followed by newline
-      // The Rust side expects SidecarEvent format: { type, session_id, data }
-      const line = JSON.stringify(event) + '\n';
-      process.stdout.write(line);
+      // Queue serialized events, then flush with backpressure-aware writes.
+      // The Rust side expects SidecarEvent format: { type, sessionId, data }.
+      this.stdoutQueue.push(JSON.stringify(event) + '\n');
     }
+
+    this.flushStdoutQueue();
   }
 
   /**
-   * Flush all pending events immediately and synchronously.
-   * This ensures all events are written before the function returns.
-   * CRITICAL: Call this at the end of sendMessage to prevent lost events.
+   * Flush all pending events immediately (best effort).
+   * If stdout is backpressured, remaining events stay queued and are resumed
+   * on the next `drain` event.
    */
   flushSync(): void {
     if (this.flushTimeout) {
@@ -366,17 +380,48 @@ export class EventEmitter {
     this.eventBuffer = [];
 
     for (const event of events) {
-      const line = JSON.stringify(event) + '\n';
-      // Use synchronous write to ensure event is sent before continuing
-      // process.stdout.write returns boolean indicating if more writes can be done
-      // If buffer is full (returns false), the data is still queued by Node.js
-      const written = process.stdout.write(line);
-      if (!written) {
-        // Buffer is full, but data is queued. In a synchronous context,
-        // we can't truly wait, but the data will be written.
-        // For critical scenarios, we log this condition.
-        process.stderr.write(`[event-emitter] stdout buffer full, event queued: ${event.type}\n`);
+      this.stdoutQueue.push(JSON.stringify(event) + '\n');
+    }
+
+    this.flushStdoutQueue();
+  }
+
+  private flushStdoutQueue(): void {
+    if (this.stdoutFlushing || this.stdoutBackpressured) {
+      return;
+    }
+
+    this.stdoutFlushing = true;
+    try {
+      while (this.stdoutQueueOffset < this.stdoutQueue.length) {
+        const line = this.stdoutQueue[this.stdoutQueueOffset]!;
+        const canContinue = process.stdout.write(line);
+        this.stdoutQueueOffset += 1;
+
+        if (!canContinue) {
+          this.stdoutBackpressured = true;
+          process.stdout.once('drain', () => {
+            this.stdoutBackpressured = false;
+            this.flushStdoutQueue();
+          });
+          break;
+        }
       }
+
+      // Fully drained.
+      if (this.stdoutQueueOffset >= this.stdoutQueue.length) {
+        this.stdoutQueue = [];
+        this.stdoutQueueOffset = 0;
+        return;
+      }
+
+      // Compact written prefix occasionally to avoid unbounded array growth.
+      if (this.stdoutQueueOffset >= 1024) {
+        this.stdoutQueue = this.stdoutQueue.slice(this.stdoutQueueOffset);
+        this.stdoutQueueOffset = 0;
+      }
+    } finally {
+      this.stdoutFlushing = false;
     }
   }
 }

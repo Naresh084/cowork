@@ -165,12 +165,13 @@ pub async fn ensure_sidecar_started(
                 let _ = app_handle.emit(&event_name, &event);
             })
             .await;
+    }
 
-        // Get API key from secure credentials storage and set it on the sidecar
-        if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
-            let params = serde_json::json!({ "apiKey": api_key });
-            let _ = manager.send_command("set_api_key", params).await;
-        }
+    // Always ensure API key is set on sidecar (handles startup race conditions
+    // and cases where the sidecar lost state)
+    if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
+        let params = serde_json::json!({ "apiKey": api_key });
+        let _ = manager.send_command("set_api_key", params).await;
     }
 
     Ok(())

@@ -93,10 +93,14 @@ export function MessageList() {
     activeTurnId,
   } = sessionState;
 
-  // Prefer chatItems (single source of truth with correct turnId-based IDs), fallback to legacy messages
-  const messages = chatItems && chatItems.length > 0
-    ? chatItemsToMessages(chatItems)
-    : legacyMessages;
+  // Prefer legacyMessages — sendMessage() and all event handlers (stream:chunk,
+  // addMessage, turnActivities) only update V1 messages. chatItems (V2) is only
+  // populated during persistence load and via async sidecar events, so using it
+  // as primary source causes new messages to be invisible until the next restart.
+  // Fall back to chatItems only when V1 is empty (edge case).
+  const messages = legacyMessages.length > 0
+    ? legacyMessages
+    : (chatItems && chatItems.length > 0 ? chatItemsToMessages(chatItems) : legacyMessages);
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 

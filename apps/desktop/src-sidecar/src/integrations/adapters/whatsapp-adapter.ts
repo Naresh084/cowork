@@ -6,14 +6,28 @@ import { rm } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { BaseAdapter } from './base-adapter.js';
-import type { WhatsAppConfig } from '../types.js';
+import {
+  DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  type WhatsAppConfig,
+} from '../types.js';
 
 const DEFAULT_SESSION_DIR = join(homedir(), '.cowork', 'integrations', 'whatsapp');
+
+function normalizeE164Like(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const digits = String(input).replace(/\D+/g, '');
+  if (!digits) return null;
+  return `+${digits}`;
+}
 
 export class WhatsAppAdapter extends BaseAdapter {
   private client: WAWebJS.Client | null = null;
   private qrCode: string | null = null;
   private sessionDataDir: string;
+  private senderPolicy: 'allowlist' = 'allowlist';
+  private allowFrom: Set<string> = new Set();
+  private denialMessage: string = DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+  private senderAliasToPhone: Map<string, string> = new Map();
 
   constructor() {
     super('whatsapp');
@@ -28,6 +42,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   async connect(config: Record<string, unknown> = {}): Promise<void> {
     const waConfig = config as unknown as WhatsAppConfig;
     this.sessionDataDir = waConfig.sessionDataDir ?? DEFAULT_SESSION_DIR;
+    await this.updateConfig(config);
 
     if (this.client) {
       await this.disconnect();
@@ -84,7 +99,13 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!this.client || !this._connected) {
       throw new Error('WhatsApp client is not connected');
     }
-    await this.client.sendMessage(chatId, text);
+    const resolvedChatId = this.resolveOutboundChatId(chatId);
+    if (resolvedChatId !== chatId) {
+      process.stderr.write(
+        `[whatsapp-send] remapped chatId ${chatId} -> ${resolvedChatId}\n`
+      );
+    }
+    await this.client.sendMessage(resolvedChatId, text);
   }
 
   async sendTypingIndicator(chatId: string): Promise<void> {
@@ -101,6 +122,34 @@ export class WhatsAppAdapter extends BaseAdapter {
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
+
+  override async updateConfig(config: Record<string, unknown>): Promise<void> {
+    const waConfig = config as WhatsAppConfig;
+    this.senderPolicy = 'allowlist';
+
+    const allowFromRaw = Array.isArray(waConfig.allowFrom) ? waConfig.allowFrom : [];
+    const normalizedAllowFrom = new Set<string>();
+    for (const value of allowFromRaw) {
+      const normalized = normalizeE164Like(value);
+      if (normalized) {
+        normalizedAllowFrom.add(normalized);
+      }
+    }
+    this.allowFrom = normalizedAllowFrom;
+
+    const denial =
+      typeof waConfig.denialMessage === 'string'
+        ? waConfig.denialMessage.trim()
+        : '';
+    this.denialMessage = denial
+      ? denial.slice(0, 280)
+      : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+
+    const allowlist = Array.from(this.allowFrom).join(', ') || '(empty)';
+    process.stderr.write(
+      `[whatsapp-auth] config updated policy=${this.senderPolicy} allowFrom=${allowlist}\n`
+    );
+  }
 
   private registerEvents(client: WAWebJS.Client): void {
     client.on('qr', async (qr: string) => {
@@ -119,7 +168,9 @@ export class WhatsAppAdapter extends BaseAdapter {
       this.qrCode = null;
       const info = client.info;
       const displayName = info?.pushname ?? info?.wid?.user ?? 'WhatsApp';
-      this.setConnected(true, displayName);
+      const identityName = info?.pushname ?? displayName;
+      const identityPhone = normalizeE164Like(info?.wid?.user);
+      this.setConnected(true, displayName, identityName, identityPhone ?? undefined);
     });
 
     client.on('message', async (message: WAWebJS.Message) => {
@@ -129,17 +180,37 @@ export class WhatsAppAdapter extends BaseAdapter {
           return;
         }
 
+        // Ignore bot's own echo messages to prevent loops.
+        if (message.fromMe) {
+          return;
+        }
+
         // Only handle plain text messages
         if (message.type !== 'chat') {
           return;
         }
 
-        const contact = await message.getContact();
-        const senderName = contact.pushname ?? contact.name ?? contact.number ?? message.from;
+        const contact = await message.getContact().catch(() => null);
+        this.updateAliasMapping(message, contact);
+        const senderPhones = this.collectSenderPhoneCandidates(message, contact);
+        const authorized = this.isSenderAuthorized(senderPhones);
 
+        process.stderr.write(
+          `[whatsapp-auth] from=${message.from} contactId=${contact?.id?._serialized ?? '-'} contactNumber=${contact?.number ?? '-'} candidates=${senderPhones.join('|') || '-'} allowlist=${Array.from(this.allowFrom).join('|') || '-'} aliases=${this.senderAliasToPhone.size} authorized=${authorized}\n`
+        );
+
+        if (!authorized) {
+          await this.sendUnauthorizedReply(message.from);
+          return;
+        }
+
+        const senderName =
+          contact?.pushname ?? contact?.name ?? contact?.number ?? message.from;
+
+        const replyChatId = this.resolveInboundReplyChatId(message, contact);
         const incoming = this.buildIncomingMessage(
-          message.from,
-          message.from,
+          replyChatId,
+          contact?.id?._serialized ?? message.from,
           senderName,
           message.body,
         );
@@ -164,7 +235,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   }
 
   private createClient(): WAWebJS.Client {
-    return new Client({
+    const options = {
       authStrategy: new LocalAuth({
         dataPath: this.sessionDataDir,
       }),
@@ -172,7 +243,157 @@ export class WhatsAppAdapter extends BaseAdapter {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
       },
-    });
+      webVersionCache: {
+        type: 'local',
+        path: join(this.sessionDataDir, '.wwebjs_cache'),
+      },
+    } as unknown as WAWebJS.ClientOptions;
+
+    return new Client(options);
+  }
+
+  private extractSenderPhoneFromJid(
+    jid: string | null | undefined
+  ): string | null {
+    if (!jid) {
+      return null;
+    }
+    const localPart = jid.split('@')[0] ?? jid;
+    const senderId = localPart.split(':')[0] ?? localPart;
+    return normalizeE164Like(senderId);
+  }
+
+  private extractJidAlias(jid: string | null | undefined): string | null {
+    if (!jid) return null;
+    const localPart = jid.split('@')[0] ?? jid;
+    const alias = localPart.split(':')[0] ?? localPart;
+    return alias || null;
+  }
+
+  private collectSenderPhoneCandidates(
+    message: WAWebJS.Message,
+    contact: WAWebJS.Contact | null
+  ): string[] {
+    const candidates = new Set<string>();
+
+    this.addSenderCandidate(candidates, this.extractSenderPhoneFromJid(message.from));
+    this.addSenderCandidate(candidates, this.extractSenderPhoneFromJid(message.author));
+    this.addSenderCandidate(
+      candidates,
+      this.extractSenderPhoneFromJid(
+        (message.id as { remote?: string } | undefined)?.remote
+      )
+    );
+    this.addSenderCandidate(candidates, normalizeE164Like(contact?.number));
+    this.addSenderCandidate(candidates, normalizeE164Like(contact?.id?.user));
+    this.addSenderCandidate(
+      candidates,
+      this.senderAliasToPhone.get(this.extractJidAlias(message.from) ?? '')
+        ?? null
+    );
+    this.addSenderCandidate(
+      candidates,
+      this.senderAliasToPhone.get(this.extractJidAlias(message.author) ?? '')
+        ?? null
+    );
+    this.addSenderCandidate(
+      candidates,
+      this.senderAliasToPhone.get(
+        this.extractJidAlias((message.id as { remote?: string } | undefined)?.remote) ?? ''
+      ) ?? null
+    );
+
+    return Array.from(candidates);
+  }
+
+  private resolveInboundReplyChatId(
+    message: WAWebJS.Message,
+    contact: WAWebJS.Contact | null
+  ): string {
+    const contactId = contact?.id?._serialized;
+    if (contactId && typeof contactId === 'string') {
+      return contactId;
+    }
+    return message.from;
+  }
+
+  private updateAliasMapping(
+    message: WAWebJS.Message,
+    contact: WAWebJS.Contact | null
+  ): void {
+    const normalizedFromContact =
+      normalizeE164Like(contact?.number) ?? normalizeE164Like(contact?.id?.user);
+    if (!normalizedFromContact) return;
+
+    const aliases = new Set<string>();
+    const fromAlias = this.extractJidAlias(message.from);
+    if (fromAlias) aliases.add(fromAlias);
+    const authorAlias = this.extractJidAlias(message.author);
+    if (authorAlias) aliases.add(authorAlias);
+    const remoteAlias = this.extractJidAlias(
+      (message.id as { remote?: string } | undefined)?.remote
+    );
+    if (remoteAlias) aliases.add(remoteAlias);
+
+    for (const alias of aliases) {
+      this.senderAliasToPhone.set(alias, normalizedFromContact);
+    }
+  }
+
+  private resolveOutboundChatId(chatId: string): string {
+    if (!chatId) {
+      return chatId;
+    }
+
+    if (chatId.includes('@')) {
+      if (chatId.endsWith('@lid')) {
+        const alias = this.extractJidAlias(chatId);
+        const mappedPhone = alias
+          ? this.senderAliasToPhone.get(alias)
+          : undefined;
+        if (mappedPhone) {
+          const digits = mappedPhone.replace(/\D+/g, '');
+          if (digits) {
+            return `${digits}@c.us`;
+          }
+        }
+      }
+      return chatId;
+    }
+
+    const normalized = normalizeE164Like(chatId);
+    if (!normalized) {
+      return chatId;
+    }
+    const digits = normalized.replace(/\D+/g, '');
+    return digits ? `${digits}@c.us` : chatId;
+  }
+
+  private addSenderCandidate(
+    candidates: Set<string>,
+    candidate: string | null
+  ): void {
+    if (!candidate) return;
+    candidates.add(candidate);
+  }
+
+  private isSenderAuthorized(senderPhones: string[]): boolean {
+    if (this.senderPolicy !== 'allowlist') {
+      return true;
+    }
+    if (senderPhones.length === 0) {
+      return false;
+    }
+    return senderPhones.some((senderPhone) => this.allowFrom.has(senderPhone));
+  }
+
+  private async sendUnauthorizedReply(chatId: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      await this.client.sendMessage(chatId, this.denialMessage);
+    } catch {
+      // Unauthorized reply is best-effort.
+    }
   }
 
   private async destroyClient(client: WAWebJS.Client | null): Promise<void> {

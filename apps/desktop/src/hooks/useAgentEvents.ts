@@ -279,6 +279,8 @@ export function useAgentEvents(sessionId: string | null): void {
           platform: string;
           connected: boolean;
           displayName?: string;
+          identityPhone?: string;
+          identityName?: string;
           error?: string;
           connectedAt?: number;
           lastMessageAt?: number;
@@ -287,6 +289,8 @@ export function useAgentEvents(sessionId: string | null): void {
           platform: statusEvent.platform as 'whatsapp' | 'slack' | 'telegram',
           connected: statusEvent.connected,
           displayName: statusEvent.displayName,
+          identityPhone: statusEvent.identityPhone,
+          identityName: statusEvent.identityName,
           error: statusEvent.error,
           connectedAt: statusEvent.connectedAt,
           lastMessageAt: statusEvent.lastMessageAt,

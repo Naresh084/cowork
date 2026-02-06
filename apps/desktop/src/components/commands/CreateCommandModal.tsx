@@ -97,7 +97,7 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-8 md:inset-16 lg:inset-24 bg-zinc-900 rounded-xl z-[60] flex flex-col overflow-hidden border border-zinc-800 shadow-2xl"
+            className="fixed left-1/2 top-1/2 z-[60] w-[calc(100vw-4rem)] h-[calc(100vh-4rem)] md:w-[calc(100vw-8rem)] md:h-[calc(100vh-8rem)] lg:w-[calc(100vw-12rem)] lg:h-[calc(100vh-12rem)] -translate-x-1/2 -translate-y-1/2 bg-zinc-900 rounded-xl flex flex-col overflow-hidden border border-zinc-800 shadow-2xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">

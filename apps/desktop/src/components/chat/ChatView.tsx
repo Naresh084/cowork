@@ -8,15 +8,18 @@ import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { toast } from '../ui/Toast';
+import { WorkingDirectoryModal } from '../layout/WorkingDirectoryModal';
 
 export function ChatView() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [initialMessage, setInitialMessage] = useState<string | undefined>(undefined);
+  const [workingDirModalOpen, setWorkingDirModalOpen] = useState(false);
+  const pendingMessageRef = useRef<{ message: string; attachments?: Attachment[] } | null>(null);
 
   // Store state
   const { sendMessage, stopGeneration, ensureSession } = useChatStore();
-  const { activeSessionId, createSession, updateSessionTitle, sessions } = useSessionStore();
+  const { activeSessionId, createSession, updateSessionTitle } = useSessionStore();
   const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
   // Use direct selector to ensure Zustand properly tracks state changes
   const sessionState = useChatStore((state) => {
@@ -87,33 +90,30 @@ export function ChatView() {
     return `${words} — ${date}`;
   };
 
-  // Handle send message
-  const handleSend = useCallback(async (message: string, messageAttachments?: Attachment[]) => {
-    if ((!message.trim() && (!messageAttachments || messageAttachments.length === 0)) || isStreaming) return;
-
+  // Core send logic — called once we have a working directory
+  const executeSend = useCallback(async (message: string, messageAttachments?: Attachment[]) => {
     // CRITICAL: Set flag to prevent race condition in useEffect
-    // This prevents reset() from wiping the optimistic message when activeSessionId changes
     isSendingRef.current = true;
 
     let sessionId = activeSessionId;
     let createdNew = false;
 
     try {
-      // Create session if none active
       if (!sessionId) {
         try {
-          const workingDir = defaultWorkingDirectory || '/';
-          // Ensure model is a valid non-empty string, fall back to default if not
+          const workingDir = defaultWorkingDirectory;
+          if (!workingDir) return; // Should not happen — caller ensures dir is set
+
           const selectedIsValid = selectedModel && availableModels.some((m) => m.id === selectedModel);
           const modelToUse = selectedIsValid
             ? selectedModel
             : availableModels[0]?.id;
 
           if (!modelToUse) {
-            const message = modelsLoading
+            const msg = modelsLoading
               ? 'Models are still loading. Try again in a moment.'
               : 'No models available. Check your API key and model access.';
-            toast.error('No model available', message);
+            toast.error('No model available', msg);
             return;
           }
           sessionId = await createSession(workingDir, modelToUse);
@@ -127,12 +127,9 @@ export function ChatView() {
 
       ensureSession(sessionId);
 
-      // Send message
       await sendMessage(sessionId, message, messageAttachments);
       setAttachments([]);
 
-      // Set title immediately for new sessions - don't check existing title
-      // because the sessions closure might be stale
       if (createdNew) {
         const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
         updateSessionTitle(sessionId, derivedTitle).catch((error) => {
@@ -144,11 +141,9 @@ export function ChatView() {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to send message', errorMessage);
     } finally {
-      // CRITICAL: Clear the flag after send completes (success or failure)
       isSendingRef.current = false;
     }
   }, [
-    isStreaming,
     activeSessionId,
     defaultWorkingDirectory,
     selectedModel,
@@ -158,8 +153,21 @@ export function ChatView() {
     sendMessage,
     ensureSession,
     updateSessionTitle,
-    sessions,
   ]);
+
+  // Handle send message — opens modal if no working directory is set
+  const handleSend = useCallback(async (message: string, messageAttachments?: Attachment[]) => {
+    if ((!message.trim() && (!messageAttachments || messageAttachments.length === 0)) || isStreaming) return;
+
+    // If no working directory, store the pending message and open the modal
+    if (!activeSessionId && !defaultWorkingDirectory) {
+      pendingMessageRef.current = { message, attachments: messageAttachments };
+      setWorkingDirModalOpen(true);
+      return;
+    }
+
+    await executeSend(message, messageAttachments);
+  }, [isStreaming, activeSessionId, defaultWorkingDirectory, executeSend]);
 
   // Handle stop generation
   const handleStop = useCallback(async () => {
@@ -338,6 +346,22 @@ export function ChatView() {
         onInitialMessageConsumed={handleInitialMessageConsumed}
       />
 
+      {/* Working Directory Modal */}
+      <WorkingDirectoryModal
+        isOpen={workingDirModalOpen}
+        onClose={() => {
+          setWorkingDirModalOpen(false);
+          pendingMessageRef.current = null;
+        }}
+        onSelected={() => {
+          setWorkingDirModalOpen(false);
+          const pending = pendingMessageRef.current;
+          pendingMessageRef.current = null;
+          if (pending) {
+            executeSend(pending.message, pending.attachments);
+          }
+        }}
+      />
     </div>
   );
 }

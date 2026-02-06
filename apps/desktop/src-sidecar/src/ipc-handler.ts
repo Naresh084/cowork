@@ -92,11 +92,12 @@ async function getConnectorOAuthService(): Promise<ConnectorOAuthService> {
  * Get or create a MemoryService for the given working directory.
  */
 async function getMemoryService(workingDirectory: string): Promise<MemoryService> {
-  let service = memoryServices.get(workingDirectory);
+  const dir = workingDirectory || homedir();
+  let service = memoryServices.get(dir);
   if (!service) {
-    service = createMemoryService(workingDirectory);
+    service = createMemoryService(dir);
     await service.initialize();
-    memoryServices.set(workingDirectory, service);
+    memoryServices.set(dir, service);
   }
   return service;
 }
@@ -1623,17 +1624,28 @@ registerHandler('integration_list_statuses', async () => {
 });
 
 registerHandler('integration_connect', async (params) => {
-  const { platform, config } = params as { platform: string; config: Record<string, string> };
+  const { platform, config } = params as { platform: string; config: Record<string, unknown> };
   const validPlatforms = ['whatsapp', 'slack', 'telegram'];
   if (!platform || !validPlatforms.includes(platform)) {
     throw new Error(`Invalid platform: ${platform}. Must be one of: ${validPlatforms.join(', ')}`);
   }
   // Platform-specific config validation
   const safeConfig = config || {};
-  if (platform === 'slack' && (!safeConfig.botToken || !safeConfig.appToken)) {
+  if (
+    platform === 'slack' &&
+    (
+      typeof safeConfig.botToken !== 'string' ||
+      typeof safeConfig.appToken !== 'string' ||
+      !safeConfig.botToken ||
+      !safeConfig.appToken
+    )
+  ) {
     throw new Error('Slack requires both botToken (xoxb-) and appToken (xapp-)');
   }
-  if (platform === 'telegram' && !safeConfig.botToken) {
+  if (
+    platform === 'telegram' &&
+    (typeof safeConfig.botToken !== 'string' || !safeConfig.botToken)
+  ) {
     throw new Error('Telegram requires a botToken from @BotFather');
   }
   const { integrationBridge } = await import('./integrations/index.js');
@@ -1664,13 +1676,12 @@ registerHandler('integration_get_qr', async () => {
 });
 
 registerHandler('integration_configure', async (params) => {
-  const { platform, config } = params as { platform: string; config: Record<string, string> };
+  const { platform, config } = params as { platform: string; config: Record<string, unknown> };
   if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
     throw new Error(`Invalid platform: ${platform}`);
   }
   const { integrationBridge } = await import('./integrations/index.js');
-  const store = integrationBridge.getStore();
-  await store.setConfig(platform as any, { platform: platform as any, enabled: true, config: config || {} });
+  await integrationBridge.configure(platform as any, config || {});
   return { success: true };
 });
 

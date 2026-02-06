@@ -11,23 +11,40 @@ interface PlatformStatus {
   platform: PlatformType;
   connected: boolean;
   displayName?: string;
+  identityPhone?: string;
+  identityName?: string;
   error?: string;
   connectedAt?: number;
   lastMessageAt?: number;
 }
 
+export interface WhatsAppSenderControlConfig {
+  senderPolicy: 'allowlist';
+  allowFrom: string[];
+  denialMessage: string;
+}
+
+export const DEFAULT_WHATSAPP_DENIAL_MESSAGE =
+  'This Cowork bot is private. You are not authorized to chat with it.';
+
 interface IntegrationState {
   platforms: Record<PlatformType, PlatformStatus>;
   whatsappQR: string | null;
   isConnecting: Record<PlatformType, boolean>;
+  whatsappConfig: WhatsAppSenderControlConfig;
+  isConfigLoading: boolean;
+  isConfigSaving: boolean;
+  configError: string | null;
 }
 
 interface IntegrationActions {
-  connect: (platform: PlatformType, config?: Record<string, string>) => Promise<void>;
+  connect: (platform: PlatformType, config?: Record<string, unknown>) => Promise<void>;
   disconnect: (platform: PlatformType) => Promise<void>;
   refreshStatuses: () => Promise<void>;
   updatePlatformStatus: (status: PlatformStatus) => void;
   setQRCode: (qr: string | null) => void;
+  loadConfig: (platform: PlatformType) => Promise<void>;
+  saveConfig: (platform: PlatformType, config: Record<string, unknown>) => Promise<void>;
   sendTestMessage: (platform: PlatformType, message?: string) => Promise<void>;
   getConnectedPlatforms: () => PlatformType[];
 }
@@ -53,6 +70,14 @@ const initialState: IntegrationState = {
     slack: false,
     telegram: false,
   },
+  whatsappConfig: {
+    senderPolicy: 'allowlist',
+    allowFrom: [],
+    denialMessage: DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  },
+  isConfigLoading: false,
+  isConfigSaving: false,
+  configError: null,
 };
 
 const statusPollTimers: Partial<Record<PlatformType, ReturnType<typeof setInterval>>> = {};
@@ -75,6 +100,55 @@ function normalizeStatusesResponse(result: unknown): PlatformStatus[] {
   }
 
   return [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function normalizePhoneToE164Like(input: string): string | null {
+  const digits = input.replace(/\D+/g, '');
+  if (!digits) return null;
+  return `+${digits}`;
+}
+
+function normalizeAndValidateAllowFrom(values: unknown): {
+  normalized: string[];
+  invalid: string[];
+} {
+  if (!Array.isArray(values)) {
+    return { normalized: [], invalid: [] };
+  }
+
+  const normalizedSet = new Set<string>();
+  const invalid: string[] = [];
+  for (const raw of values) {
+    const str = typeof raw === 'string' ? raw.trim() : String(raw ?? '').trim();
+    if (!str) continue;
+    const normalized = normalizePhoneToE164Like(str);
+    if (!normalized) {
+      invalid.push(str);
+      continue;
+    }
+    normalizedSet.add(normalized);
+  }
+
+  return { normalized: Array.from(normalizedSet), invalid };
+}
+
+function normalizeWhatsAppConfig(rawConfig: unknown): WhatsAppSenderControlConfig {
+  const config = isRecord(rawConfig) ? rawConfig : {};
+  const allowFromResult = normalizeAndValidateAllowFrom(config.allowFrom);
+  const denialMessage =
+    typeof config.denialMessage === 'string' && config.denialMessage.trim()
+      ? config.denialMessage.trim().slice(0, 280)
+      : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+
+  return {
+    senderPolicy: 'allowlist',
+    allowFrom: allowFromResult.normalized,
+    denialMessage,
+  };
 }
 
 // ============================================================================
@@ -251,6 +325,87 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
         whatsappQR: qr,
         isConnecting: { ...state.isConnecting, whatsapp: qr ? false : state.isConnecting.whatsapp },
       }));
+    },
+
+    loadConfig: async (platform) => {
+      if (platform !== 'whatsapp') {
+        return;
+      }
+
+      set({ isConfigLoading: true, configError: null });
+      try {
+        const result = await invoke<unknown>('agent_integration_get_config', { platform });
+
+        const configPayload = isRecord(result)
+          ? (isRecord(result.config) ? result.config : result)
+          : {};
+
+        const normalizedConfig = normalizeWhatsAppConfig(configPayload);
+        set({
+          whatsappConfig: normalizedConfig,
+          isConfigLoading: false,
+          configError: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          isConfigLoading: false,
+          configError: message,
+        });
+      }
+    },
+
+    saveConfig: async (platform, config) => {
+      if (platform !== 'whatsapp') {
+        await invoke('agent_integration_configure', { platform, config });
+        return;
+      }
+
+      set({ isConfigSaving: true, configError: null });
+      try {
+        const payload = isRecord(config) ? config : {};
+        const allowFromResult = normalizeAndValidateAllowFrom(payload.allowFrom);
+        if (allowFromResult.invalid.length > 0) {
+          throw new Error(
+            `Invalid phone number format: ${allowFromResult.invalid.join(', ')}`
+          );
+        }
+        if (allowFromResult.normalized.length === 0) {
+          throw new Error('Allowlist cannot be empty.');
+        }
+
+        const denialRaw =
+          typeof payload.denialMessage === 'string'
+            ? payload.denialMessage.trim()
+            : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+        if (denialRaw.length > 280) {
+          throw new Error('Denial message must be 280 characters or less.');
+        }
+
+        const normalizedConfig: WhatsAppSenderControlConfig = {
+          senderPolicy: 'allowlist',
+          allowFrom: allowFromResult.normalized,
+          denialMessage: denialRaw || DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+        };
+
+        await invoke('agent_integration_configure', {
+          platform,
+          config: normalizedConfig,
+        });
+
+        set({
+          whatsappConfig: normalizedConfig,
+          isConfigSaving: false,
+          configError: null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          isConfigSaving: false,
+          configError: message,
+        });
+        throw error;
+      }
     },
 
     sendTestMessage: async (platform, message) => {

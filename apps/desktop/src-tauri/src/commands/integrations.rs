@@ -13,6 +13,8 @@ pub struct PlatformStatus {
     pub platform: String,
     pub connected: bool,
     pub display_name: Option<String>,
+    pub identity_phone: Option<String>,
+    pub identity_name: Option<String>,
     pub error: Option<String>,
     pub connected_at: Option<i64>,
     pub last_message_at: Option<i64>,
@@ -117,6 +119,23 @@ pub async fn agent_integration_configure(
 
     manager.send_command("integration_configure", params).await?;
     Ok(())
+}
+
+/// Get platform configuration
+#[tauri::command]
+pub async fn agent_integration_get_config(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    platform: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "platform": platform,
+    });
+
+    manager.send_command("integration_get_config", params).await
 }
 
 /// Send a test message on a platform
