@@ -1,11 +1,11 @@
-use crate::commands::keychain;
+use crate::commands::credentials;
 
-const API_KEY_SERVICE: &str = "gemini-cowork";
+const API_KEY_SERVICE: &str = "cowork";
 const API_KEY_ACCOUNT: &str = "api_key";
 
 #[tauri::command]
 pub async fn get_api_key() -> Result<Option<String>, String> {
-    keychain::keychain_get(API_KEY_SERVICE.to_string(), API_KEY_ACCOUNT.to_string()).await
+    credentials::credentials_get(API_KEY_SERVICE.to_string(), API_KEY_ACCOUNT.to_string()).await
 }
 
 #[tauri::command]
@@ -19,7 +19,7 @@ pub async fn set_api_key(api_key: String) -> Result<(), String> {
         return Err("Invalid API key format".to_string());
     }
 
-    keychain::keychain_set(
+    credentials::credentials_set(
         API_KEY_SERVICE.to_string(),
         API_KEY_ACCOUNT.to_string(),
         api_key,
@@ -28,7 +28,7 @@ pub async fn set_api_key(api_key: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn delete_api_key() -> Result<(), String> {
-    keychain::keychain_delete(API_KEY_SERVICE.to_string(), API_KEY_ACCOUNT.to_string()).await
+    credentials::credentials_delete(API_KEY_SERVICE.to_string(), API_KEY_ACCOUNT.to_string()).await
 }
 
 #[tauri::command]

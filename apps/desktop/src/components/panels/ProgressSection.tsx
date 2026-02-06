@@ -116,7 +116,7 @@ function TaskItem({ task }: TaskItemProps) {
       className={cn(
         'flex items-start gap-2 py-1.5 px-1 rounded-lg',
         'transition-colors duration-150',
-        task.status === 'in_progress' && 'bg-[#4C71FF]/5'
+        task.status === 'in_progress' && 'bg-[#1D4ED8]/5'
       )}
     >
       {/* Status Icon */}
@@ -124,7 +124,7 @@ function TaskItem({ task }: TaskItemProps) {
         {task.status === 'completed' ? (
           <CheckCircle2 className="w-4 h-4 text-[#50956A]" />
         ) : task.status === 'in_progress' ? (
-          <Loader2 className="w-4 h-4 text-[#4C71FF] animate-spin" />
+          <Loader2 className="w-4 h-4 text-[#1D4ED8] animate-spin" />
         ) : (
           <Circle className="w-4 h-4 text-white/25" />
         )}
@@ -146,8 +146,8 @@ function TaskItem({ task }: TaskItemProps) {
         {/* Active form (shown when in progress) */}
         {task.status === 'in_progress' && task.activeForm && (
           <div className="flex items-center gap-1.5 mt-0.5">
-            <Loader2 className="w-3 h-3 text-[#8CA2FF] animate-spin" />
-            <span className="text-xs text-[#8CA2FF]">{task.activeForm}</span>
+            <Loader2 className="w-3 h-3 text-[#93C5FD] animate-spin" />
+            <span className="text-xs text-[#93C5FD]">{task.activeForm}</span>
           </div>
         )}
 

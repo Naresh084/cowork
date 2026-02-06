@@ -56,7 +56,7 @@ export function SettingsView() {
         </button>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center">
-            <Settings2 className="w-5 h-5 text-[#8CA2FF]" />
+            <Settings2 className="w-5 h-5 text-[#93C5FD]" />
           </div>
           <div>
             <h1 className="text-lg font-semibold text-white/90">Settings</h1>

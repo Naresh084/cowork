@@ -27,15 +27,15 @@ export function LiveViewButton({ onClick }: LiveViewButtonProps) {
         // Layout
         'flex items-center gap-2 px-4 py-2.5',
         // Colors: Dark background with blue border glow
-        'bg-[#101421] border border-[#4C71FF]/40',
+        'bg-[#101421] border border-[#1D4ED8]/40',
         // Shape
         'rounded-xl',
         // Text color
-        'text-[#8CA2FF]',
+        'text-[#93C5FD]',
         // Shadow for depth
-        'shadow-lg shadow-[#4C71FF]/20',
+        'shadow-lg shadow-[#1D4ED8]/20',
         // Hover state
-        'hover:bg-[#1A1F2E] hover:border-[#4C71FF]/60 hover:scale-[1.02]',
+        'hover:bg-[#1A1F2E] hover:border-[#1D4ED8]/60 hover:scale-[1.02]',
         // Transitions
         'transition-all duration-200',
         // Pulsing glow animation (defined in globals.css)
@@ -49,7 +49,7 @@ export function LiveViewButton({ onClick }: LiveViewButtonProps) {
       <span className="text-sm font-medium">Live View</span>
 
       {/* Pulsing indicator dot */}
-      <span className="w-2 h-2 rounded-full bg-[#4C71FF] animate-pulse" />
+      <span className="w-2 h-2 rounded-full bg-[#1D4ED8] animate-pulse" />
     </motion.button>
   );
 }

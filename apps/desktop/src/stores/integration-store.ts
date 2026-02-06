@@ -160,7 +160,7 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
 
     sendTestMessage: async (platform, message) => {
       try {
-        await invoke('agent_integration_send_test', { platform, message: message || 'Hello from Gemini Cowork!' });
+        await invoke('agent_integration_send_test', { platform, message: message || 'Hello from Cowork!' });
       } catch (error) {
         console.warn(`Failed to send test message on ${platform}:`, error);
       }

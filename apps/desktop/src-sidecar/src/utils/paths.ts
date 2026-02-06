@@ -1,6 +1,6 @@
 /**
  * Path utilities for data storage locations
- * All data is stored in ~/.geminicowork/
+ * All data is stored in ~/.cowork/
  */
 
 import { homedir } from 'os';
@@ -8,9 +8,9 @@ import * as path from 'path';
 import { promises as fs } from 'fs';
 
 /**
- * Base data directory for Gemini Cowork
+ * Base data directory for Cowork
  */
-export const DATA_DIR = path.join(homedir(), '.geminicowork');
+export const DATA_DIR = path.join(homedir(), '.cowork');
 
 /**
  * Subdirectory paths

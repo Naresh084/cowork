@@ -288,7 +288,7 @@ const initialState: SettingsState = {
 
   // Skills Marketplace
   skillsSettings: {
-    managedDir: '', // Will be set to ~/.geminicowork/skills
+    managedDir: '', // Will be set to ~/.cowork/skills
     customDirs: [],
     showUnavailable: true,
     autoCheckEligibility: true,

@@ -402,8 +402,8 @@ function SidebarRail({
           onClick={onNewTask}
           className={cn(
             'w-10 h-10 flex items-center justify-center rounded-xl',
-            'bg-[#4C71FF] text-white shadow-lg shadow-[#4C71FF]/25',
-            'hover:shadow-xl hover:shadow-[#4C71FF]/35',
+            'bg-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25',
+            'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
             'transition-all duration-200'
           )}
           title="New task"
@@ -428,14 +428,17 @@ function SidebarRail({
                   'relative w-10 h-10 flex items-center justify-center rounded-xl',
                   'transition-all duration-150',
                   activeSessionId === session.id
-                    ? 'bg-white/[0.08] text-[#8CA2FF]'
+                    ? 'bg-white/[0.08] text-[#93C5FD]'
                     : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
                 )}
                 title={session.title || 'New task'}
               >
                 <MessageSquare className="w-4 h-4" />
+                {activeSessionId === session.id && !isLiveSession(session.id) && (
+                  <span className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-[#1D4ED8]" />
+                )}
                 {isLiveSession(session.id) && (
-                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#4C71FF] animate-pulse" />
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#1D4ED8] animate-pulse" />
                 )}
               </motion.button>
             ))}
@@ -458,7 +461,7 @@ function SidebarRail({
         >
           <Puzzle className="w-5 h-5" />
           {enabledSkillsCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#4C71FF] text-white text-[10px] font-bold flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1D4ED8] text-white text-[10px] font-bold flex items-center justify-center">
               {enabledSkillsCount}
             </span>
           )}
@@ -480,7 +483,7 @@ function SidebarRail({
         >
           <Bot className="w-5 h-5" />
           {subagentCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#3498DB] text-white text-[10px] font-bold flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#06B6D4] text-white text-[10px] font-bold flex items-center justify-center">
               {subagentCount > 9 ? '9+' : subagentCount}
             </span>
           )}
@@ -567,7 +570,7 @@ function SidebarRail({
           )}
           title="Profile & Settings"
         >
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center">
             <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
           </div>
         </motion.button>
@@ -760,7 +763,7 @@ function SidebarExpanded({
             <div className="text-sm font-medium truncate">Skills</div>
           </div>
           {enabledSkillsCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#4C71FF]/20 text-[#8CA2FF] text-xs font-medium">
+            <span className="px-2 py-0.5 rounded-full bg-[#1D4ED8]/20 text-[#93C5FD] text-xs font-medium">
               {enabledSkillsCount}
             </span>
           )}
@@ -785,7 +788,7 @@ function SidebarExpanded({
             <div className="text-sm font-medium truncate">Subagents</div>
           </div>
           {subagentCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#3498DB]/20 text-[#5DADE2] text-xs font-medium">
+            <span className="px-2 py-0.5 rounded-full bg-[#06B6D4]/20 text-[#67E8F9] text-xs font-medium">
               {subagentCount}
             </span>
           )}
@@ -880,7 +883,7 @@ function SidebarExpanded({
             profileMenuOpen && 'bg-white/[0.08]'
           )}
         >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
           </div>
           <div className="flex-1 text-left min-w-0">
@@ -985,12 +988,15 @@ function SessionItem({
         )}
       >
         <span className="flex items-center gap-2 min-w-0">
+          {isActive && (
+            <span className="w-1.5 h-1.5 rounded-full bg-[#1D4ED8] flex-shrink-0" />
+          )}
           <span className="text-sm truncate min-w-0 flex-1">
             {baseTitle}
           </span>
           {isLive && (
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[#8CA2FF] flex-shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#4C71FF] animate-pulse" />
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[#93C5FD] flex-shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1D4ED8] animate-pulse" />
               Live
             </span>
           )}
@@ -1161,14 +1167,14 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
                 'w-full px-3 py-2 rounded-lg text-sm',
                 'bg-[#0B0C10] border border-white/[0.08]',
                 'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#4C71FF]/50'
+                'focus:outline-none focus:border-[#1D4ED8]/50'
               )}
               autoFocus
             />
             <div className="flex gap-2">
               <button
                 onClick={handleSaveName}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#4C71FF] text-white"
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#1D4ED8] text-white"
               >
                 <Check className="w-4 h-4" />
                 Save
@@ -1184,7 +1190,7 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center">
               <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
             </div>
             <div className="flex-1">
@@ -1230,13 +1236,13 @@ function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuPro
                 'w-full px-3 py-2 rounded-lg text-sm',
                 'bg-[#0B0C10] border border-white/[0.08]',
                 'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#4C71FF]/50'
+                'focus:outline-none focus:border-[#1D4ED8]/50'
               )}
             />
             <div className="flex gap-2">
               <button
                 onClick={handleSaveApiKey}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#4C71FF] text-white"
+                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#1D4ED8] text-white"
               >
                 <Check className="w-4 h-4" />
                 Save

@@ -41,7 +41,7 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
           </div>
           <div className="mt-4 flex gap-2">
             <button
-              className="px-3 py-1.5 rounded-lg bg-[#4C71FF] text-white text-sm"
+              className="px-3 py-1.5 rounded-lg bg-[#1D4ED8] text-white text-sm"
               onClick={() => window.location.reload()}
             >
               Reload

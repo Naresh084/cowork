@@ -22,7 +22,7 @@ import { z } from 'zod';
 import { mkdir, readFile, writeFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, isAbsolute, resolve, sep } from 'path';
-import { homedir } from 'os';
+import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
 import { connectorBridge } from './connector-bridge.js';
@@ -1558,15 +1558,103 @@ export class AgentRunner {
   // Private Methods
   // ============================================================================
 
+  private getSystemInfo(): {
+    username: string;
+    osName: string;
+    osVersion: string;
+    architecture: string;
+    shell: string;
+    computerName: string;
+    cpuModel: string;
+    cpuCores: number;
+    totalMemoryGB: string;
+    timezone: string;
+    timezoneOffset: string;
+    locale: string;
+  } {
+    const user = userInfo();
+    const cpuList = cpus();
+    const totalMem = totalmem();
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const offsetMin = new Date().getTimezoneOffset();
+    const offsetHrs = Math.abs(Math.floor(offsetMin / 60));
+    const offsetMins = Math.abs(offsetMin % 60);
+    const offsetSign = offsetMin <= 0 ? '+' : '-';
+    const offsetStr = `UTC${offsetSign}${String(offsetHrs).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
+
+    // Map platform to friendly OS name
+    const platformNames: Record<string, string> = {
+      darwin: 'macOS',
+      win32: 'Windows',
+      linux: 'Linux',
+      freebsd: 'FreeBSD',
+    };
+
+    return {
+      username: user.username,
+      osName: platformNames[process.platform] || process.platform,
+      osVersion: release(),
+      architecture: arch(),
+      shell: user.shell || process.env.SHELL || process.env.COMSPEC || 'unknown',
+      computerName: hostname(),
+      cpuModel: cpuList.length > 0 ? cpuList[0].model : 'unknown',
+      cpuCores: cpuList.length,
+      totalMemoryGB: (totalMem / (1024 ** 3)).toFixed(1),
+      timezone: tz,
+      timezoneOffset: offsetStr,
+      locale: Intl.DateTimeFormat().resolvedOptions().locale || 'en-US',
+    };
+  }
+
   private async buildSystemPrompt(session: ActiveSession): Promise<string> {
     const now = new Date();
-    const basePrompt = `You are Gemini Cowork, a software development assistant powered by DeepAgents.
+    const sys = this.getSystemInfo();
+    const formattedDate = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const formattedTime = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
 
 ## Environment
-Working Directory: ${session.workingDirectory}
-Date: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}
-Platform: ${process.platform}
-Home: ${homedir()}
+
+### User
+- Username: ${sys.username}
+- Home Directory: ${homedir()}
+
+### System
+- OS: ${sys.osName} ${sys.osVersion} (${sys.architecture})
+- Computer Name: ${sys.computerName}
+- Shell: ${sys.shell}
+- CPU: ${sys.cpuModel} (${sys.cpuCores} cores)
+- Memory: ${sys.totalMemoryGB} GB
+
+### Date & Time
+- Current Date: ${formattedDate}
+- Current Time: ${formattedTime}
+- Timezone: ${sys.timezone} (${sys.timezoneOffset})
+- Locale: ${sys.locale}
+
+### Workspace
+- Working Directory: ${session.workingDirectory}
+- Platform: ${process.platform}
+- Node.js: ${process.version}
+
+### Instructions for Using System Information
+- Use OS-appropriate commands: prefer \`pbcopy/pbpaste\` on macOS, \`clip\`/\`Get-Clipboard\` on Windows, \`xclip\` on Linux
+- Use OS-appropriate path separators: \`/\` on macOS/Linux, \`\\\` on Windows
+- Use OS-appropriate file locations: \`~/Library/\` on macOS, \`%APPDATA%\` on Windows, \`~/.config/\` on Linux
+- Use the user's timezone when scheduling tasks, formatting dates, or referencing time
+- Use the user's locale for number/date formatting when generating user-facing content
+- When suggesting shell commands, match the user's shell (bash, zsh, powershell, etc.)
+- Address the user by their username when appropriate for a personal touch
+- When discussing system resources or performance, use the CPU/memory info for context-aware suggestions
 
 ## Tone and Style
 Be direct and concise. Avoid unnecessary preamble, postamble, or filler phrases.
@@ -3314,14 +3402,17 @@ ${toolList}
   }
 
   private emitContextUsage(session: ActiveSession): void {
-    const tokenEstimate = this.estimateTokens(session.messages);
+    // Prefer API-reported token count (accurate) over character-based estimation
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(session.messages);
     const contextWindow = getModelContextWindow(session.model);
-    eventEmitter.contextUpdate(session.id, tokenEstimate, contextWindow.input);
+    eventEmitter.contextUpdate(session.id, used, contextWindow.input);
 
     // V2: Emit context usage update with percentage
-    const percentUsed = contextWindow.input > 0 ? (tokenEstimate / contextWindow.input) * 100 : 0;
+    const percentUsed = contextWindow.input > 0 ? (used / contextWindow.input) * 100 : 0;
     eventEmitter.contextUsageUpdate(session.id, {
-      usedTokens: tokenEstimate,
+      usedTokens: used,
       maxTokens: contextWindow.input,
       percentUsed,
     });
@@ -4055,7 +4146,9 @@ ${toolList}
   private async maybeCompactContext(session: ActiveSession): Promise<void> {
     if (!this.provider) return;
     const contextWindow = getModelContextWindow(session.model);
-    const used = this.estimateTokens(session.messages);
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(session.messages);
     const ratio = contextWindow.input > 0 ? used / contextWindow.input : 0;
     if (ratio < 0.7) return;
 

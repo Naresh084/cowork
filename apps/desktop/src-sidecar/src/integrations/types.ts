@@ -8,7 +8,7 @@ export type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, Pl
 // ============================================================================
 
 export interface WhatsAppConfig {
-  /** Directory to store WhatsApp session data. Defaults to ~/.geminicowork/integrations/whatsapp/ */
+  /** Directory to store WhatsApp session data. Defaults to ~/.cowork/integrations/whatsapp/ */
   sessionDataDir?: string;
 }
 

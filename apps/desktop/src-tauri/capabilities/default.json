@@ -50,7 +50,7 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        "$HOME/.geminicowork/**",
+        "$HOME/.cowork/**",
         "$HOME/**"
       ]
     },

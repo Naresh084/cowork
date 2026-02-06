@@ -268,7 +268,7 @@ function getTypeIndicator(type: Artifact['type']): { color: string; label: strin
     case 'created':
       return { color: 'bg-[#50956A]', label: 'Created' };
     case 'modified':
-      return { color: 'bg-[#4C71FF]', label: 'Modified' };
+      return { color: 'bg-[#1D4ED8]', label: 'Modified' };
     case 'touched':
       return { color: 'bg-[#F5C400]', label: 'Touched' };
     case 'deleted':

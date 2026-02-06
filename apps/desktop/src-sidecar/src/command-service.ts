@@ -50,7 +50,7 @@ export class CommandService {
   private appDataDir: string;
 
   constructor(appDataDir?: string) {
-    this.appDataDir = appDataDir || join(homedir(), '.geminicowork');
+    this.appDataDir = appDataDir || join(homedir(), '.cowork');
     this.bundledCommandsDir = DEFAULT_BUNDLED_DIR;
     this.managedCommandsDir = join(this.appDataDir, 'commands');
   }

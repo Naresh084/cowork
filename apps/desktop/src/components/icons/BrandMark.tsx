@@ -6,44 +6,32 @@ interface BrandMarkProps {
   title?: string;
 }
 
-export function BrandMark({ className, title = 'Gemini Cowork' }: BrandMarkProps) {
+export function BrandMark({ className, title = 'Cowork' }: BrandMarkProps) {
   const id = useId();
   const gradientId = `brand-gradient-${id}`;
 
   return (
     <svg
-      viewBox="0 0 120 120"
+      viewBox="0 0 512 512"
       className={cn('w-10 h-10', className)}
       role="img"
       aria-label={title}
     >
       <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#2B48BE" />
-          <stop offset="55%" stopColor="#4C71FF" />
-          <stop offset="100%" stopColor="#8CA2FF" />
+        <linearGradient id={gradientId} x1="72" y1="78" x2="438" y2="434" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#0F172A" />
+          <stop offset="50%" stopColor="#1D4ED8" />
+          <stop offset="100%" stopColor="#7DD3FC" />
         </linearGradient>
       </defs>
-
-      <g>
-        <circle
-          cx="46"
-          cy="60"
-          r="28"
-          fill="none"
-          stroke={`url(#${gradientId})`}
-          strokeWidth="10"
-        />
-        <circle
-          cx="74"
-          cy="60"
-          r="28"
-          fill="none"
-          stroke={`url(#${gradientId})`}
-          strokeWidth="10"
-        />
-        <circle cx="60" cy="60" r="7" fill={`url(#${gradientId})`} />
-      </g>
+      <path
+        d="M382 112C340 70 286 46 226 46C124 46 46 124 46 226C46 328 124 406 226 406C286 406 340 382 382 340"
+        fill="none"
+        stroke={`url(#${gradientId})`}
+        strokeWidth="84"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

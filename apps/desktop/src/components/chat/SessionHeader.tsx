@@ -202,7 +202,7 @@ export function SessionHeader() {
   };
 
   const modeStyles: Record<ApprovalMode, { active: string; ring: string }> = {
-    auto: { active: 'bg-[#4C71FF] text-white', ring: 'bg-[#4C71FF]/15 text-[#8CA2FF]' },
+    auto: { active: 'bg-[#1D4ED8] text-white', ring: 'bg-[#1D4ED8]/15 text-[#93C5FD]' },
     read_only: { active: 'bg-[#F5C400] text-[#1A1A1E]', ring: 'bg-[#F5C400]/15 text-[#F5C400]' },
     full: { active: 'bg-[#FF5449] text-white', ring: 'bg-[#FF5449]/15 text-[#FF5449]' },
   };
@@ -238,7 +238,7 @@ export function SessionHeader() {
                   'px-3 py-1.5 rounded-lg text-sm font-medium',
                   'bg-[#111218] border border-white/[0.10]',
                   'text-white/90 placeholder:text-white/30',
-                  'focus:outline-none focus:ring-2 focus:ring-[#4C71FF]/40',
+                  'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/40',
                   'transition-all'
                 )}
               />
@@ -323,10 +323,10 @@ export function SessionHeader() {
               onClick={() => setLiveViewOpen(true)}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium',
-                'bg-[#4C71FF] text-white',
-                'hover:bg-[#5C81FF]',
+                'bg-[#1D4ED8] text-white',
+                'hover:bg-[#3B82F6]',
                 'transition-colors',
-                'shadow-sm shadow-[#4C71FF]/30'
+                'shadow-sm shadow-[#1D4ED8]/30'
               )}
               title="Open live browser view"
             >
@@ -340,7 +340,7 @@ export function SessionHeader() {
         {/* Connection status */}
         <div className={cn(
           'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
-          isAuthenticated ? 'bg-[#0F1B33] text-[#8CA2FF]' : 'bg-[#1A1A1E] text-white/50'
+          isAuthenticated ? 'bg-[#0F1B33] text-[#93C5FD]' : 'bg-[#1A1A1E] text-white/50'
         )}>
           <Plug className="w-3.5 h-3.5" />
           {connectionLabel}
@@ -401,7 +401,7 @@ export function SessionHeader() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-white/90">{mode.label}</span>
                         {approvalMode === mode.id && (
-                          <Check className="w-3.5 h-3.5 text-[#4C71FF]" />
+                          <Check className="w-3.5 h-3.5 text-[#1D4ED8]" />
                         )}
                       </div>
                       <p className="text-[11px] text-white/40">{mode.description}</p>

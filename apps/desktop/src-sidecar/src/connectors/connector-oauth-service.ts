@@ -5,7 +5,7 @@
  * - Authorization Code flow with PKCE (Google, GitHub, Slack, Linear)
  * - Device Code flow (Microsoft)
  *
- * Tokens are stored securely in the system keychain via SecretService.
+ * Tokens are stored securely in the file-based secure storage via SecretService.
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
@@ -529,7 +529,7 @@ export class ConnectorOAuthService {
                 </head>
                 <body>
                   <h1>Authorization Successful!</h1>
-                  <p>You can close this window and return to GeminiCowork.</p>
+                  <p>You can close this window and return to Cowork.</p>
                   <script>setTimeout(() => window.close(), 3000);</script>
                 </body>
                 </html>

@@ -40,7 +40,7 @@ const COMMAND_ICONS: Record<string, React.ComponentType<{ className?: string }>>
 
 // Category colors
 const CATEGORY_COLORS: Record<CommandCategory, string> = {
-  setup: 'text-[#4C71FF]',
+  setup: 'text-[#1D4ED8]',
   memory: 'text-[#9B59B6]',
   utility: 'text-[#F5C400]',
   workflow: 'text-[#27AE60]',
@@ -174,7 +174,7 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
       >
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
-          <CommandIcon className="w-3.5 h-3.5 text-[#4C71FF]" />
+          <CommandIcon className="w-3.5 h-3.5 text-[#1D4ED8]" />
           <span className="text-xs text-white/50">
             {paletteQuery ? `Searching: ${paletteQuery}` : 'Commands'}
           </span>
@@ -208,7 +208,7 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
                   'w-full flex items-start gap-3 px-3 py-2.5',
                   'text-left transition-colors duration-100',
                   isSelected
-                    ? 'bg-[#4C71FF]/15'
+                    ? 'bg-[#1D4ED8]/15'
                     : 'hover:bg-white/[0.04]'
                 )}
               >
@@ -216,11 +216,11 @@ export function CommandPalette({ onSelect, onClose }: CommandPaletteProps) {
                 <div
                   className={cn(
                     'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
-                    isSelected ? 'bg-[#4C71FF]/20' : 'bg-white/[0.04]'
+                    isSelected ? 'bg-[#1D4ED8]/20' : 'bg-white/[0.04]'
                   )}
                 >
                   <IconComponent
-                    className={cn('w-4 h-4', isSelected ? 'text-[#4C71FF]' : categoryColor)}
+                    className={cn('w-4 h-4', isSelected ? 'text-[#1D4ED8]' : categoryColor)}
                   />
                 </div>
 

@@ -112,7 +112,7 @@ export function CreateSubagentModal({ isOpen, onClose, onCreated }: CreateSubage
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-3">
-                <Bot className="w-5 h-5 text-[#3498DB]" />
+                <Bot className="w-5 h-5 text-[#06B6D4]" />
                 <h2 className="text-lg font-semibold text-zinc-100">Create Custom Subagent</h2>
               </div>
               <button
@@ -287,7 +287,7 @@ export function CreateSubagentModal({ isOpen, onClose, onCreated }: CreateSubage
               <div className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg">
                 <p className="text-sm text-zinc-400">
                   <span className="text-zinc-300 font-medium">Note:</span> Custom subagents are stored in{' '}
-                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#3498DB]">~/.geminicowork/subagents/</code>{' '}
+                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#06B6D4]">~/.cowork/subagents/</code>{' '}
                   and are available globally. They will be automatically included in the agent's delegation options.
                 </p>
               </div>
@@ -305,7 +305,7 @@ export function CreateSubagentModal({ isOpen, onClose, onCreated }: CreateSubage
               <button
                 onClick={handleSubmit}
                 disabled={isSubmitting || !name || !displayName || !description || !systemPrompt || !isNameValid}
-                className="px-6 py-2 bg-[#3498DB] hover:bg-[#2980B9] disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                className="px-6 py-2 bg-[#06B6D4] hover:bg-[#0284C7] disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? (
                   <>

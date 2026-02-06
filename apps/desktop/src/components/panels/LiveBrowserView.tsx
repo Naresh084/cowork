@@ -75,10 +75,10 @@ export function LiveBrowserView() {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-[#0D0E12]">
         <div className="flex items-center gap-2">
-          <Eye className="w-4 h-4 text-[#8CA2FF]" />
+          <Eye className="w-4 h-4 text-[#93C5FD]" />
           <span className="text-sm font-medium text-white/80">Live Browser View</span>
           {isRunning && (
-            <span className="w-2 h-2 rounded-full bg-[#4C71FF] animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-[#1D4ED8] animate-pulse" />
           )}
         </div>
         <button
@@ -99,7 +99,7 @@ export function LiveBrowserView() {
               <Globe className="w-8 h-8 text-white/20" />
             </div>
             <div className="flex items-center justify-center gap-2 mb-2">
-              <RefreshCw className="w-4 h-4 text-[#4C71FF] animate-spin" />
+              <RefreshCw className="w-4 h-4 text-[#1D4ED8] animate-spin" />
               <p className="text-white/60">Waiting for browser screenshot...</p>
             </div>
             <p className="text-sm text-white/30">
@@ -157,7 +157,7 @@ export function LiveBrowserView() {
           {/* Footer with status */}
           <div className="flex items-center justify-between mt-3 text-xs text-white/40">
             <span className="flex items-center gap-2">
-              <span className={isRunning ? 'text-[#8CA2FF]' : ''}>
+              <span className={isRunning ? 'text-[#93C5FD]' : ''}>
                 {isRunning ? 'Browser active' : 'Session ended'}
               </span>
               <span className="text-white/20">•</span>

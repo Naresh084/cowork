@@ -1,12 +1,12 @@
 pub mod agent;
 pub mod auth;
 pub mod connectors;
+pub mod credentials;
 pub mod cron;
 pub mod deep;
 pub mod files;
 pub mod heartbeat;
 pub mod integrations;
-pub mod keychain;
 pub mod policy;
 pub mod skills;
 pub mod subagent;

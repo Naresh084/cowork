@@ -44,7 +44,7 @@ function ModelSettingField({
           'w-full px-3 py-2 rounded-lg text-sm',
           'bg-[#0B0C10] border border-white/[0.08]',
           'text-white/90 placeholder:text-white/30',
-          'focus:outline-none focus:border-[#4C71FF]/50',
+          'focus:outline-none focus:border-[#1D4ED8]/50',
           'font-mono'
         )}
       />
@@ -123,9 +123,9 @@ export function GeneralSettings() {
       />
 
       {/* Info note */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-[#4C71FF]/10 border border-[#4C71FF]/20">
-        <Info className="w-4 h-4 text-[#8CA2FF] flex-shrink-0 mt-0.5" />
-        <p className="text-xs text-[#8CA2FF]">
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
+        <Info className="w-4 h-4 text-[#93C5FD] flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-[#93C5FD]">
           Search, research, and video analysis tools automatically use your selected chat model.
           Only the specialized capabilities above need separate model configuration.
         </p>
@@ -145,7 +145,7 @@ export function GeneralSettings() {
           className={cn(
             'px-4 py-2 rounded-lg text-sm transition-colors',
             hasChanges
-              ? 'bg-[#4C71FF] text-white hover:bg-[#5B7FFF]'
+              ? 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]'
               : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
           )}
         >

@@ -105,7 +105,7 @@ export function TelegramSettings() {
                 'w-full px-3 py-2 pr-10 rounded-lg text-sm',
                 'bg-[#0B0C10] border border-white/[0.08]',
                 'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#4C71FF]/50',
+                'focus:outline-none focus:border-[#1D4ED8]/50',
                 'font-mono',
                 connected && 'opacity-50 cursor-not-allowed'
               )}

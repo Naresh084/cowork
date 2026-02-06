@@ -46,9 +46,9 @@ function getInitials(name: string): string {
 
 function stringToColor(str: string): string {
   const colors = [
-    'bg-[#2B48BE]',
-    'bg-[#4C71FF]',
-    'bg-[#2B48BE]',
+    'bg-[#1E3A8A]',
+    'bg-[#1D4ED8]',
+    'bg-[#1E3A8A]',
     'bg-[#008585]',
     'bg-[#50956A]',
     'bg-[#F5C400]',

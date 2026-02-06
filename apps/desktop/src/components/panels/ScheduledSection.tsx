@@ -131,7 +131,7 @@ export function ScheduledSection() {
           <p className="text-xs text-white/40 mb-2">No scheduled tasks</p>
           <button
             onClick={() => openModal()}
-            className="text-xs text-[#8CA2FF] hover:underline"
+            className="text-xs text-[#93C5FD] hover:underline"
           >
             Create one
           </button>
@@ -144,7 +144,7 @@ export function ScheduledSection() {
           {activeJobs.length > 3 && (
             <button
               onClick={() => openModal()}
-              className="w-full py-1.5 text-[10px] text-center text-[#8CA2FF] hover:underline"
+              className="w-full py-1.5 text-[10px] text-center text-[#93C5FD] hover:underline"
             >
               View all {activeJobs.length} scheduled tasks
             </button>

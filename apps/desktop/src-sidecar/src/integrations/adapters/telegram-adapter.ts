@@ -25,7 +25,7 @@ export class TelegramAdapter extends BaseAdapter {
 
     // Get bot info for display name
     const botInfo = await this.bot.getMe();
-    const botName = botInfo.first_name || botInfo.username || 'Gemini Cowork';
+    const botName = botInfo.first_name || botInfo.username || 'Cowork';
 
     // Handle incoming messages
     const allowedChatIds = telegramConfig.allowedChatIds;

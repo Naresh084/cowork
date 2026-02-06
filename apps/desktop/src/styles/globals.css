@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* =============================================================================
-   GEMINI COWORK - LUMINA DESIGN SYSTEM
+   COWORK - LUMINA DESIGN SYSTEM
    Refined Material You + Apple-inspired color system
    ============================================================================= */
 
@@ -22,26 +22,26 @@
     --material-bg: 37 37 41;          /* #252529 - Material base */
 
     /* ==========================================================================
-       PRIMARY - Refined Indigo (Material You tonal palette)
+       PRIMARY - Cobalt Blue (Cowork brand palette)
        ========================================================================== */
     --primary-0: 0 0 0;
-    --primary-10: 4 16 51;
-    --primary-20: 9 31 92;
-    --primary-30: 20 49 143;
-    --primary-40: 43 72 190;          /* #2B48BE - Container */
-    --primary-50: 76 113 255;         /* #4C71FF - Main Primary */
-    --primary-60: 107 138 255;        /* #6B8AFF - Hover */
-    --primary-70: 140 162 255;        /* #8CA2FF - Light text */
-    --primary-80: 176 191 255;        /* #B0BFFF - On container */
-    --primary-90: 214 223 255;
-    --primary-95: 235 239 255;
-    --primary-99: 250 251 255;
+    --primary-10: 11 18 32;           /* #0B1220 */
+    --primary-20: 23 37 84;           /* #172554 */
+    --primary-30: 30 58 138;          /* #1E3A8A */
+    --primary-40: 30 64 175;          /* #1E40AF - Container */
+    --primary-50: 29 78 216;          /* #1D4ED8 - Main Primary */
+    --primary-60: 59 130 246;         /* #3B82F6 - Hover */
+    --primary-70: 96 165 250;         /* #60A5FA - Light text */
+    --primary-80: 147 197 253;        /* #93C5FD - On container */
+    --primary-90: 219 234 254;        /* #DBEAFE */
+    --primary-95: 239 246 255;        /* #EFF6FF */
+    --primary-99: 248 250 252;        /* #F8FAFC */
     --primary-100: 255 255 255;
 
-    --primary: 76 113 255;
+    --primary: 29 78 216;
     --primary-foreground: 13 13 15;
-    --primary-container: 43 72 190;
-    --primary-container-foreground: 176 191 255;
+    --primary-container: 30 64 175;
+    --primary-container-foreground: 147 197 253;
 
     /* ==========================================================================
        SECONDARY - Sophisticated Purple (Material You tonal palette)
@@ -66,26 +66,26 @@
     --secondary-container-foreground: 170 186 211;
 
     /* ==========================================================================
-       TERTIARY - Refined Teal (Complementary accent)
+       TERTIARY - Indigo Accent
        ========================================================================== */
     --tertiary-0: 0 0 0;
-    --tertiary-10: 0 32 32;
-    --tertiary-20: 0 55 55;
-    --tertiary-30: 0 79 80;
-    --tertiary-40: 0 105 106;         /* #00696A - Container */
-    --tertiary-50: 0 133 133;         /* #008585 - Main Tertiary */
-    --tertiary-60: 0 161 163;         /* #00A1A3 - Hover */
-    --tertiary-70: 0 189 191;         /* #00BDBF */
-    --tertiary-80: 0 219 221;         /* #00DBDD - On container */
-    --tertiary-90: 0 249 251;
-    --tertiary-95: 173 255 254;
-    --tertiary-99: 248 255 254;
+    --tertiary-10: 30 27 75;          /* #1E1B4B */
+    --tertiary-20: 49 46 129;         /* #312E81 */
+    --tertiary-30: 67 56 202;         /* #4338CA */
+    --tertiary-40: 79 70 229;         /* #4F46E5 - Container */
+    --tertiary-50: 99 102 241;        /* #6366F1 - Main Tertiary */
+    --tertiary-60: 129 140 248;       /* #818CF8 - Hover */
+    --tertiary-70: 165 180 252;       /* #A5B4FC */
+    --tertiary-80: 199 210 254;       /* #C7D2FE - On container */
+    --tertiary-90: 224 231 255;       /* #E0E7FF */
+    --tertiary-95: 238 242 255;       /* #EEF2FF */
+    --tertiary-99: 248 250 252;       /* #F8FAFC */
     --tertiary-100: 255 255 255;
 
-    --tertiary: 0 133 133;
+    --tertiary: 99 102 241;
     --tertiary-foreground: 255 255 255;
-    --tertiary-container: 0 105 106;
-    --tertiary-container-foreground: 0 219 221;
+    --tertiary-container: 79 70 229;
+    --tertiary-container-foreground: 199 210 254;
 
     /* ==========================================================================
        NEUTRAL - Warm organic grays (Apple-inspired)
@@ -209,7 +209,7 @@
     /* ==========================================================================
        RING (Focus states)
        ========================================================================== */
-    --ring: 76 113 255;
+    --ring: 29 78 216;
     --ring-opacity: 0.5;
 
     /* ==========================================================================
@@ -289,7 +289,7 @@
 
   /* Custom selection color */
   ::selection {
-    @apply bg-[#4C71FF]/30 text-white;
+    @apply bg-[#1D4ED8]/30 text-white;
   }
 
   /* Prevent selection of flex container empty space */
@@ -773,7 +773,7 @@
      TASK PROGRESS BAR SHIMMER ANIMATION
      ============================================================================= */
   .task-progress-shimmer {
-    background: linear-gradient(90deg, #4C71FF 0%, #8CA2FF 50%, #4C71FF 100%);
+    background: linear-gradient(90deg, #1D4ED8 0%, #93C5FD 50%, #1D4ED8 100%);
     background-size: 200% 100%;
     animation: progress-shimmer 1.5s ease-in-out infinite;
   }

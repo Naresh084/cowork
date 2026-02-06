@@ -5,7 +5,7 @@
  * Sources are prioritized: workspace > managed > bundled
  *
  * - Bundled subagents: Available for installation (like a marketplace)
- * - Managed subagents: Installed in ~/.geminicowork/subagents/
+ * - Managed subagents: Installed in ~/.cowork/subagents/
  * - Workspace subagents: Project-specific in .cowork/subagents/
  */
 
@@ -42,7 +42,7 @@ export class SubagentService {
   private appDataDir: string;
 
   constructor(appDataDir?: string) {
-    this.appDataDir = appDataDir || join(homedir(), '.geminicowork');
+    this.appDataDir = appDataDir || join(homedir(), '.cowork');
     this.bundledSubagentsDir = DEFAULT_BUNDLED_DIR;
     this.managedSubagentsDir = join(this.appDataDir, 'subagents');
   }

@@ -31,7 +31,7 @@ void slackConfig;
     // Get bot user ID for @mention detection
     const authResult = await this.webClient.auth.test();
     this.botUserId = authResult.user_id as string;
-    const botName = (authResult.user as string | undefined) || (authResult.user_id as string | undefined) || 'Gemini Cowork';
+    const botName = (authResult.user as string | undefined) || (authResult.user_id as string | undefined) || 'Cowork';
 
     // Handle incoming message events
     this.socketClient.on('message', async ({ event, ack }) => {

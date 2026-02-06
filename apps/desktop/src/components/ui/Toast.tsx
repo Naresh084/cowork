@@ -69,21 +69,21 @@ const TOAST_STYLES: Record<ToastType, string> = {
   success: 'border-[#50956A]/30 bg-[#50956A]/10',
   error: 'border-[#FF5449]/30 bg-[#FF5449]/10',
   warning: 'border-[#F5C400]/30 bg-[#F5C400]/10',
-  info: 'border-[#4C71FF]/30 bg-[#4C71FF]/10',
+  info: 'border-[#1D4ED8]/30 bg-[#1D4ED8]/10',
 };
 
 const TOAST_ICON_STYLES: Record<ToastType, string> = {
   success: 'text-[#6BB88A]',
   error: 'text-[#FF7A72]',
   warning: 'text-[#FFD700]',
-  info: 'text-[#8CA2FF]',
+  info: 'text-[#93C5FD]',
 };
 
 const PROGRESS_BAR_COLORS: Record<ToastType, string> = {
   success: 'bg-[#50956A]',
   error: 'bg-[#FF5449]',
   warning: 'bg-[#F5C400]',
-  info: 'bg-[#4C71FF]',
+  info: 'bg-[#1D4ED8]',
 };
 
 interface ToastItemProps {
@@ -134,7 +134,7 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
                 toast.action?.onClick();
                 handleRemove();
               }}
-              className="mt-2 text-sm font-medium text-[#8CA2FF] hover:text-[#A4A6FF] transition-colors"
+              className="mt-2 text-sm font-medium text-[#93C5FD] hover:text-[#DBEAFE] transition-colors"
             >
               {toast.action.label}
             </button>

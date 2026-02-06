@@ -109,13 +109,13 @@ export function WelcomeScreen({ onQuickAction }: WelcomeScreenProps) {
             <div
               className={cn(
                 'p-2 rounded-xl',
-                'bg-white/[0.04] group-hover:bg-[#4C71FF]/20',
+                'bg-white/[0.04] group-hover:bg-[#1D4ED8]/20',
                 'transition-colors duration-200'
               )}
             >
               <action.icon
                 className={cn(
-                  'w-5 h-5 text-white/50 group-hover:text-[#8CA2FF]',
+                  'w-5 h-5 text-white/50 group-hover:text-[#93C5FD]',
                   'transition-colors duration-200'
                 )}
               />

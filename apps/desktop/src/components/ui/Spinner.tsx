@@ -25,7 +25,7 @@ const strokeWidths = {
 
 const variantColors = {
   default: 'text-white/40',
-  primary: 'text-[#4C71FF]',
+  primary: 'text-[#1D4ED8]',
   white: 'text-white',
 };
 

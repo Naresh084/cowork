@@ -54,7 +54,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const invoke = await getTauriInvoke();
-      // Save to keychain
+      // Save to secure local credentials storage
       await invoke('set_api_key', { apiKey });
       // Also set on the agent sidecar (if running)
       try {

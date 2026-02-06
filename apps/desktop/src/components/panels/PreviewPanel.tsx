@@ -286,7 +286,7 @@ function PreviewLoading() {
   return (
     <div className="h-full flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-2 border-[#4C71FF] border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-[#1D4ED8] border-t-transparent rounded-full animate-spin" />
         <p className="text-sm text-white/40">Loading preview...</p>
       </div>
     </div>
@@ -423,7 +423,7 @@ function AudioPreview({ file }: { file: PreviewFile }) {
 
   return (
     <div className="h-full flex flex-col items-center justify-center p-8 bg-gradient-to-b from-[#1A1A1E] to-[#0D0D0F]">
-      <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#4C71FF] to-[#2B48BE] flex items-center justify-center mb-6 shadow-lg shadow-[#4C71FF]/20">
+      <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center mb-6 shadow-lg shadow-[#1D4ED8]/20">
         <FileAudio className="w-16 h-16 text-white" />
       </div>
       <p className="text-lg font-medium text-white/90 mb-6">{file.name}</p>
@@ -684,7 +684,7 @@ function HTMLPreview({ file }: { file: PreviewFile }) {
           className={cn(
             'px-3 py-1 rounded text-xs font-medium transition-colors',
             viewMode === 'preview'
-              ? 'bg-[#4C71FF] text-white'
+              ? 'bg-[#1D4ED8] text-white'
               : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
           )}
         >
@@ -695,7 +695,7 @@ function HTMLPreview({ file }: { file: PreviewFile }) {
           className={cn(
             'px-3 py-1 rounded text-xs font-medium transition-colors',
             viewMode === 'source'
-              ? 'bg-[#4C71FF] text-white'
+              ? 'bg-[#1D4ED8] text-white'
               : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
           )}
         >
@@ -845,7 +845,7 @@ function A2UIPreview({ file }: { file: PreviewFile }) {
     <div className="h-full flex flex-col">
       <div className="px-3 py-2 border-b border-white/[0.06] bg-white/[0.02]">
         <div className="flex items-center gap-2">
-          <Eye className="w-4 h-4 text-[#4C71FF]" />
+          <Eye className="w-4 h-4 text-[#1D4ED8]" />
           <span className="text-xs text-white/40">A2UI Component Preview</span>
         </div>
       </div>
@@ -987,7 +987,7 @@ function renderA2UINode(node: A2UINode, onAction: (action: A2UIAction) => void):
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[#8CA2FF] underline"
+          className="text-[#93C5FD] underline"
         >
           {label || href}
         </a>
@@ -998,7 +998,7 @@ function renderA2UINode(node: A2UINode, onAction: (action: A2UIAction) => void):
       return (
         <button
           onClick={() => action && onAction(action)}
-          className="px-3 py-2 rounded-lg bg-[#4C71FF]/20 text-[#8CA2FF] hover:bg-[#4C71FF]/30 transition-colors"
+          className="px-3 py-2 rounded-lg bg-[#1D4ED8]/20 text-[#93C5FD] hover:bg-[#1D4ED8]/30 transition-colors"
         >
           {label || 'Run action'}
         </button>
@@ -1039,7 +1039,7 @@ function UnknownPreview({ file }: { file: PreviewFile }) {
         <a
           href={file.url || file.path}
           download={file.name}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#4C71FF] text-white text-sm font-medium hover:bg-[#8CA2FF] transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1D4ED8] text-white text-sm font-medium hover:bg-[#93C5FD] transition-colors"
         >
           <Download className="w-4 h-4" />
           Download File

@@ -319,7 +319,7 @@ export function CronJobEditor() {
               'w-full px-4 py-2.5 rounded-lg text-sm',
               'bg-white/[0.04] border border-white/[0.08]',
               'text-white/90 placeholder:text-white/30',
-              'focus:outline-none focus:border-[#4C71FF]/50'
+              'focus:outline-none focus:border-[#1D4ED8]/50'
             )}
           />
         </div>
@@ -338,7 +338,7 @@ export function CronJobEditor() {
               'w-full px-4 py-2.5 rounded-lg text-sm resize-none',
               'bg-white/[0.04] border border-white/[0.08]',
               'text-white/90 placeholder:text-white/30',
-              'focus:outline-none focus:border-[#4C71FF]/50'
+              'focus:outline-none focus:border-[#1D4ED8]/50'
             )}
           />
           <p className="mt-1.5 text-xs text-white/40 flex items-center gap-1">
@@ -361,7 +361,7 @@ export function CronJobEditor() {
                   className={cn(
                     'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                     form.scheduleType === type
-                      ? 'bg-[#4C71FF] text-white'
+                      ? 'bg-[#1D4ED8] text-white'
                       : 'bg-white/[0.04] text-white/60 hover:bg-white/[0.08]'
                   )}
                 >
@@ -385,7 +385,7 @@ export function CronJobEditor() {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-white/[0.04] border border-white/[0.08]',
                       'text-white/90',
-                      'focus:outline-none focus:border-[#4C71FF]/50'
+                      'focus:outline-none focus:border-[#1D4ED8]/50'
                     )}
                   />
                 </div>
@@ -399,7 +399,7 @@ export function CronJobEditor() {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-white/[0.04] border border-white/[0.08]',
                       'text-white/90',
-                      'focus:outline-none focus:border-[#4C71FF]/50'
+                      'focus:outline-none focus:border-[#1D4ED8]/50'
                     )}
                   />
                 </div>
@@ -417,7 +417,7 @@ export function CronJobEditor() {
                     'w-full px-3 py-2 rounded-lg text-sm',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 />
               </div>
@@ -434,7 +434,7 @@ export function CronJobEditor() {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-white/[0.04] border border-white/[0.08]',
                       'text-white/90',
-                      'focus:outline-none focus:border-[#4C71FF]/50'
+                      'focus:outline-none focus:border-[#1D4ED8]/50'
                     )}
                   >
                     {WEEKDAYS.map((day) => (
@@ -454,7 +454,7 @@ export function CronJobEditor() {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-white/[0.04] border border-white/[0.08]',
                       'text-white/90',
-                      'focus:outline-none focus:border-[#4C71FF]/50'
+                      'focus:outline-none focus:border-[#1D4ED8]/50'
                     )}
                   />
                 </div>
@@ -476,7 +476,7 @@ export function CronJobEditor() {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-white/[0.04] border border-white/[0.08]',
                       'text-white/90',
-                      'focus:outline-none focus:border-[#4C71FF]/50'
+                      'focus:outline-none focus:border-[#1D4ED8]/50'
                     )}
                   />
                 </div>
@@ -492,7 +492,7 @@ export function CronJobEditor() {
                     'px-3 py-2 rounded-lg text-sm',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 >
                   <option value="minutes">Minute(s)</option>
@@ -516,7 +516,7 @@ export function CronJobEditor() {
                     'w-full px-3 py-2 rounded-lg text-sm font-mono',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 />
                 <p className="mt-1 text-xs text-white/40">
@@ -538,7 +538,7 @@ export function CronJobEditor() {
                     'w-full px-3 py-2 rounded-lg text-sm',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 />
               </div>
@@ -572,7 +572,7 @@ export function CronJobEditor() {
                     'w-full px-3 py-2 rounded-lg text-sm',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 />
               </div>
@@ -632,7 +632,7 @@ export function CronJobEditor() {
                     'w-full px-3 py-2 rounded-lg text-sm',
                     'bg-white/[0.04] border border-white/[0.08]',
                     'text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/50'
+                    'focus:outline-none focus:border-[#1D4ED8]/50'
                   )}
                 />
               </div>
@@ -681,7 +681,7 @@ export function CronJobEditor() {
           disabled={isLoading}
           className={cn(
             'px-4 py-2 rounded-lg text-sm font-medium',
-            'bg-[#4C71FF] text-white hover:bg-[#5B7FFF]',
+            'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]',
             'transition-colors',
             isLoading && 'opacity-50 cursor-not-allowed'
           )}

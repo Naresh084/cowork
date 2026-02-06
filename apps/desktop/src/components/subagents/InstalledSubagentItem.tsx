@@ -20,7 +20,7 @@ const CATEGORY_ICONS: Record<SubagentCategory, React.ComponentType<{ className?:
 
 // Category colors
 const CATEGORY_COLORS: Record<SubagentCategory, string> = {
-  research: 'text-[#3498DB]',
+  research: 'text-[#06B6D4]',
   development: 'text-[#27AE60]',
   analysis: 'text-[#F39C12]',
   productivity: 'text-[#9B59B6]',

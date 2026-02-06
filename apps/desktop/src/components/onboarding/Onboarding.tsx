@@ -92,7 +92,7 @@ export function Onboarding() {
       {/* Ambient Background Effects */}
       <div className="absolute inset-0 pointer-events-none">
         {/* Gradient orbs */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#4C71FF]/10 rounded-full blur-[120px]" />
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#1D4ED8]/10 rounded-full blur-[120px]" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-[#8A62C2]/10 rounded-full blur-[100px]" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#008585]/5 rounded-full blur-[150px]" />
 
@@ -129,7 +129,7 @@ export function Onboarding() {
           {/* Header Section */}
           <div className="px-8 pt-10 pb-6 text-center relative">
             {/* Decorative gradient line */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-transparent via-[#4C71FF] to-transparent" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-transparent via-[#1D4ED8] to-transparent" />
 
             {/* Icon */}
             <motion.div
@@ -146,13 +146,13 @@ export function Onboarding() {
               variants={itemVariants}
               className="text-3xl font-bold mb-3"
               style={{
-                background: 'linear-gradient(135deg, #FFFFFF 0%, #B0BFFF 50%, #4C71FF 100%)',
+                background: 'linear-gradient(135deg, #FFFFFF 0%, #DBEAFE 50%, #1D4ED8 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text'
               }}
             >
-              Welcome to Gemini Cowork
+              Welcome to Cowork
             </motion.h1>
 
             <motion.p
@@ -186,7 +186,7 @@ export function Onboarding() {
                     'w-full pl-12 pr-4 py-3.5 rounded-xl',
                     'bg-[#0D0D0F] border border-white/[0.08]',
                     'text-white placeholder:text-white/30',
-                    'focus:outline-none focus:ring-2 focus:ring-[#4C71FF]/50 focus:border-[#4C71FF]',
+                    'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
                     'transition-all duration-200',
                     error && !userName.trim() && 'border-[#FF5449] focus:ring-[#FF5449]/50'
                   )}
@@ -213,7 +213,7 @@ export function Onboarding() {
                       'w-full pl-12 pr-4 py-3.5 rounded-xl',
                       'bg-[#0D0D0F] border border-white/[0.08]',
                       'text-white placeholder:text-white/30',
-                      'focus:outline-none focus:ring-2 focus:ring-[#4C71FF]/50 focus:border-[#4C71FF]',
+                      'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
                       'transition-all duration-200',
                       error && !apiKey.trim() && 'border-[#FF5449] focus:ring-[#FF5449]/50'
                     )}
@@ -243,11 +243,11 @@ export function Onboarding() {
               disabled={isValidating}
               className={cn(
                 'w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl',
-                'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF]',
+                'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
                 'text-white font-semibold',
-                'shadow-lg shadow-[#4C71FF]/25',
-                'hover:shadow-xl hover:shadow-[#4C71FF]/35',
-                'hover:from-[#4C71FF] hover:to-[#8CA2FF]',
+                'shadow-lg shadow-[#1D4ED8]/25',
+                'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
+                'hover:from-[#1D4ED8] hover:to-[#93C5FD]',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 'transition-all duration-300'
               )}
@@ -272,7 +272,7 @@ export function Onboarding() {
                   href="https://aistudio.google.com/apikey"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-[#4C71FF] hover:text-[#8CA2FF] transition-colors"
+                  className="inline-flex items-center gap-1.5 text-sm text-[#1D4ED8] hover:text-[#93C5FD] transition-colors"
                 >
                   Get your API key from Google AI Studio
                   <ExternalLink className="w-3.5 h-3.5" />
@@ -293,7 +293,7 @@ export function Onboarding() {
               <p className="text-xs text-white/40 text-center leading-relaxed">
                 {needsOnlyName
                   ? "Your name is stored locally and helps personalize your experience."
-                  : "Your API key is stored securely in your system's keychain and never sent anywhere except to Google's API."
+                  : "Your API key is stored securely in your system's local credentials storage and never sent anywhere except to Google's API."
                 }
               </p>
             </div>
@@ -306,7 +306,7 @@ export function Onboarding() {
           className="text-center mt-6"
         >
           <p className="text-white/20 text-xs">
-            Gemini Cowork v1.0
+            Cowork v1.0
           </p>
         </motion.div>
       </motion.div>

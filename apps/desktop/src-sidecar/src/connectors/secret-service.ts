@@ -3,7 +3,7 @@
  *
  * Securely stores connector credentials in a local encrypted file.
  * Uses file-based storage with restrictive permissions (0600) to avoid
- * macOS Keychain password prompts entirely.
+ * system keyring prompts entirely.
  *
  * SECURITY: Secrets are stored in a user-only readable file and
  * are never logged or exposed in error messages.
@@ -49,6 +49,20 @@ interface SecretStorage {
 
 function getConfigDir(): string {
   if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'cowork');
+  } else if (process.platform === 'win32') {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'cowork'
+    );
+  }
+  // Linux / other
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdg, 'cowork');
+}
+
+function getLegacyConfigDir(): string {
+  if (process.platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Application Support', 'gemini-cowork');
   } else if (process.platform === 'win32') {
     return path.join(
@@ -56,7 +70,7 @@ function getConfigDir(): string {
       'gemini-cowork'
     );
   }
-  // Linux / other
+
   const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
   return path.join(xdg, 'gemini-cowork');
 }
@@ -68,6 +82,26 @@ class FileStorage implements SecretStorage {
     const configDir = getConfigDir();
     fs.mkdirSync(configDir, { recursive: true });
     this.filePath = path.join(configDir, 'secrets.json');
+    this.migrateLegacySecretsIfNeeded(configDir);
+  }
+
+  private migrateLegacySecretsIfNeeded(configDir: string): void {
+    if (fs.existsSync(this.filePath)) {
+      return;
+    }
+
+    const legacyFilePath = path.join(getLegacyConfigDir(), 'secrets.json');
+    if (!fs.existsSync(legacyFilePath)) {
+      return;
+    }
+
+    try {
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.copyFileSync(legacyFilePath, this.filePath);
+      fs.chmodSync(this.filePath, 0o600);
+    } catch {
+      // Best-effort migration; continue with empty file on failure.
+    }
   }
 
   private readStore(): Record<string, string> {
@@ -159,7 +193,7 @@ export class SecretService {
   }
 
   /**
-   * Initialize with file-based storage (no keychain, no password prompts)
+   * Initialize with file-based storage (no keyring dependency, no password prompts)
    */
   static async create(): Promise<SecretService> {
     try {

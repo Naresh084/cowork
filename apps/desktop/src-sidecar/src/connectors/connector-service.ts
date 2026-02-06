@@ -68,7 +68,7 @@ export class ConnectorService {
   private appDataDir: string;
 
   constructor(appDataDir?: string) {
-    this.appDataDir = appDataDir || join(homedir(), '.geminicowork');
+    this.appDataDir = appDataDir || join(homedir(), '.cowork');
     this.bundledConnectorsDir = DEFAULT_BUNDLED_DIR;
     this.managedConnectorsDir = join(this.appDataDir, 'connectors');
   }

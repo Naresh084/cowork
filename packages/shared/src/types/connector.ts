@@ -175,7 +175,7 @@ export type ConnectorAuth = z.infer<typeof ConnectorAuthSchema>;
  */
 export const ConnectorSourceTypeSchema = z.enum([
   'bundled',   // Shipped with app (read-only)
-  'managed',   // Installed from marketplace (in ~/.geminicowork/connectors/)
+  'managed',   // Installed from marketplace (in ~/.cowork/connectors/)
   'workspace', // Project-local connectors
 ]);
 

@@ -145,15 +145,15 @@ pub async fn ensure_sidecar_started(
     let manager = &state.manager;
 
     if !manager.is_running().await {
-        // Use home directory for persistence: ~/.geminicowork
+        // Use home directory for persistence: ~/.cowork
         // This provides consistent, user-accessible storage across platforms
         let home_dir = dirs::home_dir()
             .ok_or("Failed to get home directory")?;
-        let gemini_dir = home_dir.join(".geminicowork");
+        let gemini_dir = home_dir.join(".cowork");
 
         // Ensure the directory exists
         std::fs::create_dir_all(&gemini_dir)
-            .map_err(|e| format!("Failed to create .geminicowork directory: {}", e))?;
+            .map_err(|e| format!("Failed to create .cowork directory: {}", e))?;
 
         let app_data_str = gemini_dir
             .to_str()
@@ -178,7 +178,7 @@ pub async fn ensure_sidecar_started(
             })
             .await;
 
-        // Get API key from keychain and set it on the sidecar
+        // Get API key from secure credentials storage and set it on the sidecar
         if let Ok(Some(api_key)) = crate::commands::auth::get_api_key().await {
             let params = serde_json::json!({ "apiKey": api_key });
             let _ = manager.send_command("set_api_key", params).await;

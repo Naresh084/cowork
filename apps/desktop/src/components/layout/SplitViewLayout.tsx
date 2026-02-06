@@ -102,9 +102,9 @@ export function SplitViewLayout() {
       <div
         className={cn(
           'relative w-1 flex-shrink-0 cursor-col-resize group',
-          'bg-white/[0.06] hover:bg-[#4C71FF]/50',
+          'bg-white/[0.06] hover:bg-[#1D4ED8]/50',
           'transition-colors duration-150',
-          isResizing && 'bg-[#4C71FF]'
+          isResizing && 'bg-[#1D4ED8]'
         )}
         onMouseDown={(e) => {
           e.preventDefault();
@@ -121,7 +121,7 @@ export function SplitViewLayout() {
             'w-1 h-8 rounded-full',
             'bg-white/20 opacity-0 group-hover:opacity-100',
             'transition-opacity duration-150',
-            isResizing && 'opacity-100 bg-[#4C71FF]'
+            isResizing && 'opacity-100 bg-[#1D4ED8]'
           )}
         />
       </div>

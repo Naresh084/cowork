@@ -53,7 +53,7 @@ export class SkillService {
   private appDataDir: string;
 
   constructor(appDataDir?: string) {
-    this.appDataDir = appDataDir || join(homedir(), '.geminicowork');
+    this.appDataDir = appDataDir || join(homedir(), '.cowork');
     this.bundledSkillsDir = DEFAULT_BUNDLED_DIR;
     this.managedSkillsDir = join(this.appDataDir, 'skills');
   }
