@@ -713,6 +713,54 @@ export class SessionPersistence {
     await this.writeJson(indexPath, index);
   }
 
+  // ===========================================================================
+  // Attachment file storage
+  // ===========================================================================
+
+  /**
+   * Save an attachment's base64 data to a file on disk.
+   * Returns the absolute file path for storage in ChatItem.
+   */
+  async saveAttachmentFile(
+    sessionId: string,
+    fileName: string,
+    base64Data: string,
+    mimeType: string
+  ): Promise<string> {
+    const attachDir = join(this.sessionsDir, sessionId, 'attachments');
+    await mkdir(attachDir, { recursive: true });
+
+    // Content hash for dedup + unique naming
+    const hash = createHash('sha256').update(base64Data.slice(0, 1024)).digest('hex').slice(0, 12);
+    const ext = this.mimeToExt(mimeType);
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 50);
+    const diskName = `${hash}-${safeName}.${ext}`;
+    const filePath = join(attachDir, diskName);
+
+    if (!existsSync(filePath)) {
+      await writeFile(filePath, Buffer.from(base64Data, 'base64'));
+    }
+    return filePath;
+  }
+
+  /**
+   * Read an attachment file back as base64 string.
+   */
+  async readAttachmentAsBase64(filePath: string): Promise<string> {
+    const buf = await readFile(filePath);
+    return buf.toString('base64');
+  }
+
+  private mimeToExt(mime: string): string {
+    const map: Record<string, string> = {
+      'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+      'audio/webm': 'webm', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/wav': 'wav',
+      'video/mp4': 'mp4', 'video/webm': 'webm',
+      'application/pdf': 'pdf',
+    };
+    return map[mime] || mime.split('/')[1] || 'bin';
+  }
+
   private async readJson<T>(path: string): Promise<T> {
     const content = await readFile(path, 'utf-8');
     return JSON.parse(content) as T;

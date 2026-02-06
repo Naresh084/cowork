@@ -1914,18 +1914,25 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
       }
       return <MarkdownContent content={part.text} />;
 
-    case 'image':
+    case 'image': {
+      const imgSrc = (part as any).filePath
+        ? convertFileSrc((part as any).filePath)
+        : `data:${part.mimeType};base64,${part.data}`;
       return (
         <div className="mt-2 px-4">
           <img
-            src={`data:${part.mimeType};base64,${part.data}`}
+            src={imgSrc}
             alt="Attached image"
             className="max-w-full rounded-xl max-h-80 object-contain border border-white/[0.08]"
           />
         </div>
       );
+    }
 
-    case 'audio':
+    case 'audio': {
+      const audioSrc = (part as any).filePath
+        ? convertFileSrc((part as any).filePath)
+        : `data:${part.mimeType};base64,${part.data}`;
       return (
         <div className="mt-2 px-4">
           <div className={cn(
@@ -1935,21 +1942,26 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
             <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/15 flex items-center justify-center flex-shrink-0">
               <Mic className="w-4 h-4 text-[#8B5CF6]" />
             </div>
-            <audio controls src={`data:${part.mimeType};base64,${part.data}`} className="h-8 flex-1" />
+            <audio controls src={audioSrc} className="h-8 flex-1" />
           </div>
         </div>
       );
+    }
 
-    case 'video':
+    case 'video': {
+      const videoSrc = (part as any).filePath
+        ? convertFileSrc((part as any).filePath)
+        : `data:${part.mimeType};base64,${part.data}`;
       return (
         <div className="mt-2 px-4">
           <video
             controls
-            src={`data:${part.mimeType};base64,${part.data}`}
+            src={videoSrc}
             className="max-w-full rounded-xl max-h-80 object-contain border border-white/[0.08]"
           />
         </div>
       );
+    }
 
     case 'file':
       return (

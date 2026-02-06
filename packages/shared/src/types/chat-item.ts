@@ -27,6 +27,7 @@ export const UserMessageItemSchema = ChatItemBaseSchema.extend({
     type: z.enum(['file', 'image', 'text', 'audio', 'video', 'pdf']),
     name: z.string(),
     path: z.string().optional(),
+    filePath: z.string().optional(), // local file path for persistent storage
     mimeType: z.string().optional(),
     data: z.string().optional(),
     size: z.number().optional(),

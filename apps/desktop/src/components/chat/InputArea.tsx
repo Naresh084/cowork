@@ -9,11 +9,11 @@ import {
   FolderOpen,
   ChevronDown,
   StopCircle,
+  Search,
 } from 'lucide-react';
 import { BrandMark } from '../icons/BrandMark';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
-import { useAgentStore } from '../../stores/agent-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useCommandStore, type SlashCommand } from '../../stores/command-store';
 import { useChatStore, type Attachment } from '../../stores/chat-store';
@@ -89,16 +89,17 @@ export function InputArea({
     updateSetting,
     defaultWorkingDirectory,
     updateSetting: updateSettings,
-    approvalMode,
   } = useSettingsStore();
   const { activeSessionId, sessions, updateSessionWorkingDirectory } = useSessionStore();
-  const contextUsage = useAgentStore((state) => state.getSessionState(activeSessionId).contextUsage);
 
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const modelSearchRef = useRef<HTMLInputElement>(null);
   const [folderSelectorOpen, setFolderSelectorOpen] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [userHomeDir, setUserHomeDir] = useState<string | null>(null);
   const modelListRef = useRef<HTMLDivElement | null>(null);
+  const modelBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -172,10 +173,6 @@ export function InputArea({
     return `${tokens}`;
   };
 
-  const contextPercent = contextUsage.total > 0
-    ? Math.min(100, Math.max(0, Math.round((contextUsage.used / contextUsage.total) * 100)))
-    : 0;
-
   // Handle folder selection via Tauri dialog
   const handleSelectFolder = useCallback(async () => {
     if (!userHomeDir) {
@@ -228,9 +225,16 @@ export function InputArea({
   const currentModel = displayModels.find((m) => m.id === selectedModel) || displayModels[0];
 
   useEffect(() => {
-    if (!modelSelectorOpen || !modelListRef.current) return;
-    modelListRef.current.scrollTop = modelListRef.current.scrollHeight;
-  }, [modelSelectorOpen, displayModels.length]);
+    if (!modelSelectorOpen) {
+      setModelSearch('');
+      return;
+    }
+    // Focus search input when dropdown opens
+    requestAnimationFrame(() => modelSearchRef.current?.focus());
+    if (modelListRef.current) {
+      modelListRef.current.scrollTop = modelListRef.current.scrollHeight;
+    }
+  }, [modelSelectorOpen]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -461,7 +465,7 @@ export function InputArea({
         onChange={(e) => onAttachmentAdd(e.target.files)}
       />
 
-      <div className="max-w-[720px] mx-auto">
+      <div className="mx-10">
         {/* Attachments Preview */}
         <AnimatePresence>
           {(attachments.length > 0 || isRecording || recordingError) && (
@@ -519,6 +523,20 @@ export function InputArea({
           >
           {/* Textarea Row */}
           <div className="flex items-end gap-2 px-3 py-2">
+            <motion.button
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.94 }}
+              onClick={handleAttachmentClick}
+              className={cn(
+                'p-2 rounded-xl self-center',
+                'text-white/40 hover:text-white hover:bg-white/[0.06]',
+                'transition-colors'
+              )}
+              title="Add attachment"
+            >
+              <Plus className="w-6 h-6" />
+            </motion.button>
+
             <textarea
               ref={textareaRef}
               value={message}
@@ -550,19 +568,6 @@ export function InputArea({
                 title={isRecording ? 'Stop recording' : 'Record voice'}
               >
                 {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.06 }}
-                whileTap={{ scale: 0.94 }}
-                onClick={handleAttachmentClick}
-                className={cn(
-                  'p-1.5 rounded-lg',
-                  'text-white/40 hover:text-white hover:bg-white/[0.06]',
-                  'transition-colors'
-                )}
-                title="Add attachment"
-              >
-                <Plus className="w-4 h-4" />
               </motion.button>
 
               {/* Single Send/Stop Button */}
@@ -615,8 +620,7 @@ export function InputArea({
           </div>
 
           {/* Meta Row */}
-          <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-0.5">
-            <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center gap-1.5 px-3 pb-2 pt-0.5">
               {/* Folder Selector */}
               <div className="relative">
                 <motion.button
@@ -756,29 +760,10 @@ export function InputArea({
                 )}
               </div>
 
-              <div
-                className={cn(
-                  'px-2 py-0.5 rounded-full border text-[10px]',
-                  approvalMode === 'full'
-                    ? 'bg-[#FF5449]/15 border-[#FF5449]/30 text-[#FF5449]'
-                    : approvalMode === 'read_only'
-                      ? 'bg-[#F5C400]/15 border-[#F5C400]/30 text-[#F5C400]'
-                      : 'bg-[#1D4ED8]/15 border-[#1D4ED8]/30 text-[#93C5FD]'
-                )}
-              >
-                {approvalMode === 'read_only' ? 'Read-only' : approvalMode === 'full' ? 'Full' : 'Auto'}
-              </div>
-
-              <div
-                className="px-2 py-0.5 rounded-full border border-white/[0.08] bg-white/[0.04] text-[10px] text-white/60"
-                title={`${contextPercent}% context used`}
-              >
-                ctx {contextPercent}%
-              </div>
-
               {/* Model Selector */}
               <div className="relative">
                 <motion.button
+                  ref={modelBtnRef}
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setModelSelectorOpen(!modelSelectorOpen)}
@@ -802,71 +787,113 @@ export function InputArea({
                   <ChevronDown className="w-3 h-3" />
                 </motion.button>
 
-                <AnimatePresence>
-                  {modelSelectorOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setModelSelectorOpen(false)}
-                      />
-                      <motion.div
-                        initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 5, scale: 0.95 }}
-                        className={cn(
-                          'absolute bottom-full right-0 mb-2 z-50',
-                          'w-64 p-1.5 rounded-xl',
-                          'bg-[#1A1A1E] border border-white/[0.08]',
-                          'shadow-2xl shadow-black/40'
-                        )}
-                      >
-                        <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-white/40">
-                          Models
-                        </div>
-                        <div ref={modelListRef} className="h-72 max-h-72 overflow-y-auto pr-1">
-                          {modelsLoading && (
-                            <div className="px-3 py-2 text-xs text-white/50">Loading models…</div>
+                {modelSelectorOpen && createPortal(
+                  <AnimatePresence>
+                    {modelSelectorOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-[90]"
+                          onClick={() => setModelSelectorOpen(false)}
+                        />
+                        <motion.div
+                          initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                          className={cn(
+                            'fixed z-[95] w-72 rounded-xl overflow-hidden',
+                            'bg-[#1A1A1E] border border-white/[0.08]',
+                            'shadow-2xl shadow-black/40'
                           )}
-                          {!modelsLoading && displayModels.length === 0 && (
-                            <div className="px-3 py-2 text-xs text-white/50">
-                              No models available. Check your API key.
-                            </div>
-                          )}
-                          {displayModels.map((model) => (
-                            <button
-                              key={model.id}
-                              onClick={() => {
-                                updateSetting('selectedModel', model.id);
-                                setModelSelectorOpen(false);
-                              }}
-                              className={cn(
-                                'w-full flex flex-col items-start gap-1 px-3 py-2 rounded-lg text-sm',
-                                'transition-colors',
-                                selectedModel === model.id
-                                  ? 'bg-[#1D4ED8]/20 text-[#93C5FD]'
-                                  : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
-                              )}
-                            >
-                              <div className="w-full flex items-center gap-2">
-                                <span className="flex-1 text-left">{model.name}</span>
-                                {selectedModel === model.id && (
-                                  <span className="w-2 h-2 rounded-full bg-[#1D4ED8]" />
+                          style={(() => {
+                            const rect = modelBtnRef.current?.getBoundingClientRect();
+                            if (!rect) return {};
+                            return {
+                              bottom: window.innerHeight - rect.top + 8,
+                              right: window.innerWidth - rect.right,
+                            };
+                          })()}
+                        >
+                          {/* Search Input */}
+                          <div className="px-2 pt-2 pb-1">
+                            <div className="relative">
+                              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/30" />
+                              <input
+                                ref={modelSearchRef}
+                                type="text"
+                                value={modelSearch}
+                                onChange={(e) => setModelSearch(e.target.value)}
+                                placeholder="Search models..."
+                                className={cn(
+                                  'w-full rounded-lg py-1.5 pl-8 pr-3 text-xs',
+                                  'bg-white/[0.04] border border-white/[0.08] text-white/90',
+                                  'placeholder:text-white/30',
+                                  'focus:outline-none focus:border-[#1D4ED8]/40'
                                 )}
+                                onKeyDown={(e) => e.stopPropagation()}
+                              />
+                            </div>
+                          </div>
+
+                          <div ref={modelListRef} className="max-h-72 overflow-y-auto px-1.5 pb-1.5">
+                            {modelsLoading && (
+                              <div className="px-3 py-2 text-xs text-white/50">Loading models…</div>
+                            )}
+                            {!modelsLoading && displayModels.length === 0 && (
+                              <div className="px-3 py-2 text-xs text-white/50">
+                                No models available. Check your API key.
                               </div>
-                              <div className="flex items-center gap-2 text-[11px] text-white/40">
-                                <span>{formatTokenLimit(model.inputTokenLimit)} ctx</span>
-                                <span>•</span>
-                                <span>{formatTokenLimit(model.outputTokenLimit)} out</span>
+                            )}
+                            {displayModels
+                              .filter((model) => {
+                                if (!modelSearch.trim()) return true;
+                                const q = modelSearch.toLowerCase();
+                                return model.name.toLowerCase().includes(q) || model.id.toLowerCase().includes(q);
+                              })
+                              .map((model) => (
+                              <button
+                                key={model.id}
+                                onClick={() => {
+                                  updateSetting('selectedModel', model.id);
+                                  setModelSelectorOpen(false);
+                                }}
+                                className={cn(
+                                  'w-full flex flex-col items-start gap-1 px-3 py-2 rounded-lg text-sm',
+                                  'transition-colors',
+                                  selectedModel === model.id
+                                    ? 'bg-[#1D4ED8]/20 text-[#93C5FD]'
+                                    : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
+                                )}
+                              >
+                                <div className="w-full flex items-center gap-2">
+                                  <span className="flex-1 text-left">{model.name}</span>
+                                  {selectedModel === model.id && (
+                                    <span className="w-2 h-2 rounded-full bg-[#1D4ED8]" />
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-white/40">
+                                  <span>{formatTokenLimit(model.inputTokenLimit)} ctx</span>
+                                  <span>•</span>
+                                  <span>{formatTokenLimit(model.outputTokenLimit)} out</span>
+                                </div>
+                              </button>
+                            ))}
+                            {!modelsLoading && displayModels.length > 0 && modelSearch.trim() &&
+                              displayModels.filter((m) => {
+                                const q = modelSearch.toLowerCase();
+                                return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
+                              }).length === 0 && (
+                              <div className="px-3 py-2 text-xs text-white/40">
+                                No models match "{modelSearch}"
                               </div>
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
-                    </>
-                  )}
-                </AnimatePresence>
+                            )}
+                          </div>
+                        </motion.div>
+                      </>
+                    )}
+                  </AnimatePresence>,
+                  document.body
+                )}
               </div>
-            </div>
           </div>
         </motion.div>
         </div>

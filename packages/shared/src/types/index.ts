@@ -65,6 +65,7 @@ export interface IncomingMessage {
   senderName: string;
   senderId: string;
   content: string;
+  attachments?: PlatformMessageAttachment[];
   timestamp: number;
   replyToMessageId?: string;
 }
@@ -74,6 +75,15 @@ export interface OutgoingMessage {
   chatId: string;
   content: string;
   replyToMessageId?: string;
+}
+
+export interface PlatformMessageAttachment {
+  type: 'image' | 'audio' | 'video' | 'file' | 'pdf' | 'text';
+  name: string;
+  mimeType?: string;
+  data?: string;
+  size?: number;
+  duration?: number;
 }
 
 export interface PlatformConfig {
@@ -103,23 +113,27 @@ export const MessageContentPartSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('image'),
     mimeType: z.string(),
-    data: z.string(), // base64
+    data: z.string().optional(), // base64 (absent when filePath is used)
+    filePath: z.string().optional(), // local file path for persistent storage
   }),
   z.object({
     type: z.literal('audio'),
     mimeType: z.string(),
-    data: z.string(), // base64
+    data: z.string().optional(), // base64 (absent when filePath is used)
+    filePath: z.string().optional(), // local file path for persistent storage
   }),
   z.object({
     type: z.literal('video'),
     mimeType: z.string(),
-    data: z.string(), // base64
+    data: z.string().optional(), // base64 (absent when filePath is used)
+    filePath: z.string().optional(), // local file path for persistent storage
   }),
   z.object({
     type: z.literal('file'),
     name: z.string(),
     mimeType: z.string().optional(),
     data: z.string().optional(),
+    filePath: z.string().optional(), // local file path for persistent storage
   }),
   z.object({
     type: z.literal('tool_call'),
