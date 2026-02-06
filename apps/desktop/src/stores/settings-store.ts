@@ -164,6 +164,12 @@ export interface SessionListFilters {
   cron: boolean;
 }
 
+export interface AutomationListFilters {
+  pending: boolean;
+  completed: boolean;
+  failed: boolean;
+}
+
 interface SettingsState {
   // User
   userName: string;
@@ -213,6 +219,7 @@ interface SettingsState {
   viewMode: ViewMode;
   rightPanelSections: RightPanelSections;
   sessionListFilters: SessionListFilters;
+  automationListFilters: AutomationListFilters;
 
   // Live Browser View
   liveViewOpen: boolean;
@@ -298,6 +305,8 @@ interface SettingsActions {
   toggleRightPanelSection: (section: keyof RightPanelSections) => void;
   toggleSessionListFilter: (filter: keyof SessionListFilters) => void;
   setSessionListFilters: (filters: Partial<SessionListFilters>) => void;
+  toggleAutomationListFilter: (filter: keyof AutomationListFilters) => void;
+  setAutomationListFilters: (filters: Partial<AutomationListFilters>) => void;
 
   // Live Browser View
   setLiveViewOpen: (open: boolean) => void;
@@ -381,6 +390,11 @@ const initialState: SettingsState = {
     chat: true,
     shared: true,
     cron: false,
+  },
+  automationListFilters: {
+    pending: true,
+    completed: false,
+    failed: false,
   },
 
   // Live Browser View
@@ -912,6 +926,37 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }));
       },
 
+      toggleAutomationListFilter: (filter) => {
+        set((state) => {
+          const next = {
+            ...state.automationListFilters,
+            [filter]: !state.automationListFilters[filter],
+          };
+
+          // Keep at least one filter enabled to avoid empty list confusion.
+          if (!next.pending && !next.completed && !next.failed) {
+            next.pending = true;
+          }
+
+          return { automationListFilters: next };
+        });
+      },
+
+      setAutomationListFilters: (filters) => {
+        set((state) => {
+          const next = {
+            ...state.automationListFilters,
+            ...filters,
+          };
+
+          if (!next.pending && !next.completed && !next.failed) {
+            next.pending = true;
+          }
+
+          return { automationListFilters: next };
+        });
+      },
+
       clearError: () => {
         set({ error: null });
       },
@@ -954,6 +999,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         viewMode: state.viewMode,
         rightPanelSections: state.rightPanelSections,
         sessionListFilters: state.sessionListFilters,
+        automationListFilters: state.automationListFilters,
         // liveViewOpen is intentionally NOT persisted - should always start closed
         liveViewSplitRatio: state.liveViewSplitRatio,
       }),
@@ -998,6 +1044,17 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           cron: persistedSessionListFilters?.cron ?? initialState.sessionListFilters.cron,
         };
 
+        const persistedAutomationListFilters = persisted?.automationListFilters;
+        const validAutomationListFilters: AutomationListFilters = {
+          pending: persistedAutomationListFilters?.pending ?? initialState.automationListFilters.pending,
+          completed: persistedAutomationListFilters?.completed ?? initialState.automationListFilters.completed,
+          failed: persistedAutomationListFilters?.failed ?? initialState.automationListFilters.failed,
+        };
+
+        if (!validAutomationListFilters.pending && !validAutomationListFilters.completed && !validAutomationListFilters.failed) {
+          validAutomationListFilters.pending = true;
+        }
+
         return {
           ...currentState,
           ...persisted,
@@ -1006,6 +1063,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           specializedModels: validSpecializedModels,
           installedCommandConfigs: migratedCommandConfigs,
           sessionListFilters: validSessionListFilters,
+          automationListFilters: validAutomationListFilters,
         };
       },
       // Sync with backend when store rehydrates from storage

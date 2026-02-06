@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CronJobCard } from './CronJobCard';
 import { useCronStore } from '@/stores/cron-store';
+import { useSettingsStore } from '@/stores/settings-store';
 import type { CronJob } from '@gemini-cowork/shared';
 
 interface JobSectionProps {
@@ -72,10 +73,38 @@ function JobSection({
   );
 }
 
+interface FilterChipProps {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}
+
+function FilterChip({ label, count, active, onClick }: FilterChipProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors',
+        active
+          ? 'bg-[#1D4ED8]/25 text-[#BFDBFE] border border-[#1D4ED8]/40'
+          : 'bg-white/[0.04] text-white/50 border border-white/[0.08] hover:bg-white/[0.08] hover:text-white/70'
+      )}
+    >
+      <span>{label}</span>
+      <span className={cn('rounded-full px-1.5 py-0.5 text-[10px]', active ? 'bg-[#1D4ED8]/45' : 'bg-white/[0.08]')}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
 export function CronJobList() {
   const isLoading = useCronStore((state) => state.isLoading);
   const error = useCronStore((state) => state.error);
   const jobs = useCronStore((state) => state.jobs);
+  const automationListFilters = useSettingsStore((state) => state.automationListFilters);
+  const toggleAutomationListFilter = useSettingsStore((state) => state.toggleAutomationListFilter);
 
   // Memoize filtered jobs to prevent unnecessary re-renders
   const activeJobs = useMemo(
@@ -90,8 +119,24 @@ export function CronJobList() {
     () => jobs.filter((j) => j.status === 'completed'),
     [jobs]
   );
+  const failedJobs = useMemo(
+    () => jobs.filter((j) => j.status === 'failed'),
+    [jobs]
+  );
+  const pendingJobs = useMemo(
+    () => [...activeJobs, ...pausedJobs].sort((a, b) => {
+      const aNext = a.nextRunAt ?? Number.MAX_SAFE_INTEGER;
+      const bNext = b.nextRunAt ?? Number.MAX_SAFE_INTEGER;
+      return aNext - bNext;
+    }),
+    [activeJobs, pausedJobs]
+  );
 
-  const totalJobs = activeJobs.length + pausedJobs.length + completedJobs.length;
+  const totalJobs = activeJobs.length + pausedJobs.length + completedJobs.length + failedJobs.length;
+  const visibleJobCount =
+    (automationListFilters.pending ? pendingJobs.length : 0) +
+    (automationListFilters.completed ? completedJobs.length : 0) +
+    (automationListFilters.failed ? failedJobs.length : 0);
 
   if (isLoading) {
     return (
@@ -134,26 +179,61 @@ export function CronJobList() {
 
   return (
     <div className="space-y-2">
-      <JobSection
-        title="Active"
-        jobs={activeJobs}
-        defaultOpen={true}
-        badgeColor="bg-[#50956A]/20 text-[#8FDCA9]"
-      />
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <FilterChip
+          label="Pending / Running"
+          count={pendingJobs.length}
+          active={automationListFilters.pending}
+          onClick={() => toggleAutomationListFilter('pending')}
+        />
+        <FilterChip
+          label="Completed"
+          count={completedJobs.length}
+          active={automationListFilters.completed}
+          onClick={() => toggleAutomationListFilter('completed')}
+        />
+        <FilterChip
+          label="Failed"
+          count={failedJobs.length}
+          active={automationListFilters.failed}
+          onClick={() => toggleAutomationListFilter('failed')}
+        />
+      </div>
 
-      <JobSection
-        title="Paused"
-        jobs={pausedJobs}
-        defaultOpen={pausedJobs.length > 0 && activeJobs.length === 0}
-        badgeColor="bg-yellow-500/20 text-yellow-400"
-      />
+      {visibleJobCount === 0 ? (
+        <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 text-center">
+          <p className="text-sm text-white/60">No automations match the selected filters.</p>
+        </div>
+      ) : (
+        <>
+          {automationListFilters.pending && (
+            <JobSection
+              title="Pending / Running"
+              jobs={pendingJobs}
+              defaultOpen={true}
+              badgeColor="bg-[#50956A]/20 text-[#8FDCA9]"
+            />
+          )}
 
-      <JobSection
-        title="Completed"
-        jobs={completedJobs}
-        defaultOpen={false}
-        badgeColor="bg-white/10 text-white/50"
-      />
+          {automationListFilters.completed && (
+            <JobSection
+              title="Completed"
+              jobs={completedJobs}
+              defaultOpen={false}
+              badgeColor="bg-white/10 text-white/50"
+            />
+          )}
+
+          {automationListFilters.failed && (
+            <JobSection
+              title="Failed"
+              jobs={failedJobs}
+              defaultOpen={false}
+              badgeColor="bg-red-500/15 text-red-300"
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
