@@ -1,4 +1,10 @@
-import type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, PlatformConfig } from '@gemini-cowork/shared';
+import type {
+  PlatformType,
+  PlatformStatus,
+  IncomingMessage,
+  OutgoingMessage,
+  PlatformConfig,
+} from '@gemini-cowork/shared';
 
 // Re-export shared types for convenience within integrations
 export type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, PlatformConfig };
@@ -7,9 +13,18 @@ export type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, Pl
 // Platform-Specific Config Interfaces
 // ============================================================================
 
+export const DEFAULT_WHATSAPP_DENIAL_MESSAGE =
+  'This Cowork bot is private. You are not authorized to chat with it.';
+
 export interface WhatsAppConfig {
   /** Directory to store WhatsApp session data. Defaults to ~/.cowork/integrations/whatsapp/ */
   sessionDataDir?: string;
+  /** Sender policy (currently allowlist-only mode) */
+  senderPolicy?: 'allowlist';
+  /** E.164-like allowlist of authorized sender numbers */
+  allowFrom?: string[];
+  /** Message sent to unauthorized senders */
+  denialMessage?: string;
 }
 
 export interface SlackConfig {

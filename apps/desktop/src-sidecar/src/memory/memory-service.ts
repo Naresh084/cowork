@@ -6,6 +6,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import { randomUUID } from 'crypto';
 import type {
   Memory,
@@ -44,8 +45,9 @@ export class MemoryService {
   private initialized = false;
 
   constructor(workingDir: string) {
-    this.workingDir = workingDir;
-    this.memoriesDir = join(workingDir, '.cowork', 'memories');
+    // Fall back to home directory if workingDir is empty/undefined
+    this.workingDir = workingDir || homedir();
+    this.memoriesDir = join(this.workingDir, '.cowork', 'memories');
     this.indexPath = join(this.memoriesDir, 'index.json');
   }
 

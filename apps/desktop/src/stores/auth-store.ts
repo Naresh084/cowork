@@ -34,6 +34,14 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     try {
       const invoke = await getTauriInvoke();
       const apiKey = await invoke<string | null>('get_api_key');
+      if (apiKey) {
+        // Ensure sidecar also has the API key (handles app restarts)
+        try {
+          await invoke('agent_set_api_key', { apiKey });
+        } catch {
+          // Sidecar may not be running yet — ensure_sidecar_started will handle it
+        }
+      }
       set({
         isAuthenticated: !!apiKey,
         apiKey,

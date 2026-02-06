@@ -4,7 +4,11 @@ import { TelegramAdapter } from './adapters/telegram-adapter.js';
 import { MessageRouter } from './message-router.js';
 import { IntegrationStore } from './store.js';
 import { eventEmitter } from '../event-emitter.js';
-import type { PlatformType, PlatformStatus } from './types.js';
+import {
+  DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  type PlatformType,
+  type PlatformStatus,
+} from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
 
 // ============================================================================
@@ -114,7 +118,7 @@ export class IntegrationBridgeService {
   /** Connect a platform with given config */
   async connect(
     platform: PlatformType,
-    config: Record<string, string> = {},
+    config: Record<string, unknown> = {},
   ): Promise<void> {
     // Serialize platform operations to avoid concurrent connect/disconnect races.
     while (this.platformOpInFlight.has(platform)) {
@@ -142,6 +146,11 @@ export class IntegrationBridgeService {
     }
 
     const adapter = this.createAdapter(platform);
+    const existingConfig = this.store.getConfig(platform)?.config || {};
+    const normalizedConfig = this.normalizePlatformConfig(platform, {
+      ...existingConfig,
+      ...config,
+    });
 
     // Wire adapter status events to integration event emitter
     adapter.on('status', (status: PlatformStatus) => {
@@ -162,7 +171,7 @@ export class IntegrationBridgeService {
 
     // Attempt connection
     try {
-      await adapter.connect(config);
+      await adapter.connect(normalizedConfig);
     } catch (err) {
       // Clean up the failed adapter
       adapter.removeAllListeners();
@@ -178,8 +187,40 @@ export class IntegrationBridgeService {
     await this.store.setConfig(platform, {
       platform,
       enabled: true,
-      config,
+      config: normalizedConfig,
     });
+    } finally {
+      this.platformOpInFlight.delete(platform);
+    }
+  }
+
+  /** Persist and apply runtime configuration for a platform */
+  async configure(
+    platform: PlatformType,
+    config: Record<string, unknown> = {},
+  ): Promise<void> {
+    while (this.platformOpInFlight.has(platform)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    try {
+      const existingConfig = this.store.getConfig(platform)?.config || {};
+      const normalizedConfig = this.normalizePlatformConfig(platform, {
+        ...existingConfig,
+        ...config,
+      });
+
+      await this.store.setConfig(platform, {
+        platform,
+        enabled: true,
+        config: normalizedConfig,
+      });
+
+      const adapter = this.adapters.get(platform);
+      if (adapter) {
+        await adapter.updateConfig(normalizedConfig);
+        eventEmitter.integrationStatus(adapter.getStatus());
+      }
     } finally {
       this.platformOpInFlight.delete(platform);
     }
@@ -277,6 +318,47 @@ export class IntegrationBridgeService {
   /** Get config store (for IPC handlers) */
   getStore(): IntegrationStore {
     return this.store;
+  }
+
+  private normalizePlatformConfig(
+    platform: PlatformType,
+    config: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (platform !== 'whatsapp') {
+      return config;
+    }
+
+    const allowFromRaw = Array.isArray(config.allowFrom) ? config.allowFrom : [];
+    const allowFromSet = new Set<string>();
+    for (const value of allowFromRaw) {
+      const normalized = this.normalizeE164Like(value);
+      if (normalized) {
+        allowFromSet.add(normalized);
+      }
+    }
+
+    const denialMessage =
+      typeof config.denialMessage === 'string' && config.denialMessage.trim()
+        ? config.denialMessage.trim().slice(0, 280)
+        : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+
+    const normalizedConfig: Record<string, unknown> = {
+      ...config,
+      senderPolicy: 'allowlist',
+      allowFrom: Array.from(allowFromSet),
+      denialMessage,
+    };
+
+    return normalizedConfig;
+  }
+
+  private normalizeE164Like(value: unknown): string | null {
+    const raw = typeof value === 'string' ? value : String(value ?? '');
+    const digits = raw.replace(/\D+/g, '');
+    if (!digits) {
+      return null;
+    }
+    return `+${digits}`;
   }
 }
 

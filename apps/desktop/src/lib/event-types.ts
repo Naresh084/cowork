@@ -193,6 +193,8 @@ export type AgentEvent =
       platform: string;
       connected: boolean;
       displayName?: string;
+      identityPhone?: string;
+      identityName?: string;
       error?: string;
       connectedAt?: number;
       lastMessageAt?: number;

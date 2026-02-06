@@ -197,11 +197,12 @@ export class AgentRunner {
    * Get or create MemoryService for a session's working directory.
    */
   private async getMemoryService(workingDirectory: string): Promise<MemoryService> {
-    let service = this.memoryServices.get(workingDirectory);
+    const dir = workingDirectory || homedir();
+    let service = this.memoryServices.get(dir);
     if (!service) {
-      service = createMemoryService(workingDirectory);
+      service = createMemoryService(dir);
       await service.initialize();
-      this.memoryServices.set(workingDirectory, service);
+      this.memoryServices.set(dir, service);
     }
     return service;
   }

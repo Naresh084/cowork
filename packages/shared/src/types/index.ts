@@ -52,6 +52,8 @@ export interface PlatformStatus {
   platform: PlatformType;
   connected: boolean;
   displayName?: string;
+  identityPhone?: string;
+  identityName?: string;
   error?: string;
   connectedAt?: number;
   lastMessageAt?: number;
@@ -77,7 +79,13 @@ export interface OutgoingMessage {
 export interface PlatformConfig {
   platform: PlatformType;
   enabled: boolean;
-  config: Record<string, string>;
+  config: Record<string, unknown>;
+}
+
+export interface WhatsAppSenderControlConfig {
+  senderPolicy: 'allowlist';
+  allowFrom: string[];
+  denialMessage: string;
 }
 
 // ============================================================================

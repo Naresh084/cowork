@@ -145,6 +145,7 @@ fn main() {
             commands::integrations::agent_integration_disconnect,
             commands::integrations::agent_integration_get_qr,
             commands::integrations::agent_integration_configure,
+            commands::integrations::agent_integration_get_config,
             commands::integrations::agent_integration_send_test,
         ])
         .setup(|app| {
@@ -156,4 +157,3 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

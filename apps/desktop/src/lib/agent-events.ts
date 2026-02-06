@@ -230,6 +230,8 @@ function parseTauriEvent(
         platform: (data.platform as string) ?? '',
         connected: (data.connected as boolean) ?? false,
         displayName: data.displayName as string | undefined,
+        identityPhone: data.identityPhone as string | undefined,
+        identityName: data.identityName as string | undefined,
         error: data.error as string | undefined,
         connectedAt: data.connectedAt as number | undefined,
         lastMessageAt: data.lastMessageAt as number | undefined,
