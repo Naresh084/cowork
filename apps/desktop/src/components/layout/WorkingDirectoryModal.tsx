@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FolderOpen, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -41,68 +42,63 @@ export function WorkingDirectoryModal({ isOpen, onClose, onSelected }: WorkingDi
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <>
-          {/* Backdrop */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 z-50"
-            onClick={onClose}
-          />
-
-          {/* Modal - centered */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="fixed z-50 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg"
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="w-full max-w-lg mx-4 bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl overflow-hidden"
           >
-            <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl overflow-hidden">
-              {/* Icon header */}
-              <div className="flex flex-col items-center pt-10 pb-4 px-8">
-                <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/20 flex items-center justify-center mb-5">
-                  <FolderOpen className="w-8 h-8 text-blue-400" />
-                </div>
-                <h2 className="text-xl font-semibold text-zinc-100 text-center">
-                  Select a Working Directory
-                </h2>
+            {/* Icon header */}
+            <div className="flex flex-col items-center pt-10 pb-4 px-8">
+              <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/20 flex items-center justify-center mb-5">
+                <FolderOpen className="w-8 h-8 text-blue-400" />
               </div>
+              <h2 className="text-xl font-semibold text-zinc-100 text-center">
+                Select a Working Directory
+              </h2>
+            </div>
 
-              {/* Body */}
-              <div className="px-8 pb-6">
-                <p className="text-sm text-zinc-400 text-center leading-relaxed mb-2">
-                  A working directory is required to get started. This is the project folder where your files live — all agent actions, memories, and session data will be scoped to this directory.
-                </p>
-                <p className="text-xs text-zinc-500 text-center mb-8">
-                  You can change this later from the input bar at any time.
-                </p>
+            {/* Body */}
+            <div className="px-8 pb-6">
+              <p className="text-sm text-zinc-400 text-center leading-relaxed mb-2">
+                A working directory is required to get started. This is the project folder where your files live — all agent actions, memories, and session data will be scoped to this directory.
+              </p>
+              <p className="text-xs text-zinc-500 text-center mb-8">
+                You can change this later from the input bar at any time.
+              </p>
 
-                {/* Action button */}
-                <button
-                  onClick={handleSelectFolder}
-                  disabled={isSelecting}
-                  className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium transition-colors"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  {isSelecting ? 'Opening...' : 'Choose Project Folder'}
-                  {!isSelecting && <ArrowRight className="w-4 h-4 ml-1" />}
-                </button>
-              </div>
+              {/* Action button */}
+              <button
+                onClick={handleSelectFolder}
+                disabled={isSelecting}
+                className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium transition-colors"
+              >
+                <FolderOpen className="w-4 h-4" />
+                {isSelecting ? 'Opening...' : 'Choose Project Folder'}
+                {!isSelecting && <ArrowRight className="w-4 h-4 ml-1" />}
+              </button>
+            </div>
 
-              {/* Footer hint */}
-              <div className="px-8 py-4 border-t border-zinc-800 bg-zinc-950/50">
-                <p className="text-xs text-zinc-500 text-center">
-                  Tip: Pick the root folder of your project (e.g. where package.json or .git lives).
-                </p>
-              </div>
+            {/* Footer hint */}
+            <div className="px-8 py-4 border-t border-zinc-800 bg-zinc-950/50">
+              <p className="text-xs text-zinc-500 text-center">
+                Tip: Pick the root folder of your project (e.g. where package.json or .git lives).
+              </p>
             </div>
           </motion.div>
-        </>
+        </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }

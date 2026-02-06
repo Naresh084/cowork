@@ -229,22 +229,18 @@ export function CreateConnectorModal({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 z-[60]"
-            onClick={handleClose}
-          />
-
-          {/* Modal */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+        >
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-zinc-900 rounded-xl z-[60] flex flex-col overflow-hidden border border-zinc-800 shadow-2xl max-h-[85vh]"
+            className="w-full max-w-lg mx-4 bg-zinc-900 rounded-xl flex flex-col overflow-hidden border border-zinc-800 shadow-2xl shadow-black/60 max-h-[85vh]"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
@@ -608,7 +604,7 @@ export function CreateConnectorModal({
               )}
             </div>
           </motion.div>
-        </>
+        </motion.div>
       )}
     </AnimatePresence>,
     document.body

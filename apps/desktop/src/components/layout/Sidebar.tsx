@@ -35,7 +35,7 @@ import { WorkingDirectoryModal } from './WorkingDirectoryModal';
 import { SkillsModal } from '../skills/SkillsModal';
 import { useSkillStore } from '../../stores/skill-store';
 import { CronModal } from '../cron/CronModal';
-import { useCronActiveJobCount } from '../../stores/cron-store';
+import { useCronActiveJobCount, useCronStore } from '../../stores/cron-store';
 import { CommandManager } from '../commands/CommandManager';
 import { useCommandStore } from '../../stores/command-store';
 import { SubagentManager } from '../subagents/SubagentManager';
@@ -77,15 +77,17 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
-  const [cronModalOpen, setCronModalOpen] = useState(false);
   const [commandsModalOpen, setCommandsModalOpen] = useState(false);
   const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
   const [connectorsModalOpen, setConnectorsModalOpen] = useState(false);
   const [workingDirModalOpen, setWorkingDirModalOpen] = useState(false);
   const pendingWorkingDirCallback = useRef<((path: string) => void) | null>(null);
 
-  // Cron store
+  // Cron store - use store state so right panel "Create one" / icon also opens the modal
   const activeJobCount = useCronActiveJobCount();
+  const cronModalOpen = useCronStore((state) => state.isModalOpen);
+  const openCronModal = useCronStore((state) => state.openModal);
+  const closeCronModal = useCronStore((state) => state.closeModal);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
   const sessionMenuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -231,7 +233,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           profileMenuOpen={profileMenuOpen}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
-          onOpenCron={() => setCronModalOpen(true)}
+          onOpenCron={() => openCronModal()}
           activeJobCount={activeJobCount}
           onOpenCommands={() => setCommandsModalOpen(true)}
           commandCount={commandCount}
@@ -261,7 +263,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           isOverlay={false}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
-          onOpenCron={() => setCronModalOpen(true)}
+          onOpenCron={() => openCronModal()}
           activeJobCount={activeJobCount}
           onOpenCommands={() => setCommandsModalOpen(true)}
           commandCount={commandCount}
@@ -281,7 +283,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       {/* Cron Modal */}
       <CronModal
         isOpen={cronModalOpen}
-        onClose={() => setCronModalOpen(false)}
+        onClose={() => closeCronModal()}
       />
 
       {/* Commands Modal */}
@@ -346,7 +348,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               isOverlay={true}
               onOpenSkills={() => setSkillsModalOpen(true)}
               enabledSkillsCount={enabledSkillsCount}
-              onOpenCron={() => setCronModalOpen(true)}
+              onOpenCron={() => openCronModal()}
               activeJobCount={activeJobCount}
               onOpenCommands={() => setCommandsModalOpen(true)}
               commandCount={commandCount}

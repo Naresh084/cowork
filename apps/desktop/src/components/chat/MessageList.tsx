@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
 import { cn } from '../../lib/utils';
 import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2 } from 'lucide-react';
-import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type TurnActivityItem, type UserQuestion } from '../../stores/chat-store';
+import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSettingsStore } from '../../stores/settings-store';
