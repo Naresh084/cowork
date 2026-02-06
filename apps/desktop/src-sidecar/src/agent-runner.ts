@@ -1208,6 +1208,7 @@ export class AgentRunner {
     // Save attachment files to disk and build persisted content (filePath instead of base64)
     // messageContent keeps original base64 data in memory for the LLM call
     // persistedContent replaces data with filePath for small JSON persistence
+    console.error('[MULTIMEDIA] messageContent type:', typeof messageContent, Array.isArray(messageContent) ? `(${messageContent.length} parts)` : '');
     let persistedContent: string | Message['content'] = messageContent;
     const savedFilePaths = new Map<string, string>(); // attachment name → filePath
 
@@ -1278,22 +1279,23 @@ export class AgentRunner {
       this.subscribeToAgentEvents(session);
     }
 
-    // Emit stream start
-    eventEmitter.streamStart(sessionId);
-
-    // With checkpointer, the graph remembers prior messages via thread_id.
-    // Only send the new user message instead of the full history.
-    // Convert multimodal parts to LangChain-compatible format (image_url, media).
-    const lcContent = typeof messageContent === 'string'
-      ? messageContent
-      : await this.toLangChainContentParts(messageContent as MessageContentPart[]);
-    const newUserMessage = new HumanMessage(lcContent);
-    const lcMessages = [newUserMessage];
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
     let streamedText = '';
 
+    // Emit stream start — MUST be inside try so streamDone is guaranteed in finally/catch
+    eventEmitter.streamStart(sessionId);
+
     try {
+      // Convert multimodal parts to LangChain-compatible format (image_url, media).
+      const lcContent = typeof messageContent === 'string'
+        ? messageContent
+        : await this.toLangChainContentParts(messageContent as MessageContentPart[]);
+      console.error('[MULTIMEDIA] LangChain content types:', Array.isArray(lcContent)
+        ? lcContent.map((p: any) => p.type)
+        : typeof lcContent);
+      const newUserMessage = new HumanMessage(lcContent);
+      const lcMessages = [newUserMessage];
 
       if (agentAny.streamEvents) {
         try {
@@ -1413,6 +1415,7 @@ export class AgentRunner {
             }
           }
         } catch (streamError) {
+          console.error('[MULTIMEDIA] Stream error:', streamError instanceof Error ? streamError.message : streamError);
           if (this.isAbortError(streamError) || session.stopRequested) {
             if (streamedText) {
               assistantMessage = {
@@ -1484,6 +1487,8 @@ export class AgentRunner {
       this.emitContextUsage(session);
       await this.maybeCompactContext(session);
     } catch (error) {
+      console.error('[MULTIMEDIA] Outer error:', error instanceof Error ? error.message : error);
+      console.error('[MULTIMEDIA] Outer error stack:', error instanceof Error ? error.stack : '');
       if (this.isAbortError(error) || session.stopRequested) {
         this.finalizeAssistantSegment(session);
         if (streamedText && !session.hasAssistantTextThisTurn) {
@@ -1542,6 +1547,8 @@ export class AgentRunner {
       this.appendChatItem(session, errorItem);
 
       eventEmitter.error(sessionId, errorMessage, errorCode, rateLimitDetails ?? undefined);
+      // Always emit streamDone so frontend exits streaming state
+      eventEmitter.streamDone(sessionId, null);
       // Don't re-throw - error has been emitted to UI, re-throwing causes unhandled rejection
     } finally {
       session.stopRequested = false;
@@ -2304,22 +2311,28 @@ Paths are relative to working directory. Use absolute-style like \`/src/index.ts
 ls("/src")  // List /src contents
 \`\`\`
 
-### read_file - Read Contents
-**ALWAYS read before editing to understand current state.**
+### read_any_file - Read ANY File (PREFERRED)
+**Use this as your PRIMARY tool for reading any file.** Handles ALL file types automatically.
 \`\`\`
-read_file({ file_path: "/src/index.ts" })
-read_file({ file_path: "/src/index.ts", offset: 100, limit: 50 })  // Lines 101-150
+read_any_file({ file_path: "/src/index.ts" })                    // Code/text file
+read_any_file({ file_path: "/src/index.ts", offset: 100, limit: 50 })  // Lines 101-150
+read_any_file({ file_path: "/path/to/image.png" })               // Image → visual analysis
+read_any_file({ file_path: "/path/to/document.pdf" })            // PDF → visual analysis
+read_any_file({ file_path: "/path/to/video.mp4" })               // Video → video analysis
+read_any_file({ file_path: "/path/to/audio.mp3" })               // Audio → audio analysis
 \`\`\`
+**Supported file types:**
+- **Code/Text**: .ts, .js, .py, .java, .go, .rs, .c, .cpp, .html, .css, .json, .yaml, .toml, .md, .txt, .csv, .xml, .sql, .sh, .env
+- **Images**: .png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .ico, .heic, .tiff
+- **Documents**: .pdf (visual analysis)
+- **Video**: .mp4, .webm, .mov, .avi, .mkv
+- **Audio**: .mp3, .wav, .m4a, .ogg, .flac, .aac
 
-### view_file - View and Analyze Files
-Use for images, PDFs, videos, audio files, and any visual content.
-\`\`\`
-view_file({ file_path: "/path/to/image.png" })
-view_file({ file_path: "/path/to/document.pdf" })
-\`\`\`
-- For images/media: Content is captured for visual analysis
-- For text files: Returns file content like read_file
-- **Use view_file instead of read_file when you need to see/analyze visual content**
+**Guidelines:**
+- ALWAYS use read_any_file instead of read_file for reading files
+- For text files: returns content with line numbers, use offset/limit for large files
+- For images/media/PDFs: content is captured for visual analysis by the model
+- Read before editing - always check current state first
 
 ### write_file - Create New Files
 Creates new files. Fails if file exists (use edit_file instead).
@@ -2382,7 +2395,7 @@ execute({ command: "git status" })
 **Never without request:** Push to remote, run system-wide commands
 
 ## Additional Tools
-- **view_file**: View and analyze images, PDFs, videos, audio files visually
+- **read_any_file**: Read and analyze ANY file type - text, images, PDFs, video, audio (USE THIS for all file reading)
 - **deep_research**: Extensive autonomous research (5-60 min)
 - **google_grounded_search**: Quick web search with citations
 - **generate_image/edit_image**: Image generation and editing
@@ -2824,21 +2837,23 @@ ${toolList}
     );
     const connectorTools = this.createConnectorTools(session.id);
 
-    // Create view_file tool for multimodal content analysis
-    const viewFileTool: ToolHandler = {
-      name: 'view_file',
-      description: 'View and analyze a file (image, PDF, video, audio, or text). For images and media files, the content will be visually analyzed. Use this instead of read_file when you need to understand visual content.',
+    // Create read_any_file tool - unified file reading for ALL types
+    const readAnyFileTool: ToolHandler = {
+      name: 'read_any_file',
+      description: 'Read and analyze ANY type of file. This is the PREFERRED tool for all file reading. Handles text/code files with line numbers and offset/limit, AND images/PDFs/videos/audio for visual/audio analysis by the model. Automatically detects file type. Use this instead of read_file or view_file.',
       parameters: z.object({
-        file_path: z.string().describe('Path to the file to view'),
+        file_path: z.string().describe('Path to the file to read'),
+        offset: z.number().optional().default(0).describe('Starting line number (0-indexed, text files only)'),
+        limit: z.number().optional().default(2000).describe('Maximum lines to return (text files only)'),
       }),
       requiresPermission: (args: unknown) => ({
         type: 'file_read',
         resource: String((args as { file_path?: string }).file_path || ''),
-        reason: `View file: ${(args as { file_path?: string }).file_path}`,
-        toolName: 'view_file',
+        reason: `Read file: ${(args as { file_path?: string }).file_path}`,
+        toolName: 'read_any_file',
       }),
       execute: async (args: unknown): Promise<{ success: boolean; data?: unknown; error?: string }> => {
-        const { file_path } = args as { file_path: string };
+        const { file_path, offset = 0, limit = 2000 } = args as { file_path: string; offset?: number; limit?: number };
         const backend = new CoworkBackend(
           session.workingDirectory,
           session.id,
@@ -2849,7 +2864,7 @@ ${toolList}
           const result = await backend.readForAnalysis(file_path);
 
           if (result.type === 'multimodal') {
-            // Store multimodal content for injection into next message
+            // Store multimodal content for injection into next model call
             session.pendingMultimodalContent = session.pendingMultimodalContent || [];
             session.pendingMultimodalContent.push({
               type: result.mimeType.startsWith('image/') ? 'image' :
@@ -2881,14 +2896,23 @@ ${toolList}
             };
           }
 
-          // Text file
+          // Text file - read with offset/limit support
+          const content = await backend.read(file_path, offset, limit);
+
+          // Get total line count from readForAnalysis result
+          const totalLines = result.lineCount || 0;
+          const sliceEnd = Math.min(offset + limit, totalLines);
+          const returnedLines = sliceEnd - offset;
+
           return {
             success: true,
             data: {
               type: 'text',
               path: result.path,
-              lineCount: result.lineCount,
-              content: result.content,
+              lineCount: returnedLines,
+              totalLines,
+              offset,
+              content,
             },
           };
         } catch (error) {
@@ -2914,7 +2938,7 @@ ${toolList}
     }
 
     return [
-      viewFileTool,
+      readAnyFileTool,
       ...researchTools,
       ...computerUseTools,
       ...mediaTools,
@@ -3073,6 +3097,33 @@ ${toolList}
     return createMiddleware({
       name: 'CoworkToolMiddleware',
       wrapModelCall: async (request, handler) => {
+        // Inject pending multimodal content into messages so Gemini can "see" files
+        if (session.pendingMultimodalContent?.length) {
+          const parts: Array<{ type: string; [key: string]: unknown }> = [];
+          for (const mc of session.pendingMultimodalContent) {
+            if (mc.type === 'image') {
+              parts.push({
+                type: 'image_url',
+                image_url: { url: `data:${mc.mimeType};base64,${mc.data}` },
+              });
+            } else {
+              // video, audio, pdf → use 'media' part type for Gemini
+              parts.push({ type: 'media', mimeType: mc.mimeType, data: mc.data });
+            }
+          }
+          const injectedMsg = new HumanMessage({
+            content: [
+              { type: 'text', text: `[Multimodal file content for analysis - ${session.pendingMultimodalContent.length} file(s)]` },
+              ...parts,
+            ],
+          });
+          request = {
+            ...request,
+            messages: [...(request.messages || []), injectedMsg],
+          };
+          session.pendingMultimodalContent = [];
+        }
+
         if (!request.tools || request.tools.length === 0) {
           return handler(request);
         }

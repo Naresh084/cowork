@@ -199,8 +199,10 @@ registerHandler('create_session', async (params) => {
 // Send message
 registerHandler('send_message', async (params) => {
   const p = params as unknown as SendMessageParams;
-  if (!p.sessionId || !p.content) throw new Error('sessionId and content are required');
-  await agentRunner.sendMessage(p.sessionId, p.content, p.attachments);
+  console.error('[MULTIMEDIA] send_message IPC:', p.sessionId, 'content:', JSON.stringify(p.content?.slice(0, 50)), 'attachments:', p.attachments?.length ?? 0, p.attachments?.map((a: any) => `${a.type}:${a.name}:hasData=${!!a.data}`) ?? []);
+  if (!p.sessionId || (p.content == null && (!p.attachments || p.attachments.length === 0))) throw new Error('sessionId and content or attachments are required');
+  const content = p.content || '';
+  await agentRunner.sendMessage(p.sessionId, content, p.attachments);
   return { success: true };
 });
 

@@ -319,26 +319,17 @@ export class GeminiProvider implements AIProvider {
         case 'text':
           return { text: part.text };
         case 'image':
-          return {
-            inlineData: {
-              mimeType: part.mimeType,
-              data: part.data,
-            },
-          };
+          return part.data
+            ? { inlineData: { mimeType: part.mimeType, data: part.data } }
+            : { text: '[image]' };
         case 'audio':
-          return {
-            inlineData: {
-              mimeType: part.mimeType,
-              data: part.data,
-            },
-          };
+          return part.data
+            ? { inlineData: { mimeType: part.mimeType, data: part.data } }
+            : { text: '[audio]' };
         case 'video':
-          return {
-            inlineData: {
-              mimeType: part.mimeType,
-              data: part.data,
-            },
-          };
+          return part.data
+            ? { inlineData: { mimeType: part.mimeType, data: part.data } }
+            : { text: '[video]' };
         case 'file':
           return part.data
             ? {

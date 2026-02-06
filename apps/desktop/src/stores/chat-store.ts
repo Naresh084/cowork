@@ -800,28 +800,30 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       }
 
       for (const attachment of attachments) {
-        if (attachment.type === 'image' && attachment.data) {
+        if (attachment.type === 'image' && (attachment.data || attachment.objectUrl)) {
           parts.push({
             type: 'image',
             mimeType: attachment.mimeType || 'image/png',
-            data: attachment.data,
-          });
+            // Use objectUrl for optimistic preview (lightweight blob URL),
+            // data will be stripped when sidecar replaces with filePath
+            ...(attachment.objectUrl ? { objectUrl: attachment.objectUrl } : {}),
+          } as any);
         }
 
-        if (attachment.type === 'audio' && attachment.data) {
+        if (attachment.type === 'audio' && (attachment.data || attachment.objectUrl)) {
           parts.push({
             type: 'audio',
             mimeType: attachment.mimeType || 'audio/mpeg',
-            data: attachment.data,
-          });
+            ...(attachment.objectUrl ? { objectUrl: attachment.objectUrl } : {}),
+          } as any);
         }
 
-        if (attachment.type === 'video' && attachment.data) {
+        if (attachment.type === 'video' && (attachment.data || attachment.objectUrl)) {
           parts.push({
             type: 'video',
             mimeType: attachment.mimeType || 'video/mp4',
-            data: attachment.data,
-          });
+            ...(attachment.objectUrl ? { objectUrl: attachment.objectUrl } : {}),
+          } as any);
         }
 
         if ((attachment.type === 'file' || attachment.type === 'pdf') && attachment.data) {
@@ -1074,11 +1076,11 @@ ${attachment.data}`,
   appendChatItem: (sessionId: string, item: ChatItem) => {
     if (!sessionId) return;
     set((state) => updateSession(state, sessionId, (session) => {
-      // Dedup: if incoming user_message matches a temp- item by content, replace it
+      // Dedup: if incoming user_message replaces an optimistic temp- item, swap it
+      // Content may differ (temp has base64 data, sidecar has filePath) so match by prefix only
       if (item.kind === 'user_message') {
         const tempIdx = session.chatItems.findIndex(
-          (ci) => ci.kind === 'user_message' && ci.id.startsWith('temp-') &&
-                  JSON.stringify(ci.content) === JSON.stringify(item.content)
+          (ci) => ci.kind === 'user_message' && ci.id.startsWith('temp-')
         );
         if (tempIdx !== -1) {
           const oldItem = session.chatItems[tempIdx];
