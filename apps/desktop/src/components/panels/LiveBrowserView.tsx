@@ -27,13 +27,13 @@ export function LiveBrowserView() {
     return session?.browserViewScreenshot ?? null;
   });
 
-  // Check if computer_use is still running
+  // Check if computer_use is still running (V2: derive from chatItems)
   const isRunning = useChatStore((state) => {
     if (!activeSessionId) return false;
     const session = state.sessions[activeSessionId];
     if (!session) return false;
-    return session.streamingToolCalls.some(
-      (t) => t.name.toLowerCase() === 'computer_use' && t.status === 'running'
+    return session.chatItems.some(
+      (ci) => ci.kind === 'tool_start' && ci.name.toLowerCase() === 'computer_use' && ci.status === 'running'
     );
   });
 

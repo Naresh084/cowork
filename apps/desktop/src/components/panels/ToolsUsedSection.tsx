@@ -59,23 +59,34 @@ function ToolItem({ tool }: { tool: ToolExecution }) {
 
 export function ToolsUsedSection() {
   const { activeSessionId } = useSessionStore();
-  const streamingToolCalls = useChatStore(
-    (state) => state.getSessionState(activeSessionId).streamingToolCalls
+  const chatItems = useChatStore(
+    (state) => state.getSessionState(activeSessionId).chatItems
   );
 
-  // Filter non-default tools, deduplicate by name, sort by usage order
+  // V2: Derive tool list from chatItems tool_start items
   const nonDefaultTools = useMemo(() => {
     const seen = new Set<string>();
-    return streamingToolCalls
-      .filter(tool => isNonDefaultTool(tool.name))
-      .filter(tool => {
-        const key = tool.name.toLowerCase();
+    const toolItems = chatItems.filter(
+      (ci): ci is import('@gemini-cowork/shared').ToolStartItem => ci.kind === 'tool_start'
+    );
+    const asToolExecutions: ToolExecution[] = toolItems
+      .filter(item => isNonDefaultTool(item.name))
+      .filter(item => {
+        const key = item.name.toLowerCase();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       })
-      .sort((a, b) => a.startedAt - b.startedAt);
-  }, [streamingToolCalls]);
+      .map(item => ({
+        id: item.toolId,
+        name: item.name,
+        args: item.args as Record<string, unknown>,
+        status: item.status === 'running' ? 'running' as const : item.status === 'error' ? 'error' as const : 'success' as const,
+        startedAt: item.timestamp,
+        parentToolId: item.parentToolId,
+      }));
+    return asToolExecutions.sort((a, b) => a.startedAt - b.startedAt);
+  }, [chatItems]);
 
   const badge = nonDefaultTools.length > 0 ? nonDefaultTools.length : undefined;
 

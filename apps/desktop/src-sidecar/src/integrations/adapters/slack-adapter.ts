@@ -115,6 +115,63 @@ void slackConfig;
     // Slack does not support typing indicators for bots
   }
 
+  override async sendProcessingPlaceholder(
+    chatId: string,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.webClient) {
+      throw new Error('Slack adapter is not connected');
+    }
+
+    const response = await this.webClient.chat.postMessage({
+      channel: chatId,
+      text,
+      mrkdwn: true,
+    });
+
+    return {
+      channel: response.channel || chatId,
+      ts: response.ts,
+    };
+  }
+
+  override async replaceProcessingPlaceholder(
+    chatId: string,
+    placeholderHandle: unknown,
+    text: string,
+  ): Promise<void> {
+    if (!this.webClient) {
+      throw new Error('Slack adapter is not connected');
+    }
+
+    const handle = placeholderHandle as
+      | {
+          channel?: string;
+          ts?: string;
+        }
+      | null;
+
+    if (handle?.ts) {
+      try {
+        await this.webClient.chat.update({
+          channel: handle.channel || chatId,
+          ts: handle.ts,
+          text,
+        });
+        return;
+      } catch (err) {
+        this.emit(
+          'error',
+          new Error(
+            `Slack placeholder update failed, sending fallback message: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      }
+    }
+
+    await this.sendMessage(chatId, text);
+  }
+
   private async getUserDisplayName(userId: string): Promise<string> {
     if (!this.webClient) return userId;
 

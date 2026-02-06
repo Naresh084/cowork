@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { subscribeToAgentEvents } from '../lib/agent-events';
 import type { AgentEvent } from '../lib/event-types';
-import { useChatStore, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem } from '../stores/chat-store';
+import { useChatStore } from '../stores/chat-store';
 import { useAgentStore, type Task } from '../stores/agent-store';
 import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
 import { toast } from '../components/ui/Toast';
-import type { Message } from '@gemini-cowork/shared';
+// Message type no longer needed - V2 uses ChatItems directly
 
 function extractMediaItems(result: unknown): MediaActivityItem[] {
   const items: MediaActivityItem[] = [];
@@ -348,26 +348,18 @@ export function useAgentEvents(sessionId: string | null): void {
           chat.setStreaming(eventSessionId, true);
           chat.setThinking(eventSessionId, true);
           chat.clearStreamingContent(eventSessionId);
-          chat.addTurnActivity(eventSessionId, { type: 'thinking', status: 'active' });
           agent.setRunning(eventSessionId, true);
           break;
 
         case 'stream:chunk':
           chat.appendStreamChunk(eventSessionId, event.content);
-          chat.completeTurnThinking(eventSessionId);
           break;
 
         case 'stream:done':
-          chat.addMessage(eventSessionId, event.message as Message);
-          if (event.message?.id) {
-            chat.addTurnActivity(eventSessionId, { type: 'assistant', messageId: event.message.id });
-          }
           chat.setStreaming(eventSessionId, false);
           chat.setThinking(eventSessionId, false);
           chat.clearStreamingContent(eventSessionId);
           chat.clearThinkingContent(eventSessionId);
-          chat.completeTurnThinking(eventSessionId);
-          chat.endTurn(eventSessionId);
           agent.setRunning(eventSessionId, false);
           break;
 
@@ -389,14 +381,6 @@ export function useAgentEvents(sessionId: string | null): void {
         // Tool execution events
         case 'tool:start': {
           const parentToolId = event.parentToolId || event.toolCall.parentToolId;
-          chat.addToolExecution(eventSessionId, {
-            id: event.toolCall.id,
-            name: event.toolCall.name,
-            args: event.toolCall.args,
-            status: 'running',
-            startedAt: Date.now(),
-            parentToolId,
-          });
           chat.setStreamingTool(eventSessionId, {
             id: event.toolCall.id,
             name: event.toolCall.name,
@@ -405,11 +389,6 @@ export function useAgentEvents(sessionId: string | null): void {
             startedAt: Date.now(),
             parentToolId,
           });
-          // Only add turn activity for top-level tools (not sub-tools within tasks)
-          if (!parentToolId) {
-            chat.addTurnActivity(eventSessionId, { type: 'tool', toolId: event.toolCall.id });
-          }
-          chat.completeTurnThinking(eventSessionId);
           chat.setThinking(eventSessionId, false);
           break;
         }
@@ -417,53 +396,74 @@ export function useAgentEvents(sessionId: string | null): void {
         case 'tool:result': {
           const result = event.result;
           const toolCallId = event.toolCallId || (result as { toolCallId?: string })?.toolCallId || '';
+
+          // Resolve tool name from chatItems (V2 source)
           const sessionSnapshot = chat.getSessionState(eventSessionId);
-          const toolMatch = sessionSnapshot.streamingToolCalls.find((tool) => tool.id === toolCallId);
-          const toolName = toolMatch?.name || '';
-          if (toolCallId) {
-            chat.updateToolExecution(eventSessionId, toolCallId, {
-              status: result.success ? 'success' : 'error',
-              result: result.result,
-              error: result.error,
-              completedAt: Date.now(),
-            });
-          }
+          const toolStartItem = sessionSnapshot.chatItems.find(
+            (ci) => ci.kind === 'tool_start' && ci.toolId === toolCallId
+          );
+          const toolName = toolStartItem && toolStartItem.kind === 'tool_start' ? toolStartItem.name : '';
 
           if (result.success && toolName) {
             const lower = toolName.toLowerCase();
+            const activeTurnId = sessionSnapshot.activeTurnId;
 
             if (lower === 'generate_image' || lower === 'edit_image' || lower === 'generate_video') {
               const mediaItems = extractMediaItems(result.result);
               if (mediaItems.length > 0) {
-                chat.addTurnActivity(eventSessionId, {
-                  type: 'media',
-                  mediaItems,
-                });
+                for (let i = 0; i < mediaItems.length; i++) {
+                  const mi = mediaItems[i];
+                  chat.appendChatItem(eventSessionId, {
+                    id: `media-${toolCallId}-${i}-${Date.now()}`,
+                    kind: 'media',
+                    mediaType: mi.kind,
+                    path: mi.path,
+                    url: mi.url,
+                    mimeType: mi.mimeType,
+                    data: mi.data,
+                    toolId: toolCallId,
+                    turnId: activeTurnId,
+                    timestamp: Date.now(),
+                  } as import('@gemini-cowork/shared').ChatItem);
+                }
               }
             }
 
             if (lower === 'deep_research') {
               const report = extractReportActivity(result.result);
               if (report) {
-                chat.addTurnActivity(eventSessionId, {
-                  type: 'report',
-                  report,
-                });
+                chat.appendChatItem(eventSessionId, {
+                  id: `report-${toolCallId}-${Date.now()}`,
+                  kind: 'report',
+                  title: report.title,
+                  path: report.path,
+                  snippet: report.snippet,
+                  toolId: toolCallId,
+                  turnId: activeTurnId,
+                  timestamp: Date.now(),
+                } as import('@gemini-cowork/shared').ChatItem);
               }
             }
 
             if (lower.includes('stitch') || lower.startsWith('mcp_')) {
               const design = buildDesignPreview(result.result, toolName);
               if (design) {
-                chat.addTurnActivity(eventSessionId, {
-                  type: 'design',
-                  design,
-                });
+                chat.appendChatItem(eventSessionId, {
+                  id: `design-${toolCallId}-${Date.now()}`,
+                  kind: 'design',
+                  title: design.title,
+                  preview: design.preview,
+                  toolId: toolCallId,
+                  turnId: activeTurnId,
+                  timestamp: Date.now(),
+                } as import('@gemini-cowork/shared').ChatItem);
               }
             }
 
+            // Resolve tool args for write_todos from chatItems
             if (lower === 'write_todos') {
-              const todos = extractTodosFromToolResult(result.result) ?? (toolMatch ? extractTodosFromToolResult(toolMatch.args) : null);
+              const toolArgs = toolStartItem && toolStartItem.kind === 'tool_start' ? toolStartItem.args : undefined;
+              const todos = extractTodosFromToolResult(result.result) ?? (toolArgs ? extractTodosFromToolResult(toolArgs) : null);
               if (todos && todos.length > 0) {
                 agent.setTasks(eventSessionId, mapTodosToTasks(eventSessionId, todos));
               }
@@ -489,7 +489,6 @@ export function useAgentEvents(sessionId: string | null): void {
               requestAny.timestamp ??
               Date.now(),
           });
-          chat.addTurnActivity(eventSessionId, { type: 'permission', permissionId: event.request.id });
           break;
         }
 
@@ -511,7 +510,6 @@ export function useAgentEvents(sessionId: string | null): void {
             multiSelect: event.request.multiSelect,
             createdAt: event.request.timestamp || Date.now(),
           });
-          chat.addTurnActivity(eventSessionId, { type: 'question', questionId: event.request.id });
           break;
 
         case 'question:answered':
@@ -559,8 +557,6 @@ export function useAgentEvents(sessionId: string | null): void {
           chat.setStreaming(eventSessionId, false);
           chat.setThinking(eventSessionId, false);
           agent.setRunning(eventSessionId, false);
-          chat.completeTurnThinking(eventSessionId);
-          chat.endTurn(eventSessionId);
 
           // Safely convert event.error to string
           const errorMsg = typeof event.error === 'string'
@@ -589,18 +585,17 @@ export function useAgentEvents(sessionId: string | null): void {
             }
           }
 
-          chat.addMessage(eventSessionId, {
+          // V2: Error is also emitted as chat:item by sidecar, but create one
+          // if the sidecar doesn't emit it (e.g. frontend-only errors)
+          chat.appendChatItem(eventSessionId, {
             id: `error-${Date.now()}`,
-            role: 'system',
-            content: event.code === 'RATE_LIMIT' ? 'Rate limit exceeded' : 'Agent error',
-            metadata: {
-              kind: 'error',
-              code: event.code,
-              details: event.details,
-              raw: errorMsg,
-            },
-            createdAt: Date.now(),
-          });
+            kind: 'error',
+            message: errorMsg,
+            code: event.code,
+            details: event.details,
+            turnId: chat.getSessionState(eventSessionId).activeTurnId,
+            timestamp: Date.now(),
+          } as import('@gemini-cowork/shared').ChatItem);
           break;
         }
 

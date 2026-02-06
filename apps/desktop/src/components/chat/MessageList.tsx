@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState, Suspense } from 'react';
+import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
 import { cn } from '../../lib/utils';
 import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2 } from 'lucide-react';
-import { useChatStore, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type TurnActivityItem, type UserQuestion } from '../../stores/chat-store';
+import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type TurnActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -10,7 +10,7 @@ import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
 import { SourcesCitation } from './SourcesCitation';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Message, MessageContentPart, ChatItem, UserMessageItem, AssistantMessageItem } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart, ChatItem } from '@gemini-cowork/shared';
 import { BrandMark } from '../icons/BrandMark';
 import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';
@@ -35,7 +35,6 @@ type ErrorMessageMetadata = {
 
 // Default empty session state for when no session is active
 const EMPTY_SESSION_STATE = {
-  messages: [] as Message[],
   chatItems: [] as ChatItem[],
   isStreaming: false,
   isThinking: false,
@@ -44,30 +43,10 @@ const EMPTY_SESSION_STATE = {
   isLoadingMessages: false,
   pendingQuestions: [] as UserQuestion[],
   pendingPermissions: [] as ExtendedPermissionRequest[],
-  streamingToolCalls: [] as ToolExecution[],
-  turnActivities: {} as Record<string, TurnActivityItem[]>,
   activeTurnId: undefined as string | undefined,
   hasLoaded: false,
   lastUpdatedAt: 0,
 };
-
-/**
- * Convert chatItems to messages for backwards-compatible rendering.
- * Only extracts user_message and assistant_message items.
- */
-function chatItemsToMessages(chatItems: ChatItem[]): Message[] {
-  return chatItems
-    .filter((item): item is UserMessageItem | AssistantMessageItem =>
-      item.kind === 'user_message' || item.kind === 'assistant_message'
-    )
-    .map((item) => ({
-      id: item.kind === 'user_message' ? (item.turnId || item.id) : item.id,
-      role: item.kind === 'user_message' ? 'user' : 'assistant',
-      content: item.content,
-      createdAt: item.timestamp,
-      metadata: item.kind === 'assistant_message' ? item.metadata : undefined,
-    } as Message));
-}
 
 export function MessageList() {
   const { activeSessionId } = useSessionStore();
@@ -79,7 +58,6 @@ export function MessageList() {
   const agentState = useAgentStore((state) => state.getSessionState(activeSessionId));
   const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const {
-    messages: legacyMessages,
     chatItems,
     isStreaming,
     isThinking,
@@ -88,19 +66,16 @@ export function MessageList() {
     isLoadingMessages,
     pendingQuestions,
     pendingPermissions,
-    streamingToolCalls,
-    turnActivities,
     activeTurnId,
   } = sessionState;
 
-  // Prefer legacyMessages — sendMessage() and all event handlers (stream:chunk,
-  // addMessage, turnActivities) only update V1 messages. chatItems (V2) is only
-  // populated during persistence load and via async sidecar events, so using it
-  // as primary source causes new messages to be invisible until the next restart.
-  // Fall back to chatItems only when V1 is empty (edge case).
-  const messages = legacyMessages.length > 0
-    ? legacyMessages
-    : (chatItems && chatItems.length > 0 ? chatItemsToMessages(chatItems) : legacyMessages);
+  // V2: Derive rendering data from chatItems (single source of truth)
+  const messages = useMemo(() => deriveMessagesFromItems(chatItems), [chatItems]);
+  const toolMap = useMemo(() => deriveToolMapFromItems(chatItems), [chatItems]);
+  const turnActivities = useMemo(
+    () => deriveTurnActivitiesFromItems(chatItems, pendingPermissions, pendingQuestions),
+    [chatItems, pendingPermissions, pendingQuestions]
+  );
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 
@@ -111,10 +86,10 @@ export function MessageList() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [
+    chatItems.length,
     messages.length,
     streamingContent,
     isStreaming,
-    streamingToolCalls.length,
     pendingPermissions.length,
     pendingQuestions.length,
     sessionState.lastUpdatedAt,
@@ -135,7 +110,6 @@ export function MessageList() {
     return <EmptyState />;
   }
 
-  const toolMap = new Map(streamingToolCalls.map((tool) => [tool.id, tool]));
   const messageById = new Map(messages.map((message) => [message.id, message]));
   const assistantMessageIds = new Set<string>();
   Object.values(turnActivities || {}).forEach((activities) => {
@@ -240,8 +214,8 @@ export function MessageList() {
         })}
 
         {/* Show thinking block when there's thinking content or when waiting for response */}
-        {isStreaming && activeTurnId === turnId && (thinkingContent || (!streamingContent && !streamingToolCalls.some(t => t.status === 'running'))) && (
-          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!streamingContent && !streamingToolCalls.some(t => t.status === 'running'))} />
+        {isStreaming && activeTurnId === turnId && (thinkingContent || (!streamingContent && ![...toolMap.values()].some(t => t.status === 'running'))) && (
+          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!streamingContent && ![...toolMap.values()].some(t => t.status === 'running'))} />
         )}
 
         {isStreaming && activeTurnId === turnId && streamingContent && (
