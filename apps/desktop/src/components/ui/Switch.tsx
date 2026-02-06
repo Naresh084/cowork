@@ -50,8 +50,8 @@ export const Switch = forwardRef<HTMLInputElement, SwitchProps>(
             className={cn(
               'rounded-full transition-colors',
               styles.track,
-              'bg-white/[0.10] peer-checked:bg-[#4C71FF]',
-              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#4C71FF]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]'
+              'bg-white/[0.10] peer-checked:bg-[#1D4ED8]',
+              'peer-focus-visible:ring-2 peer-focus-visible:ring-[#1D4ED8]/50 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[#0D0D0F]'
             )}
           />
           <div

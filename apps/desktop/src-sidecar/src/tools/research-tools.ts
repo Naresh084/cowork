@@ -9,10 +9,10 @@ import { getModel } from '../model-config.js';
 
 /**
  * Get the reports directory for a session.
- * Uses appDataDir if available, otherwise falls back to ~/.geminicowork
+ * Uses appDataDir if available, otherwise falls back to ~/.cowork
  */
 function getReportsDir(context: ToolContext): string {
-  const baseDir = context.appDataDir || join(homedir(), '.geminicowork');
+  const baseDir = context.appDataDir || join(homedir(), '.cowork');
   return join(baseDir, 'sessions', context.sessionId, 'reports');
 }
 

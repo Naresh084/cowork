@@ -39,4 +39,4 @@ export { startOAuthCallbackServer, type OAuthCallbackServer } from './oauth/serv
 
 // Storage
 export { MemoryStorage } from './storage/memory.js';
-export { KeychainStorage, createSecureStorage } from './storage/keychain.js';
+export { FileSecureStorage, createSecureStorage } from './storage/secure-storage.js';

@@ -171,7 +171,7 @@ export function ContextMenu({
                     >
                       {item.checked !== undefined && (
                         <span className="w-4">
-                          {item.checked && <Check size={14} className="text-[#8CA2FF]" />}
+                          {item.checked && <Check size={14} className="text-[#93C5FD]" />}
                         </span>
                       )}
                       {item.icon && (

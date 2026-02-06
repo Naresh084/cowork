@@ -20,7 +20,7 @@ const CATEGORY_ICONS: Record<CommandCategory, React.ComponentType<{ className?: 
 
 // Category colors
 const CATEGORY_COLORS: Record<CommandCategory, string> = {
-  setup: 'text-[#4C71FF]',
+  setup: 'text-[#1D4ED8]',
   memory: 'text-[#9B59B6]',
   utility: 'text-[#F5C400]',
   workflow: 'text-[#27AE60]',

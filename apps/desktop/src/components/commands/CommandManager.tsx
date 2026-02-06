@@ -89,8 +89,8 @@ export function CommandManager({ isOpen, onClose }: CommandManagerProps) {
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#4C71FF]/20 flex items-center justify-center">
-                  <Terminal className="w-5 h-5 text-[#4C71FF]" />
+                <div className="w-10 h-10 rounded-lg bg-[#1D4ED8]/20 flex items-center justify-center">
+                  <Terminal className="w-5 h-5 text-[#1D4ED8]" />
                 </div>
                 <div>
                   <h2 className="text-xl font-semibold text-zinc-100">

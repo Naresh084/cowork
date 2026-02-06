@@ -324,7 +324,7 @@ function EmptyState() {
         transition={{ delay: 0.1, duration: 0.4 }}
         className="text-xl font-semibold text-white/90 mb-2 mt-6"
       >
-        Welcome to Gemini Cowork
+        Welcome to Cowork
       </motion.h2>
 
       <motion.p
@@ -356,8 +356,8 @@ function EmptyState() {
               'transition-all duration-200'
             )}
           >
-            <div className="w-8 h-8 rounded-lg bg-[#4C71FF]/10 flex items-center justify-center">
-              <suggestion.icon className="w-4 h-4 text-[#8CA2FF]" />
+            <div className="w-8 h-8 rounded-lg bg-[#1D4ED8]/10 flex items-center justify-center">
+              <suggestion.icon className="w-4 h-4 text-[#93C5FD]" />
             </div>
             <span>{suggestion.text}</span>
           </motion.button>
@@ -402,13 +402,13 @@ function PermissionInlineCard({ request, onDecision }: PermissionInlineCardProps
         <div
           className={cn(
             'p-2 rounded-lg',
-            riskLevel === 'high' ? 'bg-[#FF5449]/10' : 'bg-[#4C71FF]/10'
+            riskLevel === 'high' ? 'bg-[#FF5449]/10' : 'bg-[#1D4ED8]/10'
           )}
         >
           <RiskIcon
             className={cn(
               'w-4 h-4',
-              riskLevel === 'high' ? 'text-[#FF5449]' : 'text-[#8CA2FF]'
+              riskLevel === 'high' ? 'text-[#FF5449]' : 'text-[#93C5FD]'
             )}
           />
         </div>
@@ -475,7 +475,7 @@ function PermissionInlineCard({ request, onDecision }: PermissionInlineCardProps
         </button>
         <button
           onClick={() => onDecision('allow_session')}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white bg-[#4C71FF] hover:bg-[#3D64FF]"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white bg-[#1D4ED8] hover:bg-[#1E40AF]"
         >
           <CheckCircle2 className="w-3.5 h-3.5" />
           Allow session
@@ -1130,7 +1130,7 @@ function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; co
                       href={url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-[#8CA2FF] hover:text-[#B0BFFF] underline"
+                      className="text-[#93C5FD] hover:text-[#DBEAFE] underline"
                     >
                       {title}
                     </a>
@@ -1215,7 +1215,7 @@ function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; co
                       status === 'completed'
                         ? 'text-[#7FD29A]'
                         : status === 'in_progress'
-                          ? 'text-[#8CA2FF] animate-spin'
+                          ? 'text-[#93C5FD] animate-spin'
                           : 'text-white/30'
                     )}
                   />
@@ -1263,7 +1263,7 @@ function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; co
             href={previewUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-[#8CA2FF] hover:text-[#B0BFFF] underline text-[11px]"
+            className="text-[#93C5FD] hover:text-[#DBEAFE] underline text-[11px]"
           >
             {previewUrl}
           </a>
@@ -1622,12 +1622,12 @@ function MessageBubble({ message }: MessageBubbleProps) {
         className={cn(
           'flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center select-none',
           isUser
-            ? 'bg-[#1A1D24] border border-[#4C71FF]/30'
+            ? 'bg-[#1A1D24] border border-[#1D4ED8]/30'
             : 'bg-[#111218] border border-white/[0.08]'
         )}
       >
         {isUser ? (
-          <User className="w-3 h-3 text-[#8CA2FF]" />
+          <User className="w-3 h-3 text-[#93C5FD]" />
         ) : (
           <BrandMark className="w-3.5 h-3.5" />
         )}
@@ -1714,7 +1714,7 @@ function ErrorMessageCard({ metadata }: { metadata: ErrorMessageMetadata }) {
   const canRetry = !!lastUserMessage && (!remaining || remaining <= 0);
   const title = isRateLimit ? 'Rate limit exceeded' : 'Agent error';
   const description = isRateLimit
-    ? `You hit the Gemini API request limit${metadata.details?.model ? ` for ${metadata.details.model}` : ''}.`
+    ? `You hit the API request limit${metadata.details?.model ? ` for ${metadata.details.model}` : ''}.`
     : 'Something went wrong while generating a response.';
   const docsUrl = metadata.details?.docsUrl || (isRateLimit ? 'https://ai.google.dev/gemini-api/docs/rate-limits' : undefined);
 
@@ -1741,7 +1741,7 @@ function ErrorMessageCard({ metadata }: { metadata: ErrorMessageMetadata }) {
           className={cn(
             'px-3 py-1.5 text-xs rounded-lg border',
             canRetry
-              ? 'bg-[#4C71FF] text-white border-[#4C71FF]'
+              ? 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
               : 'bg-white/10 text-white/40 border-white/10 cursor-not-allowed'
           )}
         >
@@ -1755,9 +1755,9 @@ function ErrorMessageCard({ metadata }: { metadata: ErrorMessageMetadata }) {
             href={docsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-[#8CA2FF] underline"
+            className="text-xs text-[#93C5FD] underline"
           >
-            View Gemini rate-limit docs
+            View API rate-limit docs
           </a>
         </div>
       )}
@@ -1789,7 +1789,7 @@ function MarkdownContent({ content }: { content: string }) {
               if (isInline) {
                 return (
                   <code
-                    className="px-1 py-0.5 bg-[#4C71FF]/10 rounded text-[#8CA2FF] text-[0.9em] border border-[#4C71FF]/20 select-text"
+                    className="px-1 py-0.5 bg-[#1D4ED8]/10 rounded text-[#93C5FD] text-[0.9em] border border-[#1D4ED8]/20 select-text"
                     {...props}
                   >
                     {children}
@@ -1838,7 +1838,7 @@ function MarkdownContent({ content }: { content: string }) {
             },
             blockquote({ children }) {
               return (
-                <blockquote className="border-l-3 border-[#4C71FF]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg w-fit max-w-full select-text">
+                <blockquote className="border-l-3 border-[#1D4ED8]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg w-fit max-w-full select-text">
                   {children}
                 </blockquote>
               );
@@ -1849,7 +1849,7 @@ function MarkdownContent({ content }: { content: string }) {
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[#8CA2FF] hover:text-[#B0BFFF] underline select-text"
+                  className="text-[#93C5FD] hover:text-[#DBEAFE] underline select-text"
                 >
                   {children}
                 </a>
@@ -2000,7 +2000,7 @@ function ThinkingBlock({ content, isActive }: { content: string; isActive: boole
       <div className="flex items-center gap-2 py-1">
         <Sparkles className={cn(
           'w-3 h-3 flex-shrink-0',
-          isActive ? 'text-[#8CA2FF] animate-pulse' : 'text-white/30'
+          isActive ? 'text-[#93C5FD] animate-pulse' : 'text-white/30'
         )} />
         <span className={cn(
           'text-[12px]',
@@ -2039,7 +2039,7 @@ function ThinkingBlock({ content, isActive }: { content: string; isActive: boole
           >
             <div className="rounded-lg bg-[#12131A]/80 border border-white/[0.06] overflow-hidden">
               <div className="px-3 py-2 border-b border-white/[0.05] flex items-center gap-2">
-                <Sparkles className="w-3 h-3 text-[#8CA2FF]/50" />
+                <Sparkles className="w-3 h-3 text-[#93C5FD]/50" />
                 <span className="text-[10px] text-white/40 uppercase tracking-wide">Agent Reasoning</span>
               </div>
               <div className="p-3 max-h-[300px] overflow-y-auto">

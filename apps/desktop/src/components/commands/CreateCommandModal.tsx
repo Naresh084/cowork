@@ -102,7 +102,7 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
               <div className="flex items-center gap-3">
-                <Wand2 className="w-5 h-5 text-[#4C71FF]" />
+                <Wand2 className="w-5 h-5 text-[#1D4ED8]" />
                 <h2 className="text-lg font-semibold text-zinc-100">Create Custom Command</h2>
               </div>
               <button
@@ -264,8 +264,8 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
               <div className="p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg">
                 <p className="text-sm text-zinc-400">
                   <span className="text-zinc-300 font-medium">Note:</span> Custom commands are stored in{' '}
-                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#4C71FF]">~/.geminicowork/commands/</code>{' '}
-                  and are automatically installed. Type <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#4C71FF]">/{name || 'command'}</code>{' '}
+                  <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#1D4ED8]">~/.cowork/commands/</code>{' '}
+                  and are automatically installed. Type <code className="px-1 py-0.5 rounded bg-zinc-700 text-[#1D4ED8]">/{name || 'command'}</code>{' '}
                   in chat to use it.
                 </p>
               </div>
@@ -283,7 +283,7 @@ export function CreateCommandModal({ isOpen, onClose, onCreated }: CreateCommand
               <button
                 onClick={handleSubmit}
                 disabled={isSubmitting || !name || !displayName || !description || !content || !isNameValid}
-                className="px-6 py-2 bg-[#4C71FF] hover:bg-[#5C81FF] disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                className="px-6 py-2 bg-[#1D4ED8] hover:bg-[#3B82F6] disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
               >
                 {isSubmitting ? (
                   <>

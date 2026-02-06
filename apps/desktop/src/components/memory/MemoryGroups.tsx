@@ -35,7 +35,7 @@ const GROUP_ICONS: Record<string, React.ComponentType<{ className?: string }>> =
 const GROUP_COLORS: Record<string, string> = {
   preferences: 'text-[#9B59B6]',
   learnings: 'text-[#F5C400]',
-  context: 'text-[#4C71FF]',
+  context: 'text-[#1D4ED8]',
   instructions: 'text-[#27AE60]',
 };
 
@@ -140,8 +140,8 @@ export function MemoryGroups({ isOpen, onClose }: MemoryGroupsProps) {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#4C71FF]/20 flex items-center justify-center">
-                  <Folder className="w-5 h-5 text-[#4C71FF]" />
+                <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/20 flex items-center justify-center">
+                  <Folder className="w-5 h-5 text-[#1D4ED8]" />
                 </div>
                 <div>
                   <h3 className="text-base font-semibold text-white">Memory Groups</h3>
@@ -196,7 +196,7 @@ export function MemoryGroups({ isOpen, onClose }: MemoryGroupsProps) {
                       'flex-1 px-4 py-2.5 rounded-xl',
                       'bg-[#0D0D0F] border border-white/[0.06]',
                       'text-sm text-white/90 placeholder:text-white/30',
-                      'focus:outline-none focus:border-[#4C71FF]/40'
+                      'focus:outline-none focus:border-[#1D4ED8]/40'
                     )}
                   />
                   <motion.button
@@ -206,8 +206,8 @@ export function MemoryGroups({ isOpen, onClose }: MemoryGroupsProps) {
                     disabled={isCreating || !newGroupName.trim()}
                     className={cn(
                       'flex items-center gap-2 px-4 py-2.5 rounded-xl',
-                      'bg-[#4C71FF]/20 text-[#8CA2FF]',
-                      'hover:bg-[#4C71FF]/30 transition-colors',
+                      'bg-[#1D4ED8]/20 text-[#93C5FD]',
+                      'hover:bg-[#1D4ED8]/30 transition-colors',
                       (isCreating || !newGroupName.trim()) && 'opacity-50 cursor-not-allowed'
                     )}
                   >
@@ -251,7 +251,7 @@ export function MemoryGroups({ isOpen, onClose }: MemoryGroupsProps) {
                                 {memoriesInGroup.length} memories
                               </span>
                               {isDefault && (
-                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-[#4C71FF]/20 text-[#8CA2FF]">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] bg-[#1D4ED8]/20 text-[#93C5FD]">
                                   default
                                 </span>
                               )}

@@ -7,7 +7,7 @@ import { join } from 'path';
 import { BaseAdapter } from './base-adapter.js';
 import type { WhatsAppConfig } from '../types.js';
 
-const DEFAULT_SESSION_DIR = join(homedir(), '.geminicowork', 'integrations', 'whatsapp');
+const DEFAULT_SESSION_DIR = join(homedir(), '.cowork', 'integrations', 'whatsapp');
 
 export class WhatsAppAdapter extends BaseAdapter {
   private client: WAWebJS.Client | null = null;

@@ -118,8 +118,8 @@ function getAgentsMdService(workingDirectory: string): AgentsMdService {
  */
 async function getSubagentService(): Promise<SubagentService> {
   if (!subagentService) {
-    // Use explicit app data dir if available, otherwise default to ~/.geminicowork
-    const appDataDir = appDataDirectory || join(homedir(), '.geminicowork');
+    // Use explicit app data dir if available, otherwise default to ~/.cowork
+    const appDataDir = appDataDirectory || join(homedir(), '.cowork');
     subagentService = createSubagentService(appDataDir);
     await subagentService.initialize();
   }
@@ -1687,7 +1687,7 @@ registerHandler('integration_send_test', async (params) => {
     throw new Error(`Invalid platform: ${platform}`);
   }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.sendTestMessage(platform as any, message || 'Hello from Gemini Cowork!');
+  await integrationBridge.sendTestMessage(platform as any, message || 'Hello from Cowork!');
   return { success: true };
 });
 

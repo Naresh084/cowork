@@ -46,7 +46,7 @@ const GROUP_ICONS: Record<MemoryGroup, React.ComponentType<{ className?: string 
 const GROUP_COLORS: Record<MemoryGroup, string> = {
   preferences: 'text-[#9B59B6]',
   learnings: 'text-[#F5C400]',
-  context: 'text-[#4C71FF]',
+  context: 'text-[#1D4ED8]',
   instructions: 'text-[#27AE60]',
 };
 
@@ -182,7 +182,7 @@ export function MemoryPanel({ onCreateMemory, onEditMemory }: MemoryPanelProps) 
               'w-full pl-9 pr-3 py-2 rounded-lg',
               'bg-white/[0.04] border border-white/[0.08]',
               'text-sm text-white/80 placeholder:text-white/30',
-              'focus:outline-none focus:border-[#4C71FF]/40'
+              'focus:outline-none focus:border-[#1D4ED8]/40'
             )}
           />
         </div>
@@ -264,8 +264,8 @@ export function MemoryPanel({ onCreateMemory, onEditMemory }: MemoryPanelProps) 
                 onClick={onCreateMemory}
                 className={cn(
                   'mt-3 px-3 py-1.5 rounded-lg text-xs',
-                  'bg-[#4C71FF]/20 text-[#8CA2FF]',
-                  'hover:bg-[#4C71FF]/30 transition-colors'
+                  'bg-[#1D4ED8]/20 text-[#93C5FD]',
+                  'hover:bg-[#1D4ED8]/30 transition-colors'
                 )}
               >
                 Create your first memory
@@ -351,17 +351,17 @@ function MemoryItem({ memory, isSelected, onSelect, onEdit, onDelete }: MemoryIt
       className={cn(
         'w-full flex items-start gap-3 px-3 py-2.5 text-left',
         'transition-colors',
-        isSelected && 'bg-[#4C71FF]/10'
+        isSelected && 'bg-[#1D4ED8]/10'
       )}
     >
       {/* Icon */}
       <div
         className={cn(
           'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5',
-          isSelected ? 'bg-[#4C71FF]/20' : 'bg-white/[0.04]'
+          isSelected ? 'bg-[#1D4ED8]/20' : 'bg-white/[0.04]'
         )}
       >
-        <Icon className={cn('w-3.5 h-3.5', isSelected ? 'text-[#4C71FF]' : color)} />
+        <Icon className={cn('w-3.5 h-3.5', isSelected ? 'text-[#1D4ED8]' : color)} />
       </div>
 
       {/* Content */}

@@ -2,7 +2,7 @@
  * CronStore - File-based persistence for cron jobs
  *
  * Storage structure:
- * ~/.geminicowork/cron/
+ * ~/.cowork/cron/
  *   jobs.json         - All cron job definitions
  *   runs/{jobId}.jsonl - Run history per job (JSONL format)
  */

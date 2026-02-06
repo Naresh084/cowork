@@ -52,7 +52,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
                       if (isInline) {
                         return (
                           <code
-                            className="px-1 py-0.5 bg-[#4C71FF]/10 rounded text-[#8CA2FF] text-[0.9em] border border-[#4C71FF]/20 select-text"
+                            className="px-1 py-0.5 bg-[#1D4ED8]/10 rounded text-[#93C5FD] text-[0.9em] border border-[#1D4ED8]/20 select-text"
                             {...props}
                           >
                             {children}
@@ -101,7 +101,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
                           href={href}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[#8CA2FF] hover:text-[#B0BFFF] underline select-text"
+                          className="text-[#93C5FD] hover:text-[#DBEAFE] underline select-text"
                         >
                           {children}
                         </a>
@@ -118,7 +118,7 @@ export function StreamingMessage({ content }: StreamingMessageProps) {
                     },
                     blockquote({ children }) {
                       return (
-                        <blockquote className="border-l-3 border-[#4C71FF]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg w-fit max-w-full select-text">
+                        <blockquote className="border-l-3 border-[#1D4ED8]/50 pl-3 my-2 text-white/60 italic bg-white/[0.02] py-1.5 pr-2 rounded-r-lg w-fit max-w-full select-text">
                           {children}
                         </blockquote>
                       );

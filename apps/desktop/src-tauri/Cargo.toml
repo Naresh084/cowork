@@ -1,8 +1,8 @@
 [package]
-name = "gemini-cowork"
+name = "cowork"
 version = "0.1.0"
 description = "AI-powered coding assistant desktop app"
-authors = ["Gemini Cowork"]
+authors = ["Cowork"]
 license = "MIT"
 repository = ""
 edition = "2021"

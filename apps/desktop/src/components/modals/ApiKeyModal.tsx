@@ -99,14 +99,14 @@ export function ApiKeyModal({ isOpen, onClose, errorMessage }: ApiKeyModalProps)
               htmlFor="api-key"
               className="block text-sm font-medium text-white/70 mb-2"
             >
-              Gemini API Key
+              API Key
             </label>
             <input
               id="api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your Gemini API key"
+              placeholder="Enter your API key"
               autoFocus
               className={cn(
                 'w-full px-4 py-3 rounded-xl',

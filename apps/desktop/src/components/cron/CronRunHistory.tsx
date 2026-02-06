@@ -86,7 +86,7 @@ function RunCard({ run }: { run: CronRun }) {
       )}
 
       {run.sessionId && run.sessionId !== 'main' && (
-        <button className="flex items-center gap-1 mt-2 text-xs text-[#8CA2FF] hover:underline">
+        <button className="flex items-center gap-1 mt-2 text-xs text-[#93C5FD] hover:underline">
           <ExternalLink className="w-3 h-3" />
           View Session
         </button>

@@ -284,7 +284,7 @@ export function CodeBlock({
         >
           {isLoading ? (
             <div className="p-3 flex items-center gap-2 text-white/40">
-              <div className="w-3 h-3 border-2 border-white/20 border-t-[#4C71FF] rounded-full animate-spin" />
+              <div className="w-3 h-3 border-2 border-white/20 border-t-[#1D4ED8] rounded-full animate-spin" />
               <span className="text-xs">Loading...</span>
             </div>
           ) : (
@@ -313,7 +313,7 @@ export function InlineCode({ children, className }: InlineCodeProps) {
     <code
       className={cn(
         'px-1.5 py-0.5 rounded-md',
-        'bg-white/[0.06] text-[#8CA2FF]',
+        'bg-white/[0.06] text-[#93C5FD]',
         'font-mono text-sm',
         className
       )}

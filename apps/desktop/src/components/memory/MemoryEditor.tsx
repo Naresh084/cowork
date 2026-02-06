@@ -38,7 +38,7 @@ const GROUP_ICONS: Record<MemoryGroup, React.ComponentType<{ className?: string 
 const GROUP_COLORS: Record<MemoryGroup, string> = {
   preferences: 'text-[#9B59B6]',
   learnings: 'text-[#F5C400]',
-  context: 'text-[#4C71FF]',
+  context: 'text-[#1D4ED8]',
   instructions: 'text-[#27AE60]',
 };
 
@@ -207,7 +207,7 @@ export function MemoryEditor({ isOpen, onClose, memory }: MemoryEditorProps) {
                     'w-full px-4 py-3 rounded-xl',
                     'bg-[#0D0D0F] border border-white/[0.06]',
                     'text-sm text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/40'
+                    'focus:outline-none focus:border-[#1D4ED8]/40'
                   )}
                 />
               </div>
@@ -257,7 +257,7 @@ export function MemoryEditor({ isOpen, onClose, memory }: MemoryEditorProps) {
                     'w-full px-4 py-3 rounded-xl',
                     'bg-[#0D0D0F] border border-white/[0.06]',
                     'text-sm text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/40',
+                    'focus:outline-none focus:border-[#1D4ED8]/40',
                     'resize-none'
                   )}
                 />
@@ -280,7 +280,7 @@ export function MemoryEditor({ isOpen, onClose, memory }: MemoryEditorProps) {
                     'w-full px-4 py-3 rounded-xl',
                     'bg-[#0D0D0F] border border-white/[0.06]',
                     'text-sm text-white/90 placeholder:text-white/30',
-                    'focus:outline-none focus:border-[#4C71FF]/40'
+                    'focus:outline-none focus:border-[#1D4ED8]/40'
                   )}
                 />
               </div>
@@ -305,10 +305,10 @@ export function MemoryEditor({ isOpen, onClose, memory }: MemoryEditorProps) {
                 disabled={isCreating}
                 className={cn(
                   'flex items-center gap-2 px-4 py-2 rounded-lg text-sm',
-                  'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF]',
+                  'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
                   'text-white font-medium',
-                  'shadow-lg shadow-[#4C71FF]/25',
-                  'hover:shadow-xl hover:shadow-[#4C71FF]/35',
+                  'shadow-lg shadow-[#1D4ED8]/25',
+                  'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
                   'transition-shadow duration-200',
                   isCreating && 'opacity-50 cursor-not-allowed'
                 )}

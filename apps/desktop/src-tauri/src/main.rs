@@ -22,10 +22,6 @@ fn main() {
             commands::auth::delete_api_key,
             commands::auth::validate_api_key,
             commands::auth::fetch_models,
-            // Keychain commands
-            commands::keychain::keychain_get,
-            commands::keychain::keychain_set,
-            commands::keychain::keychain_delete,
             // File commands
             commands::files::read_file,
             commands::files::write_file,

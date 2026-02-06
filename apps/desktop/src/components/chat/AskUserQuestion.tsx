@@ -89,17 +89,17 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
       transition={{ duration: 0.3 }}
       className={cn(
         'rounded-xl border overflow-hidden',
-        'bg-gradient-to-br from-[#4C71FF]/5 to-[#2B48BE]/5',
-        'border-[#4C71FF]/20'
+        'bg-gradient-to-br from-[#1D4ED8]/5 to-[#1E3A8A]/5',
+        'border-[#1D4ED8]/20'
       )}
     >
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 bg-[#4C71FF]/10 border-b border-[#4C71FF]/20">
-        <div className="p-1.5 rounded-lg bg-[#4C71FF]/20">
-          <HelpCircle className="w-4 h-4 text-[#8CA2FF]" />
+      <div className="flex items-center gap-2 px-4 py-3 bg-[#1D4ED8]/10 border-b border-[#1D4ED8]/20">
+        <div className="p-1.5 rounded-lg bg-[#1D4ED8]/20">
+          <HelpCircle className="w-4 h-4 text-[#93C5FD]" />
         </div>
         {question.header && (
-          <span className="px-2 py-0.5 rounded-full bg-[#4C71FF]/20 text-xs font-medium text-[#8CA2FF]">
+          <span className="px-2 py-0.5 rounded-full bg-[#1D4ED8]/20 text-xs font-medium text-[#93C5FD]">
             {question.header}
           </span>
         )}
@@ -128,7 +128,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
                 'text-left transition-all duration-200',
                 'border',
                 isSelected
-                  ? 'bg-[#4C71FF]/10 border-[#4C71FF]/40'
+                  ? 'bg-[#1D4ED8]/10 border-[#1D4ED8]/40'
                   : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.10]'
               )}
             >
@@ -139,7 +139,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
                   'border-2 transition-all duration-200',
                   question.multiSelect ? 'rounded' : 'rounded-full',
                   isSelected
-                    ? 'bg-[#4C71FF] border-[#4C71FF]'
+                    ? 'bg-[#1D4ED8] border-[#1D4ED8]'
                     : 'border-white/30'
                 )}
               >
@@ -165,7 +165,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
 
               {/* Arrow indicator */}
               {!question.multiSelect && isSelected && (
-                <ChevronRight className="w-4 h-4 text-[#8CA2FF] flex-shrink-0" />
+                <ChevronRight className="w-4 h-4 text-[#93C5FD] flex-shrink-0" />
               )}
             </button>
           );
@@ -181,7 +181,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
                 'text-left transition-all duration-200',
                 'border',
                 showCustomInput
-                  ? 'bg-[#4C71FF]/10 border-[#4C71FF]/40'
+                  ? 'bg-[#1D4ED8]/10 border-[#1D4ED8]/40'
                   : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.10]'
               )}
             >
@@ -191,7 +191,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
                   'border-2 transition-all duration-200',
                   question.multiSelect ? 'rounded' : 'rounded-full',
                   showCustomInput
-                    ? 'bg-[#4C71FF] border-[#4C71FF]'
+                    ? 'bg-[#1D4ED8] border-[#1D4ED8]'
                     : 'border-white/30'
                 )}
               >
@@ -231,7 +231,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
                       'w-full px-3 py-2 rounded-lg text-sm',
                       'bg-[#0D0D0F] border border-white/[0.08]',
                       'text-white/90 placeholder:text-white/30',
-                      'focus:outline-none focus:ring-2 focus:ring-[#4C71FF]/50 focus:border-[#4C71FF]',
+                      'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
                       'resize-none'
                     )}
                     autoFocus
@@ -252,7 +252,7 @@ export function AskUserQuestion({ question, onAnswer }: AskUserQuestionProps) {
             'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl',
             'text-sm font-medium transition-all duration-200',
             canSubmit
-              ? 'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF] text-white shadow-lg shadow-[#4C71FF]/25 hover:shadow-xl hover:shadow-[#4C71FF]/35'
+              ? 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
               : 'bg-white/[0.04] text-white/30 cursor-not-allowed'
           )}
         >

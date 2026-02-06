@@ -517,7 +517,7 @@ export function InputArea({
             className={cn(
               'rounded-[20px] overflow-visible',
               'bg-[#0F1014]/90 border border-white/[0.08] backdrop-blur',
-              'focus-within:border-[#4C71FF]/45',
+              'focus-within:border-[#1D4ED8]/45',
               'transition-colors duration-200 shadow-lg shadow-black/40'
             )}
           >
@@ -528,7 +528,7 @@ export function InputArea({
               value={message}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={hasMessages ? 'Reply...' : 'Ask Gemini anything... (type / for commands)'}
+              placeholder={hasMessages ? 'Reply...' : 'Ask Cowork anything... (type / for commands)'}
               disabled={isStreaming}
               rows={1}
               className={cn(
@@ -606,7 +606,7 @@ export function InputArea({
                       'p-2 rounded-full',
                       'transition-all duration-200',
                       message.trim() || attachments.length > 0
-                        ? 'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF] text-white shadow-lg shadow-[#4C71FF]/25 hover:shadow-xl hover:shadow-[#4C71FF]/35'
+                        ? 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
                         : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
                     )}
                     title="Send"
@@ -673,8 +673,8 @@ export function InputArea({
                         {/* Header */}
                         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.08]">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-[#4C71FF]/20 flex items-center justify-center">
-                              <Folder className="w-5 h-5 text-[#8CA2FF]" />
+                            <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/20 flex items-center justify-center">
+                              <Folder className="w-5 h-5 text-[#93C5FD]" />
                             </div>
                             <div>
                               <h3 className="text-base font-semibold text-white">Working Directory</h3>
@@ -700,7 +700,7 @@ export function InputArea({
                               'flex items-center gap-3 px-4 py-3 rounded-xl',
                               'bg-[#0D0D0F] border border-white/[0.06]'
                             )}>
-                              <FolderOpen className="w-5 h-5 text-[#4C71FF] flex-shrink-0" />
+                              <FolderOpen className="w-5 h-5 text-[#1D4ED8] flex-shrink-0" />
                               {workingDirectory ? (
                                 <span className="text-sm text-white/80 font-mono truncate">
                                   {workingDirectory}
@@ -734,10 +734,10 @@ export function InputArea({
                             onClick={handleSelectFolder}
                             className={cn(
                               'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl',
-                              'bg-gradient-to-r from-[#2B48BE] to-[#4C71FF]',
+                              'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
                               'text-white font-medium',
-                              'shadow-lg shadow-[#4C71FF]/25',
-                              'hover:shadow-xl hover:shadow-[#4C71FF]/35',
+                              'shadow-lg shadow-[#1D4ED8]/25',
+                              'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
                               'transition-shadow duration-200'
                             )}
                           >
@@ -747,8 +747,8 @@ export function InputArea({
 
                           {/* Security Note */}
                           <div className="mt-4 flex items-start gap-2 px-1">
-                            <div className="w-4 h-4 rounded-full bg-[#4C71FF]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <span className="text-[10px] text-[#8CA2FF]">i</span>
+                            <div className="w-4 h-4 rounded-full bg-[#1D4ED8]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <span className="text-[10px] text-[#93C5FD]">i</span>
                             </div>
                             <p className="text-xs text-white/40 leading-relaxed">
                               For security, only folders within your home directory (~) are accessible.
@@ -769,7 +769,7 @@ export function InputArea({
                     ? 'bg-[#FF5449]/15 border-[#FF5449]/30 text-[#FF5449]'
                     : approvalMode === 'read_only'
                       ? 'bg-[#F5C400]/15 border-[#F5C400]/30 text-[#F5C400]'
-                      : 'bg-[#4C71FF]/15 border-[#4C71FF]/30 text-[#8CA2FF]'
+                      : 'bg-[#1D4ED8]/15 border-[#1D4ED8]/30 text-[#93C5FD]'
                 )}
               >
                 {approvalMode === 'read_only' ? 'Read-only' : approvalMode === 'full' ? 'Full' : 'Auto'}
@@ -849,14 +849,14 @@ export function InputArea({
                                 'w-full flex flex-col items-start gap-1 px-3 py-2 rounded-lg text-sm',
                                 'transition-colors',
                                 selectedModel === model.id
-                                  ? 'bg-[#4C71FF]/20 text-[#8CA2FF]'
+                                  ? 'bg-[#1D4ED8]/20 text-[#93C5FD]'
                                   : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
                               )}
                             >
                               <div className="w-full flex items-center gap-2">
                                 <span className="flex-1 text-left">{model.name}</span>
                                 {selectedModel === model.id && (
-                                  <span className="w-2 h-2 rounded-full bg-[#4C71FF]" />
+                                  <span className="w-2 h-2 rounded-full bg-[#1D4ED8]" />
                                 )}
                               </div>
                               <div className="flex items-center gap-2 text-[11px] text-white/40">

@@ -71,7 +71,7 @@ function getAutomationUserDataDir(): string {
       ? process.env.LOCALAPPDATA || os.homedir()
       : path.join(os.homedir(), '.config');
 
-  return path.join(baseDir, 'GeminiCowork', 'ChromeAutomation');
+  return path.join(baseDir, 'Cowork', 'ChromeAutomation');
 }
 
 /**
@@ -371,7 +371,7 @@ function getSessionProfileDir(sessionId: string): string {
 
   // Use a sanitized session ID for the folder name
   const safeSessionId = sessionId.replace(/[^a-zA-Z0-9-_]/g, '_');
-  return path.join(baseDir, 'GeminiCowork', 'ChromeSessions', safeSessionId);
+  return path.join(baseDir, 'Cowork', 'ChromeSessions', safeSessionId);
 }
 
 /**

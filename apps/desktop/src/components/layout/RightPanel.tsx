@@ -108,7 +108,7 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
           'hover:bg-[#1A1B24] hover:border-white/[0.12]',
           'shadow-lg shadow-black/40',
           'transition-colors duration-200',
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4C71FF]/50'
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]/50'
         )}
         style={{ transform: 'translateY(-50%)' }}
         whileHover={{ scale: 1.05 }}
@@ -134,13 +134,13 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
             className={cn(
               'absolute left-0 top-0 bottom-0 w-1 z-20',
               'cursor-col-resize group',
-              isResizing && 'bg-[#4C71FF]'
+              isResizing && 'bg-[#1D4ED8]'
             )}
             onMouseDown={() => setIsResizing(true)}
           >
             <div className={cn(
               'absolute inset-y-0 -left-1 -right-1',
-              'group-hover:bg-[#4C71FF]/30',
+              'group-hover:bg-[#1D4ED8]/30',
               'transition-colors duration-150'
             )} />
           </motion.div>
@@ -263,7 +263,7 @@ function CollapsedSectionButton({
       className={cn(
         'relative p-2.5 rounded-xl transition-all duration-200',
         isActive
-          ? 'bg-[#4C71FF]/15 text-[#8CA2FF] shadow-[0_0_12px_rgba(76,113,255,0.15)]'
+          ? 'bg-[#1D4ED8]/15 text-[#93C5FD] shadow-[0_0_12px_rgba(76,113,255,0.15)]'
           : 'text-white/40 hover:text-white/70 hover:bg-white/[0.06]'
       )}
       title={title}
@@ -273,7 +273,7 @@ function CollapsedSectionButton({
         <motion.span
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
-          className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-[#4C71FF] text-white text-[10px] font-semibold flex items-center justify-center shadow-lg shadow-[#4C71FF]/30"
+          className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-[#1D4ED8] text-white text-[10px] font-semibold flex items-center justify-center shadow-lg shadow-[#1D4ED8]/30"
         >
           {badge > 99 ? '99+' : badge}
         </motion.span>

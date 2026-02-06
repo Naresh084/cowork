@@ -51,7 +51,7 @@ function ModelSettingField({
           'w-full px-3 py-2 rounded-lg text-sm',
           'bg-[#0B0C10] border border-white/[0.08]',
           'text-white/90 placeholder:text-white/30',
-          'focus:outline-none focus:border-[#4C71FF]/50',
+          'focus:outline-none focus:border-[#1D4ED8]/50',
           'font-mono'
         )}
       />
@@ -136,7 +136,7 @@ export function ModelSettingsModal({ isOpen, onClose }: ModelSettingsModalProps)
           <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-white/[0.06] flex items-center justify-center">
-                <Settings2 className="w-5 h-5 text-[#8CA2FF]" />
+                <Settings2 className="w-5 h-5 text-[#93C5FD]" />
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-white/90">Model Settings</h2>
@@ -185,9 +185,9 @@ export function ModelSettingsModal({ isOpen, onClose }: ModelSettingsModalProps)
             />
 
             {/* Info note */}
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-[#4C71FF]/10 border border-[#4C71FF]/20">
-              <Info className="w-4 h-4 text-[#8CA2FF] flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-[#8CA2FF]">
+            <div className="flex items-start gap-3 p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
+              <Info className="w-4 h-4 text-[#93C5FD] flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-[#93C5FD]">
                 Search, research, and video analysis tools automatically use your selected chat model.
                 Only the specialized capabilities above need separate model configuration.
               </p>
@@ -211,7 +211,7 @@ export function ModelSettingsModal({ isOpen, onClose }: ModelSettingsModalProps)
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-2 rounded-lg text-sm bg-[#4C71FF] text-white hover:bg-[#5B7FFF] transition-colors"
+                className="px-4 py-2 rounded-lg text-sm bg-[#1D4ED8] text-white hover:bg-[#3B82F6] transition-colors"
               >
                 Save changes
               </button>

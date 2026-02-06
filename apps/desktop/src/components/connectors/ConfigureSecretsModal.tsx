@@ -164,7 +164,7 @@ export function ConfigureSecretsModal({
               {/* Help text */}
               <div className="p-3 bg-zinc-800/50 rounded-lg border border-zinc-700">
                 <p className="text-xs text-zinc-400">
-                  Your credentials are securely stored in the system keychain and are
+                  Your credentials are securely stored in local encrypted storage and are
                   never transmitted except to authenticate with the service.
                 </p>
               </div>

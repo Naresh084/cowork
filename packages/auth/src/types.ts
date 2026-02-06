@@ -119,10 +119,10 @@ export const OAUTH_REDIRECT_URI = 'http://localhost:51121/oauth-callback';
 export const OAUTH_CALLBACK_PORT = 51121;
 
 export const STORAGE_KEYS = {
-  API_KEY: 'gemini_cowork_api_key',
-  ACCESS_TOKEN: 'gemini_cowork_access_token',
-  REFRESH_TOKEN: 'gemini_cowork_refresh_token',
-  TOKEN_EXPIRY: 'gemini_cowork_token_expiry',
-  USER_EMAIL: 'gemini_cowork_user_email',
-  AUTH_METHOD: 'gemini_cowork_auth_method',
+  API_KEY: 'cowork_api_key',
+  ACCESS_TOKEN: 'cowork_access_token',
+  REFRESH_TOKEN: 'cowork_refresh_token',
+  TOKEN_EXPIRY: 'cowork_token_expiry',
+  USER_EMAIL: 'cowork_user_email',
+  AUTH_METHOD: 'cowork_auth_method',
 } as const;

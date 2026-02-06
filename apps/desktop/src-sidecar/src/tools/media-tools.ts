@@ -19,10 +19,10 @@ function getExtension(mimeType?: string, fallback = 'bin'): string {
 
 /**
  * Get the generated media directory for a session.
- * Uses appDataDir if available, otherwise falls back to ~/.geminicowork
+ * Uses appDataDir if available, otherwise falls back to ~/.cowork
  */
 function getGeneratedDir(appDataDir: string | undefined, sessionId: string): string {
-  const baseDir = appDataDir || join(homedir(), '.geminicowork');
+  const baseDir = appDataDir || join(homedir(), '.cowork');
   return join(baseDir, 'sessions', sessionId, 'generated');
 }
 
@@ -33,7 +33,7 @@ async function saveGeneratedFile(
   mimeType: string | undefined,
   prefix: string
 ): Promise<string> {
-  // Store in ~/.geminicowork/sessions/<session-id>/generated/
+  // Store in ~/.cowork/sessions/<session-id>/generated/
   const dir = getGeneratedDir(appDataDir, sessionId);
   await mkdir(dir, { recursive: true });
   const ext = getExtension(mimeType);

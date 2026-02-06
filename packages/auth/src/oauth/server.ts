@@ -138,7 +138,7 @@ const SUCCESS_HTML = `<!DOCTYPE html>
         </svg>
       </div>
       <h1>All set!</h1>
-      <p>You've successfully signed in. You can now return to Gemini Cowork.</p>
+      <p>You've successfully signed in. You can now return to Cowork.</p>
       <button class="btn" onclick="window.close()">Close this tab</button>
       <div class="sub-text">If the button doesn't work, please close this tab manually.</div>
     </div>

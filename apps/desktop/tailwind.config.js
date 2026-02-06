@@ -30,26 +30,26 @@ export default {
         ring: 'rgb(var(--ring) / <alpha-value>)',
 
         // ==========================================================================
-        // PRIMARY - Refined Indigo (Material You tonal palette)
+        // PRIMARY - Cobalt Blue (Cowork brand palette)
         // ==========================================================================
         primary: {
           0: '#000000',
-          10: '#041033',
-          20: '#091F5C',
-          30: '#14318F',
-          40: '#2B48BE',      // Container
-          50: '#4C71FF',      // Main Primary
-          60: '#6B8AFF',      // Hover
-          70: '#8CA2FF',      // Light text
-          80: '#B0BFFF',      // On container
-          90: '#D6DFFF',
-          95: '#EBEFFF',
-          99: '#FAFBFF',
+          10: '#0B1220',
+          20: '#172554',
+          30: '#1E3A8A',
+          40: '#1E40AF',      // Container
+          50: '#1D4ED8',      // Main Primary
+          60: '#3B82F6',      // Hover
+          70: '#60A5FA',      // Light text
+          80: '#93C5FD',      // On container
+          90: '#DBEAFE',
+          95: '#EFF6FF',
+          99: '#F8FAFC',
           100: '#FFFFFF',
-          DEFAULT: '#4C71FF',
+          DEFAULT: '#1D4ED8',
           foreground: '#0D0D0F',
-          container: '#2B48BE',
-          'container-foreground': '#B0BFFF',
+          container: '#1E40AF',
+          'container-foreground': '#93C5FD',
         },
 
         // ==========================================================================
@@ -76,26 +76,26 @@ export default {
         },
 
         // ==========================================================================
-        // TERTIARY - Refined Teal
+        // TERTIARY - Indigo Accent
         // ==========================================================================
         tertiary: {
           0: '#000000',
-          10: '#002020',
-          20: '#003737',
-          30: '#004F50',
-          40: '#00696A',      // Container
-          50: '#008585',      // Main Tertiary
-          60: '#00A1A3',      // Hover
-          70: '#00BDBF',
-          80: '#00DBDD',      // On container
-          90: '#00F9FB',
-          95: '#ADFFFE',
-          99: '#F8FFFE',
+          10: '#1E1B4B',
+          20: '#312E81',
+          30: '#4338CA',
+          40: '#4F46E5',      // Container
+          50: '#6366F1',      // Main Tertiary
+          60: '#818CF8',      // Hover
+          70: '#A5B4FC',
+          80: '#C7D2FE',      // On container
+          90: '#E0E7FF',
+          95: '#EEF2FF',
+          99: '#F8FAFC',
           100: '#FFFFFF',
-          DEFAULT: '#008585',
+          DEFAULT: '#6366F1',
           foreground: '#FFFFFF',
-          container: '#00696A',
-          'container-foreground': '#00DBDD',
+          container: '#4F46E5',
+          'container-foreground': '#C7D2FE',
         },
 
         // ==========================================================================

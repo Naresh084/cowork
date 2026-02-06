@@ -268,13 +268,13 @@ function ToolList({
                 'flex-1 px-3 py-1.5 rounded-lg text-sm font-mono',
                 'bg-white/[0.04] border border-white/[0.08]',
                 'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#4C71FF]/50'
+                'focus:outline-none focus:border-[#1D4ED8]/50'
               )}
             />
             <button
               onClick={handleAdd}
               disabled={!newTool.trim()}
-              className="p-1.5 rounded-lg bg-[#4C71FF] text-white disabled:opacity-50"
+              className="p-1.5 rounded-lg bg-[#1D4ED8] text-white disabled:opacity-50"
             >
               <Check className="w-4 h-4" />
             </button>
@@ -394,7 +394,7 @@ function RulesList({
                   'px-3 py-1.5 rounded-lg text-sm',
                   'bg-white/[0.04] border border-white/[0.08]',
                   'text-white/90',
-                  'focus:outline-none focus:border-[#4C71FF]/50'
+                  'focus:outline-none focus:border-[#1D4ED8]/50'
                 )}
               >
                 <option value="allow">Allow</option>
@@ -410,7 +410,7 @@ function RulesList({
                   'flex-1 px-3 py-1.5 rounded-lg text-sm font-mono',
                   'bg-white/[0.04] border border-white/[0.08]',
                   'text-white/90 placeholder:text-white/30',
-                  'focus:outline-none focus:border-[#4C71FF]/50'
+                  'focus:outline-none focus:border-[#1D4ED8]/50'
                 )}
               />
             </div>
@@ -427,7 +427,7 @@ function RulesList({
               <button
                 onClick={handleAdd}
                 disabled={!newRule.tool.trim()}
-                className="px-3 py-1 rounded-lg text-sm bg-[#4C71FF] text-white disabled:opacity-50"
+                className="px-3 py-1 rounded-lg text-sm bg-[#1D4ED8] text-white disabled:opacity-50"
               >
                 Add Rule
               </button>
@@ -522,8 +522,8 @@ export function ToolPolicyModal({ isOpen, onClose }: ToolPolicyModalProps) {
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#4C71FF]/20 flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-[#8CA2FF]" />
+                <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/20 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-[#93C5FD]" />
                 </div>
                 <div>
                   <h2 className="text-lg font-semibold text-white/90">Tool Policy</h2>
@@ -596,9 +596,9 @@ export function ToolPolicyModal({ isOpen, onClose }: ToolPolicyModalProps) {
               />
 
               {/* Info Note */}
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-[#4C71FF]/10 border border-[#4C71FF]/20">
-                <Info className="w-4 h-4 text-[#8CA2FF] flex-shrink-0 mt-0.5" />
-                <div className="text-xs text-[#8CA2FF] space-y-1">
+              <div className="flex items-start gap-3 p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
+                <Info className="w-4 h-4 text-[#93C5FD] flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-[#93C5FD] space-y-1">
                   <p>
                     <strong>Evaluation order:</strong> Global Deny → Global Allow → Custom Rules → Profile Defaults
                   </p>
@@ -621,7 +621,7 @@ export function ToolPolicyModal({ isOpen, onClose }: ToolPolicyModalProps) {
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg text-sm bg-[#4C71FF] text-white hover:bg-[#5B7FFF] transition-colors"
+                className="px-4 py-2 rounded-lg text-sm bg-[#1D4ED8] text-white hover:bg-[#3B82F6] transition-colors"
               >
                 Done
               </button>

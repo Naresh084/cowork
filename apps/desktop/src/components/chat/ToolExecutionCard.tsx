@@ -100,7 +100,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
       className={cn(
         'rounded-xl border overflow-hidden transition-all duration-200 max-w-full',
         execution.status === 'running'
-          ? 'bg-[#101421] border-[#4C71FF]/30'
+          ? 'bg-[#101421] border-[#1D4ED8]/30'
           : execution.status === 'error'
             ? 'bg-[#2A1414] border-[#FF5449]/30'
             : execution.status === 'success'
@@ -122,7 +122,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
           className={cn(
             'p-2 rounded-lg flex-shrink-0',
             execution.status === 'running'
-              ? 'bg-[#4C71FF]/20'
+              ? 'bg-[#1D4ED8]/20'
               : execution.status === 'error'
                 ? 'bg-[#FF5449]/20'
                 : execution.status === 'success'
@@ -178,8 +178,8 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
 
       {pendingPermission && (
         <div className="px-3 pb-2">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1A1F2B] border border-[#4C71FF]/25 text-xs text-white/70">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#8CA2FF]" />
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1A1F2B] border border-[#1D4ED8]/25 text-xs text-white/70">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#93C5FD]" />
             Waiting for approval to continue.
           </div>
         </div>
@@ -382,7 +382,7 @@ function StatusBadge({ status }: { status: ToolExecution['status'] }) {
 function getStatusConfig(status: ToolExecution['status']) {
   switch (status) {
     case 'running':
-      return { color: 'text-[#8CA2FF]', bgColor: 'bg-[#4C71FF]/10', label: 'Running' };
+      return { color: 'text-[#93C5FD]', bgColor: 'bg-[#1D4ED8]/10', label: 'Running' };
     case 'success':
       return { color: 'text-[#50956A]', bgColor: 'bg-[#50956A]/10', label: 'Success' };
     case 'error':
@@ -1040,7 +1040,7 @@ function renderA2uiPreview(
             timestamp: Date.now(),
           })
         }
-        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#4C71FF]/20 text-[#8CA2FF] hover:bg-[#4C71FF]/30 transition-colors"
+        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1D4ED8]/20 text-[#93C5FD] hover:bg-[#1D4ED8]/30 transition-colors"
       >
         <Eye className="w-4 h-4" />
         Open UI Preview

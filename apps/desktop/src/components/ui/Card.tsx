@@ -44,7 +44,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
           variantStyles[variant],
           paddingStyles[padding],
           hoverable && 'hover:bg-[#222228] hover:border-white/[0.10] cursor-pointer',
-          selected && 'border-[#4C71FF]/50 bg-[#4C71FF]/10',
+          selected && 'border-[#1D4ED8]/50 bg-[#1D4ED8]/10',
           className
         )}
         {...props}

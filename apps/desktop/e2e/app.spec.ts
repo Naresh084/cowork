@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Gemini Cowork App', () => {
+test.describe('Cowork App', () => {
   test('should load the application', async ({ page }) => {
     await page.goto('/');
 

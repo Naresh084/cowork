@@ -4,7 +4,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import type { PlatformType, PlatformConfig } from '@gemini-cowork/shared';
 
-const CONFIG_DIR = join(homedir(), '.geminicowork', 'integrations');
+const CONFIG_DIR = join(homedir(), '.cowork', 'integrations');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 interface IntegrationStoreData {

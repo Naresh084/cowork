@@ -326,7 +326,7 @@ export async function createAuthManager(
   let storage = options.storage;
 
   if (!storage) {
-    const { createSecureStorage } = await import('./storage/keychain.js');
+    const { createSecureStorage } = await import('./storage/secure-storage.js');
     storage = await createSecureStorage();
   }
 

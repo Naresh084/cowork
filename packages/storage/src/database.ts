@@ -7,7 +7,7 @@ import { mkdirSync, existsSync } from 'fs';
 // Database Configuration
 // ============================================================================
 
-const APP_DIR = '.gemini-cowork';
+const APP_DIR = '.cowork';
 const DB_FILE = 'data.db';
 
 export interface DatabaseOptions {
