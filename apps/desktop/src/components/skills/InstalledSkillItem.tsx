@@ -1,4 +1,4 @@
-import { Trash2, Check, X, AlertTriangle } from 'lucide-react';
+import { Trash2, Check, X, AlertTriangle, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SkillManifest, SkillEligibility } from '@gemini-cowork/shared';
 
@@ -22,6 +22,7 @@ export function InstalledSkillItem({
   const emoji = skill.frontmatter.metadata?.emoji || '📦';
   const name = skill.frontmatter.name;
   const isEligible = !eligibility || eligibility.eligible;
+  const isPlatform = skill.source.type === 'platform';
 
   const getStatusBadge = () => {
     if (!isEligible) {
@@ -60,6 +61,12 @@ export function InstalledSkillItem({
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <span className="text-xl">{emoji}</span>
         <span className="font-medium text-zinc-100 truncate">{name}</span>
+        {isPlatform && (
+          <span className="flex items-center gap-1 text-[10px] text-violet-400 bg-violet-950/50 px-1.5 py-0.5 rounded-full flex-shrink-0">
+            <FolderOpen className="w-2.5 h-2.5" />
+            Platform
+          </span>
+        )}
       </div>
 
       {/* Status */}
@@ -86,7 +93,9 @@ export function InstalledSkillItem({
           }}
           className={cn(
             'w-10 h-5 rounded-full relative transition-colors',
-            isEnabled ? 'bg-blue-600' : 'bg-zinc-700'
+            isEnabled
+              ? isPlatform ? 'bg-violet-600' : 'bg-blue-600'
+              : 'bg-zinc-700'
           )}
         >
           <span
@@ -97,17 +106,19 @@ export function InstalledSkillItem({
           />
         </button>
 
-        {/* Uninstall */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onUninstall();
-          }}
-          className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
-          title="Uninstall"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        {/* Uninstall - hidden for platform skills (read-only) */}
+        {!isPlatform && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onUninstall();
+            }}
+            className="p-1.5 rounded-md text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+            title="Uninstall"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -272,6 +272,68 @@ export function useAgentEvents(sessionId: string | null): void {
         return;
       }
 
+      // Integration events are emitted without a sessionId; handle them before
+      // per-session guards so status/QR updates are not dropped.
+      if (event.type === 'integration:status') {
+        const statusEvent = event as unknown as {
+          platform: string;
+          connected: boolean;
+          displayName?: string;
+          error?: string;
+          connectedAt?: number;
+          lastMessageAt?: number;
+        };
+        useIntegrationStore.getState().updatePlatformStatus({
+          platform: statusEvent.platform as 'whatsapp' | 'slack' | 'telegram',
+          connected: statusEvent.connected,
+          displayName: statusEvent.displayName,
+          error: statusEvent.error,
+          connectedAt: statusEvent.connectedAt,
+          lastMessageAt: statusEvent.lastMessageAt,
+        });
+        return;
+      }
+
+      if (event.type === 'integration:qr') {
+        const qrEvent = event as unknown as { qrDataUrl: string };
+        useIntegrationStore.getState().setQRCode(qrEvent.qrDataUrl);
+        return;
+      }
+
+      if (event.type === 'integration:message_in') {
+        const msgEvent = event as unknown as { platform: string; sender: string; content: string };
+        const platformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+        toast.info(
+          `${platformNames[msgEvent.platform] || msgEvent.platform}`,
+          `${msgEvent.sender}: ${msgEvent.content}`,
+          5000
+        );
+        return;
+      }
+
+      if (event.type === 'integration:message_out') {
+        const outEvent = event as unknown as { platform: string; timestamp: number };
+        const currentStatus = useIntegrationStore.getState().platforms[outEvent.platform as 'whatsapp' | 'slack' | 'telegram'];
+        if (currentStatus) {
+          useIntegrationStore.getState().updatePlatformStatus({
+            ...currentStatus,
+            lastMessageAt: outEvent.timestamp || Date.now(),
+          });
+        }
+        return;
+      }
+
+      if (event.type === 'integration:queued') {
+        const queuedEvent = event as unknown as { platform: string; queueSize: number };
+        const queuePlatformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+        toast.info(
+          `${queuePlatformNames[queuedEvent.platform] || queuedEvent.platform}`,
+          `Message queued (${queuedEvent.queueSize} waiting)`,
+          3000
+        );
+        return;
+      }
+
       if (!eventSessionId) return;
       chat.ensureSession(eventSessionId);
       agent.ensureSession(eventSessionId);
@@ -602,67 +664,6 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
         }
 
-        // Integration events
-        case 'integration:status': {
-          const statusEvent = event as unknown as {
-            platform: string;
-            connected: boolean;
-            displayName?: string;
-            error?: string;
-            connectedAt?: number;
-            lastMessageAt?: number;
-          };
-          useIntegrationStore.getState().updatePlatformStatus({
-            platform: statusEvent.platform as 'whatsapp' | 'slack' | 'telegram',
-            connected: statusEvent.connected,
-            displayName: statusEvent.displayName,
-            error: statusEvent.error,
-            connectedAt: statusEvent.connectedAt,
-            lastMessageAt: statusEvent.lastMessageAt,
-          });
-          break;
-        }
-
-        case 'integration:qr': {
-          const qrEvent = event as unknown as { qrDataUrl: string };
-          useIntegrationStore.getState().setQRCode(qrEvent.qrDataUrl);
-          break;
-        }
-
-        case 'integration:message_in': {
-          const msgEvent = event as unknown as { platform: string; sender: string; content: string };
-          const platformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
-          toast.info(
-            `${platformNames[msgEvent.platform] || msgEvent.platform}`,
-            `${msgEvent.sender}: ${msgEvent.content}`,
-            5000
-          );
-          break;
-        }
-
-        case 'integration:message_out': {
-          // Update last message timestamp on the platform
-          const outEvent = event as unknown as { platform: string; timestamp: number };
-          const currentStatus = useIntegrationStore.getState().platforms[outEvent.platform as 'whatsapp' | 'slack' | 'telegram'];
-          if (currentStatus) {
-            useIntegrationStore.getState().updatePlatformStatus({
-              ...currentStatus,
-              lastMessageAt: outEvent.timestamp || Date.now(),
-            });
-          }
-          break;
-        }
-
-        case 'integration:queued': {
-          const queuedEvent = event as unknown as { platform: string; queueSize: number };
-          const queuePlatformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
-          toast.info(
-            `${queuePlatformNames[queuedEvent.platform] || queuedEvent.platform}`,
-            `Message queued (${queuedEvent.queueSize} waiting)`,
-            3000
-          );
-          break;
-        }
       }
       } catch (error) {
         console.error('[useAgentEvents] Event handler error:', error);

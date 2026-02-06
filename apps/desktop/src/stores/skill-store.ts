@@ -132,15 +132,33 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
 
         // Sync installed configs with actual managed skills
         // Remove stale configs that don't have corresponding managed skills
+        // (but never remove platform configs - they are managed by discovery)
         const managedSkillNames = new Set(
           skills
             .filter((s) => s.source.type === 'managed')
             .map((s) => s.frontmatter.name)
         );
-        const { installedSkillConfigs, removeInstalledSkillConfig } = useSettingsStore.getState();
+        const { installedSkillConfigs, removeInstalledSkillConfig, addInstalledSkillConfig } = useSettingsStore.getState();
         for (const config of installedSkillConfigs) {
+          // Skip platform configs - they persist as long as the platform dir exists
+          if (config.source === 'platform') continue;
           if (!managedSkillNames.has(config.name)) {
             removeInstalledSkillConfig(config.id);
+          }
+        }
+
+        // Auto-create disabled configs for newly discovered platform skills
+        const existingConfigNames = new Set(installedSkillConfigs.map((c) => c.name));
+        const platformSkills = skills.filter((s) => s.source.type === 'platform');
+        for (const skill of platformSkills) {
+          if (!existingConfigNames.has(skill.frontmatter.name)) {
+            addInstalledSkillConfig({
+              id: skill.id,
+              name: skill.frontmatter.name,
+              enabled: false,
+              installedAt: Date.now(),
+              source: 'platform',
+            });
           }
         }
 
@@ -359,10 +377,19 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
       const skill = availableSkills.find((s) => s.id === skillId);
       if (!skill) return;
 
-      const { installedSkillConfigs } = useSettingsStore.getState();
+      const { installedSkillConfigs, addInstalledSkillConfig, updateInstalledSkillConfig } = useSettingsStore.getState();
       const config = installedSkillConfigs.find((c) => c.name === skill.frontmatter.name);
       if (config) {
-        useSettingsStore.getState().updateInstalledSkillConfig(config.id, { enabled: true });
+        updateInstalledSkillConfig(config.id, { enabled: true });
+      } else if (skill.source.type === 'platform') {
+        // Auto-create config for platform skill on enable
+        addInstalledSkillConfig({
+          id: skill.id,
+          name: skill.frontmatter.name,
+          enabled: true,
+          installedAt: Date.now(),
+          source: 'platform',
+        });
       }
     },
 
@@ -406,22 +433,29 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
       const { availableSkills, searchQuery, selectedCategory, activeTab, eligibilityMap } = get();
       const { installedSkillConfigs, skillsSettings } = useSettingsStore.getState();
       const installedNames = new Set(installedSkillConfigs.map((c) => c.name));
+      const enabledPlatformNames = new Set(
+        installedSkillConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
+      );
 
       let skills = availableSkills;
 
       // Filter by tab
       if (activeTab === 'available') {
-        // Show bundled skills that don't have a managed version (not installed)
-        // Also show bundled skills even if installed, so user can see them
+        // Show bundled + platform skills (not managed)
+        // Platform skills that are disabled show here for enabling
         skills = skills.filter((s) => {
-          if (s.source.type === 'managed') return false; // Don't show managed on available tab
-          return true; // Show all bundled skills
+          if (s.source.type === 'managed') return false;
+          // Hide enabled platform skills from available (they show in installed)
+          if (s.source.type === 'platform' && enabledPlatformNames.has(s.frontmatter.name)) return false;
+          return true;
         });
       } else if (activeTab === 'installed') {
-        // Show only managed skills that are in installed configs
-        skills = skills.filter(
-          (s) => s.source.type === 'managed' && installedNames.has(s.frontmatter.name)
-        );
+        // Show managed skills + enabled platform skills
+        skills = skills.filter((s) => {
+          if (s.source.type === 'managed' && installedNames.has(s.frontmatter.name)) return true;
+          if (s.source.type === 'platform' && enabledPlatformNames.has(s.frontmatter.name)) return true;
+          return false;
+        });
       }
 
       // Filter by search query
@@ -457,41 +491,62 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
       const { availableSkills } = get();
       const { installedSkillConfigs } = useSettingsStore.getState();
       const installedNames = new Set(installedSkillConfigs.map((c) => c.name));
-
-      // Return managed skills that are in the installed configs
-      // Prefer managed version over bundled
-      return availableSkills.filter(
-        (s) => s.source.type === 'managed' && installedNames.has(s.frontmatter.name)
+      const enabledPlatformNames = new Set(
+        installedSkillConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
       );
+
+      // Return managed skills + enabled platform skills
+      return availableSkills.filter((s) => {
+        if (s.source.type === 'managed' && installedNames.has(s.frontmatter.name)) return true;
+        if (s.source.type === 'platform' && enabledPlatformNames.has(s.frontmatter.name)) return true;
+        return false;
+      });
     },
 
     getInstalledCount: () => {
-      // Count based on actual managed skills, not just configs
       const { availableSkills } = get();
-      return availableSkills.filter((s) => s.source.type === 'managed').length;
+      const { installedSkillConfigs } = useSettingsStore.getState();
+      const enabledPlatformNames = new Set(
+        installedSkillConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
+      );
+
+      // Count managed skills + enabled platform skills
+      return availableSkills.filter((s) => {
+        if (s.source.type === 'managed') return true;
+        if (s.source.type === 'platform' && enabledPlatformNames.has(s.frontmatter.name)) return true;
+        return false;
+      }).length;
     },
 
     getEnabledCount: () => {
       const { availableSkills } = get();
       const { installedSkillConfigs } = useSettingsStore.getState();
 
-      // Count managed skills that are enabled in configs
+      // Count managed + platform skills that are enabled in configs
       const enabledNames = new Set(
         installedSkillConfigs.filter((c) => c.enabled).map((c) => c.name)
       );
-      return availableSkills.filter(
-        (s) => s.source.type === 'managed' && enabledNames.has(s.frontmatter.name)
-      ).length;
+      return availableSkills.filter((s) => {
+        if (s.source.type === 'managed' && enabledNames.has(s.frontmatter.name)) return true;
+        if (s.source.type === 'platform' && enabledNames.has(s.frontmatter.name)) return true;
+        return false;
+      }).length;
     },
 
     isSkillInstalled: (skillId) => {
       const { availableSkills } = get();
+      const { installedSkillConfigs } = useSettingsStore.getState();
 
       const skill = availableSkills.find((s) => s.id === skillId);
       if (!skill) return false;
 
-      // A skill is installed if a managed version exists on disk
-      // (configs alone are not reliable - they may be stale)
+      // Platform skills are "installed" when their config is enabled
+      if (skill.source.type === 'platform') {
+        const config = installedSkillConfigs.find((c) => c.name === skill.frontmatter.name);
+        return config?.enabled ?? false;
+      }
+
+      // A managed skill is installed if it exists on disk
       const managedSkillExists = availableSkills.some(
         (s) => s.source.type === 'managed' && s.frontmatter.name === skill.frontmatter.name
       );

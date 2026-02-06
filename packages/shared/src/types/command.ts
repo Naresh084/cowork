@@ -60,6 +60,7 @@ export type CommandFrontmatter = z.infer<typeof CommandFrontmatterSchema>;
 export const CommandSourceTypeSchema = z.enum([
   'bundled',   // Shipped with app
   'managed',   // Installed from marketplace / custom
+  'platform',  // Discovered from .agent/ or .claude/ directories
 ]);
 
 export type CommandSourceType = z.infer<typeof CommandSourceTypeSchema>;
@@ -101,6 +102,7 @@ export type CommandManifest = z.infer<typeof CommandManifestSchema>;
 export const InstalledCommandConfigSchema = z.object({
   id: z.string(),
   name: z.string(),
+  enabled: z.boolean().default(true),
   installedAt: z.number(),
   source: CommandSourceTypeSchema,
 });

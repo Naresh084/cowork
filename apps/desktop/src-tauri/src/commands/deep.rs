@@ -334,11 +334,14 @@ pub struct CreateCommandInput {
 pub async fn deep_command_list(
     app: AppHandle,
     state: State<'_, AgentState>,
+    working_directory: Option<String>,
 ) -> Result<Vec<CommandManifest>, String> {
     ensure_sidecar_started(&app, &state).await?;
 
     let manager = &state.manager;
-    let params = serde_json::json!({});
+    let params = serde_json::json!({
+        "workingDirectory": working_directory,
+    });
 
     let result = manager.send_command("discover_commands", params).await?;
     // Handler returns { commands: [...] }

@@ -6,7 +6,6 @@ import { InputArea } from './InputArea';
 import { DropZone } from './AttachmentPreview';
 import { useChatStore, type Attachment } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
-import { useAgentEvents } from '../../hooks/useAgentEvents';
 import { useSettingsStore } from '../../stores/settings-store';
 import { toast } from '../ui/Toast';
 
@@ -26,9 +25,6 @@ export function ChatView() {
   });
   const messages = sessionState?.messages ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
-
-  // Subscribe to agent events
-  useAgentEvents(activeSessionId);
 
   // Reset chat and load messages when session changes
   // Use a ref to track the current session and abort stale loads

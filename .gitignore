@@ -44,6 +44,8 @@ coverage/
 # Cache
 .cache/
 *.tsbuildinfo
+**/.wwebjs_cache/
+**/.wwebjs_auth/
 
 # OS files
 Thumbs.db

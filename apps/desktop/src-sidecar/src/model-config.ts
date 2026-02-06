@@ -18,7 +18,7 @@ const DEFAULT_MODELS = {
   IMAGE_EDITING_MODEL: 'imagen-3.0-capability-001',
 
   // Video generation and analysis
-  VIDEO_GENERATION_MODEL: 'veo-2.0-generate-001',
+  VIDEO_GENERATION_MODEL: 'veo-3.1-generate-preview',
   VIDEO_ANALYSIS_MODEL: 'gemini-2.5-pro',
 
   // Computer use / browser automation

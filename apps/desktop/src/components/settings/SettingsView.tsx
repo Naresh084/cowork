@@ -39,7 +39,14 @@ export function SettingsView() {
 
   // Refresh platform statuses from sidecar when settings screen opens
   useEffect(() => {
-    useIntegrationStore.getState().refreshStatuses();
+    const store = useIntegrationStore.getState();
+    store.refreshStatuses();
+
+    const interval = setInterval(() => {
+      void useIntegrationStore.getState().refreshStatuses();
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const ActiveContent = tabContent[activeTab];

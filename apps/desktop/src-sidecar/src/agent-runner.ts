@@ -132,7 +132,7 @@ interface SpecializedModels {
 
 const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
   imageGeneration: 'imagen-4.0-generate-001',
-  videoGeneration: 'veo-2.0-generate-001',
+  videoGeneration: 'veo-3.1-generate-preview',
   computerUse: 'gemini-2.5-computer-use-preview-10-2025',
 };
 

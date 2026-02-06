@@ -2,6 +2,7 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import type WAWebJS from 'whatsapp-web.js';
 import QRCode from 'qrcode';
+import { rm } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { BaseAdapter } from './base-adapter.js';
@@ -32,27 +33,44 @@ export class WhatsAppAdapter extends BaseAdapter {
       await this.disconnect();
     }
 
-    this.client = new Client({
-      authStrategy: new LocalAuth({
-        dataPath: this.sessionDataDir,
-      }),
-      puppeteer: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      },
-    });
-
+    this.client = this.createClient();
     this.registerEvents(this.client);
 
-    await this.client.initialize();
+    try {
+      await this.client.initialize();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const isProfileLockError =
+        message.includes('already running for') || message.includes('userDataDir');
+
+      if (!isProfileLockError) {
+        throw err;
+      }
+
+      // Try one recovery path for stale Chromium singleton lock files.
+      await this.cleanupStaleProfileLocks();
+      await this.destroyClient(this.client);
+
+      this.client = this.createClient();
+      this.registerEvents(this.client);
+
+      try {
+        await this.client.initialize();
+      } catch (retryErr) {
+        const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        throw new Error(
+          `WhatsApp session is locked by another browser process. ${retryMessage}`
+        );
+      }
+    }
   }
 
   async disconnect(): Promise<void> {
     if (!this.client) return;
 
     try {
-      this.client.removeAllListeners();
-      await this.client.destroy();
+      await this.destroyClient(this.client);
+      await this.cleanupStaleProfileLocks();
     } catch {
       // Client may already be disconnected
     } finally {
@@ -143,5 +161,69 @@ export class WhatsAppAdapter extends BaseAdapter {
       this.setConnected(false);
       this.emit('error', new Error(`WhatsApp auth failed: ${message}`));
     });
+  }
+
+  private createClient(): WAWebJS.Client {
+    return new Client({
+      authStrategy: new LocalAuth({
+        dataPath: this.sessionDataDir,
+      }),
+      puppeteer: {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      },
+    });
+  }
+
+  private async destroyClient(client: WAWebJS.Client | null): Promise<void> {
+    if (!client) return;
+
+    const browser = (client as WAWebJS.Client & {
+      pupBrowser?: {
+        close?: () => Promise<void>;
+        process?: () => { killed?: boolean; kill: (signal?: NodeJS.Signals) => boolean } | null;
+      };
+    }).pupBrowser;
+
+    try {
+      client.removeAllListeners();
+    } catch {
+      // best-effort cleanup
+    }
+
+    try {
+      await client.destroy();
+    } catch {
+      // best-effort cleanup
+    }
+
+    try {
+      await browser?.close?.();
+    } catch {
+      // best-effort cleanup
+    }
+
+    try {
+      const proc = browser?.process?.();
+      if (proc && !proc.killed) {
+        proc.kill('SIGKILL');
+      }
+    } catch {
+      // best-effort cleanup
+    }
+  }
+
+  private async cleanupStaleProfileLocks(): Promise<void> {
+    const profileDir = join(this.sessionDataDir, 'session');
+    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    await Promise.all(
+      lockFiles.map(async (file) => {
+        try {
+          await rm(join(profileDir, file), { force: true });
+        } catch {
+          // ignore cleanup failures, retry path is best-effort
+        }
+      })
+    );
   }
 }

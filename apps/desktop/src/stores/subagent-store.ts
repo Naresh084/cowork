@@ -22,7 +22,7 @@ export type SubagentCategory = 'research' | 'development' | 'analysis' | 'produc
 /**
  * Subagent source
  */
-export type SubagentSource = 'built-in' | 'custom';
+export type SubagentSource = 'built-in' | 'custom' | 'platform';
 
 /**
  * Subagent definition
@@ -216,6 +216,13 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
     },
 
     uninstallSubagent: async (name, workingDirectory) => {
+      // Platform subagents cannot be uninstalled (they live in external folders)
+      const sub = get().subagents.find((s) => s.name === name);
+      if (sub?.source === 'platform') {
+        set({ error: 'Platform subagents cannot be uninstalled. Disable them instead.' });
+        return;
+      }
+
       set((state) => ({
         isInstalling: new Set([...state.isInstalling, name]),
         error: null,

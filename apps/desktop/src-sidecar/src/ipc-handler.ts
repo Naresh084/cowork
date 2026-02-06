@@ -516,8 +516,9 @@ registerHandler('create_skill', async (params) => {
 // ============================================================================
 
 // Discover all commands from all sources
-registerHandler('discover_commands', async () => {
-  const commands = await commandService.discoverAll();
+registerHandler('discover_commands', async (params) => {
+  const p = params as { workingDirectory?: string };
+  const commands = await commandService.discoverAll(p.workingDirectory);
   return { commands };
 });
 
