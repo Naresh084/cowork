@@ -251,15 +251,18 @@ Use this when the user wants to:
 - Create reminders for future times
 - Automate repetitive work (code review, backups, monitoring)
 - Schedule one-time future tasks
+- Run something N times then auto-stop (use maxRuns)
 
 The scheduled task runs in an isolated session with fresh context.
+IMPORTANT: Always create ONE task with the right schedule type. NEVER create multiple tasks for a repeating request.
+If the user says "do X every Y minutes for N times", use schedule type "interval" with maxRuns set to N.
 
-Examples of schedule formats:
-- Once: { type: "once", datetime: "tomorrow at 9am" } or { type: "once", datetime: "2026-02-10T15:00:00" }
-- Daily: { type: "daily", time: "09:00", timezone: "America/Los_Angeles" }
-- Weekly: { type: "weekly", dayOfWeek: "monday", time: "09:00" }
-- Interval: { type: "interval", every: 30 } (every 30 minutes)
-- Cron: { type: "cron", expression: "0 9 * * MON-FRI" }`,
+Schedule types:
+- once: { type: "once", datetime: "tomorrow at 9am" } or { type: "once", datetime: "in 30 minutes" }
+- daily: { type: "daily", time: "09:00", timezone: "America/Los_Angeles" }
+- weekly: { type: "weekly", dayOfWeek: "monday", time: "09:00" }
+- interval: { type: "interval", every: 30 } (every 30 minutes, combine with maxRuns to limit)
+- cron: { type: "cron", expression: "0 9 * * MON-FRI" }`,
 
     parameters: z.object({
       name: z.string().describe('Short name for the task, e.g., "Daily Code Review"'),
@@ -281,6 +284,12 @@ Examples of schedule formats:
         .string()
         .optional()
         .describe('Working directory for the task. Defaults to current session directory.'),
+      maxRuns: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('Maximum number of times to run. Task auto-stops after this many runs. E.g., set to 5 to run 5 times then stop.'),
     }),
 
     execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
@@ -289,9 +298,10 @@ Examples of schedule formats:
         prompt: string;
         schedule: UserSchedule;
         workingDirectory?: string;
+        maxRuns?: number;
       };
 
-      const { name, prompt, schedule, workingDirectory } = parsed;
+      const { name, prompt, schedule, workingDirectory, maxRuns } = parsed;
 
       try {
         // Convert user schedule to internal format
@@ -305,6 +315,7 @@ Examples of schedule formats:
           workingDirectory: workingDirectory || context.workingDirectory,
           sessionTarget: 'isolated',
           wakeMode: 'now',
+          maxRuns,
         });
 
         return {
@@ -313,9 +324,10 @@ Examples of schedule formats:
             jobId: job.id,
             name: job.name,
             schedule: formatSchedule(job.schedule),
+            maxRuns: job.maxRuns ?? 'unlimited',
             nextRunAt: job.nextRunAt,
             nextRunFormatted: formatNextRun(job.nextRunAt),
-            message: `Scheduled task "${name}" created successfully. Next run: ${formatNextRun(job.nextRunAt)}`,
+            message: `Scheduled task "${name}" created successfully.${job.maxRuns ? ` Will run ${job.maxRuns} time${job.maxRuns > 1 ? 's' : ''} then auto-stop.` : ''} Next run: ${formatNextRun(job.nextRunAt)}`,
           },
         };
       } catch (error) {

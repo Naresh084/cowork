@@ -27,7 +27,7 @@ import { existsSync } from 'fs';
 import { join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
-import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools } from './tools/index.js';
+import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools } from './tools/index.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
@@ -2414,83 +2414,144 @@ execute({ command: "git status" })
 
 ## Scheduled Tasks with schedule_task
 
-You can create automated recurring tasks that run in the background. Use the \`schedule_task\` tool when appropriate.
+You can create automated scheduled tasks that run in the background. Use the \`schedule_task\` tool when appropriate.
+
+### CRITICAL RULES
+1. **ALWAYS create ONE schedule_task** for any repeating request. NEVER create multiple separate tasks.
+2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
+3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use google_grounded_search to search the web").
+4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
 
 ### When to Suggest Scheduling
 Proactively suggest scheduling when the user:
-- Mentions "every day", "daily", "weekly", "monthly", "regularly"
-- Says "remind me", "don't forget", "check this tomorrow"
-- Asks you to do something repeatedly (e.g., "review code every morning")
-- Wants monitoring or reporting tasks (e.g., "check for updates weekly")
-- Mentions specific future times (e.g., "on Friday", "next week")
+- Mentions "every day", "daily", "weekly", "monthly", "regularly", "every X minutes/hours"
+- Says "remind me", "don't forget", "check this tomorrow", "in 30 minutes"
+- Asks to do something repeatedly or a specific number of times
+- Wants monitoring, reporting, or periodic checks
+- Mentions specific future times ("on Friday", "next week", "at 3 PM")
 
-### How to Suggest
-When you detect scheduling intent, offer to create a scheduled task:
+### How schedule_task Works
+- Creates a background job managed by the cron service that runs automatically on schedule
+- The \`prompt\` field is the FULL instruction executed each time - make it detailed
+- The isolated agent has access to ALL tools (search, file operations, etc.)
+- Results are delivered to the user's chat when each run completes
+- \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit
+- Use \`manage_scheduled_task\` to list, pause, resume, run, delete, or view history
 
-Example response:
-"I can set this up as a scheduled task that runs automatically. Here's what I'll create:
-- **Daily at 9 AM**: Review commits from the last 24 hours
-- Summarize changes and flag potential issues
-
-Would you like me to create this scheduled task?"
-
-### schedule_task Tool Usage
-\`\`\`
-schedule_task({
-  name: "Daily Code Review",
-  prompt: "Review yesterday's commits and summarize changes. Focus on code quality, missing tests, and security issues.",
-  schedule: { type: "daily", time: "09:00" }
-})
-\`\`\`
-
-### Schedule Types
-- **once**: One-time at specific datetime
+### Schedule Types Reference
+- **once**: One-time future execution
   \`{ type: "once", datetime: "tomorrow at 9am" }\`
+  \`{ type: "once", datetime: "in 30 minutes" }\`
   \`{ type: "once", datetime: "2026-02-10T15:00:00" }\`
 
+- **interval**: Every N minutes (combine with maxRuns to limit)
+  \`{ type: "interval", every: 1 }\` (every minute)
+  \`{ type: "interval", every: 60 }\` (every hour)
+
 - **daily**: Every day at specified time
-  \`{ type: "daily", time: "09:00", timezone: "America/Los_Angeles" }\`
+  \`{ type: "daily", time: "09:00" }\`
+  \`{ type: "daily", time: "18:00", timezone: "America/Los_Angeles" }\`
 
 - **weekly**: Specific day and time each week
   \`{ type: "weekly", dayOfWeek: "monday", time: "09:00" }\`
 
-- **interval**: Every N minutes
-  \`{ type: "interval", every: 60 }\` (every hour)
+- **cron**: Advanced cron expression for complex schedules
+  \`{ type: "cron", expression: "0 9 * * MON-FRI" }\` (weekdays at 9 AM)
+  \`{ type: "cron", expression: "*/15 * * * *" }\` (every 15 minutes)
 
-- **cron**: Advanced cron expression
-  \`{ type: "cron", expression: "0 9 * * MON-FRI" }\`
+### Examples (8 common scenarios)
+
+**Example 1: Interval with maxRuns - "Fetch news every minute for 5 minutes"**
+\`\`\`
+schedule_task({
+  name: "News Updates",
+  prompt: "Use google_grounded_search to find the latest breaking news headlines worldwide. Provide a brief summary of the top 5 stories with their sources and links.",
+  schedule: { type: "interval", every: 1 },
+  maxRuns: 5
+})
+\`\`\`
+Result: Runs every 1 minute, automatically stops after 5 runs.
+
+**Example 2: Daily recurring - "Review my commits every morning"**
+\`\`\`
+schedule_task({
+  name: "Daily Code Review",
+  prompt: "Run git log for the last 24 hours. Review each commit for code quality, missing tests, potential bugs, and security issues. Provide a summary with actionable recommendations.",
+  schedule: { type: "daily", time: "09:00" }
+})
+\`\`\`
+Result: Runs every day at 9 AM indefinitely until paused or deleted.
+
+**Example 3: One-time reminder - "Remind me to deploy on Friday at 3 PM"**
+\`\`\`
+schedule_task({
+  name: "Deploy Reminder",
+  prompt: "Remind the user: It's time to deploy! Check that all tests pass, staging is verified, and the changelog is updated before deploying to production.",
+  schedule: { type: "once", datetime: "Friday at 15:00" }
+})
+\`\`\`
+Result: Fires once at the specified time, then auto-completes.
+
+**Example 4: Weekly report - "Send me a security scan every Monday"**
+\`\`\`
+schedule_task({
+  name: "Weekly Security Scan",
+  prompt: "Run a comprehensive security review: check for outdated dependencies with npm audit, scan for hardcoded secrets, review recent changes for common vulnerabilities (XSS, SQL injection, path traversal). Provide a detailed report with severity levels.",
+  schedule: { type: "weekly", dayOfWeek: "monday", time: "08:00" }
+})
+\`\`\`
+Result: Runs every Monday at 8 AM indefinitely.
+
+**Example 5: Monitoring with limit - "Check if my API is responding every 5 minutes for the next hour"**
+\`\`\`
+schedule_task({
+  name: "API Health Check",
+  prompt: "Use google_grounded_search or make a request to check if https://api.example.com/health is responding. Report the status and response time. If down, provide details about the error.",
+  schedule: { type: "interval", every: 5 },
+  maxRuns: 12
+})
+\`\`\`
+Result: Checks every 5 minutes, stops after 12 checks (= 1 hour).
+
+**Example 6: Cron expression - "Run tests every weekday at 6 PM"**
+\`\`\`
+schedule_task({
+  name: "Weekday Test Run",
+  prompt: "Run the full test suite with 'pnpm test'. Report results including pass/fail counts, any failures with details, and test duration. If tests fail, analyze the errors and suggest fixes.",
+  schedule: { type: "cron", expression: "0 18 * * MON-FRI" }
+})
+\`\`\`
+Result: Runs at 6 PM Monday through Friday.
+
+**Example 7: Quick repeated task - "Search for Bitcoin price 3 times, once every 2 minutes"**
+\`\`\`
+schedule_task({
+  name: "Bitcoin Price Check",
+  prompt: "Use google_grounded_search to find the current Bitcoin (BTC) price in USD. Report the price, 24h change percentage, and any notable market news.",
+  schedule: { type: "interval", every: 2 },
+  maxRuns: 3
+})
+\`\`\`
+Result: Checks every 2 minutes, stops after 3 checks.
+
+**Example 8: Delayed one-time - "In 30 minutes, summarize my git changes"**
+\`\`\`
+schedule_task({
+  name: "Git Summary",
+  prompt: "Run git diff and git status to see all current changes. Provide a clear summary of what was modified, added, and deleted. Group changes by file and describe the purpose of each change.",
+  schedule: { type: "once", datetime: "in 30 minutes" }
+})
+\`\`\`
+Result: Fires once, 30 minutes from now.
 
 ### Managing Existing Tasks
 Use \`manage_scheduled_task\` to:
-- \`list\`: Show all scheduled tasks
-- \`pause\`: Temporarily stop a task
+- \`list\`: Show all scheduled tasks with status, schedule, next run time, and run count
+- \`pause\`: Temporarily stop a task (keeps config, stops running)
 - \`resume\`: Resume a paused task
-- \`run\`: Trigger immediate execution
-- \`history\`: View past runs
-- \`delete\`: Remove a task
-
-### Best Practices
-1. **Be specific in prompts**: Include exactly what to check/do
-2. **Use isolated sessions**: Tasks run with fresh context (default)
-3. **Consider timing**: Suggest appropriate frequencies based on the task
-4. **Proactively suggest**: When user asks something repetitive, offer scheduling
-5. **Confirm before creating**: Always ask user before creating a scheduled task
-
-### Example Interactions
-
-User: "Can you review my commits every morning?"
-Assistant: "I can set up a daily code review that runs each morning. I'll:
-- Check commits from the last 24 hours
-- Summarize changes and highlight potential issues
-- Post a summary here when done
-
-Would you like me to schedule this for 9 AM your time?"
-
-User: "Remind me to deploy on Friday"
-Assistant: "I'll create a one-time reminder for Friday. What time works best for you?"
-
-User: "Check for security updates weekly"
-Assistant: "I can check for security updates every week. I suggest Monday mornings at 9 AM. Should I create this scheduled task?"
+- \`run\`: Trigger immediate execution of a task (doesn't count against maxRuns schedule)
+- \`history\`: View past runs with results, duration, and errors
+- \`delete\`: Permanently remove a task
 
 ## Important Reminders
 1. Always mark todos completed when done
@@ -2947,6 +3008,8 @@ ${toolList}
       // Integration module not available - skip notification tools
     }
 
+    const cronTools = createCronTools();
+
     return [
       readAnyFileTool,
       ...researchTools,
@@ -2955,6 +3018,7 @@ ${toolList}
       ...groundingTools,
       ...connectorTools,
       ...notificationTools,
+      ...cronTools,
     ];
   }
 

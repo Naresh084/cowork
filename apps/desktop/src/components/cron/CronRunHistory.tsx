@@ -47,7 +47,7 @@ function RunCard({ run }: { run: CronRun }) {
     <div
       className={cn(
         'p-4 rounded-lg border',
-        isSuccess && 'bg-[#10B981]/5 border-[#10B981]/20',
+        isSuccess && 'bg-[#50956A]/5 border-[#50956A]/20',
         isError && 'bg-red-500/5 border-red-500/20',
         isTimeout && 'bg-yellow-500/5 border-yellow-500/20',
         isCancelled && 'bg-white/[0.02] border-white/[0.06]'
@@ -55,7 +55,7 @@ function RunCard({ run }: { run: CronRun }) {
     >
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
-          {isSuccess && <CheckCircle2 className="w-4 h-4 text-[#10B981]" />}
+          {isSuccess && <CheckCircle2 className="w-4 h-4 text-[#8FDCA9]" />}
           {isError && <XCircle className="w-4 h-4 text-red-400" />}
           {isTimeout && <AlertTriangle className="w-4 h-4 text-yellow-400" />}
           {isCancelled && <Clock className="w-4 h-4 text-white/40" />}
@@ -157,7 +157,7 @@ export function CronRunHistory() {
           </div>
           <div>
             <span className="text-white/40">Successful: </span>
-            <span className="text-[#10B981] font-medium">{successCount}</span>
+            <span className="text-[#8FDCA9] font-medium">{successCount}</span>
           </div>
           <div>
             <span className="text-white/40">Failed: </span>
