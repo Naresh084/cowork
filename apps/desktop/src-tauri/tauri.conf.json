@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.cowork.app",
   "build": {
-    "beforeDevCommand": "pnpm dev:vite",
+    "beforeDevCommand": "pnpm icon:sync && pnpm dev:vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm icon:sync && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {

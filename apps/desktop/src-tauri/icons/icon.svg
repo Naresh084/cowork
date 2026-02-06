@@ -1,16 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
   <defs>
-    <linearGradient id="g" x1="72" y1="78" x2="438" y2="434" gradientUnits="userSpaceOnUse">
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0" stop-color="#0F172A"/>
       <stop offset="0.5" stop-color="#1D4ED8"/>
       <stop offset="1" stop-color="#7DD3FC"/>
     </linearGradient>
   </defs>
-  <path
-    d="M382 112C340 70 286 46 226 46C124 46 46 124 46 226C46 328 124 406 226 406C286 406 340 382 382 340"
-    stroke="url(#g)"
-    stroke-width="84"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+  <g transform="translate(47 37) scale(0.97)">
+    <path
+      d="M382 112C340 70 286 46 226 46C124 46 46 124 46 226C46 328 124 406 226 406C286 406 340 382 382 340"
+      stroke="url(#g)"
+      stroke-width="84"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
 </svg>

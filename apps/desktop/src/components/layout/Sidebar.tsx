@@ -446,114 +446,38 @@ function SidebarRail({
         </div>
       </div>
 
-      {/* Skills Button */}
-      <div className="p-2">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onOpenSkills}
-          className={cn(
-            'relative w-10 h-10 flex items-center justify-center rounded-xl',
-            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-            'transition-all duration-150'
-          )}
-          title={`Skills${enabledSkillsCount > 0 ? ` (${enabledSkillsCount} enabled)` : ''}`}
-        >
-          <Puzzle className="w-5 h-5" />
-          {enabledSkillsCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#1D4ED8] text-white text-[10px] font-bold flex items-center justify-center">
-              {enabledSkillsCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Subagents Button */}
-      <div className="p-2">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onOpenSubagents}
-          className={cn(
-            'relative w-10 h-10 flex items-center justify-center rounded-xl',
-            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-            'transition-all duration-150'
-          )}
-          title={`Subagents${subagentCount > 0 ? ` (${subagentCount} installed)` : ''}`}
-        >
-          <Bot className="w-5 h-5" />
-          {subagentCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#06B6D4] text-white text-[10px] font-bold flex items-center justify-center">
-              {subagentCount > 9 ? '9+' : subagentCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Commands Button */}
-      <div className="p-2">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onOpenCommands}
-          className={cn(
-            'relative w-10 h-10 flex items-center justify-center rounded-xl',
-            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-            'transition-all duration-150'
-          )}
-          title={`Commands${commandCount > 0 ? ` (${commandCount} available)` : ''}`}
-        >
-          <Terminal className="w-5 h-5" />
-          {commandCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#9B59B6] text-white text-[10px] font-bold flex items-center justify-center">
-              {commandCount > 9 ? '9+' : commandCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Connectors Button */}
-      <div className="p-2">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onOpenConnectors}
-          className={cn(
-            'relative w-10 h-10 flex items-center justify-center rounded-xl',
-            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-            'transition-all duration-150'
-          )}
-          title={`Connectors${connectorCount > 0 ? ` (${connectorCount} connected)` : ''}`}
-        >
-          <Plug className="w-5 h-5" />
-          {connectorCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#10B981] text-white text-[10px] font-bold flex items-center justify-center">
-              {connectorCount > 9 ? '9+' : connectorCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Automations Tasks Button */}
-      <div className="p-2">
-        <motion.button
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={onOpenCron}
-          className={cn(
-            'relative w-10 h-10 flex items-center justify-center rounded-xl',
-            'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
-            'transition-all duration-150'
-          )}
-          title={`Automations${activeJobCount > 0 ? ` (${activeJobCount} active)` : ''}`}
-        >
-          <Calendar className="w-5 h-5" />
-          {activeJobCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#10B981] text-white text-[10px] font-bold flex items-center justify-center">
-              {activeJobCount}
-            </span>
-          )}
-        </motion.button>
+      {/* Tools & Extensions */}
+      <div className="px-2 py-1.5 space-y-0.5 border-t border-white/[0.06]">
+        {([
+          { icon: Puzzle, count: enabledSkillsCount, color: '#1D4ED8', onClick: onOpenSkills, title: 'Skills' },
+          { icon: Bot, count: subagentCount, color: '#06B6D4', onClick: onOpenSubagents, title: 'Subagents' },
+          { icon: Terminal, count: commandCount, color: '#9B59B6', onClick: onOpenCommands, title: 'Commands' },
+          { icon: Plug, count: connectorCount, color: '#10B981', onClick: onOpenConnectors, title: 'Connectors' },
+          { icon: Calendar, count: activeJobCount, color: '#10B981', onClick: onOpenCron, title: 'Automations' },
+        ] as const).map(({ icon: Icon, count, color, onClick, title }) => (
+          <motion.button
+            key={title}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={onClick}
+            className={cn(
+              'relative w-10 h-8 flex items-center justify-center rounded-lg',
+              'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
+              'transition-all duration-150'
+            )}
+            title={`${title}${count > 0 ? ` (${count})` : ''}`}
+          >
+            <Icon className="w-4 h-4" />
+            {count > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full text-white text-[9px] font-bold flex items-center justify-center"
+                style={{ backgroundColor: color }}
+              >
+                {count > 9 ? '9+' : count}
+              </span>
+            )}
+          </motion.button>
+        ))}
       </div>
 
       {/* Profile Section */}
@@ -745,129 +669,36 @@ function SidebarExpanded({
         </p>
       </div>
 
-      {/* Skills Button */}
-      <div className="px-3 py-2 border-t border-white/[0.08]">
-        <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenSkills}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
-          )}
-        >
-          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-            <Puzzle className="w-4 h-4" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium truncate">Skills</div>
-          </div>
-          {enabledSkillsCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#1D4ED8]/20 text-[#93C5FD] text-xs font-medium">
-              {enabledSkillsCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Subagents Button */}
-      <div className="px-3 py-2">
-        <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenSubagents}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
-          )}
-        >
-          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-            <Bot className="w-4 h-4" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium truncate">Subagents</div>
-          </div>
-          {subagentCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#06B6D4]/20 text-[#67E8F9] text-xs font-medium">
-              {subagentCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Commands Button */}
-      <div className="px-3 py-2">
-        <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenCommands}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
-          )}
-        >
-          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-            <Terminal className="w-4 h-4" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium truncate">Commands</div>
-          </div>
-          {commandCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#9B59B6]/20 text-[#BB8FCE] text-xs font-medium">
-              {commandCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Connectors Button */}
-      <div className="px-3 py-2">
-        <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenConnectors}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
-          )}
-        >
-          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-            <Plug className="w-4 h-4" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium truncate">Connectors</div>
-          </div>
-          {connectorCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#34D399] text-xs font-medium">
-              {connectorCount}
-            </span>
-          )}
-        </motion.button>
-      </div>
-
-      {/* Automations Tasks Button */}
-      <div className="px-3 py-2">
-        <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenCron}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
-          )}
-        >
-          <div className="w-8 h-8 rounded-lg bg-white/[0.04] flex items-center justify-center flex-shrink-0">
-            <Calendar className="w-4 h-4" />
-          </div>
-          <div className="flex-1 text-left min-w-0">
-            <div className="text-sm font-medium truncate">Automations</div>
-          </div>
-          {activeJobCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-[#10B981]/20 text-[#34D399] text-xs font-medium">
-              {activeJobCount}
-            </span>
-          )}
-        </motion.button>
+      {/* Tools & Extensions */}
+      <div className="px-2 py-1.5 border-t border-white/[0.08] space-y-0.5">
+        {([
+          { icon: Puzzle, label: 'Skills', count: enabledSkillsCount, badgeCls: 'bg-[#1D4ED8]/20 text-[#93C5FD]', onClick: onOpenSkills },
+          { icon: Bot, label: 'Subagents', count: subagentCount, badgeCls: 'bg-[#06B6D4]/20 text-[#67E8F9]', onClick: onOpenSubagents },
+          { icon: Terminal, label: 'Commands', count: commandCount, badgeCls: 'bg-[#9B59B6]/20 text-[#BB8FCE]', onClick: onOpenCommands },
+          { icon: Plug, label: 'Connectors', count: connectorCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenConnectors },
+          { icon: Calendar, label: 'Automations', count: activeJobCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenCron },
+        ] as const).map(({ icon: Icon, label, count, badgeCls, onClick }) => (
+          <motion.button
+            key={label}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
+            onClick={onClick}
+            className={cn(
+              'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg',
+              'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'
+            )}
+          >
+            <div className="w-6 h-6 rounded-md bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+              <Icon className="w-3.5 h-3.5" />
+            </div>
+            <span className="flex-1 text-left text-[13px] font-medium truncate">{label}</span>
+            {count > 0 && (
+              <span className={cn('px-1.5 py-px rounded-full text-[11px] font-medium', badgeCls)}>
+                {count}
+              </span>
+            )}
+          </motion.button>
+        ))}
       </div>
 
       {/* Profile Section */}

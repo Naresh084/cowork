@@ -25,6 +25,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Get version
         id: get-version
         run: |
@@ -34,6 +47,9 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify synchronized versions
+        run: pnpm version:check -- --version "${{ steps.get-version.outputs.version }}"
+
       - name: Create Release
         id: create-release
         uses: actions/create-release@v1
@@ -41,21 +57,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
-          release_name: Gemini Cowork v${{ steps.get-version.outputs.version }}
+          release_name: Cowork v${{ steps.get-version.outputs.version }}
           draft: true
           prerelease: false
           body: |
-            ## Gemini Cowork v${{ steps.get-version.outputs.version }}
+            ## Cowork v${{ steps.get-version.outputs.version }}
 
             ### Downloads
 
             | Platform | Download |
             |----------|----------|
-            | Windows (64-bit) | `Gemini-Cowork_${{ steps.get-version.outputs.version }}_x64-setup.exe` |
-            | macOS (Apple Silicon) | `Gemini-Cowork_${{ steps.get-version.outputs.version }}_aarch64.dmg` |
-            | macOS (Intel) | `Gemini-Cowork_${{ steps.get-version.outputs.version }}_x64.dmg` |
-            | Linux (AppImage) | `Gemini-Cowork_${{ steps.get-version.outputs.version }}_amd64.AppImage` |
-            | Linux (Debian) | `Gemini-Cowork_${{ steps.get-version.outputs.version }}_amd64.deb` |
+            | Windows (64-bit) | `Cowork_${{ steps.get-version.outputs.version }}_x64-setup.exe` |
+            | macOS (Apple Silicon) | `Cowork_${{ steps.get-version.outputs.version }}_aarch64.dmg` |
+            | macOS (Intel) | `Cowork_${{ steps.get-version.outputs.version }}_x64.dmg` |
+            | Linux (AppImage) | `Cowork_${{ steps.get-version.outputs.version }}_amd64.AppImage` |
+            | Linux (Debian) | `Cowork_${{ steps.get-version.outputs.version }}_amd64.deb` |
 
             ### Installation
 
@@ -186,6 +202,12 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
+
+      - name: Verify synchronized versions
+        run: pnpm version:check -- --version "${{ needs.create-release.outputs.version }}"
+
+      - name: Sync desktop icons
+        run: pnpm --filter @gemini-cowork/desktop icon:sync
 
       - name: Download sidecar artifact
         uses: actions/download-artifact@v4

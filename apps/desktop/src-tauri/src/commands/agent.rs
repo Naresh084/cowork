@@ -56,18 +56,6 @@ pub struct SessionDetails {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Message {
-    pub id: String,
-    pub session_id: String,
-    pub role: String,
-    pub content: String,
-    pub attachments: Option<Vec<Attachment>>,
-    pub tool_calls: Option<serde_json::Value>,
-    pub created_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Attachment {
     #[serde(rename = "type")]
     pub attachment_type: String,

@@ -1,10 +1,22 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { KeyRound, ArrowRight, Loader2, ExternalLink, AlertCircle, User } from 'lucide-react';
+import {
+  KeyRound,
+  ArrowRight,
+  Loader2,
+  ExternalLink,
+  AlertCircle,
+  User,
+  ShieldCheck,
+  Sparkles,
+  CheckCircle2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { BrandMark } from '../icons/BrandMark';
+
+const onboardingHero = new URL('../../assets/onboarding/image_2.png', import.meta.url).href;
 
 export function Onboarding() {
   const [userName, setUserName] = useState('');
@@ -14,26 +26,22 @@ export function Onboarding() {
   const { setApiKey: saveApiKey, validateApiKey, isAuthenticated } = useAuthStore();
   const { updateSetting, userName: existingUserName } = useSettingsStore();
 
-  // Check if we only need to collect name (API key already exists)
   const needsOnlyName = isAuthenticated && !existingUserName;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isValidating) return;
 
-    // Validate name
     if (!userName.trim()) {
       setError('Please enter your name');
       return;
     }
 
-    // If we only need name, save and return
     if (needsOnlyName) {
       updateSetting('userName', userName.trim());
       return;
     }
 
-    // Validate API key
     if (!apiKey.trim()) {
       setError('Please enter your API key');
       return;
@@ -56,7 +64,6 @@ export function Onboarding() {
         return;
       }
 
-      // Save both name and API key
       updateSetting('userName', userName.trim());
       await saveApiKey(apiKey);
 
@@ -69,247 +76,193 @@ export function Onboarding() {
     }
   };
 
-  // Animation variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1, delayChildren: 0.2 }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
-    }
-  };
-
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-[#0B0C10] relative overflow-hidden">
-      {/* Ambient Background Effects */}
-      <div className="absolute inset-0 pointer-events-none">
-        {/* Gradient orbs */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#1D4ED8]/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-[#8A62C2]/10 rounded-full blur-[100px]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-[#008585]/5 rounded-full blur-[150px]" />
-
-        {/* Subtle grid pattern */}
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage: `
-              linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px)
-            `,
-            backgroundSize: '32px 32px'
-          }}
-        />
-      </div>
-
-      {/* Main Content */}
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="relative z-10 w-full max-w-md px-4"
-      >
-        {/* Glass Card */}
-        <motion.div
-          variants={itemVariants}
-          className={cn(
-            'rounded-3xl overflow-hidden',
-            'bg-white/[0.03] backdrop-blur-xl',
-            'border border-white/[0.08]',
-            'shadow-2xl shadow-black/40'
-          )}
+    <div className="h-screen w-screen overflow-hidden bg-[#060A15] text-white">
+      <div className="grid h-full lg:grid-cols-[1.12fr_0.88fr]">
+        <motion.aside
+          initial={{ opacity: 0, x: -24 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+          className="relative hidden overflow-hidden lg:block"
         >
-          {/* Header Section */}
-          <div className="px-8 pt-10 pb-6 text-center relative">
-            {/* Decorative gradient line */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-1 bg-gradient-to-r from-transparent via-[#1D4ED8] to-transparent" />
+          <img
+            src={onboardingHero}
+            alt="Cowork onboarding visual"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#060A15]/55 via-[#060A15]/25 to-[#060A15]/70" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(147,197,253,0.25),transparent_45%),radial-gradient(circle_at_70%_80%,rgba(29,78,216,0.2),transparent_40%)]" />
 
-            {/* Icon */}
-            <motion.div
-              variants={itemVariants}
-              className="relative mx-auto mb-6"
-            >
-              <div className="relative w-20 h-20 mx-auto flex items-center justify-center">
-                <BrandMark className="w-16 h-16" />
+          <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-14">
+            <div className="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-black/20 px-4 py-2 backdrop-blur-sm w-fit">
+              <BrandMark className="h-6 w-6" />
+              <span className="text-sm font-semibold tracking-wide text-white/90">Cowork</span>
+            </div>
+
+            <div className="max-w-xl space-y-8">
+              <div className="space-y-4">
+                <p className="inline-flex items-center gap-2 rounded-full border border-[#93C5FD]/35 bg-[#1D4ED8]/20 px-3 py-1 text-xs font-medium uppercase tracking-wider text-[#DBEAFE]">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  AI Desktop Assistant
+                </p>
+                <h1 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
+                  Build, automate, and ship faster in one workspace.
+                </h1>
+                <p className="max-w-lg text-sm leading-relaxed text-white/75 xl:text-base">
+                  Cowork keeps your coding flow uninterrupted with tooling, memory, and execution in a single
+                  desktop environment.
+                </p>
               </div>
-            </motion.div>
 
-            {/* Title */}
-            <motion.h1
-              variants={itemVariants}
-              className="text-3xl font-bold mb-3"
-              style={{
-                background: 'linear-gradient(135deg, #FFFFFF 0%, #DBEAFE 50%, #1D4ED8 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text'
-              }}
-            >
-              Welcome to Cowork
-            </motion.h1>
-
-            <motion.p
-              variants={itemVariants}
-              className="text-white/50 text-sm"
-            >
-              {needsOnlyName
-                ? "Let's personalize your experience"
-                : "Set up your workspace in seconds"
-              }
-            </motion.p>
-          </div>
-
-          {/* Form Section */}
-          <form onSubmit={handleSubmit} className="px-8 pb-8 space-y-5">
-            {/* Name Input */}
-            <motion.div variants={itemVariants}>
-              <label className="block text-sm font-medium text-white/70 mb-2">
-                Your Name
-              </label>
-              <div className="relative">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                  <User className="w-5 h-5 text-white/30" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-white/15 bg-black/20 p-4 backdrop-blur-sm">
+                  <CheckCircle2 className="mb-2 h-4 w-4 text-[#93C5FD]" />
+                  <p className="text-sm text-white/85">Context-aware coding assistance</p>
                 </div>
-                <input
-                  type="text"
-                  value={userName}
-                  onChange={(e) => setUserName(e.target.value)}
-                  placeholder="Enter your name"
-                  className={cn(
-                    'w-full pl-12 pr-4 py-3.5 rounded-xl',
-                    'bg-[#0D0D0F] border border-white/[0.08]',
-                    'text-white placeholder:text-white/30',
-                    'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
-                    'transition-all duration-200',
-                    error && !userName.trim() && 'border-[#FF5449] focus:ring-[#FF5449]/50'
-                  )}
-                />
+                <div className="rounded-xl border border-white/15 bg-black/20 p-4 backdrop-blur-sm">
+                  <CheckCircle2 className="mb-2 h-4 w-4 text-[#93C5FD]" />
+                  <p className="text-sm text-white/85">Local-first workflow and storage</p>
+                </div>
               </div>
-            </motion.div>
+            </div>
+          </div>
+        </motion.aside>
 
-            {/* API Key Input (only show if needed) */}
-            {!needsOnlyName && (
-              <motion.div variants={itemVariants}>
-                <label className="block text-sm font-medium text-white/70 mb-2">
-                  API Key
-                </label>
+        <section className="relative flex h-full items-center justify-center px-6 py-8 sm:px-10 lg:px-14">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_85%_20%,rgba(59,130,246,0.16),transparent_45%),radial-gradient(circle_at_20%_80%,rgba(79,70,229,0.12),transparent_40%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.018)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.018)_1px,transparent_1px)] bg-[size:30px_30px] opacity-35" />
+
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="relative z-10 w-full max-w-xl"
+          >
+            <div className="mb-7 flex items-center gap-3 lg:hidden">
+              <BrandMark className="h-8 w-8" />
+              <span className="text-lg font-semibold text-white/95">Cowork</span>
+            </div>
+
+            <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-sm lg:hidden">
+              <img
+                src={onboardingHero}
+                alt="Cowork visual"
+                className="h-40 w-full rounded-xl object-cover"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-3xl font-semibold text-white">Welcome to Cowork</h2>
+              <p className="text-sm leading-relaxed text-white/65">
+                {needsOnlyName
+                  ? "Let's personalize your workspace."
+                  : 'Set up your profile and connect your API key to get started.'}
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-white/75">Your Name</label>
                 <div className="relative">
-                  <div className="absolute left-4 top-1/2 -translate-y-1/2">
-                    <KeyRound className="w-5 h-5 text-white/30" />
-                  </div>
+                  <User className="pointer-events-none absolute left-4 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-white/35" />
                   <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="AIza..."
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    placeholder="Enter your name"
                     className={cn(
-                      'w-full pl-12 pr-4 py-3.5 rounded-xl',
-                      'bg-[#0D0D0F] border border-white/[0.08]',
-                      'text-white placeholder:text-white/30',
-                      'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
-                      'transition-all duration-200',
-                      error && !apiKey.trim() && 'border-[#FF5449] focus:ring-[#FF5449]/50'
+                      'w-full rounded-xl border bg-[#0A1021]/80 py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-white/35',
+                      'border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35',
+                      'transition-colors duration-200',
+                      error && !userName.trim() && 'border-[#FF5449] focus:border-[#FF5449] focus:ring-[#FF5449]/35'
                     )}
                   />
                 </div>
-              </motion.div>
-            )}
+              </div>
 
-            {/* Error Message */}
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center gap-2 text-[#FF5449] text-sm bg-[#FF5449]/10 px-4 py-2.5 rounded-lg border border-[#FF5449]/20"
+              {!needsOnlyName && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-white/75">API Key</label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-4 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-white/35" />
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="AI..."
+                      className={cn(
+                        'w-full rounded-xl border bg-[#0A1021]/80 py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-white/35',
+                        'border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35',
+                        'transition-colors duration-200',
+                        error && !apiKey.trim() && 'border-[#FF5449] focus:border-[#FF5449] focus:ring-[#FF5449]/35'
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-xl border border-[#FF5449]/30 bg-[#FF5449]/10 px-3.5 py-3 text-sm text-[#FF9A93]">
+                  <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isValidating}
+                className={cn(
+                  'inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold text-white',
+                  'bg-gradient-to-r from-[#1E3A8A] via-[#1D4ED8] to-[#3B82F6]',
+                  'shadow-lg shadow-[#1D4ED8]/30 transition-all duration-200',
+                  'hover:translate-y-[-1px] hover:shadow-xl hover:shadow-[#1D4ED8]/40',
+                  'disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0'
+                )}
               >
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
-              </motion.div>
-            )}
+                {isValidating ? (
+                  <>
+                    <Loader2 className="h-4.5 w-4.5 animate-spin" />
+                    Validating...
+                  </>
+                ) : (
+                  <>
+                    Get Started
+                    <ArrowRight className="h-4.5 w-4.5" />
+                  </>
+                )}
+              </button>
 
-            {/* Submit Button */}
-            <motion.button
-              variants={itemVariants}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="submit"
-              disabled={isValidating}
-              className={cn(
-                'w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl',
-                'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8]',
-                'text-white font-semibold',
-                'shadow-lg shadow-[#1D4ED8]/25',
-                'hover:shadow-xl hover:shadow-[#1D4ED8]/35',
-                'hover:from-[#1D4ED8] hover:to-[#93C5FD]',
-                'disabled:opacity-50 disabled:cursor-not-allowed',
-                'transition-all duration-300'
+              {!needsOnlyName && (
+                <div className="pt-1 text-center">
+                  <a
+                    href="https://aistudio.google.com/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-sm text-[#93C5FD] transition-colors hover:text-[#DBEAFE]"
+                  >
+                    Get your API key from Google AI Studio
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
               )}
-            >
-              {isValidating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Validating...
-                </>
-              ) : (
-                <>
-                  Get Started
-                  <ArrowRight className="w-5 h-5" />
-                </>
-              )}
-            </motion.button>
+            </form>
 
-            {/* Help Link */}
-            {!needsOnlyName && (
-              <motion.div variants={itemVariants} className="text-center pt-2">
-                <a
-                  href="https://aistudio.google.com/apikey"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-[#1D4ED8] hover:text-[#93C5FD] transition-colors"
-                >
-                  Get your API key from Google AI Studio
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </motion.div>
-            )}
-          </form>
-
-          {/* Security Note */}
-          <motion.div
-            variants={itemVariants}
-            className="px-8 pb-8"
-          >
-            <div className={cn(
-              'p-4 rounded-xl',
-              'bg-white/[0.02] border border-white/[0.06]'
-            )}>
-              <p className="text-xs text-white/40 text-center leading-relaxed">
+            <div className="mt-8 flex items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-[#93C5FD]" />
+              <p className="text-xs leading-relaxed text-white/55">
                 {needsOnlyName
-                  ? "Your name is stored locally and helps personalize your experience."
-                  : "Your API key is stored securely in your system's local credentials storage and never sent anywhere except to Google's API."
-                }
+                  ? 'Your name is saved locally to personalize your workspace.'
+                  : 'Your API key and secrets are stored locally with restrictive file permissions and are only used for API requests.'}
               </p>
             </div>
-          </motion.div>
-        </motion.div>
 
-        {/* Version/Brand Footer */}
-        <motion.div
-          variants={itemVariants}
-          className="text-center mt-6"
-        >
-          <p className="text-white/20 text-xs">
-            Cowork v1.0
-          </p>
-        </motion.div>
-      </motion.div>
+          </motion.div>
+
+          <div className="pointer-events-none absolute bottom-5 left-1/2 z-20 -translate-x-1/2">
+            <p className="text-xs tracking-wide text-white/25">{`Cowork v${__APP_VERSION__}`}</p>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
