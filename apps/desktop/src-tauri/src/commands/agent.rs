@@ -8,8 +8,6 @@ use tauri::{AppHandle, Emitter, State};
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,
-    #[serde(default)]
-    pub r#type: Option<String>,
     pub title: Option<String>,
     pub working_directory: String,
     pub model: String,
@@ -21,8 +19,6 @@ pub struct SessionInfo {
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     pub id: String,
-    #[serde(default)]
-    pub r#type: Option<String>,
     pub title: Option<String>,
     pub working_directory: Option<String>,
     pub model: Option<String>,
@@ -36,8 +32,6 @@ pub struct SessionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct SessionDetails {
     pub id: String,
-    #[serde(default)]
-    pub r#type: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]

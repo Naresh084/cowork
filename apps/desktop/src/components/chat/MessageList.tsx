@@ -136,6 +136,7 @@ export function MessageList() {
   }
 
   const messageById = new Map(messages.map((message) => [message.id, message]));
+
   const assistantMessageIds = new Set<string>();
   Object.values(turnActivities || {}).forEach((activities) => {
     activities.forEach((activity) => {
