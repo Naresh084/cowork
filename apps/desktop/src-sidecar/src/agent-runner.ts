@@ -12,6 +12,8 @@ import type {
   PermissionItem,
   QuestionItem,
   MediaItem,
+  ReportItem,
+  DesignItem,
   ErrorItem,
 } from '@gemini-cowork/shared';
 import { createDeepAgent } from 'deepagents';
@@ -676,6 +678,147 @@ export class AgentRunner {
       };
       this.appendChatItem(session, mediaItem);
     }
+  }
+
+  private emitReportChatItemForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    if (toolName.toLowerCase() !== 'deep_research') {
+      return;
+    }
+
+    const resultAny = result as
+      | {
+          report?: string;
+          reportPath?: string;
+        }
+      | null;
+    if (!resultAny?.reportPath && !resultAny?.report) {
+      return;
+    }
+
+    const snippet = resultAny.report
+      ? `${resultAny.report.slice(0, 240)}${resultAny.report.length > 240 ? '…' : ''}`
+      : undefined;
+
+    const reportItem: ReportItem = {
+      id: generateChatItemId(),
+      kind: 'report',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      title: 'Deep research report',
+      path: resultAny.reportPath,
+      snippet,
+      toolId,
+    };
+    this.appendChatItem(session, reportItem);
+  }
+
+  private buildDesignPreview(result: unknown, toolName: string): DesignItem['preview'] | undefined {
+    if (!result || typeof result !== 'object') return undefined;
+    const resultAny = result as Record<string, unknown>;
+    const design = resultAny.design as Record<string, unknown> | undefined;
+    const code = resultAny.code as Record<string, unknown> | undefined;
+
+    const html = (resultAny.html || design?.html || code?.html) as string | undefined;
+    const css = (resultAny.css || design?.css || code?.css) as string | undefined;
+    const svg = (resultAny.svg || design?.svg) as string | undefined;
+    const previewUrl =
+      (resultAny.previewUrl as string | undefined) ||
+      (resultAny.preview as { url?: string } | undefined)?.url;
+
+    const safeName =
+      toolName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 40) ||
+      'design';
+
+    if (previewUrl) {
+      return {
+        name: `${safeName}-preview.html`,
+        content: `<html><body style=\"margin:0;\"><iframe src=\"${previewUrl}\" style=\"border:0;width:100%;height:100vh;\"></iframe></body></html>`,
+      };
+    }
+
+    if (html || css) {
+      const htmlContent = html
+        ? html
+        : `<html><head>${css ? `<style>${css}</style>` : ''}</head><body></body></html>`;
+      const combined = css && html && !html.includes('<style')
+        ? htmlContent.replace(/<head>/i, `<head><style>${css}</style>`)
+        : htmlContent;
+      return {
+        name: `${safeName}-design.html`,
+        content: combined,
+      };
+    }
+
+    if (svg) {
+      return {
+        name: `${safeName}-design.svg.html`,
+        content: `<html><body style=\"margin:0;display:flex;align-items:center;justify-content:center;background:#fff;\">${svg}</body></html>`,
+      };
+    }
+
+    const files = resultAny.files as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(files)) {
+      const file = files.find((entry) => entry && (entry.content || entry.data || entry.url));
+      if (!file) return undefined;
+
+      const content =
+        typeof file.content === 'string'
+          ? file.content
+          : typeof file.data === 'string'
+            ? file.data
+            : undefined;
+      const url = typeof file.url === 'string' ? file.url : undefined;
+
+      return {
+        name: String(file.path || file.name || file.filename || `${safeName}-output.html`),
+        content: content || (url ? `<html><body style=\"margin:0;\"><iframe src=\"${url}\" style=\"border:0;width:100%;height:100vh;\"></iframe></body></html>` : undefined),
+        url,
+      };
+    }
+
+    return undefined;
+  }
+
+  private emitDesignChatItemForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    const lowerTool = toolName.toLowerCase();
+    if (!(lowerTool.includes('stitch') || lowerTool.startsWith('mcp_'))) {
+      return;
+    }
+
+    const preview = this.buildDesignPreview(result, toolName);
+    if (!preview) return;
+
+    const designItem: DesignItem = {
+      id: generateChatItemId(),
+      kind: 'design',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      title: 'Design preview',
+      preview,
+      toolId,
+    };
+    this.appendChatItem(session, designItem);
+  }
+
+  private emitSupplementalToolResultItems(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    this.emitMediaChatItemsForToolResult(session, toolName, toolId, result);
+    this.emitReportChatItemForToolResult(session, toolName, toolId, result);
+    this.emitDesignChatItemForToolResult(session, toolName, toolId, result);
   }
 
 
@@ -2782,7 +2925,7 @@ ${toolList}
           };
           this.appendChatItem(session, toolResultItem);
           if (result.success) {
-            this.emitMediaChatItemsForToolResult(session, tool.name, toolCallId, result.data);
+            this.emitSupplementalToolResultItems(session, tool.name, toolCallId, result.data);
           }
 
           return result.data ?? result;
@@ -2920,7 +3063,7 @@ ${toolList}
           };
           this.appendChatItem(session, toolResultItem);
           if (status === 'success') {
-            this.emitMediaChatItemsForToolResult(session, toolName, toolCallId, result);
+            this.emitSupplementalToolResultItems(session, toolName, toolCallId, result);
           }
         };
 

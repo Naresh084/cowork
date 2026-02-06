@@ -362,10 +362,28 @@ export function InputArea({
     setRecordingError(null);
 
     try {
-      if (typeof window === 'undefined' || !navigator.mediaDevices || !window.MediaRecorder) {
-        throw new Error('Audio recording is not supported in this environment.');
+      if (typeof window === 'undefined' || !navigator.mediaDevices) {
+        throw new Error('Microphone access requires a secure context. Please check app permissions.');
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!window.MediaRecorder) {
+        throw new Error('MediaRecorder API is not available in this browser.');
+      }
+
+      // Request microphone permission - this triggers the macOS permission dialog
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (permErr: unknown) {
+        const name = permErr instanceof DOMException ? permErr.name : '';
+        if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+          throw new Error('Microphone permission denied. Please allow microphone access in System Settings > Privacy & Security > Microphone.');
+        }
+        if (name === 'NotFoundError') {
+          throw new Error('No microphone found. Please connect a microphone and try again.');
+        }
+        throw permErr;
+      }
+
       const mimeType = MediaRecorder.isTypeSupported('audio/webm')
         ? 'audio/webm'
         : MediaRecorder.isTypeSupported('audio/mp4')
@@ -383,6 +401,8 @@ export function InputArea({
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
         stream.getTracks().forEach((track) => track.stop());
+        const objectUrl = URL.createObjectURL(blob);
+        const duration = recordingTime;
 
         const reader = new FileReader();
         reader.onload = () => {
@@ -393,6 +413,8 @@ export function InputArea({
             mimeType: blob.type || 'audio/webm',
             size: blob.size,
             data: base64,
+            objectUrl,
+            duration,
           });
         };
         reader.readAsDataURL(blob);

@@ -47,7 +47,10 @@
       "minimumSystemVersion": "10.15",
       "exceptionDomain": "",
       "signingIdentity": null,
-      "entitlements": null,
+      "entitlements": "./Cowork.entitlements",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Cowork needs microphone access to record voice notes"
+      },
       "frameworks": []
     },
     "windows": {
