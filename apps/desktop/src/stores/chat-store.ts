@@ -271,6 +271,18 @@ const updateSession = (
   };
 };
 
+function compareChatItems(a: ChatItem, b: ChatItem): number {
+  const aSeq = typeof a.sequence === 'number' ? a.sequence : Number.POSITIVE_INFINITY;
+  const bSeq = typeof b.sequence === 'number' ? b.sequence : Number.POSITIVE_INFINITY;
+  if (aSeq !== bSeq) return aSeq - bSeq;
+  if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+  return a.id.localeCompare(b.id);
+}
+
+function sortChatItems(items: ChatItem[]): ChatItem[] {
+  return [...items].sort(compareChatItems);
+}
+
 // ============================================================================
 // V2 Legacy Conversion - Convert old V1 data to V2 ChatItems
 // ============================================================================
@@ -691,10 +703,11 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
               mergedChatItems.push(item);
             }
           }
+          const orderedItems = sortChatItems(mergedChatItems);
 
           return {
             ...existing,
-            chatItems: mergedChatItems,
+            chatItems: orderedItems,
             isLoadingMessages: false,
             hasLoaded: true,
           };
@@ -1076,14 +1089,14 @@ ${attachment.data}`,
           const newActiveTurnId = (session.activeTurnId && oldTurnId && session.activeTurnId === oldTurnId)
             ? newTurnId
             : session.activeTurnId;
-          return { ...session, chatItems: updated, activeTurnId: newActiveTurnId };
+          return { ...session, chatItems: sortChatItems(updated), activeTurnId: newActiveTurnId };
         }
       }
       // Dedup: skip if item with same ID already exists
       if (session.chatItems.some((ci) => ci.id === item.id)) {
         return session;
       }
-      return { ...session, chatItems: [...session.chatItems, item] };
+      return { ...session, chatItems: sortChatItems([...session.chatItems, item]) };
     }));
   },
 
@@ -1101,7 +1114,7 @@ ${attachment.data}`,
     if (!sessionId) return;
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
-      chatItems: items,
+      chatItems: sortChatItems(items),
       hasLoaded: true,
     })));
   },

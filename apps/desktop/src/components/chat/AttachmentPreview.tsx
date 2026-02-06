@@ -70,33 +70,34 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
   if (isImage && previewSrc) {
     return (
       <div
-        className={cn(
-          'relative group rounded-xl overflow-hidden cursor-pointer',
-          'border border-white/[0.08] hover:border-white/[0.20]',
-          'transition-all duration-200 hover:shadow-lg hover:shadow-black/30'
-        )}
+        className="relative group cursor-pointer"
         onClick={() => openWithOS(attachment)}
         title={`${attachment.name} — click to open`}
       >
-        <img
-          src={previewSrc}
-          alt={attachment.name}
-          className="w-[72px] h-[72px] object-cover"
-        />
-        {/* Hover overlay */}
         <div className={cn(
-          'absolute inset-0 bg-black/50 flex items-center justify-center',
-          'opacity-0 group-hover:opacity-100 transition-opacity duration-200'
+          'rounded-xl overflow-hidden',
+          'border border-white/[0.08] hover:border-white/[0.20]',
+          'transition-all duration-200 hover:shadow-lg hover:shadow-black/30'
         )}>
-          <Eye className="w-5 h-5 text-white" />
+          <img
+            src={previewSrc}
+            alt={attachment.name}
+            className="w-[96px] h-[96px] object-cover block"
+          />
+          {/* Hover overlay */}
+          <div className={cn(
+            'absolute inset-0 rounded-xl bg-black/50 flex items-center justify-center',
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-200'
+          )}>
+            <Eye className="w-5 h-5 text-white" />
+          </div>
+          {/* Name strip */}
+          <div className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded-b-xl">
+            <span className="text-[9px] text-white/80 truncate block">
+              {attachment.name}
+            </span>
+          </div>
         </div>
-        {/* Name strip */}
-        <div className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm">
-          <span className="text-[9px] text-white/80 truncate block">
-            {attachment.name}
-          </span>
-        </div>
-        {/* Remove button */}
         <RemoveButton onRemove={onRemove} />
       </div>
     );
@@ -106,34 +107,36 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
   if (isVideo && previewSrc) {
     return (
       <div
-        className={cn(
-          'relative group rounded-xl overflow-hidden cursor-pointer',
-          'border border-white/[0.08] hover:border-white/[0.20]',
-          'transition-all duration-200 hover:shadow-lg hover:shadow-black/30'
-        )}
+        className="relative group cursor-pointer"
         onClick={() => openWithOS(attachment)}
         title={`${attachment.name} — click to open`}
       >
-        <video
-          src={previewSrc}
-          className="w-[72px] h-[72px] object-cover"
-          muted
-          preload="metadata"
-        />
-        {/* Play icon overlay */}
         <div className={cn(
-          'absolute inset-0 flex items-center justify-center',
-          'bg-black/30 group-hover:bg-black/50 transition-colors duration-200'
+          'rounded-xl overflow-hidden',
+          'border border-white/[0.08] hover:border-white/[0.20]',
+          'transition-all duration-200 hover:shadow-lg hover:shadow-black/30'
         )}>
-          <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-            <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="white" />
+          <video
+            src={previewSrc}
+            className="w-[96px] h-[96px] object-cover block"
+            muted
+            preload="metadata"
+          />
+          {/* Play icon overlay */}
+          <div className={cn(
+            'absolute inset-0 rounded-xl flex items-center justify-center',
+            'bg-black/30 group-hover:bg-black/50 transition-colors duration-200'
+          )}>
+            <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <Play className="w-3.5 h-3.5 text-white ml-0.5" fill="white" />
+            </div>
           </div>
-        </div>
-        {/* Name strip */}
-        <div className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm">
-          <span className="text-[9px] text-white/80 truncate block">
-            {attachment.name}
-          </span>
+          {/* Name strip */}
+          <div className="absolute bottom-0 left-0 right-0 px-1.5 py-0.5 bg-black/60 backdrop-blur-sm rounded-b-xl">
+            <span className="text-[9px] text-white/80 truncate block">
+              {attachment.name}
+            </span>
+          </div>
         </div>
         <RemoveButton onRemove={onRemove} />
       </div>

@@ -235,7 +235,7 @@ export class SessionPersistence {
 
   private async enqueueSessionWrite<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
     const previous = this.sessionWriteQueues.get(sessionId) ?? Promise.resolve();
-    let releaseCurrent: (() => void) | null = null;
+    let releaseCurrent: () => void = () => {};
     const current = new Promise<void>((resolve) => {
       releaseCurrent = resolve;
     });
@@ -249,7 +249,7 @@ export class SessionPersistence {
       await previous;
       return await op();
     } finally {
-      releaseCurrent?.();
+      releaseCurrent();
       if (this.sessionWriteQueues.get(sessionId) === current) {
         this.sessionWriteQueues.delete(sessionId);
       }

@@ -5,7 +5,6 @@ import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTu
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import { StreamingMessage } from './StreamingMessage';
 import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
 import { SourcesCitation } from './SourcesCitation';
@@ -62,7 +61,6 @@ export function MessageList() {
     isStreaming,
     isThinking,
     thinkingContent,
-    streamingContent,
     isLoadingMessages,
     pendingQuestions,
     pendingPermissions,
@@ -88,7 +86,6 @@ export function MessageList() {
   }, [
     chatItems.length,
     messages.length,
-    streamingContent,
     isStreaming,
     pendingPermissions.length,
     pendingQuestions.length,
@@ -125,6 +122,8 @@ export function MessageList() {
     if (activities.length === 0 && (!isStreaming || activeTurnId !== turnId)) {
       return null;
     }
+    const hasRunningTool = [...toolMap.values()].some((t) => t.status === 'running');
+    const hasAssistantInTurn = activities.some((activity) => activity.type === 'assistant');
 
     return (
       <div className="mt-2 space-y-2 turn-activities">
@@ -213,13 +212,16 @@ export function MessageList() {
           return null;
         })}
 
-        {/* Show thinking block when there's thinking content or when waiting for response */}
-        {isStreaming && activeTurnId === turnId && (thinkingContent || (!streamingContent && ![...toolMap.values()].some(t => t.status === 'running'))) && (
-          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!streamingContent && ![...toolMap.values()].some(t => t.status === 'running'))} />
+        {/* Show thinking block when there's thinking content or when waiting for the first assistant item */}
+        {isStreaming && activeTurnId === turnId && (thinkingContent || (!hasAssistantInTurn && !hasRunningTool)) && (
+          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!hasAssistantInTurn && !hasRunningTool)} />
         )}
 
-        {isStreaming && activeTurnId === turnId && streamingContent && (
-          <StreamingMessage content={streamingContent} />
+        {isStreaming && activeTurnId === turnId && !thinkingContent && !hasAssistantInTurn && (
+          <div className="flex items-center gap-2 text-xs text-white/55 pl-9">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#93C5FD]" />
+            <span>Processing...</span>
+          </div>
         )}
       </div>
     );
