@@ -105,10 +105,10 @@ export function ScheduleSuggestionCard({
         animate={{ opacity: 1, y: 0 }}
         className={cn(
           'my-4 p-4 rounded-xl',
-          'bg-[#10B981]/10 border border-[#10B981]/20'
+          'bg-[#50956A]/10 border border-[#50956A]/20'
         )}
       >
-        <div className="flex items-center gap-2 text-[#10B981]">
+        <div className="flex items-center gap-2 text-[#8FDCA9]">
           <Check className="w-5 h-5" />
           <span className="font-medium">Scheduled task created!</span>
         </div>
@@ -125,13 +125,13 @@ export function ScheduleSuggestionCard({
       animate={{ opacity: 1, y: 0 }}
       className={cn(
         'my-4 p-4 rounded-xl',
-        'bg-gradient-to-r from-[#10B981]/10 to-[#059669]/10',
-        'border border-[#10B981]/20'
+        'bg-gradient-to-r from-[#1D4ED8]/10 to-[#1E3A8A]/10',
+        'border border-[#1D4ED8]/20'
       )}
     >
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg bg-[#10B981]/20 flex items-center justify-center flex-shrink-0">
-          <Calendar className="w-5 h-5 text-[#10B981]" />
+        <div className="w-10 h-10 rounded-lg bg-[#1D4ED8]/15 flex items-center justify-center flex-shrink-0">
+          <Calendar className="w-5 h-5 text-[#60A5FA]" />
         </div>
 
         <div className="flex-1 min-w-0">
@@ -146,7 +146,7 @@ export function ScheduleSuggestionCard({
             </div>
             <div className="flex items-center gap-2">
               <span className="text-white/50">Schedule:</span>
-              <span className="font-medium text-[#10B981]">
+              <span className="font-medium text-[#60A5FA]">
                 {formatScheduleDisplay()}
               </span>
             </div>
@@ -165,8 +165,8 @@ export function ScheduleSuggestionCard({
               disabled={isCreating}
               className={cn(
                 'flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium',
-                'bg-[#10B981] text-white',
-                'hover:bg-[#059669] transition-colors',
+                'bg-[#1D4ED8] text-white',
+                'hover:bg-[#3B82F6] transition-colors',
                 isCreating && 'opacity-50 cursor-not-allowed'
               )}
             >

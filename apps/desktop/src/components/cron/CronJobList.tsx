@@ -138,7 +138,7 @@ export function CronJobList() {
         title="Active"
         jobs={activeJobs}
         defaultOpen={true}
-        badgeColor="bg-[#10B981]/20 text-[#34D399]"
+        badgeColor="bg-[#50956A]/20 text-[#8FDCA9]"
       />
 
       <JobSection

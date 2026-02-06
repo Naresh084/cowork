@@ -77,6 +77,26 @@ export function MessageList() {
     () => deriveTurnActivitiesFromItems(chatItems, pendingPermissions, pendingQuestions),
     [chatItems, pendingPermissions, pendingQuestions]
   );
+  const finalAssistantMessageIds = useMemo(() => {
+    const compareByTimelineOrder = (a: ChatItem, b: ChatItem): number => {
+      const aSeq = typeof a.sequence === 'number' ? a.sequence : Number.POSITIVE_INFINITY;
+      const bSeq = typeof b.sequence === 'number' ? b.sequence : Number.POSITIVE_INFINITY;
+      if (aSeq !== bSeq) return aSeq - bSeq;
+      if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+      return a.id.localeCompare(b.id);
+    };
+
+    const latestAssistantByTurn = new Map<string, ChatItem>();
+    for (const item of chatItems) {
+      if (item.kind !== 'assistant_message' || !item.turnId) continue;
+      const existing = latestAssistantByTurn.get(item.turnId);
+      if (!existing || compareByTimelineOrder(existing, item) < 0) {
+        latestAssistantByTurn.set(item.turnId, item);
+      }
+    }
+
+    return new Set(Array.from(latestAssistantByTurn.values(), (item) => item.id));
+  }, [chatItems]);
   const artifacts = agentState.artifacts;
   const { respondToQuestion, respondToPermission } = useChatStore();
 
@@ -214,7 +234,13 @@ export function MessageList() {
             if (!activity.messageId) return null;
             const message = messageById.get(activity.messageId);
             if (!message) return null;
-            return <MessageBubble key={activity.id} message={message} />;
+            return (
+              <MessageBubble
+                key={activity.id}
+                message={message}
+                showCopyAction={finalAssistantMessageIds.has(message.id)}
+              />
+            );
           }
 
           return null;
@@ -260,7 +286,14 @@ export function MessageList() {
                 transition={{ duration: 0.3, delay: index * 0.05 }}
                 className="message-turn-container"
               >
-                <MessageBubble message={message} />
+                <MessageBubble
+                  message={message}
+                  showCopyAction={
+                    message.role !== 'assistant'
+                    || !assistantMessageIds.has(message.id)
+                    || finalAssistantMessageIds.has(message.id)
+                  }
+                />
                 {message.role === 'user' && renderTurnActivities(message.id)}
               </motion.div>
               );
@@ -351,6 +384,7 @@ function EmptyState() {
 
 interface MessageBubbleProps {
   message: Message;
+  showCopyAction?: boolean;
 }
 
 interface PermissionInlineCardProps {
@@ -1552,7 +1586,7 @@ function DesignActivityRow({
   );
 }
 
-function MessageBubble({ message }: MessageBubbleProps) {
+function MessageBubble({ message, showCopyAction = true }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -1650,7 +1684,7 @@ function MessageBubble({ message }: MessageBubbleProps) {
         ) : null}
 
         {/* Actions */}
-        {!isUser && (
+        {!isUser && showCopyAction && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

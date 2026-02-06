@@ -112,7 +112,7 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
             <div
               className={cn(
                 'w-2 h-2 rounded-full flex-shrink-0',
-                isActive && 'bg-[#10B981]',
+                isActive && 'bg-[#50956A]',
                 isPaused && 'bg-yellow-500',
                 job.status === 'completed' && 'bg-white/30',
                 job.status === 'failed' && 'bg-red-500'
@@ -144,7 +144,7 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
           <div
             className={cn(
               'w-3 h-3 rounded-full flex-shrink-0',
-              isActive && 'bg-[#10B981]',
+              isActive && 'bg-[#50956A]',
               isPaused && 'bg-yellow-500',
               job.status === 'completed' && 'bg-white/30',
               job.status === 'failed' && 'bg-red-500'
@@ -170,7 +170,7 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
                 className="fixed inset-0 z-10"
                 onClick={() => setShowMenu(false)}
               />
-              <div className="absolute right-0 top-8 w-40 py-1 rounded-lg bg-[#1A1B21] border border-white/[0.08] shadow-xl z-20">
+              <div className="absolute right-0 top-8 w-40 py-1 rounded-lg bg-[#111218] border border-white/[0.08] shadow-xl z-20">
                 <button
                   onClick={() => {
                     startEdit(job.id);
@@ -224,7 +224,7 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
                 {' '}
                 · Last:{' '}
                 {job.lastStatus === 'ok' ? (
-                  <span className="text-[#10B981]">
+                  <span className="text-[#8FDCA9]">
                     Success{job.lastDurationMs ? ` (${formatDuration(job.lastDurationMs)})` : ''}
                   </span>
                 ) : job.lastStatus === 'error' ? (
@@ -268,8 +268,8 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
           disabled={isRunning}
           className={cn(
             'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium',
-            'bg-[#10B981]/20 text-[#34D399]',
-            'hover:bg-[#10B981]/30 transition-colors',
+            'bg-[#1D4ED8]/15 text-[#60A5FA]',
+            'hover:bg-[#1D4ED8]/25 transition-colors',
             isRunning && 'opacity-50 cursor-not-allowed'
           )}
         >

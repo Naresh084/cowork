@@ -104,8 +104,8 @@ export function CronModal({ isOpen, onClose }: CronModalProps) {
                   {/* Header */}
                   <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.08]">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-[#10B981]/20 flex items-center justify-center">
-                        <Calendar className="w-5 h-5 text-[#34D399]" />
+                      <div className="w-10 h-10 rounded-xl bg-[#1D4ED8]/15 flex items-center justify-center">
+                        <Calendar className="w-5 h-5 text-[#60A5FA]" />
                       </div>
                       <div>
                         <h2 className="text-lg font-semibold text-white/90">
@@ -123,8 +123,8 @@ export function CronModal({ isOpen, onClose }: CronModalProps) {
                         onClick={startCreate}
                         className={cn(
                           'flex items-center gap-2 px-4 py-2 rounded-lg',
-                          'bg-[#10B981] text-white text-sm font-medium',
-                          'hover:bg-[#059669] transition-colors'
+                          'bg-[#1D4ED8] text-white text-sm font-medium',
+                          'hover:bg-[#3B82F6] transition-colors'
                         )}
                       >
                         <Plus className="w-4 h-4" />
