@@ -226,10 +226,34 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
 export class SessionPersistence {
   private sessionsDir: string;
   private workspacesDir: string;
+  private sessionWriteQueues: Map<string, Promise<void>> = new Map();
 
   constructor(appDataDir: string) {
     this.sessionsDir = join(appDataDir, 'sessions');
     this.workspacesDir = join(appDataDir, 'workspaces');
+  }
+
+  private async enqueueSessionWrite<T>(sessionId: string, op: () => Promise<T>): Promise<T> {
+    const previous = this.sessionWriteQueues.get(sessionId) ?? Promise.resolve();
+    let releaseCurrent: (() => void) | null = null;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+
+    this.sessionWriteQueues.set(
+      sessionId,
+      previous.then(() => current).catch(() => current),
+    );
+
+    try {
+      await previous;
+      return await op();
+    } finally {
+      releaseCurrent?.();
+      if (this.sessionWriteQueues.get(sessionId) === current) {
+        this.sessionWriteQueues.delete(sessionId);
+      }
+    }
   }
 
   async initialize(): Promise<void> {
@@ -435,47 +459,49 @@ export class SessionPersistence {
    * Save session in V2 format (unified chatItems).
    */
   async saveSessionV2(data: PersistedSessionDataV2): Promise<void> {
-    const sessionDir = join(this.sessionsDir, data.metadata.id);
+    await this.enqueueSessionWrite(data.metadata.id, async () => {
+      const sessionDir = join(this.sessionsDir, data.metadata.id);
 
-    if (!existsSync(sessionDir)) {
-      await mkdir(sessionDir, { recursive: true });
-    }
+      if (!existsSync(sessionDir)) {
+        await mkdir(sessionDir, { recursive: true });
+      }
 
-    await Promise.all([
-      this.writeJson(join(sessionDir, 'session.json'), {
-        version: SCHEMA_VERSION,
-        id: data.metadata.id,
-        type: data.metadata.type || 'main',
-        title: data.metadata.title,
-        workingDirectory: data.metadata.workingDirectory,
-        model: data.metadata.model,
-        approvalMode: data.metadata.approvalMode,
-        createdAt: data.metadata.createdAt,
-        updatedAt: data.metadata.updatedAt,
-        lastAccessedAt: data.metadata.lastAccessedAt,
-      }),
-      this.writeJson(join(sessionDir, 'chat-items.json'), {
-        version: SCHEMA_VERSION,
-        chatItems: data.chatItems,
-      }),
-      this.writeJson(join(sessionDir, 'tasks.json'), {
-        version: SCHEMA_VERSION,
-        tasks: data.tasks,
-      }),
-      this.writeJson(join(sessionDir, 'artifacts.json'), {
-        version: SCHEMA_VERSION,
-        artifacts: data.artifacts,
-      }),
-      data.contextUsage
-        ? this.writeJson(join(sessionDir, 'context.json'), data.contextUsage)
-        : Promise.resolve(),
-    ]);
+      await Promise.all([
+        this.writeJson(join(sessionDir, 'session.json'), {
+          version: SCHEMA_VERSION,
+          id: data.metadata.id,
+          type: data.metadata.type || 'main',
+          title: data.metadata.title,
+          workingDirectory: data.metadata.workingDirectory,
+          model: data.metadata.model,
+          approvalMode: data.metadata.approvalMode,
+          createdAt: data.metadata.createdAt,
+          updatedAt: data.metadata.updatedAt,
+          lastAccessedAt: data.metadata.lastAccessedAt,
+        }),
+        this.writeJson(join(sessionDir, 'chat-items.json'), {
+          version: SCHEMA_VERSION,
+          chatItems: data.chatItems,
+        }),
+        this.writeJson(join(sessionDir, 'tasks.json'), {
+          version: SCHEMA_VERSION,
+          tasks: data.tasks,
+        }),
+        this.writeJson(join(sessionDir, 'artifacts.json'), {
+          version: SCHEMA_VERSION,
+          artifacts: data.artifacts,
+        }),
+        data.contextUsage
+          ? this.writeJson(join(sessionDir, 'context.json'), data.contextUsage)
+          : Promise.resolve(),
+      ]);
 
-    // Update index
-    await this.updateIndexV2(data);
+      // Update index
+      await this.updateIndexV2(data);
 
-    // Update workspace index
-    await this.addSessionToWorkspace(data.metadata.id, data.metadata.workingDirectory);
+      // Update workspace index
+      await this.addSessionToWorkspace(data.metadata.id, data.metadata.workingDirectory);
+    });
   }
 
   /**
@@ -522,7 +548,7 @@ export class SessionPersistence {
   /**
    * Save chatItems directly for incremental updates.
    */
-  async saveChatItems(sessionId: string, chatItems: ChatItem[]): Promise<void> {
+  private async saveChatItemsUnsafe(sessionId: string, chatItems: ChatItem[]): Promise<void> {
     const sessionDir = join(this.sessionsDir, sessionId);
     if (!existsSync(sessionDir)) {
       await mkdir(sessionDir, { recursive: true });
@@ -535,43 +561,56 @@ export class SessionPersistence {
   }
 
   /**
+   * Save chatItems directly for incremental updates.
+   */
+  async saveChatItems(sessionId: string, chatItems: ChatItem[]): Promise<void> {
+    await this.enqueueSessionWrite(sessionId, async () => {
+      await this.saveChatItemsUnsafe(sessionId, chatItems);
+    });
+  }
+
+  /**
    * Append a single chat item for real-time persistence.
    */
   async appendChatItem(sessionId: string, item: ChatItem): Promise<void> {
-    const sessionDir = join(this.sessionsDir, sessionId);
-    const chatItemsPath = join(sessionDir, 'chat-items.json');
+    await this.enqueueSessionWrite(sessionId, async () => {
+      const sessionDir = join(this.sessionsDir, sessionId);
+      const chatItemsPath = join(sessionDir, 'chat-items.json');
 
-    let chatItems: ChatItem[] = [];
-    if (existsSync(chatItemsPath)) {
-      try {
-        const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
-        chatItems = data.chatItems || [];
-      } catch {
-        // Start fresh
+      let chatItems: ChatItem[] = [];
+      if (existsSync(chatItemsPath)) {
+        try {
+          const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
+          chatItems = data.chatItems || [];
+        } catch {
+          // Start fresh
+        }
       }
-    }
 
-    chatItems.push(item);
-    await this.saveChatItems(sessionId, chatItems);
+      chatItems.push(item);
+      await this.saveChatItemsUnsafe(sessionId, chatItems);
+    });
   }
 
   /**
    * Update a chat item by ID.
    */
   async updateChatItem(sessionId: string, itemId: string, updates: Partial<ChatItem>): Promise<void> {
-    const sessionDir = join(this.sessionsDir, sessionId);
-    const chatItemsPath = join(sessionDir, 'chat-items.json');
+    await this.enqueueSessionWrite(sessionId, async () => {
+      const sessionDir = join(this.sessionsDir, sessionId);
+      const chatItemsPath = join(sessionDir, 'chat-items.json');
 
-    if (!existsSync(chatItemsPath)) return;
+      if (!existsSync(chatItemsPath)) return;
 
-    const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
-    const chatItems = data.chatItems || [];
+      const data = await this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath);
+      const chatItems = data.chatItems || [];
 
-    const index = chatItems.findIndex(item => item.id === itemId);
-    if (index >= 0) {
-      chatItems[index] = { ...chatItems[index], ...updates } as ChatItem;
-      await this.saveChatItems(sessionId, chatItems);
-    }
+      const index = chatItems.findIndex(item => item.id === itemId);
+      if (index >= 0) {
+        chatItems[index] = { ...chatItems[index], ...updates } as ChatItem;
+        await this.saveChatItemsUnsafe(sessionId, chatItems);
+      }
+    });
   }
 
   /**

@@ -1,7 +1,7 @@
 import { SocketModeClient } from '@slack/socket-mode';
 import { WebClient } from '@slack/web-api';
 import { BaseAdapter } from './base-adapter.js';
-import type { SlackConfig } from '../types.js';
+import type { SlackConfig, IntegrationMediaPayload } from '../types.js';
 
 /**
  * Slack adapter using Socket Mode for real-time messaging.
@@ -170,6 +170,88 @@ void slackConfig;
     }
 
     await this.sendMessage(chatId, text);
+  }
+
+  override async updateStreamingMessage(
+    chatId: string,
+    handle: unknown,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.webClient) {
+      throw new Error('Slack adapter is not connected');
+    }
+
+    const currentHandle = handle as
+      | {
+          channel?: string;
+          ts?: string;
+        }
+      | null;
+
+    if (currentHandle?.ts) {
+      try {
+        await this.webClient.chat.update({
+          channel: currentHandle.channel || chatId,
+          ts: currentHandle.ts,
+          text,
+        });
+        return currentHandle;
+      } catch {
+        // Fall back to send-new below.
+      }
+    }
+
+    const response = await this.webClient.chat.postMessage({
+      channel: chatId,
+      text,
+      mrkdwn: true,
+    });
+    return {
+      channel: response.channel || chatId,
+      ts: response.ts,
+    };
+  }
+
+  override async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
+    if (!this.webClient) {
+      throw new Error('Slack adapter is not connected');
+    }
+
+    if (!media.path && !media.data && !media.url) {
+      await this.sendMessage(chatId, media.caption || `Sent ${media.mediaType}`);
+      return null;
+    }
+
+    if (media.url && !media.path && !media.data) {
+      await this.sendMessage(
+        chatId,
+        `${media.caption?.trim() || `Sent ${media.mediaType}`}\n${media.url}`,
+      );
+      return null;
+    }
+
+    const filename =
+      media.path?.split('/').pop() ||
+      `${media.mediaType}-${Date.now()}${media.mediaType === 'image' ? '.png' : '.mp4'}`;
+
+    const uploadArgs: Record<string, unknown> = {
+      channel_id: chatId,
+      filename,
+      title: filename,
+    };
+
+    if (media.caption?.trim()) {
+      uploadArgs.initial_comment = media.caption.trim();
+    }
+
+    if (media.path) {
+      uploadArgs.file = media.path;
+    } else if (media.data) {
+      uploadArgs.file = Buffer.from(media.data, 'base64');
+    }
+
+    const response = await this.webClient.filesUploadV2(uploadArgs as never);
+    return response;
   }
 
   private async getUserDisplayName(userId: string): Promise<string> {

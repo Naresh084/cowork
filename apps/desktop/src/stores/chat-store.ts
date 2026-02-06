@@ -18,6 +18,7 @@ export interface Attachment {
   mimeType?: string;
   data?: string; // base64 encoded
   size?: number;
+  objectUrl?: string; // blob URL for preview rendering
 }
 
 export interface ToolExecution {
@@ -217,6 +218,7 @@ export interface SessionDetails {
   chatItems: ChatItem[];
   tasks: Task[];
   artifacts: Artifact[];
+  contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
 }
 
 const createSessionState = (): SessionChatState => ({
@@ -704,6 +706,23 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
         if (session.artifacts) {
           agentStore.setArtifacts(sessionId, session.artifacts);
+        }
+
+        // Restore context usage from persisted data
+        if (session.contextUsage) {
+          agentStore.setContextUsage(
+            sessionId,
+            session.contextUsage.usedTokens,
+            session.contextUsage.maxTokens,
+          );
+          set((state) => updateSession(state, sessionId, (existing) => ({
+            ...existing,
+            contextUsage: {
+              usedTokens: session.contextUsage!.usedTokens,
+              maxTokens: session.contextUsage!.maxTokens,
+              percentUsed: session.contextUsage!.percentUsed,
+            },
+          })));
         }
 
         return session;

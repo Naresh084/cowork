@@ -26,6 +26,7 @@ fn main() {
             commands::files::read_file,
             commands::files::write_file,
             commands::files::list_directory,
+            commands::files::open_file_preview,
             // Agent commands
             commands::agent::agent_set_api_key,
             commands::agent::agent_create_session,

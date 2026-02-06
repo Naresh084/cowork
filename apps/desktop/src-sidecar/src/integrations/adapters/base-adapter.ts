@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { PlatformType, PlatformStatus, IncomingMessage } from '../types.js';
+import type { PlatformType, PlatformStatus, IncomingMessage, IntegrationMediaPayload } from '../types.js';
 
 /**
  * Abstract base class for messaging platform adapters.
@@ -62,6 +62,30 @@ export abstract class BaseAdapter extends EventEmitter {
     text: string,
   ): Promise<void> {
     await this.sendMessage(chatId, text);
+  }
+
+  /**
+   * Update an existing streaming text message and return the latest handle.
+   * Default behavior sends a new message and returns no reusable handle.
+   */
+  async updateStreamingMessage(
+    chatId: string,
+    _handle: unknown,
+    text: string,
+  ): Promise<unknown> {
+    await this.sendMessage(chatId, text);
+    return null;
+  }
+
+  /**
+   * Send media content to the platform.
+   * Default behavior falls back to text-only representation.
+   */
+  async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
+    const suffix = media.url ? `\n${media.url}` : '';
+    const caption = media.caption?.trim() || `Sent ${media.mediaType}`;
+    await this.sendMessage(chatId, `${caption}${suffix}`);
+    return null;
   }
 
   /** Get the current connection status. */

@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { BaseAdapter } from './base-adapter.js';
-import type { TelegramConfig } from '../types.js';
+import type { TelegramConfig, IntegrationMediaPayload } from '../types.js';
 
 /**
  * Telegram adapter using long-polling for real-time messaging.
@@ -145,5 +145,75 @@ export class TelegramAdapter extends BaseAdapter {
     }
 
     await this.sendMessage(chatId, text);
+  }
+
+  override async updateStreamingMessage(
+    chatId: string,
+    handle: unknown,
+    text: string,
+  ): Promise<unknown> {
+    if (!this.bot) {
+      throw new Error('Telegram adapter is not connected');
+    }
+
+    const currentHandle = handle as
+      | {
+          chatId?: string;
+          messageId?: number;
+        }
+      | null;
+
+    if (typeof currentHandle?.messageId === 'number') {
+      try {
+        await this.bot.editMessageText(text, {
+          chat_id: currentHandle.chatId ?? chatId,
+          message_id: currentHandle.messageId,
+        });
+        return currentHandle;
+      } catch {
+        // Fall through to send-new.
+      }
+    }
+
+    const sent = await this.bot.sendMessage(chatId, text);
+    return {
+      chatId: String(sent.chat.id),
+      messageId: sent.message_id,
+    };
+  }
+
+  override async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
+    if (!this.bot) {
+      throw new Error('Telegram adapter is not connected');
+    }
+
+    const caption = media.caption?.trim() || undefined;
+
+    if (media.mediaType === 'image') {
+      const source: Buffer | string | undefined = media.path
+        ? media.path
+        : media.data
+          ? Buffer.from(media.data, 'base64')
+          : media.url;
+
+      if (source) {
+        return this.bot.sendPhoto(chatId, source, caption ? { caption } : {});
+      }
+    }
+
+    if (media.mediaType === 'video') {
+      const source: Buffer | string | undefined = media.path
+        ? media.path
+        : media.data
+          ? Buffer.from(media.data, 'base64')
+          : media.url;
+
+      if (source) {
+        return this.bot.sendVideo(chatId, source, caption ? { caption } : {});
+      }
+    }
+
+    const fallback = `${caption || `Sent ${media.mediaType}`}${media.url ? `\n${media.url}` : ''}`;
+    return this.bot.sendMessage(chatId, fallback);
   }
 }

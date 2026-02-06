@@ -73,7 +73,7 @@ export type AgentEvent =
   | {
       type: 'stream:done';
       sessionId: string;
-      message: Message;
+      message: Message | null;
     }
   // Thinking events (agent's internal reasoning)
   | { type: 'thinking:start'; sessionId: string }

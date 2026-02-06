@@ -33,11 +33,11 @@ function parseTauriEvent(
       return {
         type: 'stream:done',
         sessionId,
-        message: data.message as AgentEvent & { type: 'stream:done' } extends {
+        message: (data.message as AgentEvent & { type: 'stream:done' } extends {
           message: infer M;
         }
           ? M
-          : never,
+          : never) ?? null,
       };
 
     case 'tool:start':

@@ -33,6 +33,26 @@ export class EventEmitter {
       data,
     };
 
+    // Coalesce frequent chat:update events within the current flush window.
+    if (type === 'chat:update' && event.sessionId) {
+      const incoming = event.data as { itemId?: string } | null;
+      const incomingItemId = incoming?.itemId;
+      if (incomingItemId) {
+        for (let i = this.eventBuffer.length - 1; i >= 0; i -= 1) {
+          const buffered = this.eventBuffer[i];
+          if (buffered?.type !== 'chat:update' || buffered.sessionId !== event.sessionId) {
+            continue;
+          }
+          const bufferedData = buffered.data as { itemId?: string } | null;
+          if (bufferedData?.itemId === incomingItemId) {
+            this.eventBuffer[i] = event;
+            this.scheduleFlush();
+            return;
+          }
+        }
+      }
+    }
+
     this.eventBuffer.push(event);
     this.scheduleFlush();
   }

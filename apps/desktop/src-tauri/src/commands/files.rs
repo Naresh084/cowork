@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -196,4 +197,42 @@ pub async fn list_directory(path: String) -> Result<Vec<FileInfo>, String> {
     });
 
     Ok(files)
+}
+
+#[tauri::command]
+pub async fn open_file_preview(name: String, data: String) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir().join("cowork-preview");
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    let file_path = temp_dir.join(&name);
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Failed to decode file data: {}", e))?;
+
+    fs::write(&file_path, bytes)
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    let path_str = file_path.to_string_lossy().to_string();
+
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    std::process::Command::new("xdg-open")
+        .arg(&path_str)
+        .spawn()
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("cmd")
+        .args(["/c", "start", "", &path_str])
+        .spawn()
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+
+    Ok(())
 }
