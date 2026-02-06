@@ -307,8 +307,6 @@ export function CronJobEditor() {
       name: form.name.trim(),
       prompt: form.prompt.trim(),
       schedule,
-      sessionTarget: 'isolated',
-      wakeMode: 'now',
       workingDirectory: form.workingDirectory.trim(),
       model: form.model.trim() || undefined,
       maxTurns: form.maxTurns > 0 ? form.maxTurns : undefined,

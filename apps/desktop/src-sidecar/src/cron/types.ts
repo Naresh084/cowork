@@ -2,7 +2,7 @@
  * Internal cron types for sidecar implementation
  */
 
-import type { CronSchedule, CronSessionTarget, CronWakeMode } from '@gemini-cowork/shared';
+import type { CronSchedule } from '@gemini-cowork/shared';
 
 /**
  * Input for creating a new cron job
@@ -12,8 +12,6 @@ export interface CreateCronJobInput {
   description?: string;
   prompt: string;
   schedule: CronSchedule;
-  sessionTarget: CronSessionTarget;
-  wakeMode: CronWakeMode;
   workingDirectory: string;
   model?: string;
   deleteAfterRun?: boolean;
@@ -30,8 +28,6 @@ export interface UpdateCronJobInput {
   description?: string;
   prompt?: string;
   schedule?: CronSchedule;
-  sessionTarget?: CronSessionTarget;
-  wakeMode?: CronWakeMode;
   workingDirectory?: string;
   model?: string;
   status?: 'active' | 'paused';

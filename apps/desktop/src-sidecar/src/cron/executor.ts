@@ -1,9 +1,8 @@
 /**
- * CronExecutor - Executes cron jobs in isolated or main sessions
+ * CronExecutor - Executes cron jobs in isolated sessions
  *
- * Execution modes:
+ * Execution mode:
  * - Isolated: Creates fresh session, runs agent, returns result
- * - Main: Queues event for heartbeat processing (future feature)
  */
 
 import type { CronJob, CronRun } from '@gemini-cowork/shared';
@@ -56,11 +55,7 @@ export class CronExecutor {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT;
 
     try {
-      if (job.sessionTarget === 'isolated') {
-        return await this.executeIsolated(job, runId, startedAt, timeout);
-      } else {
-        return await this.executeInMain(job, runId, startedAt);
-      }
+      return await this.executeIsolated(job, runId, startedAt, timeout);
     } catch (error) {
       return {
         id: runId,
@@ -87,8 +82,8 @@ export class CronExecutor {
       throw new Error('AgentRunner not set');
     }
 
-    // Create fresh isolated session with cron-specific title
-    const sessionTitle = `[cron:${job.id}] ${job.name}`;
+    // Create fresh isolated session; title is derived from the first message/prompt.
+    const sessionTitle = this.deriveSessionTitle(job.prompt, job.name);
     const session = await this.agentRunner.createSession(
       job.workingDirectory,
       job.model ?? null,
@@ -145,43 +140,17 @@ export class CronExecutor {
   }
 
   /**
-   * Execute in main session (via heartbeat system event)
-   * Note: This will be fully implemented when HeartbeatService is added
+   * Derive session title from the first instruction text.
    */
-  private async executeInMain(
-    job: CronJob,
-    runId: string,
-    startedAt: number
-  ): Promise<CronRun> {
-    // For now, main session execution is a placeholder
-    // When HeartbeatService is implemented, this will queue a system event
-
-    // Queue system event for processing in main session
-    // This will be enabled when HeartbeatService is implemented:
-    // const eventId = heartbeatService.queueEvent({
-    //   type: 'cron:trigger',
-    //   payload: {
-    //     jobId: job.id,
-    //     jobName: job.name,
-    //     prompt: job.prompt,
-    //     runId,
-    //   },
-    //   priority: 'normal',
-    // });
-    //
-    // if (job.wakeMode === 'now') {
-    //   heartbeatService.wake('now');
-    // }
-
-    return {
-      id: runId,
-      jobId: job.id,
-      sessionId: 'main',
-      startedAt,
-      completedAt: Date.now(),
-      result: 'success',
-      summary: `Queued for main session (feature pending)`,
-    };
+  private deriveSessionTitle(prompt: string, fallbackName: string): string {
+    const normalized = prompt.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return fallbackName || 'Scheduled Task';
+    }
+    if (normalized.length <= 80) {
+      return normalized;
+    }
+    return `${normalized.slice(0, 77).trimEnd()}...`;
   }
 
   /**

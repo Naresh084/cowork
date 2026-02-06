@@ -4,7 +4,7 @@
  * Coordinates:
  * - CronStore: Persistence layer for jobs and runs
  * - CronScheduler: Timer management and job execution
- * - CronExecutor: Job execution in isolated/main sessions
+ * - CronExecutor: Job execution in isolated sessions
  */
 
 import { EventEmitter } from 'events';

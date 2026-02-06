@@ -93,10 +93,6 @@ pub struct CreateCronJobInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wake_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delete_after_run: Option<bool>,
@@ -120,9 +116,7 @@ pub struct UpdateCronJobInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schedule: Option<CronSchedule>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_target: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub wake_mode: Option<String>,
+    pub working_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

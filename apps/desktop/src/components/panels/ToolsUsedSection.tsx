@@ -14,6 +14,9 @@ const NON_DEFAULT_TOOLS = new Set([
   'edit_image',
   'generate_video',
   'analyze_video',
+  'stitch',
+  'schedule_task',
+  'manage_scheduled_task',
 ]);
 
 function isNonDefaultTool(toolName: string): boolean {

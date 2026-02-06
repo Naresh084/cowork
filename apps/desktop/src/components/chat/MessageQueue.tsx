@@ -8,12 +8,18 @@ interface MessageQueueProps {
   sessionId: string;
 }
 
+const EMPTY_QUEUE: Array<{ id: string; content: string; queuedAt: number }> = [];
+
 export function MessageQueue({ sessionId }: MessageQueueProps) {
   const queue = useChatStore((state) => {
     const session = state.sessions[sessionId];
-    return session?.messageQueue ?? [];
+    return session?.messageQueue ?? EMPTY_QUEUE;
   });
-  const { removeFromQueue, sendQueuedImmediately, editQueuedMessage } = useChatStore();
+  const removeFromQueue = useChatStore((state) => state.removeFromQueue);
+  const sendQueuedImmediately = useChatStore(
+    (state) => state.sendQueuedImmediately
+  );
+  const editQueuedMessage = useChatStore((state) => state.editQueuedMessage);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');

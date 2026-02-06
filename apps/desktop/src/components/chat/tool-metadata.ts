@@ -12,6 +12,7 @@ import {
   ListTodo,
   Zap,
   Sparkles,
+  Calendar,
 } from 'lucide-react';
 
 const TOOL_ICONS: Record<string, typeof Terminal> = {
@@ -37,6 +38,8 @@ const TOOL_ICONS: Record<string, typeof Terminal> = {
   google_grounded_search: Globe,
   computer_use: Globe,
   stitch: Palette,
+  schedule_task: Calendar,
+  manage_scheduled_task: Calendar,
   write_todos: ListTodo,
   task: Zap,
   spawn_task: Zap,
@@ -67,6 +70,8 @@ const TOOL_NAMES: Record<string, string> = {
   google_grounded_search: 'Google Search',
   computer_use: 'Browser Control',
   stitch: 'Stitch Design',
+  schedule_task: 'Schedule Task',
+  manage_scheduled_task: 'Manage Schedule',
   write_todos: 'Task Progress',
   task: 'Task',
   spawn_task: 'Task',
@@ -96,6 +101,8 @@ const TOOL_CATEGORIES: Record<string, string> = {
   google_grounded_search: 'Search',
   computer_use: 'Browser',
   stitch: 'Design',
+  schedule_task: 'Automation',
+  manage_scheduled_task: 'Automation',
   write_todos: 'Progress',
   task: 'Agent',
   spawn_task: 'Agent',
