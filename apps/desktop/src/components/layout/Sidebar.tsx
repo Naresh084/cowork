@@ -5,16 +5,7 @@ import {
   MessageSquare,
   Trash2,
   MoreHorizontal,
-  ChevronDown,
-  Key,
-  Eye,
-  EyeOff,
-  Check,
-  X,
-  Copy,
-  LogOut,
   Settings,
-  Settings2,
   Puzzle,
   Calendar,
   Terminal,
@@ -25,7 +16,6 @@ import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import { useAuthStore } from '../../stores/auth-store';
 import { useAppStore } from '../../stores/app-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
@@ -67,7 +57,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     sessionListFilters,
     toggleSessionListFilter,
   } = useSettingsStore();
-  const { apiKey } = useAuthStore();
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
   const chatSessions = useChatStore((state) => state.sessions);
 
   const isLiveSession = (sessionId: string) => {
@@ -79,7 +69,6 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     return session.isStreaming || session.pendingPermissions.length > 0 || hasRunningTool;
   };
 
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isHovering, setIsHovering] = useState(false);
@@ -95,7 +84,6 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const cronModalOpen = useCronStore((state) => state.isModalOpen);
   const openCronModal = useCronStore((state) => state.openModal);
   const closeCronModal = useCronStore((state) => state.closeModal);
-  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const sessionMenuRef = useRef<HTMLDivElement>(null);
   const sessionMenuButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
@@ -117,6 +105,9 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   // Connectors store - show CONNECTED count
   const { getConnectedCount } = useConnectorStore();
   const connectedConnectorCount = getConnectedCount();
+  const handleOpenSettings = useCallback(() => {
+    setCurrentView('settings');
+  }, [setCurrentView]);
 
   // Load sessions on mount
   useEffect(() => {
@@ -230,14 +221,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
         <SidebarRail
           sessions={sessions}
           activeSessionId={activeSessionId}
-          apiKey={apiKey}
           onNewTask={handleNewTask}
           onSelectSession={selectSession}
           isLiveSession={isLiveSession}
-          onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
-          onCloseProfile={() => setProfileMenuOpen(false)}
-          profileButtonRef={profileButtonRef}
-          profileMenuOpen={profileMenuOpen}
+          onOpenSettings={handleOpenSettings}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
           onOpenCron={() => openCronModal()}
@@ -255,19 +242,15 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           sessions={sessions}
           activeSessionId={activeSessionId}
           isLoading={isLoading}
-          apiKey={apiKey}
           sessionMenuId={sessionMenuId}
           sessionMenuPosition={sessionMenuPosition}
           sessionMenuRef={sessionMenuRef}
-          profileButtonRef={profileButtonRef}
-          profileMenuOpen={profileMenuOpen}
           onNewTask={handleNewTask}
           onSelectSession={selectSession}
           isLiveSession={isLiveSession}
           onToggleSessionMenu={handleSessionMenuToggle}
           onDeleteSession={handleDeleteSession}
-          onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
-          onCloseProfile={() => setProfileMenuOpen(false)}
+          onOpenSettings={handleOpenSettings}
           isOverlay={false}
           onOpenSkills={() => setSkillsModalOpen(true)}
           enabledSkillsCount={enabledSkillsCount}
@@ -342,19 +325,15 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               sessions={sessions}
               activeSessionId={activeSessionId}
               isLoading={isLoading}
-              apiKey={apiKey}
               sessionMenuId={sessionMenuId}
               sessionMenuPosition={sessionMenuPosition}
               sessionMenuRef={sessionMenuRef}
-              profileButtonRef={profileButtonRef}
-              profileMenuOpen={profileMenuOpen}
               onNewTask={handleNewTask}
               onSelectSession={selectSession}
               isLiveSession={isLiveSession}
               onToggleSessionMenu={handleSessionMenuToggle}
               onDeleteSession={handleDeleteSession}
-              onOpenProfile={() => setProfileMenuOpen(!profileMenuOpen)}
-              onCloseProfile={() => setProfileMenuOpen(false)}
+              onOpenSettings={handleOpenSettings}
               isOverlay={true}
               onOpenSkills={() => setSkillsModalOpen(true)}
               enabledSkillsCount={enabledSkillsCount}
@@ -379,14 +358,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
 interface SidebarRailProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
-  apiKey: string | null;
   onNewTask: () => void;
   onSelectSession: (id: string) => void;
   isLiveSession: (id: string) => boolean;
-  onOpenProfile: () => void;
-  onCloseProfile: () => void;
-  profileButtonRef: RefObject<HTMLButtonElement>;
-  profileMenuOpen: boolean;
+  onOpenSettings: () => void;
   onOpenSkills: () => void;
   enabledSkillsCount: number;
   onOpenCron: () => void;
@@ -403,14 +378,10 @@ interface SidebarRailProps {
 function SidebarRail({
   sessions,
   activeSessionId,
-  apiKey,
   onNewTask,
   onSelectSession,
   isLiveSession,
-  onOpenProfile,
-  onCloseProfile,
-  profileButtonRef,
-  profileMenuOpen,
+  onOpenSettings,
   onOpenSkills,
   enabledSkillsCount,
   onOpenCron,
@@ -423,9 +394,7 @@ function SidebarRail({
   connectorCount,
   sessionListFilters,
 }: SidebarRailProps) {
-  const { userName } = useSettingsStore();
   const filteredSessions = sessions.filter((session) => sessionListFilters[getSessionCategory(session)]);
-  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
@@ -527,36 +496,21 @@ function SidebarRail({
         ))}
       </div>
 
-      {/* Profile Section */}
+      {/* Settings */}
       <div className="p-2 border-t border-white/[0.06]">
         <motion.button
-          ref={profileButtonRef}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          onClick={onOpenProfile}
+          onClick={onOpenSettings}
           className={cn(
             'w-10 h-10 flex items-center justify-center rounded-xl',
-            'hover:bg-white/[0.04] transition-colors',
-            profileMenuOpen && 'bg-white/[0.08]'
+            'hover:bg-white/[0.04] transition-colors text-white/70'
           )}
-          title="Profile & Settings"
+          title="Settings"
         >
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center">
-            <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
-          </div>
+          <Settings className="w-4 h-4" />
         </motion.button>
       </div>
-
-      <AnimatePresence>
-        {profileMenuOpen && (
-          <ProfileMenu
-            apiKey={apiKey}
-            onClose={onCloseProfile}
-            buttonRef={profileButtonRef}
-            isCollapsed={true}
-          />
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -565,19 +519,15 @@ interface SidebarExpandedProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   isLoading: boolean;
-  apiKey: string | null;
   sessionMenuId: string | null;
   sessionMenuPosition: { top: number; left: number } | null;
   sessionMenuRef: RefObject<HTMLDivElement>;
-  profileButtonRef: RefObject<HTMLButtonElement>;
-  profileMenuOpen: boolean;
   onNewTask: () => void;
   onSelectSession: (id: string) => void;
   isLiveSession: (id: string) => boolean;
   onToggleSessionMenu: (id: string, buttonElement: HTMLButtonElement | null) => void;
   onDeleteSession: (id: string) => void;
-  onOpenProfile: () => void;
-  onCloseProfile: () => void;
+  onOpenSettings: () => void;
   isOverlay: boolean;
   onOpenSkills: () => void;
   enabledSkillsCount: number;
@@ -597,19 +547,15 @@ function SidebarExpanded({
   sessions,
   activeSessionId,
   isLoading,
-  apiKey,
   sessionMenuId,
   sessionMenuPosition,
   sessionMenuRef,
-  profileButtonRef,
-  profileMenuOpen,
   onNewTask,
   onSelectSession,
   isLiveSession,
   onToggleSessionMenu,
   onDeleteSession,
-  onOpenProfile,
-  onCloseProfile,
+  onOpenSettings,
   isOverlay,
   onOpenSkills,
   enabledSkillsCount,
@@ -636,7 +582,6 @@ function SidebarExpanded({
   const filteredSessions = sessions.filter(
     (session) => sessionListFilters[getSessionCategory(session)]
   );
-  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -804,47 +749,26 @@ function SidebarExpanded({
         ))}
       </div>
 
-      {/* Profile Section */}
+      {/* Footer */}
       <div className="p-3 border-t border-white/[0.08]">
-        <motion.button
-          ref={profileButtonRef}
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.99 }}
-          onClick={onOpenProfile}
-          className={cn(
-            'w-full flex items-center gap-3 p-2 rounded-xl',
-            'hover:bg-white/[0.04] transition-colors',
-            profileMenuOpen && 'bg-white/[0.08]'
-          )}
-        >
+        <div className="w-full flex items-center gap-2 p-2 rounded-xl bg-white/[0.03] border border-white/[0.06]">
           <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
+            <span className="text-white text-xs font-bold">{(userName?.charAt(0).toUpperCase() || '?')}</span>
           </div>
-          <div className="flex-1 text-left min-w-0">
+          <div className="flex-1 min-w-0">
             <div className="text-sm font-medium text-white/90 truncate">{userName || 'User'}</div>
-            <div className="text-xs text-white/40 truncate">
-              {apiKey ? 'API Connected' : 'Not configured'}
-            </div>
+            <div className="text-xs text-white/40 truncate">Local profile</div>
           </div>
-          <ChevronDown
-            className={cn(
-              'w-4 h-4 text-white/40 transition-transform',
-              profileMenuOpen && 'rotate-180'
-            )}
-          />
-        </motion.button>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:text-white/90 hover:bg-white/[0.08] transition-colors"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </button>
+        </div>
       </div>
-
-      <AnimatePresence>
-        {profileMenuOpen && (
-          <ProfileMenu
-            apiKey={apiKey}
-            onClose={onCloseProfile}
-            buttonRef={profileButtonRef}
-            isCollapsed={false}
-          />
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 }
@@ -1037,274 +961,5 @@ function SessionItem({
         document.body
       )}
     </motion.div>
-  );
-}
-
-interface ProfileMenuProps {
-  apiKey: string | null;
-  onClose: () => void;
-  buttonRef: RefObject<HTMLButtonElement>;
-  isCollapsed: boolean;
-}
-
-function ProfileMenu({ apiKey, onClose, buttonRef, isCollapsed }: ProfileMenuProps) {
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [isEditingKey, setIsEditingKey] = useState(false);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [newApiKey, setNewApiKey] = useState('');
-  const [newUserName, setNewUserName] = useState('');
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
-  const menuRef = useRef<HTMLDivElement>(null);
-  const { setApiKey, clearApiKey } = useAuthStore();
-  const { userName, updateSetting } = useSettingsStore();
-  const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
-
-  const maskedApiKey = apiKey
-    ? `${apiKey.slice(0, 6)}${'•'.repeat(20)}${apiKey.slice(-4)}`
-    : 'Not configured';
-
-  // Calculate position based on button location
-  useEffect(() => {
-    if (buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      if (isCollapsed) {
-        setMenuPosition({
-          top: rect.bottom - 300,
-          left: rect.right + 8,
-        });
-      } else {
-        setMenuPosition({
-          top: rect.top - 320,
-          left: rect.left,
-        });
-      }
-    }
-  }, [buttonRef, isCollapsed]);
-
-  // Close on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node) &&
-          buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose, buttonRef]);
-
-  const handleSaveApiKey = async () => {
-    if (!newApiKey.trim()) return;
-    try {
-      await setApiKey(newApiKey);
-      setIsEditingKey(false);
-      setNewApiKey('');
-      toast.success('API key updated');
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      toast.error('Failed to save API key', errorMessage);
-    }
-  };
-
-  const handleCopyApiKey = () => {
-    if (apiKey) {
-      navigator.clipboard.writeText(apiKey);
-      toast.success('API key copied to clipboard');
-    }
-  };
-
-  const handleSaveName = () => {
-    if (!newUserName.trim()) return;
-    updateSetting('userName', newUserName.trim());
-    setIsEditingName(false);
-    setNewUserName('');
-    toast.success('Name updated');
-  };
-
-  const handleLogout = async () => {
-    try {
-      await clearApiKey();
-      toast.success('Logged out successfully');
-      onClose();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      toast.error('Failed to logout', errorMessage);
-    }
-  };
-
-  const menuContent = (
-    <motion.div
-      ref={menuRef}
-      initial={{ opacity: 0, scale: 0.95, y: 10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95, y: 10 }}
-      className={cn(
-        'fixed z-[100] w-80 rounded-2xl overflow-hidden',
-        'bg-[#111218] border border-white/[0.08]',
-        'shadow-2xl shadow-black/60'
-      )}
-      style={{ top: menuPosition.top, left: menuPosition.left }}
-    >
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-white/[0.08]">
-        {isEditingName ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={newUserName}
-              onChange={(e) => setNewUserName(e.target.value)}
-              placeholder="Enter your name"
-              className={cn(
-                'w-full px-3 py-2 rounded-lg text-sm',
-                'bg-[#0B0C10] border border-white/[0.08]',
-                'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#1D4ED8]/50'
-              )}
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleSaveName}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#1D4ED8] text-white"
-              >
-                <Check className="w-4 h-4" />
-                Save
-              </button>
-              <button
-                onClick={() => setIsEditingName(false)}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
-              >
-                <X className="w-4 h-4" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] flex items-center justify-center">
-              <span className="text-white text-xs font-bold">{getInitial(userName)}</span>
-            </div>
-            <div className="flex-1">
-              <div className="text-sm font-medium text-white/90">{userName || 'User'}</div>
-              <div className="text-xs text-white/40">Local account</div>
-            </div>
-            <button
-              onClick={() => {
-                setNewUserName(userName);
-                setIsEditingName(true);
-              }}
-              className="text-xs text-white/30 hover:text-white/50 transition-colors"
-            >
-              Edit
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* API Key Section */}
-      <div className="p-4 border-b border-white/[0.08]">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Key className="w-4 h-4 text-white/40" />
-            <span className="text-sm text-white/70">API Key</span>
-          </div>
-          <button
-            onClick={() => setShowApiKey(!showApiKey)}
-            className="text-white/40 hover:text-white/70"
-          >
-            {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-
-        {isEditingKey ? (
-          <div className="space-y-2">
-            <input
-              type="password"
-              value={newApiKey}
-              onChange={(e) => setNewApiKey(e.target.value)}
-              placeholder="Enter new API key"
-              className={cn(
-                'w-full px-3 py-2 rounded-lg text-sm',
-                'bg-[#0B0C10] border border-white/[0.08]',
-                'text-white/90 placeholder:text-white/30',
-                'focus:outline-none focus:border-[#1D4ED8]/50'
-              )}
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={handleSaveApiKey}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-[#1D4ED8] text-white"
-              >
-                <Check className="w-4 h-4" />
-                Save
-              </button>
-              <button
-                onClick={() => setIsEditingKey(false)}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
-              >
-                <X className="w-4 h-4" />
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="px-3 py-2 rounded-lg bg-[#0B0C10] border border-white/[0.08] text-xs text-white/60 font-mono">
-              {showApiKey ? apiKey || 'Not configured' : maskedApiKey}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setIsEditingKey(true)}
-                className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
-              >
-                <Settings className="w-4 h-4" />
-                Update
-              </button>
-              {apiKey && (
-                <button
-                  onClick={handleCopyApiKey}
-                  className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-white/[0.06] text-white/70"
-                >
-                  <Copy className="w-4 h-4" />
-                  Copy
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Settings */}
-      <div className="px-4 pb-2">
-        <button
-          onClick={() => {
-            onClose();
-            useAppStore.getState().setCurrentView('settings');
-          }}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/70 hover:bg-white/[0.04] transition-colors"
-        >
-          <Settings2 className="w-4 h-4" />
-          Settings
-        </button>
-      </div>
-
-      {/* Logout */}
-      <div className="p-4 pt-2">
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20"
-        >
-          <LogOut className="w-4 h-4" />
-          Remove API key
-        </button>
-      </div>
-    </motion.div>
-  );
-
-  return (
-    <>
-      {createPortal(menuContent, document.body)}
-    </>
   );
 }

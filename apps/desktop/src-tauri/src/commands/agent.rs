@@ -192,6 +192,12 @@ pub async fn ensure_sidecar_started(
         let _ = manager.send_command("set_api_key", params).await;
     }
 
+    // Sync Stitch MCP API key (if configured) so sidecar can gate Stitch tools.
+    if let Ok(stitch_api_key) = crate::commands::auth::get_stitch_api_key().await {
+        let params = serde_json::json!({ "apiKey": stitch_api_key });
+        let _ = manager.send_command("set_stitch_api_key", params).await;
+    }
+
     Ok(())
 }
 
@@ -208,6 +214,22 @@ pub async fn agent_set_api_key(
     let params = serde_json::json!({ "apiKey": api_key });
 
     manager.send_command("set_api_key", params).await?;
+    Ok(())
+}
+
+/// Set or clear the Stitch MCP API key for the sidecar runtime.
+#[tauri::command]
+pub async fn agent_set_stitch_api_key(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    api_key: Option<String>,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({ "apiKey": api_key });
+
+    manager.send_command("set_stitch_api_key", params).await?;
     Ok(())
 }
 

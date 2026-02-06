@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, MessageSquare, Hash, Send, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Settings2, MessageSquare, Hash, Send, SlidersHorizontal, KeyRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { GeneralSettings } from './GeneralSettings';
+import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
 import { WhatsAppSettings } from './WhatsAppSettings';
 import { SlackSettings } from './SlackSettings';
 import { TelegramSettings } from './TelegramSettings';
 
-type SettingsTab = 'general' | 'integrations' | 'whatsapp' | 'slack' | 'telegram';
+type SettingsTab = 'general' | 'apiKeys' | 'integrations' | 'whatsapp' | 'slack' | 'telegram';
 
 interface TabConfig {
   id: SettingsTab;
@@ -21,6 +22,7 @@ interface TabConfig {
 
 const tabConfig: TabConfig[] = [
   { id: 'general', label: 'General', icon: Settings2 },
+  { id: 'apiKeys', label: 'API & Keys', icon: KeyRound },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: '#25D366' },
   { id: 'slack', label: 'Slack', icon: Hash, color: '#9B59B6' },
@@ -29,6 +31,7 @@ const tabConfig: TabConfig[] = [
 
 const tabContent: Record<SettingsTab, React.ComponentType> = {
   general: GeneralSettings,
+  apiKeys: ApiKeysSettings,
   integrations: IntegrationSettings,
   whatsapp: WhatsAppSettings,
   slack: SlackSettings,
@@ -82,6 +85,7 @@ export function SettingsView() {
           const isActive = activeTab === tab.id;
           const isConnected =
             tab.id !== 'general' &&
+            tab.id !== 'apiKeys' &&
             tab.id !== 'integrations' &&
             platforms[tab.id as 'whatsapp' | 'slack' | 'telegram']?.connected;
 
@@ -101,7 +105,7 @@ export function SettingsView() {
                 color={tab.color && isActive ? tab.color : undefined}
               />
               <span>{tab.label}</span>
-              {tab.id !== 'general' && tab.id !== 'integrations' && (
+              {tab.id !== 'general' && tab.id !== 'apiKeys' && tab.id !== 'integrations' && (
                 <div
                   className={cn(
                     'w-2 h-2 rounded-full flex-shrink-0',

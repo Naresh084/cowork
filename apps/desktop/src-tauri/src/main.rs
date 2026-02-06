@@ -20,6 +20,9 @@ fn main() {
             commands::auth::get_api_key,
             commands::auth::set_api_key,
             commands::auth::delete_api_key,
+            commands::auth::get_stitch_api_key,
+            commands::auth::set_stitch_api_key,
+            commands::auth::delete_stitch_api_key,
             commands::auth::validate_api_key,
             commands::auth::fetch_models,
             // File commands
@@ -29,6 +32,7 @@ fn main() {
             commands::files::open_file_preview,
             // Agent commands
             commands::agent::agent_set_api_key,
+            commands::agent::agent_set_stitch_api_key,
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,
             commands::agent::agent_respond_permission,

@@ -12,6 +12,7 @@ const getTauriInvoke = async () => {
 interface AuthState {
   isAuthenticated: boolean;
   apiKey: string | null;
+  stitchApiKey: string | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -20,12 +21,15 @@ interface AuthActions {
   initialize: () => Promise<void>;
   setApiKey: (apiKey: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
+  setStitchApiKey: (apiKey: string) => Promise<void>;
+  clearStitchApiKey: () => Promise<void>;
   validateApiKey: (apiKey: string) => Promise<boolean>;
 }
 
 export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   isAuthenticated: false,
   apiKey: null,
+  stitchApiKey: null,
   isLoading: false,
   error: null,
 
@@ -33,10 +37,14 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
     set({ isLoading: true, error: null });
     try {
       const invoke = await getTauriInvoke();
-      const apiKey = await invoke<string | null>('get_api_key');
+      const [apiKey, stitchApiKey] = await Promise.all([
+        invoke<string | null>('get_api_key'),
+        invoke<string | null>('get_stitch_api_key'),
+      ]);
       set({
         isAuthenticated: !!apiKey,
         apiKey,
+        stitchApiKey,
         isLoading: false,
       });
       // Sync API key to sidecar in the background — don't block startup
@@ -45,11 +53,15 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
           // Sidecar may not be running yet — backend init will handle it
         });
       }
+      invoke('agent_set_stitch_api_key', { apiKey: stitchApiKey ?? null }).catch(() => {
+        // Sidecar may not be running yet — backend init will handle it
+      });
     } catch (error) {
       console.error('[AuthStore] Initialization error:', error);
       set({
         isAuthenticated: false,
         apiKey: null,
+        stitchApiKey: null,
         isLoading: false,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -107,6 +119,52 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
       return isValid;
     } catch (error) {
       console.error('API key validation error:', error);
+      throw error;
+    }
+  },
+
+  setStitchApiKey: async (apiKey: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const invoke = await getTauriInvoke();
+      await invoke('set_stitch_api_key', { apiKey });
+      try {
+        await invoke('agent_set_stitch_api_key', { apiKey });
+      } catch {
+        // Ignore if sidecar not running yet
+      }
+      set({
+        stitchApiKey: apiKey,
+        isLoading: false,
+      });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+
+  clearStitchApiKey: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const invoke = await getTauriInvoke();
+      await invoke('delete_stitch_api_key');
+      try {
+        await invoke('agent_set_stitch_api_key', { apiKey: null });
+      } catch {
+        // Ignore if sidecar not running yet
+      }
+      set({
+        stitchApiKey: null,
+        isLoading: false,
+      });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   },
