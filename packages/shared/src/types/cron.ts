@@ -88,6 +88,7 @@ export const CronJobSchema = z.object({
   status: CronJobStatusSchema,
   deleteAfterRun: z.boolean().optional(),
   maxRuns: z.number().int().positive().optional(),
+  maxTurns: z.number().int().positive().optional().describe('Max agent turns per execution'),
   tags: z.array(z.string()).optional(),
 
   // Timestamps
@@ -186,6 +187,7 @@ export const CreateCronJobInputSchema = z.object({
   model: z.string().optional(),
   deleteAfterRun: z.boolean().optional(),
   maxRuns: z.number().int().positive().optional(),
+  maxTurns: z.number().int().positive().optional().describe('Max agent turns per execution'),
   tags: z.array(z.string()).optional(),
 });
 
@@ -206,6 +208,7 @@ export const UpdateCronJobInputSchema = z.object({
   status: z.enum(['active', 'paused']).optional(),
   deleteAfterRun: z.boolean().optional(),
   maxRuns: z.number().int().positive().optional(),
+  maxTurns: z.number().int().positive().optional().describe('Max agent turns per execution'),
   tags: z.array(z.string()).optional(),
 });
 

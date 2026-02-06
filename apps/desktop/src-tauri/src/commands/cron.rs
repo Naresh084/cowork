@@ -45,6 +45,8 @@ pub struct CronJob {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_runs: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -101,6 +103,8 @@ pub struct CreateCronJobInput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_runs: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }
 
@@ -125,6 +129,8 @@ pub struct UpdateCronJobInput {
     pub delete_after_run: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_runs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
 }

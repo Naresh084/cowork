@@ -41,6 +41,7 @@ interface FormState {
   timezone: string;
   workingDirectory: string;
   model: string;
+  maxTurns: number;
   deleteAfterRun: boolean;
   postSummary: boolean;
 }
@@ -99,6 +100,7 @@ export function CronJobEditor() {
     timezone: getUserTimezone(),
     workingDirectory: defaultWorkingDirectory || '',
     model: '',
+    maxTurns: 25,
     deleteAfterRun: false,
     postSummary: false,
   });
@@ -177,6 +179,7 @@ export function CronJobEditor() {
         timezone,
         workingDirectory: editingJob.workingDirectory,
         model: editingJob.model || '',
+        maxTurns: editingJob.maxTurns || 25,
         deleteAfterRun: editingJob.deleteAfterRun || false,
         postSummary: false,
       });
@@ -308,6 +311,7 @@ export function CronJobEditor() {
       wakeMode: 'now',
       workingDirectory: form.workingDirectory.trim(),
       model: form.model.trim() || undefined,
+      maxTurns: form.maxTurns > 0 ? form.maxTurns : undefined,
       deleteAfterRun: form.scheduleType === 'once' && form.deleteAfterRun,
     };
 
@@ -562,18 +566,38 @@ export function CronJobEditor() {
           </div>
         </div>
 
-        {/* Model Override */}
-        <div>
-          <label className="block text-sm font-medium text-white/70 mb-2">
-            Model Override
-          </label>
-          <input
-            type="text"
-            value={form.model}
-            onChange={(e) => updateField('model', e.target.value)}
-            placeholder="Uses session default if empty"
-            className={cn(inputCls, 'px-4 py-2.5')}
-          />
+        {/* Max Turns & Model Override */}
+        <div className="flex gap-4">
+          <div className="w-32">
+            <label className="block text-sm font-medium text-white/70 mb-2">
+              Max Turns
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="500"
+              value={form.maxTurns}
+              onChange={(e) =>
+                updateField('maxTurns', Math.max(1, parseInt(e.target.value) || 1))
+              }
+              className={cn(inputCls, 'px-4 py-2.5')}
+            />
+            <p className="mt-1 text-xs text-white/40">
+              Agent loop limit
+            </p>
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-white/70 mb-2">
+              Model Override
+            </label>
+            <input
+              type="text"
+              value={form.model}
+              onChange={(e) => updateField('model', e.target.value)}
+              placeholder="Uses session default if empty"
+              className={cn(inputCls, 'px-4 py-2.5')}
+            />
+          </div>
         </div>
 
         {/* Delete after run (for one-time) */}

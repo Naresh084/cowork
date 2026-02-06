@@ -121,6 +121,7 @@ export class CronStore {
       model: input.model,
       deleteAfterRun: input.deleteAfterRun,
       maxRuns: input.maxRuns,
+      maxTurns: input.maxTurns,
       tags: input.tags,
       status: 'active',
       createdAt: now,

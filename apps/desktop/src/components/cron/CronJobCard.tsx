@@ -212,7 +212,10 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
       <div className="space-y-2 mb-4">
         <div className="flex items-center gap-2 text-sm text-white/60">
           <RefreshCw className="w-4 h-4 flex-shrink-0" />
-          <span>{formatSchedule(job.schedule)}</span>
+          <span>
+            {formatSchedule(job.schedule)}
+            {job.maxTurns && <span className="text-white/40"> · {job.maxTurns} turns max</span>}
+          </span>
         </div>
         <div className="flex items-center gap-2 text-sm text-white/60">
           <Clock className="w-4 h-4 flex-shrink-0" />

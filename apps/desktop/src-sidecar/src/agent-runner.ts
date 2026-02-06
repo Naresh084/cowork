@@ -1082,7 +1082,8 @@ export class AgentRunner {
   async sendMessage(
     sessionId: string,
     content: string,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    maxTurns?: number
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1106,7 +1107,7 @@ export class AgentRunner {
     }
 
     // Execute immediately
-    await this.executeMessage(sessionId, content, attachments);
+    await this.executeMessage(sessionId, content, attachments, maxTurns);
 
     // After execution completes, process any queued messages
     await this.processMessageQueue(sessionId);
@@ -1136,7 +1137,8 @@ export class AgentRunner {
   private async executeMessage(
     sessionId: string,
     content: string,
-    attachments?: Attachment[]
+    attachments?: Attachment[],
+    maxTurns?: number
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1303,7 +1305,7 @@ export class AgentRunner {
         try {
           const streamOptions = {
             version: 'v2',
-            recursionLimit: RECURSION_LIMIT,
+            recursionLimit: maxTurns ?? RECURSION_LIMIT,
             signal: abortController.signal,
             abortSignal: abortController.signal,
             configurable: { thread_id: session.threadId },
@@ -1429,7 +1431,7 @@ export class AgentRunner {
             }
           } else if (!streamedText) {
             const invokeOptions = {
-              recursionLimit: RECURSION_LIMIT,
+              recursionLimit: maxTurns ?? RECURSION_LIMIT,
               signal: abortController.signal,
               abortSignal: abortController.signal,
               configurable: { thread_id: session.threadId },
@@ -1454,7 +1456,7 @@ export class AgentRunner {
         }
       } else {
         const invokeOptions = {
-          recursionLimit: RECURSION_LIMIT,
+          recursionLimit: maxTurns ?? RECURSION_LIMIT,
           signal: abortController.signal,
           abortSignal: abortController.signal,
           configurable: { thread_id: session.threadId },

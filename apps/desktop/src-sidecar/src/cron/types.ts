@@ -18,6 +18,7 @@ export interface CreateCronJobInput {
   model?: string;
   deleteAfterRun?: boolean;
   maxRuns?: number;
+  maxTurns?: number;
   tags?: string[];
 }
 
@@ -36,6 +37,7 @@ export interface UpdateCronJobInput {
   status?: 'active' | 'paused';
   deleteAfterRun?: boolean;
   maxRuns?: number;
+  maxTurns?: number;
   tags?: string[];
 }
 
