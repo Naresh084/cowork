@@ -4,10 +4,18 @@ import type {
   IncomingMessage,
   OutgoingMessage,
   PlatformConfig,
+  PlatformMessageAttachment,
 } from '@gemini-cowork/shared';
 
 // Re-export shared types for convenience within integrations
-export type { PlatformType, PlatformStatus, IncomingMessage, OutgoingMessage, PlatformConfig };
+export type {
+  PlatformType,
+  PlatformStatus,
+  IncomingMessage,
+  OutgoingMessage,
+  PlatformConfig,
+  PlatformMessageAttachment,
+};
 
 export interface IntegrationMediaPayload {
   mediaType: 'image' | 'video';

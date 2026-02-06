@@ -79,6 +79,7 @@ export function useAgentEvents(sessionId: string | null): void {
   const agentStoreRef = useRef(useAgentStore.getState());
   const sessionStoreRef = useRef(useSessionStore.getState());
   const activeSessionRef = useRef<string | null>(sessionId);
+  const sessionReloadTimerRef = useRef<number | null>(null);
 
   // Keep refs up to date
   useEffect(() => {
@@ -117,8 +118,17 @@ export function useAgentEvents(sessionId: string | null): void {
 
       // Handle events that don't require a sessionId first
       if (event.type === 'session:updated') {
-        // Trigger a reload of sessions to get updated data (title, etc.)
-        sessionStoreRef.current.loadSessions();
+        // Debounce reloads to avoid repeated sidebar refreshes during startup bursts.
+        if (sessionReloadTimerRef.current !== null) {
+          return;
+        }
+        sessionReloadTimerRef.current = window.setTimeout(() => {
+          sessionReloadTimerRef.current = null;
+          const sessionStore = sessionStoreRef.current;
+          if (!sessionStore.isLoading) {
+            sessionStore.loadSessions();
+          }
+        }, 150);
         return;
       }
 
@@ -475,6 +485,10 @@ export function useAgentEvents(sessionId: string | null): void {
     const unsubscribe = subscribeToAgentEvents(null, handleEvent);
 
     return () => {
+      if (sessionReloadTimerRef.current !== null) {
+        window.clearTimeout(sessionReloadTimerRef.current);
+        sessionReloadTimerRef.current = null;
+      }
       unsubscribe();
     };
   }, []);

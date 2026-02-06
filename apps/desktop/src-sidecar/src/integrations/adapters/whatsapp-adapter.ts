@@ -9,6 +9,7 @@ import { BaseAdapter } from './base-adapter.js';
 import {
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
   type IntegrationMediaPayload,
+  type PlatformMessageAttachment,
   type WhatsAppConfig,
 } from '../types.js';
 
@@ -22,6 +23,42 @@ function normalizeE164Like(input: string | null | undefined): string | null {
   const digits = String(input).replace(/\D+/g, '');
   if (!digits) return null;
   return `+${digits}`;
+}
+
+function fallbackMimeTypeForWhatsAppType(type: string): string {
+  switch (type) {
+    case 'image':
+    case 'sticker':
+      return 'image/jpeg';
+    case 'video':
+    case 'video_note':
+      return 'video/mp4';
+    case 'audio':
+      return 'audio/mpeg';
+    case 'ptt':
+    case 'voice':
+      return 'audio/ogg';
+    case 'document':
+      return 'application/octet-stream';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function extensionFromMimeType(mimeType: string): string {
+  const cleanMime = mimeType.split(';')[0]?.trim().toLowerCase() ?? '';
+  const slashIndex = cleanMime.indexOf('/');
+  if (slashIndex < 0) return 'bin';
+  const subtype = cleanMime.slice(slashIndex + 1);
+  if (!subtype) return 'bin';
+  if (subtype === 'jpeg') return 'jpg';
+  if (subtype === 'quicktime') return 'mov';
+  if (subtype === 'x-m4a') return 'm4a';
+  if (subtype.includes('+')) {
+    const normalized = subtype.split('+').pop();
+    return normalized || 'bin';
+  }
+  return subtype;
 }
 
 export class WhatsAppAdapter extends BaseAdapter {
@@ -303,11 +340,6 @@ export class WhatsAppAdapter extends BaseAdapter {
           return;
         }
 
-        // Only handle plain text messages
-        if (message.type !== 'chat') {
-          return;
-        }
-
         const contact = await message.getContact().catch(() => null);
         this.updateAliasMapping(message, contact);
         const senderPhones = this.collectSenderPhoneCandidates(message, contact);
@@ -328,11 +360,21 @@ export class WhatsAppAdapter extends BaseAdapter {
           contact?.pushname ?? contact?.name ?? contact?.number ?? message.from;
 
         const replyChatId = this.resolveInboundReplyChatId(message, contact);
+        const attachments = await this.extractIncomingAttachments(message);
+        const bodyText = typeof message.body === 'string' ? message.body.trim() : '';
+        const fallbackText = this.buildFallbackIncomingText(message, attachments.length);
+        const content = bodyText || fallbackText;
+
+        if (!content && attachments.length === 0) {
+          return;
+        }
+
         const incoming = this.buildIncomingMessage(
           replyChatId,
           contact?.id?._serialized ?? message.from,
           senderName,
-          message.body,
+          content,
+          attachments,
         );
 
         this.emit('message', incoming);
@@ -370,6 +412,143 @@ export class WhatsAppAdapter extends BaseAdapter {
     } as unknown as WAWebJS.ClientOptions;
 
     return new Client(options);
+  }
+
+  private async extractIncomingAttachments(
+    message: WAWebJS.Message,
+  ): Promise<PlatformMessageAttachment[]> {
+    if (!message.hasMedia) {
+      return [];
+    }
+
+    const media = await message.downloadMedia().catch(() => null);
+    if (!media?.data) {
+      return [];
+    }
+
+    const mimeType = media.mimetype || fallbackMimeTypeForWhatsAppType(message.type);
+    const messageType = String(message.type);
+    const attachmentType = this.mapWhatsAppAttachmentType(messageType, mimeType);
+    const inferredName = this.inferWhatsAppAttachmentName(
+      media.filename ?? undefined,
+      attachmentType,
+      mimeType,
+    );
+    const size =
+      typeof media.filesize === 'number'
+        ? media.filesize
+        : typeof media.filesize === 'string'
+          ? Number.parseInt(media.filesize, 10)
+          : undefined;
+    const rawDuration = (message as unknown as { duration?: unknown }).duration;
+    const parsedDuration =
+      typeof rawDuration === 'number'
+        ? rawDuration
+        : typeof rawDuration === 'string'
+          ? Number.parseInt(rawDuration, 10)
+          : undefined;
+    const duration = Number.isFinite(parsedDuration) ? parsedDuration : undefined;
+
+    return [
+      {
+        type: attachmentType,
+        name: inferredName,
+        mimeType,
+        data: media.data,
+        size: Number.isFinite(size) ? size : undefined,
+        duration,
+      },
+    ];
+  }
+
+  private mapWhatsAppAttachmentType(
+    messageType: string,
+    mimeType: string | undefined,
+  ): PlatformMessageAttachment['type'] {
+    if (messageType === 'image' || messageType === 'sticker') {
+      return 'image';
+    }
+
+    if (messageType === 'video' || messageType === 'video_note') {
+      return 'video';
+    }
+
+    if (messageType === 'audio' || messageType === 'ptt' || messageType === 'voice') {
+      return 'audio';
+    }
+
+    const normalizedMime = (mimeType || '').toLowerCase();
+    if (normalizedMime.includes('pdf')) {
+      return 'pdf';
+    }
+
+    if (normalizedMime.startsWith('image/')) {
+      return 'image';
+    }
+
+    if (normalizedMime.startsWith('video/')) {
+      return 'video';
+    }
+
+    if (normalizedMime.startsWith('audio/')) {
+      return 'audio';
+    }
+
+    return 'file';
+  }
+
+  private inferWhatsAppAttachmentName(
+    filename: string | null | undefined,
+    attachmentType: PlatformMessageAttachment['type'],
+    mimeType: string,
+  ): string {
+    if (filename && filename.trim()) {
+      return filename.trim();
+    }
+
+    const extension = extensionFromMimeType(mimeType);
+    const prefix = attachmentType === 'pdf' ? 'document' : attachmentType;
+    return `${prefix}-${Date.now()}.${extension}`;
+  }
+
+  private buildFallbackIncomingText(
+    message: WAWebJS.Message,
+    attachmentCount: number,
+  ): string {
+    const messageType = String(message.type);
+
+    if (attachmentCount > 0) {
+      if (messageType === 'ptt' || messageType === 'voice') {
+        return 'Voice note received.';
+      }
+      if (messageType === 'audio') {
+        return 'Audio message received.';
+      }
+      if (messageType === 'image') {
+        return 'Image received.';
+      }
+      if (messageType === 'video' || messageType === 'video_note') {
+        return 'Video received.';
+      }
+      if (messageType === 'document') {
+        return 'Document received.';
+      }
+      return 'Attachment received.';
+    }
+
+    if (messageType === 'location' || messageType === 'live_location') {
+      return 'Location shared.';
+    }
+
+    if (messageType === 'vcard' || messageType === 'multi_vcard') {
+      return 'Contact card shared.';
+    }
+
+    if (messageType !== 'chat') {
+      return `${messageType} message received.`;
+    }
+
+    return '';
   }
 
   private extractSenderPhoneFromJid(

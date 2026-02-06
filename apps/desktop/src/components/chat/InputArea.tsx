@@ -613,9 +613,9 @@ export function InputArea({
                 {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               </motion.button>
 
-              {/* Single Send/Stop Button */}
+              {/* Single Send/Stop Button - show send when there's input content even during streaming */}
               <AnimatePresence mode="wait">
-                {isStreaming ? (
+                {isStreaming && !message.trim() && attachments.length === 0 ? (
                   <motion.button
                     key="stop"
                     initial={{ opacity: 0, scale: 0.8, rotate: -90 }}

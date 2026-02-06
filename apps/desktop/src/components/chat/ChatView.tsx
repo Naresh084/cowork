@@ -29,6 +29,7 @@ export function ChatView() {
   });
   const chatItems = sessionState?.chatItems ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
+  const isLoadingMessages = sessionState?.isLoadingMessages ?? false;
 
   // Reset chat and load messages when session changes
   // Use a ref to track the current session and abort stale loads
@@ -82,6 +83,10 @@ export function ChatView() {
   }, [activeSessionId]);
 
   const hasMessages = chatItems.some(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message');
+  const hasActiveSession = Boolean(activeSessionId);
+  const isSessionBootstrapping =
+    hasActiveSession && (!sessionState || !sessionState.hasLoaded || isLoadingMessages);
+  const showMessageList = hasMessages || isSessionBootstrapping;
 
   const deriveTitle = (text: string) => {
     const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -332,9 +337,9 @@ export function ChatView() {
       {/* Session Header */}
       <SessionHeader />
 
-      {/* Messages or Welcome Screen */}
+      {/* Messages, Loading, or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {hasMessages ? (
+        {showMessageList ? (
           <MessageList />
         ) : (
           <WelcomeScreen onQuickAction={handleQuickAction} />

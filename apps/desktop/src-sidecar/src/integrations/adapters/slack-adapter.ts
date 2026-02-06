@@ -1,7 +1,11 @@
 import { SocketModeClient } from '@slack/socket-mode';
 import { WebClient } from '@slack/web-api';
 import { BaseAdapter } from './base-adapter.js';
-import type { SlackConfig, IntegrationMediaPayload } from '../types.js';
+import type {
+  SlackConfig,
+  IntegrationMediaPayload,
+  PlatformMessageAttachment,
+} from '../types.js';
 
 /**
  * Slack adapter using Socket Mode for real-time messaging.
@@ -11,6 +15,7 @@ export class SlackAdapter extends BaseAdapter {
   private socketClient: SocketModeClient | null = null;
   private webClient: WebClient | null = null;
   private botUserId: string | null = null;
+  private botToken: string | null = null;
 
   constructor() {
     super('slack');
@@ -26,6 +31,7 @@ void slackConfig;
     }
 
     this.webClient = new WebClient(slackConfig.botToken);
+    this.botToken = slackConfig.botToken;
     this.socketClient = new SocketModeClient({ appToken: slackConfig.appToken });
 
     // Get bot user ID for @mention detection
@@ -41,25 +47,38 @@ void slackConfig;
         // Skip bot's own messages
         if (event.user === this.botUserId) return;
 
-        // Skip message subtypes (edits, deletes, joins, etc.)
-        if (event.subtype) return;
+        const subtype = typeof event.subtype === 'string' ? event.subtype : null;
+        const rawFiles = Array.isArray(event.files)
+          ? (event.files as Array<Record<string, unknown>>)
+          : [];
+        const hasFiles = rawFiles.length > 0;
 
-        // Skip messages without text
-        if (!event.text) return;
+        // Skip message subtypes except file shares.
+        if (subtype && subtype !== 'file_share') return;
+
+        const rawText = typeof event.text === 'string' ? event.text : '';
+        if (!rawText.trim() && !hasFiles) return;
 
         const isDM = event.channel_type === 'im';
-        const isMention = event.text.includes(`<@${this.botUserId}>`);
+        const isMention = rawText.includes(`<@${this.botUserId}>`);
 
         // Only respond to DMs or @mentions
         if (!isDM && !isMention) return;
 
         // Clean @mention text from message
-        let content = event.text;
+        let content = rawText;
         if (isMention) {
           content = content.replace(new RegExp(`<@${this.botUserId}>`, 'g'), '').trim();
         }
 
-        if (!content) return;
+        const attachments = hasFiles
+          ? await this.extractIncomingAttachments(rawFiles)
+          : [];
+        if (!content.trim()) {
+          content = this.buildAttachmentFallbackText(rawFiles, attachments.length);
+        }
+
+        if (!content.trim() && attachments.length === 0) return;
 
         // Get sender display name
         const senderName = await this.getUserDisplayName(event.user);
@@ -69,6 +88,7 @@ void slackConfig;
           event.user,
           senderName,
           content,
+          attachments,
         );
         this.emit('message', message);
       } catch (err) {
@@ -96,6 +116,7 @@ void slackConfig;
     }
     this.webClient = null;
     this.botUserId = null;
+    this.botToken = null;
     this.setConnected(false);
   }
 
@@ -264,5 +285,99 @@ void slackConfig;
     } catch {
       return userId;
     }
+  }
+
+  private async extractIncomingAttachments(
+    files: Array<Record<string, unknown>>,
+  ): Promise<PlatformMessageAttachment[]> {
+    const attachments: PlatformMessageAttachment[] = [];
+
+    for (const file of files) {
+      const attachment = await this.downloadSlackAttachment(file);
+      if (attachment) {
+        attachments.push(attachment);
+      }
+    }
+
+    return attachments;
+  }
+
+  private async downloadSlackAttachment(
+    file: Record<string, unknown>,
+  ): Promise<PlatformMessageAttachment | null> {
+    const token = this.botToken;
+    if (!token) {
+      return null;
+    }
+
+    const urlPrivateDownload = typeof file.url_private_download === 'string'
+      ? file.url_private_download
+      : null;
+    const urlPrivate = typeof file.url_private === 'string' ? file.url_private : null;
+    const downloadUrl = urlPrivateDownload || urlPrivate;
+    if (!downloadUrl) {
+      return null;
+    }
+
+    const response = await fetch(downloadUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Slack file download failed: ${response.status}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const data = Buffer.from(arrayBuffer).toString('base64');
+
+    const mimeTypeFromFile = typeof file.mimetype === 'string' ? file.mimetype : '';
+    const mimeTypeFromHeader = response.headers.get('content-type') || '';
+    const mimeType = mimeTypeFromFile || mimeTypeFromHeader || 'application/octet-stream';
+
+    const name = typeof file.name === 'string' && file.name.trim()
+      ? file.name.trim()
+      : `slack-file-${Date.now()}`;
+    const size = typeof file.size === 'number' ? file.size : data ? Buffer.from(data, 'base64').length : undefined;
+    const durationMs = typeof file.duration_ms === 'number' ? file.duration_ms : undefined;
+
+    return {
+      type: this.mapMimeTypeToAttachmentType(mimeType),
+      name,
+      mimeType,
+      data,
+      size,
+      duration: typeof durationMs === 'number' ? Math.round(durationMs / 1000) : undefined,
+    };
+  }
+
+  private mapMimeTypeToAttachmentType(
+    mimeType: string,
+  ): PlatformMessageAttachment['type'] {
+    const normalized = mimeType.toLowerCase();
+    if (normalized.includes('pdf')) return 'pdf';
+    if (normalized.startsWith('image/')) return 'image';
+    if (normalized.startsWith('video/')) return 'video';
+    if (normalized.startsWith('audio/')) return 'audio';
+    if (normalized.startsWith('text/')) return 'text';
+    return 'file';
+  }
+
+  private buildAttachmentFallbackText(
+    files: Array<Record<string, unknown>>,
+    downloadedCount: number,
+  ): string {
+    if (downloadedCount > 0) {
+      if (downloadedCount === 1) return 'Attachment received.';
+      return `${downloadedCount} attachments received.`;
+    }
+
+    if (files.length > 0) {
+      if (files.length === 1) return 'File received.';
+      return `${files.length} files received.`;
+    }
+
+    return '';
   }
 }

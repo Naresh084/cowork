@@ -2,7 +2,13 @@ import { EventEmitter } from 'events';
 import { stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import type { ChatItem } from '@gemini-cowork/shared';
-import type { IncomingMessage, IntegrationMediaPayload, PlatformType } from './types.js';
+import type {
+  IncomingMessage,
+  IntegrationMediaPayload,
+  PlatformMessageAttachment,
+  PlatformType,
+} from './types.js';
+import type { Attachment } from '../types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
 import { eventEmitter } from '../event-emitter.js';
 import { formatIntegrationText } from './formatters/index.js';
@@ -204,6 +210,87 @@ export class MessageRouter extends EventEmitter {
       return normalized;
     }
     return `${normalized.slice(0, 77).trimEnd()}...`;
+  }
+
+  private normalizeIncomingContent(content: string | undefined): string {
+    return (content ?? '').replace(/\s+/g, ' ').trim();
+  }
+
+  private mapIncomingAttachments(
+    attachments: PlatformMessageAttachment[] | undefined,
+  ): Attachment[] {
+    if (!attachments || attachments.length === 0) {
+      return [];
+    }
+
+    const mapped: Attachment[] = [];
+
+    for (const item of attachments) {
+      const hasData = typeof item.data === 'string' && item.data.length > 0;
+      let normalizedType: Attachment['type'] =
+        item.type === 'pdf' ? 'pdf' : item.type;
+
+      // Ensure metadata-only media is still represented as a file placeholder.
+      if (!hasData && (normalizedType === 'image' || normalizedType === 'audio' || normalizedType === 'video')) {
+        normalizedType = 'file';
+      }
+
+      const mimeType =
+        item.mimeType ||
+        (normalizedType === 'image'
+          ? 'image/png'
+          : normalizedType === 'audio'
+            ? 'audio/mpeg'
+            : normalizedType === 'video'
+              ? 'video/mp4'
+              : normalizedType === 'pdf'
+                ? 'application/pdf'
+                : normalizedType === 'text'
+                  ? 'text/plain'
+                  : 'application/octet-stream');
+
+      mapped.push({
+        type: normalizedType,
+        name: item.name || `${normalizedType}-${Date.now()}`,
+        mimeType,
+        data: hasData ? item.data! : '',
+      });
+    }
+
+    return mapped;
+  }
+
+  private buildTaggedInboundContent(msg: IncomingMessage): string {
+    const platformLabel =
+      msg.platform.charAt(0).toUpperCase() + msg.platform.slice(1);
+    const normalizedContent = this.normalizeIncomingContent(msg.content);
+    const hasAttachments = Boolean(msg.attachments && msg.attachments.length > 0);
+
+    if (normalizedContent) {
+      return `[${platformLabel} | ${msg.senderName}]: ${normalizedContent}`;
+    }
+
+    if (hasAttachments) {
+      const count = msg.attachments!.length;
+      const descriptor = count === 1 ? 'attachment' : `${count} attachments`;
+      return `[${platformLabel} | ${msg.senderName}]: sent ${descriptor}.`;
+    }
+
+    return `[${platformLabel} | ${msg.senderName}]: (empty message)`;
+  }
+
+  private buildSessionSeedText(msg: IncomingMessage): string {
+    const normalizedContent = this.normalizeIncomingContent(msg.content);
+    if (normalizedContent) {
+      return normalizedContent;
+    }
+
+    if (msg.attachments && msg.attachments.length > 0) {
+      const count = msg.attachments.length;
+      return count === 1 ? `Attachment from ${msg.senderName}` : `${count} attachments from ${msg.senderName}`;
+    }
+
+    return '';
   }
 
   private async maybeNameSessionFromFirstMessage(
@@ -615,7 +702,8 @@ export class MessageRouter extends EventEmitter {
       `[message-router] incoming platform=${msg.platform} chatId=${msg.chatId} session=${sessionId}\n`,
     );
 
-    eventEmitter.integrationMessageIn(msg.platform, msg.senderName, msg.content);
+    const inboundSummary = this.normalizeIncomingContent(msg.content) || '[attachment]';
+    eventEmitter.integrationMessageIn(msg.platform, msg.senderName, inboundSummary);
 
     if (state.isProcessing) {
       state.messageQueue.push(msg);
@@ -684,15 +772,17 @@ export class MessageRouter extends EventEmitter {
       }
     }
 
-    await this.maybeNameSessionFromFirstMessage(sessionId, msg.content);
-
-    const platformLabel =
-      msg.platform.charAt(0).toUpperCase() + msg.platform.slice(1);
-    const taggedContent = `[${platformLabel} | ${msg.senderName}]: ${msg.content}`;
+    await this.maybeNameSessionFromFirstMessage(sessionId, this.buildSessionSeedText(msg));
+    const taggedContent = this.buildTaggedInboundContent(msg);
+    const inboundAttachments = this.mapIncomingAttachments(msg.attachments);
     state.requestMarker = taggedContent;
 
     try {
-      await this.agentRunner.sendMessage(sessionId, taggedContent);
+      await this.agentRunner.sendMessage(
+        sessionId,
+        taggedContent,
+        inboundAttachments.length > 0 ? inboundAttachments : undefined,
+      );
     } catch (err) {
       if (adapter && state.pendingOrigin) {
         try {
@@ -744,11 +834,20 @@ export class MessageRouter extends EventEmitter {
   private consolidateQueue(messages: IncomingMessage[]): IncomingMessage {
     const first = messages[0];
     const combined = messages
-      .map((m, i) => `${i + 1}. ${m.content}`)
+      .map((m, i) => {
+        const text = this.normalizeIncomingContent(m.content);
+        const attachmentNote =
+          m.attachments && m.attachments.length > 0
+            ? ` (${m.attachments.length} attachment${m.attachments.length === 1 ? '' : 's'})`
+            : '';
+        return `${i + 1}. ${text || '[attachment only]'}${attachmentNote}`;
+      })
       .join('\n');
+    const combinedAttachments = messages.flatMap((m) => m.attachments ?? []);
     return {
       ...first,
       content: `Multiple messages received:\n${combined}`,
+      attachments: combinedAttachments.length > 0 ? combinedAttachments : undefined,
     };
   }
 

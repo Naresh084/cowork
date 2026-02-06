@@ -44,6 +44,7 @@ const EMPTY_SESSION_STATE = {
   pendingPermissions: [] as ExtendedPermissionRequest[],
   activeTurnId: undefined as string | undefined,
   hasLoaded: false,
+  error: null as string | null,
   lastUpdatedAt: 0,
 };
 
@@ -65,6 +66,8 @@ export function MessageList() {
     pendingQuestions,
     pendingPermissions,
     activeTurnId,
+    hasLoaded,
+    error: sessionError,
   } = sessionState;
 
   // V2: Derive rendering data from chatItems (single source of truth)
@@ -92,12 +95,17 @@ export function MessageList() {
     sessionState.lastUpdatedAt,
   ]);
 
-  // Show loading state only when loading AND no messages exist yet
-  // If messages already exist, show them instead of blocking the UI
-  if (isLoadingMessages && messages.length === 0) {
+  // Show loading while persistence is in-flight or session bootstrap has not completed yet.
+  const isInitialSessionLoad =
+    Boolean(activeSessionId) && !hasLoaded && !sessionError;
+
+  if ((isLoadingMessages || isInitialSessionLoad) && messages.length === 0) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="animate-pulse text-white/40">Loading messages...</div>
+        <div className="flex flex-col items-center gap-3">
+          <BrandMark className="w-10 h-10 animate-pulse" />
+          <p className="text-sm text-white/50">Loading conversation…</p>
+        </div>
       </div>
     );
   }
@@ -217,12 +225,6 @@ export function MessageList() {
           <ThinkingBlock content={thinkingContent} isActive={isThinking || (!hasAssistantInTurn && !hasRunningTool)} />
         )}
 
-        {isStreaming && activeTurnId === turnId && !thinkingContent && !hasAssistantInTurn && (
-          <div className="flex items-center gap-2 text-xs text-white/55 pl-9">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-[#93C5FD]" />
-            <span>Processing...</span>
-          </div>
-        )}
       </div>
     );
   };

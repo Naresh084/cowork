@@ -82,6 +82,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       },
 
       loadSessions: async () => {
+        if (get().isLoading) {
+          return;
+        }
+
         // Wait for backend to be initialized first
         if (!get().backendInitialized) {
           await get().waitForBackend();
@@ -121,8 +125,12 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             sessions,
             isLoading: false,
             hasLoaded: true,
-            // Clear stale activeSessionId if session no longer exists
-            activeSessionId: activeSessionExists ? currentActiveId : null,
+            // Keep current selection when valid; otherwise select most recent session if available.
+            activeSessionId: activeSessionExists
+              ? currentActiveId
+              : sessions.length > 0
+                ? sessions[0].id
+                : null,
           });
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
