@@ -236,6 +236,11 @@ export function InputArea({
     }
   }, [modelSelectorOpen]);
 
+  // Auto-focus textarea on mount
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
   // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
@@ -350,6 +355,43 @@ export function InputArea({
       handleSend();
     }
   };
+
+  // Handle paste: extract images/files from clipboard
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      // Skip text items — let the browser handle those normally
+      if (item.kind === 'string') continue;
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+
+    if (files.length === 0) return;
+
+    // Prevent the default paste (which would insert weird text for images)
+    e.preventDefault();
+
+    // Use DataTransfer to build a proper FileList from extracted files
+    const dt = new DataTransfer();
+    for (const file of files) {
+      // For clipboard images that have no name, give them a useful one
+      if (file.name === 'image.png' || !file.name) {
+        const named = new File([file], `clipboard-${Date.now()}.${file.type.split('/')[1] || 'png'}`, {
+          type: file.type,
+        });
+        dt.items.add(named);
+      } else {
+        dt.items.add(file);
+      }
+    }
+    onAttachmentAdd(dt.files);
+  }, [onAttachmentAdd]);
 
   const handleAttachmentClick = () => {
     fileInputRef.current?.click();
@@ -542,6 +584,7 @@ export function InputArea({
               value={message}
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={hasMessages ? 'Reply...' : 'Ask Cowork anything... (type / for commands)'}
               rows={1}
               className={cn(
