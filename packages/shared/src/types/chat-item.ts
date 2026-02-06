@@ -30,6 +30,7 @@ export const UserMessageItemSchema = ChatItemBaseSchema.extend({
     mimeType: z.string().optional(),
     data: z.string().optional(),
     size: z.number().optional(),
+    duration: z.number().optional(),
   })).optional(),
 });
 

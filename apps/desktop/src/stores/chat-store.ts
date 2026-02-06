@@ -19,6 +19,7 @@ export interface Attachment {
   data?: string; // base64 encoded
   size?: number;
   objectUrl?: string; // blob URL for preview rendering
+  duration?: number; // seconds, for audio/video
 }
 
 export interface ToolExecution {

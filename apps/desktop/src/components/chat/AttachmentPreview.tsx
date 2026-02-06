@@ -1,4 +1,6 @@
-import { X, Image as ImageIcon, Play, FileText, Eye } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Image as ImageIcon, Play, Pause, FileText, Eye, Mic } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { Attachment } from '../../stores/chat-store';
 import { FileTypeIcon } from '../icons/FileTypeIcon';
@@ -58,6 +60,12 @@ async function openWithOS(attachment: Attachment) {
 }
 
 function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
+  const [playingAudio, setPlayingAudio] = useState<{
+    src: string;
+    name: string;
+    duration?: number;
+  } | null>(null);
+
   const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/');
   const isVideo = attachment.type === 'video' || attachment.mimeType?.startsWith('video/');
   const isAudio = attachment.type === 'audio' || attachment.mimeType?.startsWith('audio/');
@@ -143,20 +151,50 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
     );
   }
 
-  // Audio with inline player
+  // Audio card (styled, with playback dialog)
   if (isAudio && previewSrc) {
     return (
-      <div
-        className={cn(
-          'relative group flex items-center gap-2 px-3 py-2 rounded-xl',
-          'bg-white/[0.04] border border-white/[0.08] hover:border-white/[0.12]',
-          'transition-all duration-200'
+      <>
+        <div
+          className={cn(
+            'relative group flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer',
+            'bg-[#8B5CF6]/[0.06] border border-[#8B5CF6]/[0.12]',
+            'hover:border-[#8B5CF6]/[0.25] hover:bg-[#8B5CF6]/[0.10]',
+            'transition-all duration-200'
+          )}
+          onClick={() => setPlayingAudio({ src: previewSrc, name: attachment.name, duration: attachment.duration })}
+          title={`${attachment.name} — click to play`}
+        >
+          <div className="w-9 h-9 rounded-lg bg-[#8B5CF6]/15 flex items-center justify-center flex-shrink-0">
+            <Mic className="w-[18px] h-[18px] text-[#8B5CF6]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="text-xs text-white/80 truncate block max-w-[120px]">
+              {attachment.name}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {attachment.duration != null && (
+                <span className="text-[10px] text-white/35">
+                  {formatDuration(attachment.duration)}
+                </span>
+              )}
+              {attachment.duration != null && attachment.size && (
+                <span className="text-[10px] text-white/20">&middot;</span>
+              )}
+              {attachment.size && (
+                <span className="text-[10px] text-white/35">{formatFileSize(attachment.size)}</span>
+              )}
+            </div>
+          </div>
+          <RemoveButton onRemove={onRemove} />
+        </div>
+        {playingAudio && (
+          <AudioPlaybackDialog
+            audio={playingAudio}
+            onClose={() => setPlayingAudio(null)}
+          />
         )}
-      >
-        <audio controls src={previewSrc} className="h-8 max-w-[200px]" />
-        <span className="text-[10px] text-white/50 max-w-[80px] truncate">{attachment.name}</span>
-        <RemoveButton onRemove={onRemove} />
-      </div>
+      </>
     );
   }
 
@@ -174,7 +212,7 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
         title={canOpen ? `${attachment.name} — click to open` : attachment.name}
       >
         <div className="w-9 h-9 rounded-lg bg-[#FF5449]/15 flex items-center justify-center flex-shrink-0">
-          <FileText className="w-4.5 h-4.5 text-[#FF5449]" />
+          <FileText className="w-[18px] h-[18px] text-[#FF5449]" />
         </div>
         <div className="min-w-0 flex-1">
           <span className="text-xs text-white/80 truncate block max-w-[120px]">
@@ -218,6 +256,192 @@ function AttachmentItem({ attachment, onRemove }: AttachmentItemProps) {
   );
 }
 
+// ============================================================================
+// Audio Playback Dialog
+// ============================================================================
+
+interface AudioPlaybackDialogProps {
+  audio: { src: string; name: string; duration?: number };
+  onClose: () => void;
+}
+
+function AudioPlaybackDialog({ audio, onClose }: AudioPlaybackDialogProps) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(audio.duration || 0);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    const onTimeUpdate = () => setCurrentTime(el.currentTime);
+    const onLoaded = () => {
+      if (el.duration && isFinite(el.duration)) setDuration(el.duration);
+    };
+    const onEnded = () => setIsPlaying(false);
+
+    el.addEventListener('timeupdate', onTimeUpdate);
+    el.addEventListener('loadedmetadata', onLoaded);
+    el.addEventListener('ended', onEnded);
+
+    return () => {
+      el.removeEventListener('timeupdate', onTimeUpdate);
+      el.removeEventListener('loadedmetadata', onLoaded);
+      el.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (isPlaying) {
+      el.pause();
+      setIsPlaying(false);
+    } else {
+      el.play();
+      setIsPlaying(true);
+    }
+  }, [isPlaying]);
+
+  const seekTo = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = audioRef.current;
+    if (!el || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    el.currentTime = ratio * duration;
+    setCurrentTime(el.currentTime);
+  }, [duration]);
+
+  // Close on Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return createPortal(
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center"
+      onClick={onClose}
+    >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+      {/* Dialog */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.92, y: 10 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 380 }}
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          'relative w-[340px] rounded-2xl overflow-hidden',
+          'bg-[#1C1C20] border border-white/[0.08]',
+          'shadow-2xl shadow-black/50'
+        )}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 pt-5 pb-3">
+          <div className="w-10 h-10 rounded-xl bg-[#8B5CF6]/15 flex items-center justify-center flex-shrink-0">
+            <Mic className="w-5 h-5 text-[#8B5CF6]" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-medium text-white/90 truncate">{audio.name}</h3>
+            <p className="text-[11px] text-white/40">Voice Note</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/[0.08] transition-colors"
+          >
+            <X className="w-4 h-4 text-white/50" />
+          </button>
+        </div>
+
+        {/* Waveform visualization */}
+        <div className="px-5 py-3">
+          <div className="flex items-end justify-center gap-[3px] h-12">
+            {Array.from({ length: 32 }).map((_, i) => {
+              const barProgress = (i / 32) * 100;
+              const isPast = barProgress <= progress;
+              // Pseudo-random heights for visual interest
+              const height = 20 + Math.sin(i * 0.8) * 15 + Math.cos(i * 1.3) * 10;
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    'w-[5px] rounded-full transition-colors duration-150',
+                    isPast ? 'bg-[#8B5CF6]' : 'bg-white/[0.08]',
+                    isPlaying && isPast && 'bg-[#A78BFA]'
+                  )}
+                  style={{ height: `${Math.max(4, height)}%` }}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="px-5">
+          <div
+            className="h-1.5 rounded-full bg-white/[0.06] cursor-pointer group"
+            onClick={seekTo}
+          >
+            <div
+              className="h-full rounded-full bg-[#8B5CF6] transition-all duration-100 relative"
+              style={{ width: `${progress}%` }}
+            >
+              <div className={cn(
+                'absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full',
+                'bg-[#8B5CF6] border-2 border-[#1C1C20]',
+                'opacity-0 group-hover:opacity-100 transition-opacity'
+              )} />
+            </div>
+          </div>
+          <div className="flex justify-between mt-1.5">
+            <span className="text-[10px] text-white/30">{formatDuration(Math.floor(currentTime))}</span>
+            <span className="text-[10px] text-white/30">{formatDuration(Math.floor(duration))}</span>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="flex items-center justify-center py-4">
+          <button
+            onClick={togglePlay}
+            className={cn(
+              'w-12 h-12 rounded-full flex items-center justify-center',
+              'bg-[#8B5CF6] hover:bg-[#7C3AED]',
+              'transition-colors duration-150',
+              'shadow-lg shadow-[#8B5CF6]/25'
+            )}
+          >
+            {isPlaying ? (
+              <Pause className="w-5 h-5 text-white" fill="white" />
+            ) : (
+              <Play className="w-5 h-5 text-white ml-0.5" fill="white" />
+            )}
+          </button>
+        </div>
+
+        {/* Hidden audio element */}
+        <audio ref={audioRef} src={audio.src} preload="metadata" />
+      </motion.div>
+    </motion.div>,
+    document.body
+  );
+}
+
+// ============================================================================
+// Shared Components & Utilities
+// ============================================================================
+
 function RemoveButton({ onRemove }: { onRemove: () => void }) {
   return (
     <motion.button
@@ -248,6 +472,12 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 interface DropZoneProps {

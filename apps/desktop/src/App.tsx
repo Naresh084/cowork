@@ -12,8 +12,6 @@ import { useSubagentStore } from './stores/subagent-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const [authReady, setAuthReady] = useState(false);
-  const [settingsHydrated, setSettingsHydrated] = useState(false);
   const { isAuthenticated, initialize, apiKey } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
   const { fetchModels, availableModels, modelsLoading, userName } = useSettingsStore();
@@ -21,47 +19,36 @@ export function App() {
   const { discoverCommands } = useCommandStore();
   const { loadSubagents } = useSubagentStore();
 
-  // Wait for settings store to rehydrate from localStorage
+  // Initialize auth + wait for settings hydration, then hide loading
   useEffect(() => {
-    // Check if already hydrated (synchronous hydration case)
-    if (useSettingsStore.persist.hasHydrated()) {
-      setSettingsHydrated(true);
-      return;
-    }
-    const unsub = useSettingsStore.persist.onFinishHydration(() => {
-      setSettingsHydrated(true);
-    });
-    return unsub;
-  }, []);
-
-  // Initialize auth
-  useEffect(() => {
-    let isMounted = true;
-
-    initialize()
-      .catch((error) => {
-        console.error('[App] Initialization error:', error);
-      })
-      .finally(() => {
-        if (isMounted) setAuthReady(true);
-      });
-
-    return () => { isMounted = false; };
-  }, [initialize]);
-
-  // Hide loading once both auth and settings hydration are done (with 4s safety timeout)
-  useEffect(() => {
-    if (authReady && settingsHydrated) {
-      setIsLoading(false);
-      return;
-    }
-
     const timeoutId = window.setTimeout(() => {
       setIsLoading(false);
     }, 4000);
 
+    const run = async () => {
+      // Wait for settings store to hydrate from localStorage
+      if (!useSettingsStore.persist.hasHydrated()) {
+        await new Promise<void>((resolve) => {
+          const unsub = useSettingsStore.persist.onFinishHydration(() => {
+            unsub();
+            resolve();
+          });
+        });
+      }
+
+      // Initialize auth (reads API key from file storage)
+      await initialize().catch((error) => {
+        console.error('[App] Initialization error:', error);
+      });
+
+      setIsLoading(false);
+      clearTimeout(timeoutId);
+    };
+
+    run();
+
     return () => clearTimeout(timeoutId);
-  }, [authReady, settingsHydrated]);
+  }, [initialize]);
 
   // Coordinate backend initialization with session loading
   useEffect(() => {

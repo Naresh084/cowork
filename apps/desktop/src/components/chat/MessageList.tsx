@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2 } from 'lucide-react';
+import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic } from 'lucide-react';
 import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
@@ -1928,11 +1928,15 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
     case 'audio':
       return (
         <div className="mt-2 px-4">
-          <audio
-            controls
-            src={`data:${part.mimeType};base64,${part.data}`}
-            className="w-full"
-          />
+          <div className={cn(
+            'flex items-center gap-2.5 px-3 py-2.5 rounded-xl',
+            'bg-[#8B5CF6]/[0.06] border border-[#8B5CF6]/[0.12]'
+          )}>
+            <div className="w-8 h-8 rounded-lg bg-[#8B5CF6]/15 flex items-center justify-center flex-shrink-0">
+              <Mic className="w-4 h-4 text-[#8B5CF6]" />
+            </div>
+            <audio controls src={`data:${part.mimeType};base64,${part.data}`} className="h-8 flex-1" />
+          </div>
         </div>
       );
 
