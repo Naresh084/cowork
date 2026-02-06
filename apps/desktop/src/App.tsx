@@ -12,6 +12,8 @@ import { useSubagentStore } from './stores/subagent-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
   const { isAuthenticated, initialize, apiKey } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
   const { fetchModels, availableModels, modelsLoading, userName } = useSettingsStore();
@@ -19,30 +21,47 @@ export function App() {
   const { discoverCommands } = useCommandStore();
   const { loadSubagents } = useSubagentStore();
 
+  // Wait for settings store to rehydrate from localStorage
+  useEffect(() => {
+    // Check if already hydrated (synchronous hydration case)
+    if (useSettingsStore.persist.hasHydrated()) {
+      setSettingsHydrated(true);
+      return;
+    }
+    const unsub = useSettingsStore.persist.onFinishHydration(() => {
+      setSettingsHydrated(true);
+    });
+    return unsub;
+  }, []);
+
+  // Initialize auth
   useEffect(() => {
     let isMounted = true;
-    const timeoutId = window.setTimeout(() => {
-      if (isMounted) {
-        setIsLoading(false);
-      }
-    }, 4000);
 
     initialize()
       .catch((error) => {
         console.error('[App] Initialization error:', error);
       })
       .finally(() => {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-        clearTimeout(timeoutId);
+        if (isMounted) setAuthReady(true);
       });
 
-    return () => {
-      isMounted = false;
-      clearTimeout(timeoutId);
-    };
+    return () => { isMounted = false; };
   }, [initialize]);
+
+  // Hide loading once both auth and settings hydration are done (with 4s safety timeout)
+  useEffect(() => {
+    if (authReady && settingsHydrated) {
+      setIsLoading(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsLoading(false);
+    }, 4000);
+
+    return () => clearTimeout(timeoutId);
+  }, [authReady, settingsHydrated]);
 
   // Coordinate backend initialization with session loading
   useEffect(() => {
@@ -84,7 +103,7 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
-  if (isLoading && !isAuthenticated) {
+  if (isLoading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
