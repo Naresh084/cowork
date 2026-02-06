@@ -79,38 +79,51 @@ export class IntegrationBridgeService {
 
   /**
    * Subscribe to agent events to route responses back to platforms.
-   * Intercepts stream events to route responses back to platforms.
+   * Intercepts chat/stream lifecycle events to route responses back to platforms.
    */
   private subscribeToAgentEvents(): void {
-    const originalStreamChunk = eventEmitter.streamChunk.bind(eventEmitter);
-    eventEmitter.streamChunk = (sessionId: string, content: string) => {
-      originalStreamChunk(sessionId, content);
-      this.router.onStreamChunk(sessionId, content);
-    };
-
-    // Intercept chatItem events to route assistant messages to integrations
+    // Intercept chat:item events for segment/media routing.
     const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
     eventEmitter.chatItem = (sessionId: string, item: import('@gemini-cowork/shared').ChatItem) => {
       originalChatItem(sessionId, item);
+      this.router.onChatItem(sessionId, item);
+    };
 
-      // Route assistant messages to integrations
-      const chatItem = item as { kind?: string; content?: string | Array<{ type: string; text?: string }> } | null;
-      if (chatItem?.kind === 'assistant_message') {
-        let finalText = '';
-        if (typeof chatItem.content === 'string') {
-          finalText = chatItem.content;
-        } else if (Array.isArray(chatItem.content)) {
-          finalText = chatItem.content
-            .filter((p) => p.type === 'text' && p.text)
-            .map((p) => p.text!)
-            .join('\n');
-        }
+    // Intercept chat:update events for streaming text updates.
+    const originalChatUpdate = eventEmitter.chatItemUpdate.bind(eventEmitter);
+    eventEmitter.chatItemUpdate = (
+      sessionId: string,
+      itemId: string,
+      updates: Partial<import('@gemini-cowork/shared').ChatItem>,
+    ) => {
+      originalChatUpdate(sessionId, itemId, updates);
+      this.router.onChatItemUpdate(sessionId, itemId, updates);
+    };
 
-        this.router.onStreamDone(sessionId, finalText).catch((err) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          process.stderr.write(
-            `[integration] Error routing response: ${errMsg}\n`,
-          );
+    // Intercept stream completion to close active integration request state.
+    const originalStreamDone = eventEmitter.streamDone.bind(eventEmitter);
+    eventEmitter.streamDone = (sessionId: string, message: unknown) => {
+      originalStreamDone(sessionId, message);
+      this.router.onStreamDone(sessionId).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error finishing integration stream: ${errMsg}\n`,
+        );
+      });
+    };
+
+    // Intercept errors to clear blocked integration state.
+    const originalError = eventEmitter.error.bind(eventEmitter);
+    eventEmitter.error = (
+      sessionId: string | undefined,
+      errorMessage: string,
+      code?: string,
+      details?: unknown,
+    ) => {
+      originalError(sessionId, errorMessage, code, details);
+      if (sessionId) {
+        this.router.onStreamError(sessionId, errorMessage).catch(() => {
+          // Best-effort cleanup only.
         });
       }
     };

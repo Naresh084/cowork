@@ -1,33 +1,43 @@
 import { EventEmitter } from 'events';
-import type { IncomingMessage, PlatformType } from './types.js';
+import { stat } from 'fs/promises';
+import { existsSync } from 'fs';
+import type { ChatItem } from '@gemini-cowork/shared';
+import type { IncomingMessage, IntegrationMediaPayload, PlatformType } from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
 import { eventEmitter } from '../event-emitter.js';
+import { formatIntegrationText } from './formatters/index.js';
 
 const INTEGRATION_SESSION_TITLE = 'Shared Session';
 const LEGACY_INTEGRATION_SESSION_TITLE = 'Messaging Integration';
 const THINKING_PLACEHOLDER_TEXT = 'Thinking...';
-
-// ============================================================================
-// Types
-// ============================================================================
+const DEFAULT_MEDIA_SIZE_LIMIT_BYTES = 50 * 1024 * 1024;
 
 interface PendingOrigin {
+  requestId: number;
   platform: PlatformType;
   chatId: string;
   senderName: string;
   thinkingHandle: unknown;
 }
 
+interface OutboundSegmentState {
+  segmentIndex: number;
+  handle: unknown;
+  lastHash: string;
+}
+
 interface SessionProcessingState {
   isProcessing: boolean;
   pendingOrigin: PendingOrigin | null;
-  accumulatedResponse: string;
   messageQueue: IncomingMessage[];
+  turnId: string | null;
+  requestMarker: string | null;
+  placeholderReplaced: boolean;
+  hasDeliveredContent: boolean;
+  segmentStateByItemId: Map<string, OutboundSegmentState>;
+  sentMediaItemIds: Set<string>;
+  outboundChain: Promise<void>;
 }
-
-// ============================================================================
-// Message Router
-// ============================================================================
 
 /**
  * Routes messages between platform adapters and the agent runner.
@@ -36,8 +46,7 @@ interface SessionProcessingState {
  * - Receives incoming messages from all registered adapters
  * - Tags messages with platform/sender info before sending to agent
  * - Manages a message queue when agent is busy processing
- * - Routes agent responses back to the originating platform
- * - Consolidates rapid-fire messages (5+ in queue)
+ * - Routes agent timeline updates back to the originating platform
  */
 export class MessageRouter extends EventEmitter {
   private adapters: Map<PlatformType, BaseAdapter> = new Map();
@@ -45,6 +54,14 @@ export class MessageRouter extends EventEmitter {
   private agentRunner: any = null;
   private integrationSessionId: string | null = null;
   private sessionCreationPromise: Promise<string> | null = null;
+  private requestCounter = 0;
+  private readonly maxMediaBytes: number;
+
+  constructor() {
+    super();
+    const rawLimit = Number(process.env.COWORK_INTEGRATION_MAX_MEDIA_BYTES ?? DEFAULT_MEDIA_SIZE_LIMIT_BYTES);
+    this.maxMediaBytes = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : DEFAULT_MEDIA_SIZE_LIMIT_BYTES;
+  }
 
   /** Set the agent runner reference (called during initialization) */
   setAgentRunner(runner: any): void {
@@ -86,15 +103,13 @@ export class MessageRouter extends EventEmitter {
       return existingSessionId;
     }
 
-    // Prevent concurrent session creation - reuse in-flight promise
     if (this.sessionCreationPromise) {
       return this.sessionCreationPromise;
     }
 
     this.sessionCreationPromise = this.createNewSession(seedMessage);
     try {
-      const id = await this.sessionCreationPromise;
-      return id;
+      return await this.sessionCreationPromise;
     } finally {
       this.sessionCreationPromise = null;
     }
@@ -127,7 +142,6 @@ export class MessageRouter extends EventEmitter {
       }
 
       await Promise.resolve(this.agentRunner.getSession(integrationSession.id));
-
       this.integrationSessionId = integrationSession.id;
 
       eventEmitter.sessionUpdated({
@@ -177,19 +191,6 @@ export class MessageRouter extends EventEmitter {
     return sessionId;
   }
 
-  onStreamChunk(sessionId: string, chunk: string): void {
-    if (sessionId !== this.integrationSessionId) return;
-    if (!chunk) return;
-
-    const state = this.getState(sessionId);
-    if (!state.pendingOrigin) return;
-
-    state.accumulatedResponse += chunk;
-    if (state.accumulatedResponse.length > 16000) {
-      state.accumulatedResponse = state.accumulatedResponse.slice(-16000);
-    }
-  }
-
   private getFallbackResponseText(): string {
     return 'I received your message, but I could not generate a text reply. Please try again.';
   }
@@ -223,16 +224,16 @@ export class MessageRouter extends EventEmitter {
       )) as
         | {
             title?: string | null;
-            messages?: unknown[];
             messageCount?: number;
+            chatItems?: unknown[];
           }
         | null;
       if (!session) return;
 
       const messageCount = typeof session.messageCount === 'number'
         ? session.messageCount
-        : Array.isArray((session as { chatItems?: unknown[] }).chatItems)
-          ? (session as { chatItems: unknown[] }).chatItems.length
+        : Array.isArray(session.chatItems)
+          ? session.chatItems.length
           : 0;
 
       if (messageCount > 0) {
@@ -264,22 +265,6 @@ export class MessageRouter extends EventEmitter {
     }
   }
 
-  private async sendPlatformReply(
-    adapter: BaseAdapter | undefined,
-    platform: PlatformType,
-    chatId: string,
-    thinkingHandle: unknown,
-    text: string,
-  ): Promise<void> {
-    if (!adapter) {
-      return;
-    }
-
-    const cleanText = this.formatForPlatform(text, platform);
-    await adapter.replaceProcessingPlaceholder(chatId, thinkingHandle, cleanText);
-    eventEmitter.integrationMessageOut(platform, chatId);
-  }
-
   /** Get or create processing state for a session */
   private getState(sessionId: string): SessionProcessingState {
     let state = this.sessionState.get(sessionId);
@@ -287,12 +272,334 @@ export class MessageRouter extends EventEmitter {
       state = {
         isProcessing: false,
         pendingOrigin: null,
-        accumulatedResponse: '',
         messageQueue: [],
+        turnId: null,
+        requestMarker: null,
+        placeholderReplaced: false,
+        hasDeliveredContent: false,
+        segmentStateByItemId: new Map(),
+        sentMediaItemIds: new Set(),
+        outboundChain: Promise.resolve(),
       };
       this.sessionState.set(sessionId, state);
     }
     return state;
+  }
+
+  private resetStateForNextRequest(state: SessionProcessingState): void {
+    state.isProcessing = false;
+    state.pendingOrigin = null;
+    state.turnId = null;
+    state.requestMarker = null;
+    state.placeholderReplaced = false;
+    state.hasDeliveredContent = false;
+    state.segmentStateByItemId.clear();
+    state.sentMediaItemIds.clear();
+    state.outboundChain = Promise.resolve();
+  }
+
+  private enqueueOutbound(state: SessionProcessingState, action: () => Promise<void>): void {
+    state.outboundChain = state.outboundChain
+      .then(action)
+      .catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        eventEmitter.error(undefined, `Integration outbound step failed: ${errMsg}`, 'INTEGRATION_SEND_ERROR');
+      });
+  }
+
+  private extractTextContent(content: unknown): string {
+    if (typeof content === 'string') {
+      return content;
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if (!part || typeof part !== 'object') return '';
+          const partAny = part as { type?: string; text?: string };
+          if (partAny.type === 'text' && typeof partAny.text === 'string') {
+            return partAny.text;
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    return '';
+  }
+
+  private hashText(input: string): string {
+    return `${input.length}:${input}`;
+  }
+
+  private async ensurePlaceholderReplaced(
+    state: SessionProcessingState,
+    adapter: BaseAdapter,
+    platform: PlatformType,
+    chatId: string,
+    replacementText: string,
+  ): Promise<void> {
+    if (!state.pendingOrigin || state.placeholderReplaced) {
+      return;
+    }
+
+    await adapter.replaceProcessingPlaceholder(
+      chatId,
+      state.pendingOrigin.thinkingHandle,
+      replacementText,
+    );
+    state.placeholderReplaced = true;
+    state.hasDeliveredContent = true;
+    eventEmitter.integrationMessageOut(platform, chatId);
+  }
+
+  private async sendAssistantText(
+    state: SessionProcessingState,
+    itemId: string,
+    segmentIndex: number,
+    text: string,
+  ): Promise<void> {
+    if (!state.pendingOrigin) return;
+
+    const { platform, chatId } = state.pendingOrigin;
+    const adapter = this.adapters.get(platform);
+    if (!adapter) return;
+
+    const cleanText = formatIntegrationText(platform, text);
+    if (!cleanText.trim()) return;
+
+    const current = state.segmentStateByItemId.get(itemId);
+    const nextHash = this.hashText(cleanText);
+    if (current?.lastHash === nextHash) {
+      return;
+    }
+
+    if (!state.placeholderReplaced) {
+      await this.ensurePlaceholderReplaced(state, adapter, platform, chatId, cleanText);
+      state.segmentStateByItemId.set(itemId, {
+        segmentIndex,
+        handle: state.pendingOrigin.thinkingHandle,
+        lastHash: nextHash,
+      });
+      return;
+    }
+
+    const handle = await adapter.updateStreamingMessage(chatId, current?.handle, cleanText);
+    state.segmentStateByItemId.set(itemId, {
+      segmentIndex,
+      handle,
+      lastHash: nextHash,
+    });
+    state.hasDeliveredContent = true;
+    eventEmitter.integrationMessageOut(platform, chatId);
+  }
+
+  private async sendMediaItem(state: SessionProcessingState, item: ChatItem): Promise<void> {
+    if (!state.pendingOrigin) return;
+    if (item.kind !== 'media') return;
+    if (state.sentMediaItemIds.has(item.id)) return;
+
+    const { platform, chatId } = state.pendingOrigin;
+    const adapter = this.adapters.get(platform);
+    if (!adapter) return;
+
+    const media: IntegrationMediaPayload = {
+      mediaType: item.mediaType,
+      path: item.path,
+      url: item.url,
+      mimeType: item.mimeType,
+      data: item.data,
+      caption: item.mediaType === 'image' ? 'Generated image' : 'Generated video',
+      itemId: item.id,
+    };
+
+    const size = await this.getMediaSizeBytes(media);
+    if (size !== null && size > this.maxMediaBytes) {
+      const msg = formatIntegrationText(
+        platform,
+        `Generated ${media.mediaType} is too large to send (${Math.round(size / (1024 * 1024))}MB). Open it in Cowork desktop.`,
+      );
+      await this.ensurePlaceholderReplaced(state, adapter, platform, chatId, msg);
+      if (state.placeholderReplaced) {
+        await adapter.sendMessage(chatId, msg);
+        eventEmitter.integrationMessageOut(platform, chatId);
+      }
+      state.sentMediaItemIds.add(item.id);
+      state.hasDeliveredContent = true;
+      return;
+    }
+
+    await this.ensurePlaceholderReplaced(
+      state,
+      adapter,
+      platform,
+      chatId,
+      formatIntegrationText(platform, media.caption || `Generated ${media.mediaType}`),
+    );
+
+    await adapter.sendMedia(chatId, media);
+    eventEmitter.integrationMessageOut(platform, chatId);
+    state.sentMediaItemIds.add(item.id);
+    state.hasDeliveredContent = true;
+  }
+
+  private async getMediaSizeBytes(media: IntegrationMediaPayload): Promise<number | null> {
+    if (media.path && existsSync(media.path)) {
+      try {
+        const s = await stat(media.path);
+        return s.size;
+      } catch {
+        return null;
+      }
+    }
+
+    if (media.data) {
+      try {
+        return Buffer.from(media.data, 'base64').length;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private matchesTurn(state: SessionProcessingState, turnId: string | undefined): boolean {
+    if (!turnId) return false;
+    if (!state.turnId) return true;
+    return state.turnId === turnId;
+  }
+
+  private detectTurnFromUserMessage(state: SessionProcessingState, item: ChatItem): void {
+    if (item.kind !== 'user_message') return;
+    if (state.turnId) return;
+    if (!state.requestMarker) return;
+
+    const text = this.extractTextContent(item.content);
+    if (text.trim() === state.requestMarker.trim()) {
+      state.turnId = item.turnId || item.id;
+    }
+  }
+
+  onChatItem(sessionId: string, item: ChatItem): void {
+    if (sessionId !== this.integrationSessionId) return;
+
+    const state = this.getState(sessionId);
+    if (!state.pendingOrigin) return;
+
+    this.detectTurnFromUserMessage(state, item);
+
+    if (item.kind === 'assistant_message') {
+      if (!this.matchesTurn(state, item.turnId)) return;
+      if (!state.turnId && item.turnId) {
+        state.turnId = item.turnId;
+      }
+
+      const segmentIndex = item.stream?.segmentIndex ?? 0;
+      const text = this.extractTextContent(item.content);
+      if (!text.trim()) return;
+
+      this.enqueueOutbound(state, async () => {
+        await this.sendAssistantText(state, item.id, segmentIndex, text);
+      });
+      return;
+    }
+
+    if (item.kind === 'media') {
+      if (!this.matchesTurn(state, item.turnId)) return;
+      if (!state.turnId && item.turnId) {
+        state.turnId = item.turnId;
+      }
+      this.enqueueOutbound(state, async () => {
+        await this.sendMediaItem(state, item);
+      });
+    }
+  }
+
+  onChatItemUpdate(sessionId: string, itemId: string, updates: Partial<ChatItem>): void {
+    if (sessionId !== this.integrationSessionId) return;
+
+    const state = this.getState(sessionId);
+    if (!state.pendingOrigin) return;
+
+    const segment = state.segmentStateByItemId.get(itemId);
+    if (!segment) return;
+
+    const content = (updates as { content?: unknown }).content;
+    if (content === undefined) return;
+
+    const text = this.extractTextContent(content);
+    if (!text.trim()) return;
+
+    this.enqueueOutbound(state, async () => {
+      await this.sendAssistantText(state, itemId, segment.segmentIndex, text);
+    });
+  }
+
+  /**
+   * Called when agent finishes streaming a response.
+   * If no assistant/media output was sent, replace placeholder with fallback text.
+   */
+  async onStreamDone(sessionId: string): Promise<void> {
+    if (sessionId !== this.integrationSessionId) return;
+
+    const state = this.getState(sessionId);
+    if (!state.pendingOrigin) return;
+
+    const { platform, chatId, thinkingHandle } = state.pendingOrigin;
+    const adapter = this.adapters.get(platform);
+
+    await state.outboundChain;
+
+    try {
+      if (!state.hasDeliveredContent && adapter) {
+        await adapter.replaceProcessingPlaceholder(
+          chatId,
+          thinkingHandle,
+          this.getFallbackResponseText(),
+        );
+        eventEmitter.integrationMessageOut(platform, chatId);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      eventEmitter.error(
+        undefined,
+        `Failed to send fallback to ${platform}: ${errorMsg}`,
+        'INTEGRATION_SEND_ERROR',
+      );
+    }
+
+    this.resetStateForNextRequest(state);
+    await this.processNextInQueue(sessionId, state);
+  }
+
+  async onStreamError(sessionId: string, errorText?: string): Promise<void> {
+    if (sessionId !== this.integrationSessionId) return;
+
+    const state = this.getState(sessionId);
+    if (!state.pendingOrigin) return;
+
+    const { platform, chatId, thinkingHandle } = state.pendingOrigin;
+    const adapter = this.adapters.get(platform);
+
+    await state.outboundChain;
+
+    try {
+      if (adapter) {
+        const message = formatIntegrationText(
+          platform,
+          errorText?.trim() || 'Sorry, there was an error while processing your message.',
+        );
+        await adapter.replaceProcessingPlaceholder(chatId, thinkingHandle, message);
+        eventEmitter.integrationMessageOut(platform, chatId);
+      }
+    } catch {
+      // Best effort.
+    }
+
+    this.resetStateForNextRequest(state);
+    await this.processNextInQueue(sessionId, state);
   }
 
   /** Handle an incoming message from any platform */
@@ -308,17 +615,12 @@ export class MessageRouter extends EventEmitter {
       `[message-router] incoming platform=${msg.platform} chatId=${msg.chatId} session=${sessionId}\n`,
     );
 
-    // Emit event for desktop UI
     eventEmitter.integrationMessageIn(msg.platform, msg.senderName, msg.content);
 
     if (state.isProcessing) {
-      // Agent is busy - queue the message
       state.messageQueue.push(msg);
-
-      // Emit queued event
       eventEmitter.integrationQueued(msg.platform, state.messageQueue.length);
 
-      // Send acknowledgment to platform
       const adapter = this.adapters.get(msg.platform);
       if (adapter) {
         try {
@@ -327,7 +629,7 @@ export class MessageRouter extends EventEmitter {
             `Message received. Processing previous request... (${state.messageQueue.length} in queue)`,
           );
         } catch {
-          /* ignore ack errors */
+          // Ignore queue ack errors.
         }
       }
       return;
@@ -343,25 +645,29 @@ export class MessageRouter extends EventEmitter {
     msg: IncomingMessage,
   ): Promise<void> {
     state.isProcessing = true;
+    state.turnId = null;
+    state.requestMarker = null;
+    state.placeholderReplaced = false;
+    state.hasDeliveredContent = false;
+    state.segmentStateByItemId.clear();
+    state.sentMediaItemIds.clear();
+
     state.pendingOrigin = {
+      requestId: ++this.requestCounter,
       platform: msg.platform,
       chatId: msg.chatId,
       senderName: msg.senderName,
       thinkingHandle: null,
     };
-    state.accumulatedResponse = '';
 
-    // Send typing indicator
     const adapter = this.adapters.get(msg.platform);
     if (adapter) {
       try {
         await adapter.sendTypingIndicator(msg.chatId);
       } catch {
-        /* ignore typing errors */
+        // Ignore typing errors.
       }
-    }
 
-    if (adapter) {
       try {
         const handle = await adapter.sendProcessingPlaceholder(
           msg.chatId,
@@ -380,10 +686,10 @@ export class MessageRouter extends EventEmitter {
 
     await this.maybeNameSessionFromFirstMessage(sessionId, msg.content);
 
-    // Tag message with platform info
     const platformLabel =
       msg.platform.charAt(0).toUpperCase() + msg.platform.slice(1);
     const taggedContent = `[${platformLabel} | ${msg.senderName}]: ${msg.content}`;
+    state.requestMarker = taggedContent;
 
     try {
       await this.agentRunner.sendMessage(sessionId, taggedContent);
@@ -400,63 +706,10 @@ export class MessageRouter extends EventEmitter {
           // Best-effort error reply.
         }
       }
-      state.isProcessing = false;
-      state.pendingOrigin = null;
+
+      this.resetStateForNextRequest(state);
       throw err;
     }
-  }
-
-  /**
-   * Called when agent finishes streaming a response (stream:done event).
-   * Routes the final clean response text back to the originating platform.
-   */
-  async onStreamDone(sessionId: string, finalText: string): Promise<void> {
-    if (sessionId !== this.integrationSessionId) return;
-
-    const state = this.getState(sessionId);
-    if (!state.pendingOrigin) return;
-
-    const { platform, chatId, thinkingHandle } = state.pendingOrigin;
-    const adapter = this.adapters.get(platform);
-    const responseText = finalText.trim() || state.accumulatedResponse.trim();
-
-    try {
-      if (responseText) {
-        await this.sendPlatformReply(
-          adapter,
-          platform,
-          chatId,
-          thinkingHandle,
-          responseText,
-        );
-      } else {
-        process.stderr.write(
-          `[message-router] Empty final response for session=${sessionId}, sending fallback text\n`,
-        );
-        await this.sendPlatformReply(
-          adapter,
-          platform,
-          chatId,
-          thinkingHandle,
-          this.getFallbackResponseText(),
-        );
-      }
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      eventEmitter.error(
-        undefined,
-        `Failed to send to ${platform}: ${errorMsg}`,
-        'INTEGRATION_SEND_ERROR',
-      );
-    }
-
-    // Clear processing state
-    state.isProcessing = false;
-    state.pendingOrigin = null;
-    state.accumulatedResponse = '';
-
-    // Process next queued message
-    await this.processNextInQueue(sessionId, state);
   }
 
   /** Process the next message in the queue, if any */
@@ -468,7 +721,6 @@ export class MessageRouter extends EventEmitter {
 
     let nextMsg: IncomingMessage;
 
-    // If 5+ messages queued, consolidate them
     if (state.messageQueue.length >= 5) {
       nextMsg = this.consolidateQueue(state.messageQueue);
       state.messageQueue = [];
@@ -481,10 +733,7 @@ export class MessageRouter extends EventEmitter {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[message-router] Queue processing error: ${errMsg}\n`);
-      // Reset processing state so next messages aren't permanently stuck
-      state.isProcessing = false;
-      state.pendingOrigin = null;
-      // Try to process remaining queued messages
+      this.resetStateForNextRequest(state);
       if (state.messageQueue.length > 0) {
         await this.processNextInQueue(sessionId, state);
       }
@@ -501,20 +750,6 @@ export class MessageRouter extends EventEmitter {
       ...first,
       content: `Multiple messages received:\n${combined}`,
     };
-  }
-
-  /** Format agent response for specific platform (truncate if needed) */
-  private formatForPlatform(text: string, platform: PlatformType): string {
-    const maxLength =
-      platform === 'whatsapp' ? 4000 : platform === 'telegram' ? 4096 : 8000;
-
-    if (text.length > maxLength) {
-      return (
-        text.substring(0, maxLength - 60) +
-        '\n\n...(truncated, see desktop for full response)'
-      );
-    }
-    return text;
   }
 
   /** Get adapter for a platform */
