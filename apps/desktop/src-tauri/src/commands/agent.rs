@@ -313,6 +313,101 @@ pub async fn agent_stop_generation(
     Ok(())
 }
 
+/// Get the message queue for a session
+#[tauri::command]
+pub async fn agent_get_queue(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+    });
+
+    manager.send_command("get_queue", params).await
+}
+
+/// Remove a message from the queue
+#[tauri::command]
+pub async fn agent_remove_from_queue(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    message_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "messageId": message_id,
+    });
+
+    manager.send_command("remove_from_queue", params).await
+}
+
+/// Reorder the message queue
+#[tauri::command]
+pub async fn agent_reorder_queue(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    message_ids: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "messageIds": message_ids,
+    });
+
+    manager.send_command("reorder_queue", params).await
+}
+
+/// Send a queued message immediately
+#[tauri::command]
+pub async fn agent_send_queued_immediately(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    message_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "messageId": message_id,
+    });
+
+    manager.send_command("send_queued_immediately", params).await
+}
+
+/// Edit a queued message
+#[tauri::command]
+pub async fn agent_edit_queued_message(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    message_id: String,
+    content: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "messageId": message_id,
+        "content": content,
+    });
+
+    manager.send_command("edit_queued_message", params).await
+}
+
 /// List all sessions
 #[tauri::command]
 pub async fn agent_list_sessions(
