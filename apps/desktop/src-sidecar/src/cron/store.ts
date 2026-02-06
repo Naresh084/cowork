@@ -61,8 +61,21 @@ export class CronStore {
   private async loadJobs(): Promise<void> {
     const jobs = await readJsonFile<CronJob[]>(getCronJobsPath(), []);
     this.jobCache.clear();
+    let changed = false;
     for (const job of jobs) {
-      this.jobCache.set(job.id, job);
+      const normalized: CronJob = {
+        ...job,
+        sessionTarget: 'isolated',
+        wakeMode: 'now',
+      };
+      if (job.sessionTarget !== 'isolated' || job.wakeMode !== 'now') {
+        changed = true;
+      }
+      this.jobCache.set(job.id, normalized);
+    }
+
+    if (changed) {
+      await this.saveJobs();
     }
   }
 
@@ -115,8 +128,8 @@ export class CronStore {
       description: input.description,
       prompt: input.prompt,
       schedule: input.schedule,
-      sessionTarget: input.sessionTarget,
-      wakeMode: input.wakeMode,
+      sessionTarget: 'isolated',
+      wakeMode: 'now',
       workingDirectory: input.workingDirectory,
       model: input.model,
       deleteAfterRun: input.deleteAfterRun,
@@ -149,6 +162,8 @@ export class CronStore {
     const updated: CronJob = {
       ...existing,
       ...updates,
+      sessionTarget: 'isolated',
+      wakeMode: 'now',
       id: existing.id, // Prevent ID changes
       createdAt: existing.createdAt, // Prevent createdAt changes
       updatedAt: Date.now(),

@@ -133,11 +133,7 @@ export function ChatView() {
 
       ensureSession(sessionId);
 
-      // Clear attachments immediately so preview disappears right away
-      // (don't wait for sendMessage which blocks until agent finishes)
-      setAttachments([]);
-      await sendMessage(sessionId, message, messageAttachments);
-
+      // Set session title immediately from user message (before AI processes it)
       if (createdNew) {
         const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
         updateSessionTitle(sessionId, derivedTitle).catch((error) => {
@@ -145,6 +141,11 @@ export function ChatView() {
           toast.error('Failed to update session title', errorMessage);
         });
       }
+
+      // Clear attachments immediately so preview disappears right away
+      // (don't wait for sendMessage which blocks until agent finishes)
+      setAttachments([]);
+      await sendMessage(sessionId, message, messageAttachments);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       toast.error('Failed to send message', errorMessage);

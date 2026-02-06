@@ -82,8 +82,6 @@ export function ScheduleSuggestionCard({
         prompt,
         schedule: toCronSchedule(),
         workingDirectory,
-        sessionTarget: 'isolated',
-        wakeMode: 'now',
       });
       setIsCreated(true);
       onAccept?.();

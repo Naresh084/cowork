@@ -320,8 +320,6 @@ Schedule types:
           prompt,
           schedule: cronSchedule,
           workingDirectory: workingDirectory || context.workingDirectory,
-          sessionTarget: 'isolated',
-          wakeMode: 'now',
           maxRuns,
           maxTurns,
         });

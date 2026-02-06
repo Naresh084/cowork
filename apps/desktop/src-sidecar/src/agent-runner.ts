@@ -2232,7 +2232,7 @@ export class AgentRunner {
       minute: '2-digit',
       hour12: true,
     });
-    const basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
+    let basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
 
 ## Environment
 
@@ -2587,6 +2587,13 @@ Use \`manage_scheduled_task\` to:
 2. If a tool fails, explain and try alternatives
 3. Stay focused on the requested task
 4. Remove debug code before completion`;
+
+    if (session.type === 'isolated' || session.type === 'cron') {
+      basePrompt = basePrompt.replace(
+        /\n## Scheduled Tasks with schedule_task[\s\S]*?\n## Important Reminders/,
+        '\n## Important Reminders'
+      );
+    }
 
     // Build Deep Agents middleware prompts
     const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
@@ -3037,7 +3044,10 @@ ${toolList}
       // Integration module not available - skip notification tools
     }
 
-    const cronTools = createCronTools();
+    const cronTools =
+      session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createCronTools();
 
     return [
       readAnyFileTool,
