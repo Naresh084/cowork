@@ -229,10 +229,10 @@ export class MessageRouter extends EventEmitter {
         | null;
       if (!session) return;
 
-      const messageCount = Array.isArray(session.messages)
-        ? session.messages.length
-        : typeof session.messageCount === 'number'
-          ? session.messageCount
+      const messageCount = typeof session.messageCount === 'number'
+        ? session.messageCount
+        : Array.isArray((session as { chatItems?: unknown[] }).chatItems)
+          ? (session as { chatItems: unknown[] }).chatItems.length
           : 0;
 
       if (messageCount > 0) {

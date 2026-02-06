@@ -45,14 +45,13 @@ import type {
   Attachment,
   Task,
   Artifact,
-  ToolExecution,
   ExtendedPermissionRequest,
   QuestionRequest,
   SkillConfig,
-  PersistedMessage,
-  PersistedToolExecution,
 } from './types.js';
 import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
+import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
+import { HumanMessage } from '@langchain/core/messages';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -69,6 +68,13 @@ type DeepAgentInstance = {
 };
 
 type ApprovalMode = 'auto' | 'read_only' | 'full';
+
+interface QueuedMessage {
+  id: string;
+  content: string;
+  attachments?: Attachment[];
+  queuedAt: number;
+}
 
 interface ActiveSession {
   id: string;
@@ -115,6 +121,10 @@ interface ActiveSession {
   }>;
   /** Last known prompt tokens from API response (for accurate context tracking) */
   lastKnownPromptTokens: number;
+  /** Thread ID for checkpointer (same as session ID) */
+  threadId: string;
+  /** Message queue for messages sent while agent is busy */
+  messageQueue: QueuedMessage[];
   createdAt: number;
   updatedAt: number;
   /** Last time the session was accessed/selected by the user */
@@ -162,6 +172,7 @@ export class AgentRunner {
    */
   async initialize(appDataDir: string): Promise<{ sessionsRestored: number }> {
     this.appDataDir = appDataDir;
+    setCheckpointerDataDir(appDataDir);
     this.persistence = new SessionPersistence(appDataDir);
     await this.persistence.initialize();
 
@@ -362,6 +373,8 @@ export class AgentRunner {
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
       lastKnownPromptTokens: 0,
+      threadId: data.metadata.id,
+      messageQueue: [],
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
       lastAccessedAt: data.metadata.lastAccessedAt,
@@ -552,6 +565,8 @@ export class AgentRunner {
       activeParentToolId: undefined,
       inFlightPermissions: new Map(),
       lastKnownPromptTokens: 0,
+      threadId: sessionId,
+      messageQueue: [],
       createdAt: now,
       updatedAt: now,
       lastAccessedAt: now,
@@ -584,9 +599,64 @@ export class AgentRunner {
   }
 
   /**
-   * Send a message to a session.
+   * Send a message to a session. If the agent is currently busy,
+   * the message is queued and auto-sent when the current turn completes.
    */
   async sendMessage(
+    sessionId: string,
+    content: string,
+    attachments?: Attachment[]
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // If agent is currently busy (has active abort controller), queue the message
+    if (session.abortController && !session.abortController.signal.aborted) {
+      const queuedMsg: QueuedMessage = {
+        id: generateId('qmsg'),
+        content,
+        attachments,
+        queuedAt: Date.now(),
+      };
+      session.messageQueue.push(queuedMsg);
+      // Emit queue update event to frontend
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      return;
+    }
+
+    // Execute immediately
+    await this.executeMessage(sessionId, content, attachments);
+
+    // After execution completes, process any queued messages
+    await this.processMessageQueue(sessionId);
+  }
+
+  /**
+   * Process queued messages for a session, one at a time.
+   */
+  private async processMessageQueue(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    while (session.messageQueue.length > 0) {
+      const next = session.messageQueue.shift()!;
+      // Emit queue update (item removed)
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      await this.executeMessage(sessionId, next.content, next.attachments);
+    }
+  }
+
+  /**
+   * Execute a message send (the actual agent invocation).
+   * Extracted from sendMessage to support queue processing.
+   */
+  private async executeMessage(
     sessionId: string,
     content: string,
     attachments?: Attachment[]
@@ -697,7 +767,14 @@ export class AgentRunner {
     // Emit stream start
     eventEmitter.streamStart(sessionId);
 
-    const lcMessages = this.toLangChainMessages(this.deriveMessagesFromChatItems(session.chatItems), session);
+    // With checkpointer, the graph remembers prior messages via thread_id.
+    // Only send the new user message instead of the full history.
+    const newUserMessage = new HumanMessage(
+      typeof messageContent === 'string'
+        ? messageContent
+        : messageContent // Pass content parts directly for multimodal
+    );
+    const lcMessages = [newUserMessage];
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
     let streamedText = '';
@@ -711,6 +788,7 @@ export class AgentRunner {
             recursionLimit: RECURSION_LIMIT,
             signal: abortController.signal,
             abortSignal: abortController.signal,
+            configurable: { thread_id: session.threadId },
           };
           const stream = agentAny.streamEvents(
             { messages: lcMessages },
@@ -845,6 +923,7 @@ export class AgentRunner {
               recursionLimit: RECURSION_LIMIT,
               signal: abortController.signal,
               abortSignal: abortController.signal,
+              configurable: { thread_id: session.threadId },
             };
             const result = await session.agent.invoke(
               { messages: lcMessages },
@@ -868,6 +947,7 @@ export class AgentRunner {
           recursionLimit: RECURSION_LIMIT,
           signal: abortController.signal,
           abortSignal: abortController.signal,
+          configurable: { thread_id: session.threadId },
         };
         const result = await session.agent.invoke(
           { messages: lcMessages },
@@ -1052,6 +1132,90 @@ export class AgentRunner {
     } else if (agentAny.stop) {
       agentAny.stop();
     }
+  }
+
+  // ============================================================================
+  // Message Queue Management
+  // ============================================================================
+
+  /**
+   * Get the current message queue for a session.
+   */
+  getMessageQueue(sessionId: string): Array<{ id: string; content: string; queuedAt: number }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    return session.messageQueue.map(m => ({ id: m.id, content: m.content, queuedAt: m.queuedAt }));
+  }
+
+  /**
+   * Remove a message from the queue.
+   */
+  removeFromQueue(sessionId: string, messageId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const idx = session.messageQueue.findIndex(m => m.id === messageId);
+    if (idx === -1) return false;
+    session.messageQueue.splice(idx, 1);
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    return true;
+  }
+
+  /**
+   * Reorder the message queue.
+   */
+  reorderQueue(sessionId: string, messageIds: string[]): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const reordered: QueuedMessage[] = [];
+    for (const id of messageIds) {
+      const msg = session.messageQueue.find(m => m.id === id);
+      if (msg) reordered.push(msg);
+    }
+    session.messageQueue = reordered;
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    return true;
+  }
+
+  /**
+   * Send a queued message immediately (stops current agent, moves message to front).
+   */
+  async sendQueuedImmediately(sessionId: string, messageId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const idx = session.messageQueue.findIndex(m => m.id === messageId);
+    if (idx === -1) return false;
+
+    // Remove from current position and put at front
+    const [msg] = session.messageQueue.splice(idx, 1);
+    session.messageQueue.unshift(msg);
+
+    // Emit queue update
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+
+    // Stop current generation — processMessageQueue will pick up queued message
+    this.stopGeneration(sessionId);
+    return true;
+  }
+
+  /**
+   * Edit the content of a queued message.
+   */
+  editQueuedMessage(sessionId: string, messageId: string, newContent: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const msg = session.messageQueue.find(m => m.id === messageId);
+    if (!msg) return false;
+    msg.content = newContent;
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    return true;
   }
 
   /**
@@ -2077,6 +2241,10 @@ ${toolList}
     // Store middleware hooks for later invocation
     this.storeMiddlewareHooks(session.id, middlewareStack);
 
+    // Determine AGENTS.md paths for DeepAgents built-in memory loading
+    const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
+    const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
+
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const agent = createDeepAgentAny({
       model,
@@ -2085,6 +2253,8 @@ ${toolList}
       middleware: [this.createToolMiddleware(session)],
       recursionLimit: RECURSION_LIMIT,
       skills: skillsParam,
+      checkpointer: getCheckpointer(),
+      memory: memoryPaths,
       backend: () => new CoworkBackend(
         session.workingDirectory,
         session.id,
@@ -3036,78 +3206,6 @@ ${toolList}
       }
     }
     return Array.from(roots);
-  }
-
-  private toLangChainMessages(messages: Message[], session?: ActiveSession): Array<{ role: string; content: unknown }> {
-    const converted = messages.map((message) => {
-      if (typeof message.content === 'string') {
-        return { role: message.role, content: message.content };
-      }
-
-      const parts = message.content.map((part) => {
-        if (part.type === 'text') {
-          return { type: 'text', text: part.text };
-        }
-        if (part.type === 'image') {
-          return {
-            type: 'image_url',
-            image_url: {
-              url: `data:${part.mimeType};base64,${part.data}`,
-            },
-          };
-        }
-        if (part.type === 'audio' || part.type === 'video') {
-          return {
-            type: 'media',
-            mimeType: part.mimeType || (part.type === 'audio' ? 'audio/mpeg' : 'video/mp4'),
-            data: part.data,
-          };
-        }
-        if (part.type === 'file' && part.data) {
-          return {
-            type: 'media',
-            mimeType: part.mimeType || 'application/octet-stream',
-            data: part.data,
-          };
-        }
-        return { type: 'text', text: `[${part.type} attachment]` };
-      });
-
-      return { role: message.role, content: parts };
-    });
-
-    // Inject pending multimodal content from view_file tool
-    if (session?.pendingMultimodalContent?.length) {
-      const multimodalParts = session.pendingMultimodalContent.map(item => {
-        if (item.type === 'image') {
-          return {
-            type: 'image_url',
-            image_url: {
-              url: `data:${item.mimeType};base64,${item.data}`,
-            },
-          };
-        }
-        return {
-          type: 'media',
-          mimeType: item.mimeType,
-          data: item.data,
-        };
-      });
-
-      // Add a context message with the visual content for the model to analyze
-      converted.push({
-        role: 'user',
-        content: [
-          { type: 'text', text: '[Visual content from view_file tool - analyze this:]' },
-          ...multimodalParts,
-        ],
-      });
-
-      // Clear pending content after injection
-      session.pendingMultimodalContent = [];
-    }
-
-    return converted;
   }
 
   private extractAssistantMessage(result: unknown): Message | null {

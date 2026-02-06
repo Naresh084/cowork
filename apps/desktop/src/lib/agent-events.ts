@@ -272,6 +272,13 @@ function parseTauriEvent(
         timestamp: (data.timestamp as number) ?? Date.now(),
       };
 
+    case 'queue:update':
+      return {
+        type: 'queue:update',
+        sessionId,
+        queue: (data.queue as Array<{ id: string; content: string; queuedAt: number }>) ?? [],
+      };
+
     default:
       console.warn('Unknown event type:', type);
       return null;
@@ -357,6 +364,7 @@ export function subscribeToAgentEvents(
     'agent:integration:message_in',
     'agent:integration:message_out',
     'agent:integration:queued',
+    'agent:queue:update',
   ];
 
   // Set up listeners for each event type
@@ -436,6 +444,7 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:integration:message_in',
     'agent:integration:message_out',
     'agent:integration:queued',
+    'agent:queue:update',
   ];
 
   for (const eventType of eventTypes) {

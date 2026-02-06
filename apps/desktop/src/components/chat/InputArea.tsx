@@ -530,7 +530,6 @@ export function InputArea({
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={hasMessages ? 'Reply...' : 'Ask Cowork anything... (type / for commands)'}
-              disabled={isStreaming}
               rows={1}
               className={cn(
                 'flex-1 min-h-[32px]',
@@ -538,7 +537,6 @@ export function InputArea({
                 'placeholder:text-white/30',
                 'resize-none focus:outline-none',
                 'max-h-24 text-[12.5px] leading-snug',
-                isStreaming && 'opacity-50'
               )}
             />
 
@@ -572,50 +570,46 @@ export function InputArea({
                 <Plus className="w-4 h-4" />
               </motion.button>
 
-              {/* Send/Stop Button */}
-              <AnimatePresence mode="wait">
-                {isStreaming ? (
-                  <motion.button
-                    key="stop"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={onStop}
-                    className={cn(
-                      'p-2 rounded-full',
-                      'bg-[#FF5449]/20 text-[#FF5449] border border-[#FF5449]/30',
-                      'hover:bg-[#FF5449]/30',
-                      'transition-colors'
-                    )}
-                    title="Stop"
-                  >
-                    <StopCircle className="w-4 h-4" />
-                  </motion.button>
-                ) : (
-                  <motion.button
-                    key="send"
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleSend}
-                    disabled={!message.trim() && attachments.length === 0}
-                    className={cn(
-                      'p-2 rounded-full',
-                      'transition-all duration-200',
-                      message.trim() || attachments.length > 0
-                        ? 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
-                        : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
-                    )}
-                    title="Send"
-                  >
-                    <ArrowUp className="w-4 h-4" />
-                  </motion.button>
+              {/* Send/Stop Buttons */}
+              {isStreaming && (
+                <motion.button
+                  key="stop"
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={onStop}
+                  className={cn(
+                    'p-2 rounded-full',
+                    'bg-[#FF5449]/20 text-[#FF5449] border border-[#FF5449]/30',
+                    'hover:bg-[#FF5449]/30',
+                    'transition-colors'
+                  )}
+                  title="Stop"
+                >
+                  <StopCircle className="w-4 h-4" />
+                </motion.button>
+              )}
+              <motion.button
+                key="send"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={handleSend}
+                disabled={!message.trim() && attachments.length === 0}
+                className={cn(
+                  'p-2 rounded-full',
+                  'transition-all duration-200',
+                  message.trim() || attachments.length > 0
+                    ? isStreaming
+                      ? 'bg-gradient-to-r from-[#1E3A8A]/70 to-[#1D4ED8]/70 text-white/80 shadow-md shadow-[#1D4ED8]/15 hover:shadow-lg hover:shadow-[#1D4ED8]/25'
+                      : 'bg-gradient-to-r from-[#1E3A8A] to-[#1D4ED8] text-white shadow-lg shadow-[#1D4ED8]/25 hover:shadow-xl hover:shadow-[#1D4ED8]/35'
+                    : 'bg-white/[0.06] text-white/30 cursor-not-allowed'
                 )}
-              </AnimatePresence>
+                title={isStreaming ? 'Queue message' : 'Send'}
+              >
+                <ArrowUp className="w-4 h-4" />
+              </motion.button>
             </div>
           </div>
 

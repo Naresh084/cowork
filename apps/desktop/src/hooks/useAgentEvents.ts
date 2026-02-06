@@ -644,6 +644,12 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
         }
 
+        // Message Queue events
+        case 'queue:update': {
+          chat.updateMessageQueue(eventSessionId, event.queue);
+          break;
+        }
+
         // Browser View events (live screenshot streaming)
         case 'browserView:screenshot': {
           const screenshotEvent = event as {

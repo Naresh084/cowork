@@ -131,6 +131,11 @@ export interface SessionChatState {
   pendingQuestions: UserQuestion[];
 
   // ============================================================================
+  // Message Queue State
+  // ============================================================================
+  messageQueue: Array<{ id: string; content: string; queuedAt: number }>;
+
+  // ============================================================================
   // UI State
   // ============================================================================
   error: string | null;
@@ -194,6 +199,12 @@ interface ChatActions {
   setChatItems: (sessionId: string, items: ChatItem[]) => void;
   updateContextUsage: (sessionId: string, usage: ContextUsage) => void;
 
+  // Message Queue
+  updateMessageQueue: (sessionId: string, queue: Array<{ id: string; content: string; queuedAt: number }>) => void;
+  removeFromQueue: (sessionId: string, messageId: string) => Promise<void>;
+  sendQueuedImmediately: (sessionId: string, messageId: string) => Promise<void>;
+  editQueuedMessage: (sessionId: string, messageId: string, newContent: string) => Promise<void>;
+
   // Browser View (Live View for computer_use)
   isComputerUseRunning: (sessionId: string | null) => boolean;
   updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => void;
@@ -203,10 +214,9 @@ interface ChatActions {
 export interface SessionDetails {
   id: string;
   messages: Message[];
-  chatItems?: ChatItem[];
-  tasks?: Task[];
-  artifacts?: Artifact[];
-  toolExecutions?: ToolExecution[];
+  chatItems: ChatItem[];
+  tasks: Task[];
+  artifacts: Artifact[];
 }
 
 const createSessionState = (): SessionChatState => ({
@@ -226,6 +236,9 @@ const createSessionState = (): SessionChatState => ({
   // Interactive state
   pendingPermissions: [],
   pendingQuestions: [],
+
+  // Message queue
+  messageQueue: [],
 
   // UI state
   error: null,
@@ -667,7 +680,7 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
           // Backward compat: if backend has V1 messages but no chatItems, convert
           if (incomingChatItems.length === 0 && session.messages && session.messages.length > 0) {
-            incomingChatItems = convertLegacyToV2(session.messages, session.toolExecutions);
+            incomingChatItems = convertLegacyToV2(session.messages);
           }
 
           const mergedChatItems = [...existingChatItems];
@@ -1080,6 +1093,42 @@ ${attachment.data}`,
       ...session,
       contextUsage: usage,
     })));
+  },
+
+  // Message Queue
+  updateMessageQueue: (sessionId: string, queue: Array<{ id: string; content: string; queuedAt: number }>) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      messageQueue: queue,
+    })));
+  },
+
+  removeFromQueue: async (sessionId: string, messageId: string) => {
+    if (!sessionId) return;
+    try {
+      await invoke('agent_remove_from_queue', { sessionId, messageId });
+    } catch (error) {
+      console.error('[ChatStore] Failed to remove from queue:', error);
+    }
+  },
+
+  sendQueuedImmediately: async (sessionId: string, messageId: string) => {
+    if (!sessionId) return;
+    try {
+      await invoke('agent_send_queued_immediately', { sessionId, messageId });
+    } catch (error) {
+      console.error('[ChatStore] Failed to send queued message:', error);
+    }
+  },
+
+  editQueuedMessage: async (sessionId: string, messageId: string, newContent: string) => {
+    if (!sessionId) return;
+    try {
+      await invoke('agent_edit_queued_message', { sessionId, messageId, content: newContent });
+    } catch (error) {
+      console.error('[ChatStore] Failed to edit queued message:', error);
+    }
   },
 
   // Browser View (Live View for computer_use)

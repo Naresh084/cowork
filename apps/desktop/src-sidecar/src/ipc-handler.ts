@@ -242,6 +242,42 @@ registerHandler('stop_generation', async (params) => {
   return { success: true };
 });
 
+// Message Queue management
+registerHandler('get_queue', async (params) => {
+  const sessionId = params.sessionId as string;
+  if (!sessionId) throw new Error('sessionId is required');
+  return agentRunner.getMessageQueue(sessionId);
+});
+
+registerHandler('remove_from_queue', async (params) => {
+  const sessionId = params.sessionId as string;
+  const messageId = params.messageId as string;
+  if (!sessionId || !messageId) throw new Error('sessionId and messageId are required');
+  return agentRunner.removeFromQueue(sessionId, messageId);
+});
+
+registerHandler('reorder_queue', async (params) => {
+  const sessionId = params.sessionId as string;
+  const messageIds = params.messageIds as string[];
+  if (!sessionId || !messageIds) throw new Error('sessionId and messageIds are required');
+  return agentRunner.reorderQueue(sessionId, messageIds);
+});
+
+registerHandler('send_queued_immediately', async (params) => {
+  const sessionId = params.sessionId as string;
+  const messageId = params.messageId as string;
+  if (!sessionId || !messageId) throw new Error('sessionId and messageId are required');
+  return agentRunner.sendQueuedImmediately(sessionId, messageId);
+});
+
+registerHandler('edit_queued_message', async (params) => {
+  const sessionId = params.sessionId as string;
+  const messageId = params.messageId as string;
+  const content = params.content as string;
+  if (!sessionId || !messageId || !content) throw new Error('sessionId, messageId, and content are required');
+  return agentRunner.editQueuedMessage(sessionId, messageId, content);
+});
+
 // Respond to question
 registerHandler('respond_question', async (params) => {
   const p = params as unknown as RespondQuestionParams;

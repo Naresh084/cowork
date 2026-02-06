@@ -251,6 +251,13 @@ export class EventEmitter {
   }
 
   /**
+   * Emit message queue update for a session.
+   */
+  queueUpdate(sessionId: string, queue: Array<{ id: string; content: string; queuedAt: number }>): void {
+    this.emit('queue:update', sessionId, { queue });
+  }
+
+  /**
    * Emit context usage update.
    */
   contextUsageUpdate(sessionId: string, contextUsage: {
