@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calendar, Play, Clock, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -12,7 +12,12 @@ function formatNextRun(timestamp?: number): string {
   const diff = timestamp - now;
 
   if (diff < 0) return 'Overdue';
-  if (diff < 60000) return 'In less than a minute';
+  // Under 10 minutes: show m:ss
+  if (diff < 600000) {
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `In ${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
   if (diff < 3600000) {
     const minutes = Math.floor(diff / 60000);
     return `In ${minutes}m`;
@@ -51,7 +56,7 @@ function AutomationsJobItem({ job }: { job: CronJob }) {
             <div
               className={cn(
                 'w-1.5 h-1.5 rounded-full flex-shrink-0',
-                job.status === 'active' && 'bg-[#10B981]',
+                job.status === 'active' && 'bg-[#50956A]',
                 job.status === 'paused' && 'bg-yellow-500',
                 job.status === 'completed' && 'bg-white/30',
                 job.status === 'failed' && 'bg-red-500'
@@ -70,7 +75,7 @@ function AutomationsJobItem({ job }: { job: CronJob }) {
         </div>
         <button
           onClick={handleRun}
-          className="p-1 rounded hover:bg-white/[0.08] text-white/40 hover:text-[#10B981] transition-colors"
+          className="p-1 rounded hover:bg-white/[0.08] text-white/40 hover:text-[#60A5FA] transition-colors"
           title="Run now"
         >
           <Play className="w-3 h-3" />
@@ -85,12 +90,37 @@ export function ScheduledSection() {
   const loadJobs = useCronStore((state) => state.loadJobs);
   const openModal = useCronStore((state) => state.openModal);
   const jobs = useCronStore((state) => state.jobs);
+  const isModalOpen = useCronStore((state) => state.isModalOpen);
 
-  // Load jobs on mount - only run once
+  // Tick to keep relative times fresh; 1s when any job is <10min, else 30s
+  const [, setTick] = useState(0);
+  const hasImminent = jobs.some(
+    (j) => j.status === 'active' && j.nextRunAt && j.nextRunAt - Date.now() < 600_000
+  );
   useEffect(() => {
     loadJobs();
+    const ms = hasImminent ? 1_000 : 30_000;
+    let loadCounter = 0;
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+      // Only reload from backend every 30s, not every second
+      loadCounter++;
+      if (loadCounter * ms >= 30_000) {
+        loadJobs();
+        loadCounter = 0;
+      }
+    }, ms);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasImminent]);
+
+  // Reload when modal closes (job may have been created/edited)
+  useEffect(() => {
+    if (!isModalOpen) {
+      loadJobs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModalOpen]);
 
   // Memoize filtered jobs to prevent infinite re-renders
   const activeJobs = useMemo(

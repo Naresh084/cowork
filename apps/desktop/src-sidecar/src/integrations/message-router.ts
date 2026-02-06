@@ -62,6 +62,7 @@ export class MessageRouter extends EventEmitter {
   private sessionCreationPromise: Promise<string> | null = null;
   private requestCounter = 0;
   private readonly maxMediaBytes: number;
+  private sharedSessionWorkingDirectory: string | null = null;
 
   constructor() {
     super();
@@ -72,6 +73,11 @@ export class MessageRouter extends EventEmitter {
   /** Set the agent runner reference (called during initialization) */
   setAgentRunner(runner: any): void {
     this.agentRunner = runner;
+  }
+
+  setSharedSessionWorkingDirectory(path: string | null | undefined): void {
+    const normalized = typeof path === 'string' ? path.trim() : '';
+    this.sharedSessionWorkingDirectory = normalized || null;
   }
 
   /** Register an adapter to receive messages from */
@@ -172,9 +178,10 @@ export class MessageRouter extends EventEmitter {
   /** Actually create the session (called only once even with concurrent requests) */
   private async createNewSession(seedMessage?: IncomingMessage): Promise<string> {
     const initialTitle = this.buildSessionTitleFromMessage(seedMessage?.content);
+    const sharedWorkingDirectory = this.resolveSharedSessionWorkingDirectory();
     const session = await Promise.resolve(
       this.agentRunner.createSession(
-        process.cwd(),
+        sharedWorkingDirectory,
         null,
         initialTitle,
         'integration',
@@ -195,6 +202,20 @@ export class MessageRouter extends EventEmitter {
 
     this.integrationSessionId = sessionId;
     return sessionId;
+  }
+
+  private resolveSharedSessionWorkingDirectory(): string {
+    if (this.sharedSessionWorkingDirectory && existsSync(this.sharedSessionWorkingDirectory)) {
+      return this.sharedSessionWorkingDirectory;
+    }
+
+    if (this.sharedSessionWorkingDirectory) {
+      process.stderr.write(
+        `[message-router] Shared session working directory does not exist: ${this.sharedSessionWorkingDirectory}. Falling back to process cwd.\n`,
+      );
+    }
+
+    return process.cwd();
   }
 
   private getFallbackResponseText(): string {

@@ -11,7 +11,7 @@ use tauri::{AppHandle, State};
 pub enum CronSchedule {
     #[serde(rename = "at")]
     At { timestamp: i64 },
-    #[serde(rename = "every")]
+    #[serde(rename = "every", rename_all = "camelCase")]
     Every {
         interval_ms: i64,
         #[serde(skip_serializing_if = "Option::is_none")]

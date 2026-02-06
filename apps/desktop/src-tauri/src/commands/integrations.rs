@@ -138,6 +138,40 @@ pub async fn agent_integration_get_config(
     manager.send_command("integration_get_config", params).await
 }
 
+/// Get global integration settings
+#[tauri::command]
+pub async fn agent_integration_get_settings(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({});
+
+    manager.send_command("integration_get_settings", params).await
+}
+
+/// Update global integration settings
+#[tauri::command]
+pub async fn agent_integration_update_settings(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    settings: serde_json::Value,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "settings": settings,
+    });
+
+    manager
+        .send_command("integration_update_settings", params)
+        .await?;
+    Ok(())
+}
+
 /// Send a test message on a platform
 #[tauri::command]
 pub async fn agent_integration_send_test(

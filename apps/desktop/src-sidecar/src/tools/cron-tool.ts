@@ -287,13 +287,13 @@ Schedule types:
       maxRuns: z
         .number()
         .int()
-        .positive()
+        .min(1)
         .optional()
         .describe('Maximum number of times to run. Task auto-stops after this many runs. E.g., set to 5 to run 5 times then stop.'),
       maxTurns: z
         .number()
         .int()
-        .positive()
+        .min(1)
         .optional()
         .describe('Maximum agent turns per execution. Limits how many steps the agent takes each run. Default: 25.'),
     }),

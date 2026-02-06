@@ -8,9 +8,14 @@ import { DEFAULT_WHATSAPP_DENIAL_MESSAGE } from './types.js';
 const CONFIG_DIR = join(homedir(), '.cowork', 'integrations');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
+export interface IntegrationGeneralSettings {
+  sharedSessionWorkingDirectory?: string;
+}
+
 interface IntegrationStoreData {
   platforms: Record<string, PlatformConfig>;
   lastSessionId?: string;
+  settings: IntegrationGeneralSettings;
 }
 
 function normalizeE164Like(value: unknown): string | null {
@@ -21,7 +26,7 @@ function normalizeE164Like(value: unknown): string | null {
 }
 
 export class IntegrationStore {
-  private data: IntegrationStoreData = { platforms: {} };
+  private data: IntegrationStoreData = { platforms: {}, settings: {} };
   private savePromise: Promise<void> | null = null;
   private pendingSave = false;
 
@@ -39,7 +44,7 @@ export class IntegrationStore {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[integration-store] Failed to load config: ${msg}\n`);
-      this.data = { platforms: {} };
+      this.data = { platforms: {}, settings: {} };
     }
   }
 
@@ -117,14 +122,26 @@ export class IntegrationStore {
     await this.save();
   }
 
+  getSettings(): IntegrationGeneralSettings {
+    return {
+      ...this.data.settings,
+    };
+  }
+
+  async setSettings(settings: IntegrationGeneralSettings): Promise<void> {
+    this.data.settings = this.normalizeSettings(settings);
+    await this.save();
+  }
+
   private normalizeData(input: unknown): { data: IntegrationStoreData; changed: boolean } {
     if (!input || typeof input !== 'object') {
-      return { data: { platforms: {} }, changed: true };
+      return { data: { platforms: {}, settings: {} }, changed: true };
     }
 
     const parsed = input as {
       platforms?: Record<string, PlatformConfig>;
       lastSessionId?: unknown;
+      settings?: IntegrationGeneralSettings;
     };
 
     const platforms: Record<string, PlatformConfig> = {};
@@ -164,10 +181,19 @@ export class IntegrationStore {
 
     const lastSessionId =
       typeof parsed.lastSessionId === 'string' ? parsed.lastSessionId : undefined;
+    const settings = this.normalizeSettings(parsed.settings);
+
+    if (
+      JSON.stringify(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}) !==
+      JSON.stringify(settings)
+    ) {
+      changed = true;
+    }
 
     return {
       data: {
         platforms,
+        settings,
         ...(lastSessionId ? { lastSessionId } : {}),
       },
       changed,
@@ -210,5 +236,21 @@ export class IntegrationStore {
       allowFrom: Array.from(allowFromSet),
       denialMessage,
     };
+  }
+
+  private normalizeSettings(settings: unknown): IntegrationGeneralSettings {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return {};
+    }
+
+    const raw = settings as { sharedSessionWorkingDirectory?: unknown };
+    const sharedSessionWorkingDirectory =
+      typeof raw.sharedSessionWorkingDirectory === 'string'
+        ? raw.sharedSessionWorkingDirectory.trim()
+        : '';
+
+    return sharedSessionWorkingDirectory
+      ? { sharedSessionWorkingDirectory }
+      : {};
   }
 }

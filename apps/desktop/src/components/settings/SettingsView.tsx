@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, MessageSquare, Hash, Send } from 'lucide-react';
+import { ArrowLeft, Settings2, MessageSquare, Hash, Send, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { GeneralSettings } from './GeneralSettings';
+import { IntegrationSettings } from './IntegrationSettings';
 import { WhatsAppSettings } from './WhatsAppSettings';
 import { SlackSettings } from './SlackSettings';
 import { TelegramSettings } from './TelegramSettings';
 
-type SettingsTab = 'general' | 'whatsapp' | 'slack' | 'telegram';
+type SettingsTab = 'general' | 'integrations' | 'whatsapp' | 'slack' | 'telegram';
 
 interface TabConfig {
   id: SettingsTab;
@@ -20,6 +21,7 @@ interface TabConfig {
 
 const tabConfig: TabConfig[] = [
   { id: 'general', label: 'General', icon: Settings2 },
+  { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: '#25D366' },
   { id: 'slack', label: 'Slack', icon: Hash, color: '#9B59B6' },
   { id: 'telegram', label: 'Telegram', icon: Send, color: '#2AABEE' },
@@ -27,6 +29,7 @@ const tabConfig: TabConfig[] = [
 
 const tabContent: Record<SettingsTab, React.ComponentType> = {
   general: GeneralSettings,
+  integrations: IntegrationSettings,
   whatsapp: WhatsAppSettings,
   slack: SlackSettings,
   telegram: TelegramSettings,
@@ -79,6 +82,7 @@ export function SettingsView() {
           const isActive = activeTab === tab.id;
           const isConnected =
             tab.id !== 'general' &&
+            tab.id !== 'integrations' &&
             platforms[tab.id as 'whatsapp' | 'slack' | 'telegram']?.connected;
 
           return (
@@ -97,7 +101,7 @@ export function SettingsView() {
                 color={tab.color && isActive ? tab.color : undefined}
               />
               <span>{tab.label}</span>
-              {tab.id !== 'general' && (
+              {tab.id !== 'general' && tab.id !== 'integrations' && (
                 <div
                   className={cn(
                     'w-2 h-2 rounded-full flex-shrink-0',

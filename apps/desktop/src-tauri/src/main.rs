@@ -152,6 +152,8 @@ fn main() {
             commands::integrations::agent_integration_get_qr,
             commands::integrations::agent_integration_configure,
             commands::integrations::agent_integration_get_config,
+            commands::integrations::agent_integration_get_settings,
+            commands::integrations::agent_integration_update_settings,
             commands::integrations::agent_integration_send_test,
         ])
         .setup(|app| {

@@ -242,8 +242,8 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
       </div>
 
       {/* Prompt preview */}
-      <div className="mb-4 p-3 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-        <p className="text-sm text-white/50 line-clamp-2">{job.prompt}</p>
+      <div className="mb-4 p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] max-h-32 overflow-y-auto">
+        <p className="text-sm text-white/50 whitespace-pre-wrap">{job.prompt}</p>
       </div>
 
       {/* Working directory */}
