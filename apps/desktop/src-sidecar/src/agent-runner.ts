@@ -38,6 +38,7 @@ import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middl
 import { createMemoryService, type MemoryService } from './memory/memory-service.js';
 import { createMemoryExtractor, type MemoryExtractor } from './memory/memory-extractor.js';
 import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-md-service.js';
+import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@gemini-cowork/mcp';
 import type { AgentsMdConfig } from './agents-md/types.js';
 import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
 import { buildSubagentPromptSection, getSubagentConfigs } from './middleware/subagent-prompts.js';
@@ -159,6 +160,38 @@ const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
   computerUse: 'gemini-2.5-computer-use-preview-10-2025',
 };
 
+interface MCPServerConfigInput {
+  id: string;
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled?: boolean;
+  prompt?: string;
+  contextFileName?: string;
+  transport?: 'stdio' | 'http';
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+interface ManagedMCPServerState {
+  configId: string;
+  displayName: string;
+  internalServerId?: string;
+  enabled: boolean;
+  connected: boolean;
+  skippedReason?: string;
+  error?: string;
+}
+
+interface ManagedMCPToolMeta {
+  toolName: string;
+  serverConfigId: string;
+  internalServerId: string;
+  serverDisplayName: string;
+  description?: string;
+}
+
 export class AgentRunner {
   private sessions: Map<string, ActiveSession> = new Map();
   private provider: GeminiProvider | null = null;
@@ -170,6 +203,11 @@ export class AgentRunner {
   private currentTurnInfo: Map<string, { turnMessageId: string; toolIds: string[] }> = new Map();
   private isInitialized = false;
   private specializedModels: SpecializedModels = { ...DEFAULT_SPECIALIZED_MODELS };
+  private stitchApiKey: string | null = null;
+  private mcpManager: MCPClientManager = new MCPClientManager();
+  private mcpServerConfigs: MCPServerConfigInput[] = [];
+  private mcpServerStates: Map<string, ManagedMCPServerState> = new Map();
+  private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
   private appDataDir: string | null = null;
   // Deep Agents services (per-session instances stored in map)
   private memoryServices: Map<string, MemoryService> = new Map();
@@ -900,6 +938,195 @@ export class AgentRunner {
         apiKey,
       },
     });
+  }
+
+  async setStitchApiKey(apiKey: string | null): Promise<void> {
+    const normalized = typeof apiKey === 'string' ? apiKey.trim() : '';
+    this.stitchApiKey = normalized || null;
+
+    if (this.mcpServerConfigs.length > 0) {
+      await this.setMcpServers(this.mcpServerConfigs);
+    }
+  }
+
+  private sanitizeMcpName(value: string): string {
+    const normalized = value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized || 'tool';
+  }
+
+  private isStitchServerConfig(config: MCPServerConfigInput): boolean {
+    const haystack = [
+      config.id,
+      config.name,
+      config.command || '',
+      ...(config.args || []),
+      config.url || '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes('stitch');
+  }
+
+  private toRuntimeMcpConfig(config: MCPServerConfigInput): RuntimeMCPServerConfig {
+    const transport = config.transport ?? (config.url ? 'http' : 'stdio');
+    const env: Record<string, string> = { ...(config.env || {}) };
+
+    if (this.isStitchServerConfig(config) && this.stitchApiKey) {
+      env.STITCH_API_KEY = env.STITCH_API_KEY || this.stitchApiKey;
+      env.GEMINI_API_KEY = env.GEMINI_API_KEY || this.stitchApiKey;
+      env.GOOGLE_API_KEY = env.GOOGLE_API_KEY || this.stitchApiKey;
+    }
+
+    if (transport === 'http') {
+      return {
+        name: config.name,
+        enabled: config.enabled !== false,
+        transport: 'http',
+        url: config.url,
+        headers: config.headers,
+        prompt: config.prompt,
+        contextFileName: config.contextFileName,
+      };
+    }
+
+    return {
+      name: config.name,
+      enabled: config.enabled !== false,
+      transport: 'stdio',
+      command: config.command,
+      args: config.args,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      prompt: config.prompt,
+      contextFileName: config.contextFileName,
+    };
+  }
+
+  private async rebuildAllSessionAgents(): Promise<void> {
+    if (!this.apiKey) return;
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  async setMcpServers(servers: MCPServerConfigInput[]): Promise<void> {
+    this.mcpServerConfigs = Array.isArray(servers) ? [...servers] : [];
+
+    await this.mcpManager.disconnectAll().catch(() => {});
+    this.mcpManager = new MCPClientManager();
+    this.mcpServerStates.clear();
+    this.mcpToolRegistry.clear();
+
+    for (const config of this.mcpServerConfigs) {
+      const state: ManagedMCPServerState = {
+        configId: config.id,
+        displayName: config.name,
+        enabled: config.enabled !== false,
+        connected: false,
+      };
+
+      this.mcpServerStates.set(config.id, state);
+
+      if (!state.enabled) {
+        state.skippedReason = 'disabled';
+        continue;
+      }
+
+      if (this.isStitchServerConfig(config) && !this.stitchApiKey) {
+        state.skippedReason = 'missing_stitch_api_key';
+        continue;
+      }
+
+      try {
+        const runtimeConfig = this.toRuntimeMcpConfig(config);
+        const internalServerId = this.mcpManager.addServer(runtimeConfig);
+        state.internalServerId = internalServerId;
+        await this.mcpManager.connect(internalServerId);
+        state.connected = true;
+
+        const connectedState = this.mcpManager.getServerState(internalServerId);
+        for (const tool of connectedState?.tools || []) {
+          const baseName = `mcp_${this.sanitizeMcpName(config.id || config.name)}_${this.sanitizeMcpName(tool.name)}`;
+          let generatedName = baseName;
+          let suffix = 2;
+          while (this.mcpToolRegistry.has(generatedName)) {
+            generatedName = `${baseName}_${suffix}`;
+            suffix += 1;
+          }
+
+          this.mcpToolRegistry.set(generatedName, {
+            toolName: tool.name,
+            serverConfigId: config.id,
+            internalServerId,
+            serverDisplayName: config.name,
+            description: tool.description,
+          });
+        }
+      } catch (error) {
+        state.error = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    toolPolicyService.registerMcpTools(Array.from(this.mcpToolRegistry.keys()));
+    await this.rebuildAllSessionAgents();
+  }
+
+  async callMcpTool(
+    serverConfigId: string,
+    toolName: string,
+    args: Record<string, unknown> = {},
+  ): Promise<unknown> {
+    const direct = this.mcpServerStates.get(serverConfigId);
+    const fallback = Array.from(this.mcpServerStates.values()).find(
+      (state) => state.internalServerId === serverConfigId,
+    );
+    const state = direct || fallback;
+
+    if (!state?.internalServerId || !state.connected) {
+      const reason = state?.skippedReason ? ` (${state.skippedReason})` : '';
+      throw new Error(`MCP server not connected: ${serverConfigId}${reason}`);
+    }
+
+    return this.mcpManager.callTool(state.internalServerId, toolName, args);
+  }
+
+  private createMcpTools(): ToolHandler[] {
+    const handlers: ToolHandler[] = [];
+
+    for (const [generatedName, meta] of this.mcpToolRegistry.entries()) {
+      handlers.push({
+        name: generatedName,
+        description: `[MCP:${meta.serverDisplayName}] ${meta.description || meta.toolName}`,
+        parameters: z.record(z.unknown()),
+        requiresPermission: () => ({
+          type: 'network_request',
+          resource: `mcp://${meta.serverDisplayName}/${meta.toolName}`,
+          reason: `Run MCP tool ${meta.toolName} on ${meta.serverDisplayName}`,
+          toolName: generatedName,
+        }),
+        execute: async (args: unknown) => {
+          try {
+            const result = await this.mcpManager.callTool(
+              meta.internalServerId,
+              meta.toolName,
+              ((args as Record<string, unknown>) || {}),
+            );
+            return { success: true, data: result };
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        },
+      });
+    }
+
+    return handlers;
   }
 
   setModelCatalog(models: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }>): void {
@@ -2638,6 +2865,7 @@ Use \`manage_scheduled_task\` to:
 
     // Integration prompt (conditional - only when messaging platforms connected)
     const integrationPrompt = this.buildIntegrationPrompt();
+    const mcpPrompt = this.buildMcpPrompt();
 
     return buildFullSystemPrompt(basePrompt, [
       agentsMdPrompt,
@@ -2645,6 +2873,7 @@ Use \`manage_scheduled_task\` to:
       subagentPrompt,
       skillBlock,
       integrationPrompt,
+      mcpPrompt,
     ].filter(Boolean));
   }
 
@@ -2705,6 +2934,39 @@ ${toolList}
     } catch {
       return '';
     }
+  }
+
+  private buildMcpPrompt(): string {
+    const tools = Array.from(this.mcpToolRegistry.entries());
+    if (tools.length === 0) return '';
+
+    const preview = tools
+      .slice(0, 20)
+      .map(([generatedName, meta]) => {
+        const summary = meta.description ? ` - ${meta.description}` : '';
+        return `- \`${generatedName}\` (${meta.serverDisplayName}:${meta.toolName})${summary}`;
+      })
+      .join('\n');
+
+    const stitchTools = tools.filter(([generatedName, meta]) => {
+      const haystack = `${generatedName} ${meta.serverDisplayName} ${meta.toolName}`.toLowerCase();
+      return haystack.includes('stitch');
+    });
+
+    const stitchGuidance = stitchTools.length > 0
+      ? `
+### Stitch Tools
+- Stitch MCP tools are available in this session.
+- Use Stitch tools for UI/design-specific workflows when the user asks for interface mockups, layouts, or design assets.
+- Prefer Stitch outputs for design previews when available; otherwise continue with standard coding tools.`
+      : '';
+
+    return `## MCP Tools
+
+The following MCP tools are connected and available:
+${preview}
+${stitchGuidance}
+`;
   }
 
   /**
@@ -2967,7 +3229,12 @@ ${toolList}
       () => this.apiKey,
       () => session.model  // Use session model for search
     );
-    const connectorTools = this.createConnectorTools(session.id);
+    const mcpTools = this.createMcpTools();
+    const connectorTools = this.createConnectorTools(session.id).filter((tool) => {
+      const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
+      if (!haystack.includes('stitch')) return true;
+      return Boolean(this.stitchApiKey);
+    });
 
     // Create read_any_file tool - unified file reading for ALL types
     const readAnyFileTool: ToolHandler = {
@@ -3080,6 +3347,7 @@ ${toolList}
       ...computerUseTools,
       ...mediaTools,
       ...groundingTools,
+      ...mcpTools,
       ...connectorTools,
       ...notificationTools,
       ...cronTools,

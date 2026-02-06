@@ -312,6 +312,42 @@ registerHandler('set_specialized_models', async (params) => {
   return { success: true };
 });
 
+registerHandler('set_stitch_api_key', async (params) => {
+  const { apiKey } = params as { apiKey?: string | null };
+  const normalized = typeof apiKey === 'string' ? apiKey.trim() : '';
+  await agentRunner.setStitchApiKey(normalized || null);
+  return { success: true };
+});
+
+registerHandler('set_mcp_servers', async (params) => {
+  const { servers } = params as { servers?: Array<Record<string, unknown>> };
+  if (!Array.isArray(servers)) throw new Error('servers array is required');
+  await agentRunner.setMcpServers(servers as Array<{
+    id: string;
+    name: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    enabled?: boolean;
+    prompt?: string;
+    contextFileName?: string;
+    transport?: 'stdio' | 'http';
+    url?: string;
+    headers?: Record<string, string>;
+  }>);
+  return { success: true };
+});
+
+registerHandler('mcp_call_tool', async (params) => {
+  const { serverId, toolName, args } = params as {
+    serverId?: string;
+    toolName?: string;
+    args?: Record<string, unknown>;
+  };
+  if (!serverId || !toolName) throw new Error('serverId and toolName are required');
+  return agentRunner.callMcpTool(serverId, toolName, args || {});
+});
+
 // Load Gemini CLI extensions
 registerHandler('load_gemini_extensions', async () => {
   return loadGeminiExtensions();
