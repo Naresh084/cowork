@@ -48,9 +48,6 @@
       "exceptionDomain": "",
       "signingIdentity": null,
       "entitlements": "./Cowork.entitlements",
-      "infoPlist": {
-        "NSMicrophoneUsageDescription": "Cowork needs microphone access to record voice notes"
-      },
       "frameworks": []
     },
     "windows": {

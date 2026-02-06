@@ -501,6 +501,73 @@ export class AgentRunner {
       .trim();
   }
 
+  /**
+   * Convert our MessageContentPart[] to LangChain-compatible content format.
+   * Our types (image, audio, video, file) don't match LangChain's expected formats,
+   * causing "Unknown content type" errors in @langchain/google-genai.
+   *
+   * For parts with filePath but no data, reads the file back from disk.
+   */
+  private async toLangChainContentParts(parts: MessageContentPart[]): Promise<any[]> {
+    const result: any[] = [];
+    for (const part of parts) {
+      switch (part.type) {
+        case 'text':
+          result.push({ type: 'text', text: part.text });
+          break;
+        case 'image': {
+          let data = part.data;
+          if (!data && (part as any).filePath && this.persistence) {
+            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
+          }
+          if (data) {
+            result.push({
+              type: 'image_url',
+              image_url: { url: `data:${part.mimeType};base64,${data}` },
+            });
+          }
+          break;
+        }
+        case 'audio': {
+          let data = part.data;
+          if (!data && (part as any).filePath && this.persistence) {
+            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
+          }
+          if (data) {
+            result.push({ type: 'media', mimeType: part.mimeType, data });
+          }
+          break;
+        }
+        case 'video': {
+          let data = part.data;
+          if (!data && (part as any).filePath && this.persistence) {
+            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
+          }
+          if (data) {
+            result.push({ type: 'media', mimeType: part.mimeType, data });
+          }
+          break;
+        }
+        case 'file': {
+          let data = part.data;
+          if (!data && (part as any).filePath && this.persistence) {
+            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
+          }
+          if (data && part.mimeType) {
+            result.push({ type: 'media', mimeType: part.mimeType, data });
+          } else {
+            result.push({ type: 'text', text: `File: ${part.name}` });
+          }
+          break;
+        }
+        default:
+          result.push({ type: 'text', text: JSON.stringify(part) });
+          break;
+      }
+    }
+    return result;
+  }
+
   private appendAssistantSegmentChunk(session: ActiveSession, chunkText: string): void {
     if (!chunkText) return;
 
@@ -1138,6 +1205,37 @@ export class AgentRunner {
       }
     }
 
+    // Save attachment files to disk and build persisted content (filePath instead of base64)
+    // messageContent keeps original base64 data in memory for the LLM call
+    // persistedContent replaces data with filePath for small JSON persistence
+    let persistedContent: string | Message['content'] = messageContent;
+    const savedFilePaths = new Map<string, string>(); // attachment name → filePath
+
+    if (Array.isArray(messageContent) && this.persistence) {
+      const persistedParts: MessageContentPart[] = [];
+      for (const part of messageContent as MessageContentPart[]) {
+        if (part.type !== 'text' && 'data' in part && (part as any).data) {
+          const mimeType = (part as any).mimeType || 'application/octet-stream';
+          const name = part.type === 'file' ? (part as any).name : `attachment.${part.type}`;
+          try {
+            const filePath = await this.persistence.saveAttachmentFile(
+              sessionId, name, (part as any).data, mimeType
+            );
+            savedFilePaths.set(name, filePath);
+            // Persisted part: filePath instead of data
+            const { data: _removed, ...rest } = part as any;
+            persistedParts.push({ ...rest, filePath } as MessageContentPart);
+          } catch {
+            // If save fails, keep original part with data
+            persistedParts.push(part);
+          }
+        } else {
+          persistedParts.push(part);
+        }
+      }
+      persistedContent = persistedParts;
+    }
+
     // Generate turn ID and create V2 UserMessageItem
     const turnId = generateMessageId();
     session.updatedAt = Date.now();
@@ -1152,13 +1250,21 @@ export class AgentRunner {
     const chatItemAttachments = attachments?.filter(
       (a): a is typeof a & { type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf' } =>
         a.type !== 'other'
-    );
+    ).map(a => {
+      // Strip base64 data from attachments, store filePath instead
+      const filePath = savedFilePaths.get(a.name);
+      if (filePath && a.data) {
+        const { data: _removed, ...rest } = a;
+        return { ...rest, filePath };
+      }
+      return a;
+    });
     const userChatItem: UserMessageItem = {
       id: generateChatItemId(),
       kind: 'user_message',
       timestamp: now(),
       turnId,
-      content: messageContent,
+      content: persistedContent,
       attachments: chatItemAttachments,
     };
     this.appendChatItem(session, userChatItem);
@@ -1177,11 +1283,11 @@ export class AgentRunner {
 
     // With checkpointer, the graph remembers prior messages via thread_id.
     // Only send the new user message instead of the full history.
-    const newUserMessage = new HumanMessage(
-      typeof messageContent === 'string'
-        ? messageContent
-        : messageContent // Pass content parts directly for multimodal
-    );
+    // Convert multimodal parts to LangChain-compatible format (image_url, media).
+    const lcContent = typeof messageContent === 'string'
+      ? messageContent
+      : await this.toLangChainContentParts(messageContent as MessageContentPart[]);
+    const newUserMessage = new HumanMessage(lcContent);
     const lcMessages = [newUserMessage];
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
