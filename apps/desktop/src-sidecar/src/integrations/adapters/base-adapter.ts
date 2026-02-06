@@ -1,5 +1,11 @@
 import { EventEmitter } from 'events';
-import type { PlatformType, PlatformStatus, IncomingMessage, IntegrationMediaPayload } from '../types.js';
+import type {
+  PlatformType,
+  PlatformStatus,
+  IncomingMessage,
+  IntegrationMediaPayload,
+  PlatformMessageAttachment,
+} from '../types.js';
 
 /**
  * Abstract base class for messaging platform adapters.
@@ -132,6 +138,7 @@ export abstract class BaseAdapter extends EventEmitter {
     senderId: string,
     senderName: string,
     content: string,
+    attachments?: PlatformMessageAttachment[],
   ): IncomingMessage {
     this._lastActiveChat = chatId;
     this._lastMessageAt = Date.now();
@@ -141,6 +148,7 @@ export abstract class BaseAdapter extends EventEmitter {
       senderId,
       senderName,
       content,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
       timestamp: Date.now(),
     };
   }

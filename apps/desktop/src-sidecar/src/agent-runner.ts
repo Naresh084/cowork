@@ -1248,15 +1248,17 @@ export class AgentRunner {
     });
 
     // Filter attachments to only include supported types (exclude 'other')
+    // Strip base64 data from media attachments — data is only needed for the LLM call
     const chatItemAttachments = attachments?.filter(
       (a): a is typeof a & { type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf' } =>
         a.type !== 'other'
     ).map(a => {
-      // Strip base64 data from attachments, store filePath instead
-      const filePath = savedFilePaths.get(a.name);
-      if (filePath && a.data) {
+      // For media types, strip base64 data and add filePath if saved
+      if (a.type !== 'text' && a.data) {
         const { data: _removed, ...rest } = a;
-        return { ...rest, filePath };
+        // Find filePath from saved files (keys are 'attachment.{type}' format)
+        const filePath = savedFilePaths.get(`attachment.${a.type}`) || savedFilePaths.get(a.name);
+        return filePath ? { ...rest, filePath } : rest;
       }
       return a;
     });
@@ -1885,6 +1887,14 @@ export class AgentRunner {
       } catch (error) {
         throw error;
       }
+    }
+
+    // Clean up checkpointer thread data (removes stored LLM state for this session)
+    try {
+      const checkpointer = getCheckpointer();
+      await checkpointer.deleteThread(session.threadId);
+    } catch {
+      // Non-critical: if checkpointer cleanup fails, session is still deleted
     }
 
     // Clean up Deep Agents services for this session

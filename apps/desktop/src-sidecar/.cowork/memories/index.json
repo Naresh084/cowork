@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "workingDirectory": "/Users/naresh/Work/Personal/geminicowork/apps/desktop/src-sidecar",
+  "groups": [
+    "preferences",
+    "learnings",
+    "context",
+    "instructions"
+  ],
+  "memories": {},
+  "lastUpdated": "2026-02-06T08:31:51.630Z"
+}

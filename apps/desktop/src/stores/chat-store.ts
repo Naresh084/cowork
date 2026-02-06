@@ -664,16 +664,12 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
   loadMessages: async (sessionId: string, forceReload = false) => {
     if (!sessionId) return null;
 
-    // CRITICAL: Wait for backend to be initialized before attempting to load
-    // This prevents "session not found" errors during app startup
-    const sessionStore = useSessionStore.getState();
-    if (!sessionStore.backendInitialized) {
-      await sessionStore.waitForBackend();
-    }
-
     // Check if already loaded or currently loading (prevents duplicate concurrent loads)
     const sessionState = get().sessions[sessionId];
-    if (!forceReload && (sessionState?.hasLoaded || sessionState?.isLoadingMessages)) {
+    if (sessionState?.isLoadingMessages) {
+      return null;
+    }
+    if (!forceReload && sessionState?.hasLoaded) {
       return null;
     }
 
@@ -682,6 +678,24 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
       isLoadingMessages: true,
       error: null,
     })));
+
+    // CRITICAL: Wait for backend to be initialized before attempting to load.
+    // Marking isLoadingMessages before this wait prevents startup "empty chat" flicker.
+    const sessionStore = useSessionStore.getState();
+    if (!sessionStore.backendInitialized) {
+      try {
+        await sessionStore.waitForBackend();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        set((state) => updateSession(state, sessionId, (existing) => ({
+          ...existing,
+          isLoadingMessages: false,
+          error: errorMessage,
+          hasLoaded: false,
+        })));
+        return null;
+      }
+    }
 
     const attemptLoad = async (retry = 0): Promise<SessionDetails | null> => {
       try {
@@ -1077,7 +1091,7 @@ ${attachment.data}`,
     if (!sessionId) return;
     set((state) => updateSession(state, sessionId, (session) => {
       // Dedup: if incoming user_message replaces an optimistic temp- item, swap it
-      // Content may differ (temp has base64 data, sidecar has filePath) so match by prefix only
+      // Content may differ (temp has objectUrl for display, sidecar has filePath for persistence)
       if (item.kind === 'user_message') {
         const tempIdx = session.chatItems.findIndex(
           (ci) => ci.kind === 'user_message' && ci.id.startsWith('temp-')
@@ -1085,7 +1099,20 @@ ${attachment.data}`,
         if (tempIdx !== -1) {
           const oldItem = session.chatItems[tempIdx];
           const updated = [...session.chatItems];
-          updated[tempIdx] = item;
+          // Carry over objectUrl from optimistic content parts to the real item
+          // objectUrl = blob URL for current session display; filePath = for reload/persistence
+          const mergedItem = { ...item };
+          if (Array.isArray(item.content) && oldItem.kind === 'user_message' && Array.isArray(oldItem.content)) {
+            const oldContent = oldItem.content as any[];
+            mergedItem.content = (item.content as any[]).map((part: any, i: number) => {
+              const old = oldContent[i];
+              if (old?.objectUrl && !part.objectUrl) {
+                return { ...part, objectUrl: old.objectUrl };
+              }
+              return part;
+            });
+          }
+          updated[tempIdx] = mergedItem;
           // Update activeTurnId if it was pointing to the temp item's turnId
           const newTurnId = item.turnId || item.id;
           const oldTurnId = oldItem.kind === 'user_message' ? (oldItem.turnId || oldItem.id) : undefined;
