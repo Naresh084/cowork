@@ -15,8 +15,6 @@ import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '@/components/ui/Toast';
 import type {
   CronSchedule,
-  CronSessionTarget,
-  CronWakeMode,
   CreateCronJobInput,
 } from '@gemini-cowork/shared';
 
@@ -42,7 +40,6 @@ interface FormState {
   // Common
   timezone: string;
   workingDirectory: string;
-  sessionTarget: CronSessionTarget;
   model: string;
   deleteAfterRun: boolean;
   postSummary: boolean;
@@ -101,7 +98,6 @@ export function CronJobEditor() {
     cronExpression: '0 9 * * MON-FRI',
     timezone: getUserTimezone(),
     workingDirectory: defaultWorkingDirectory || '',
-    sessionTarget: 'isolated',
     model: '',
     deleteAfterRun: false,
     postSummary: false,
@@ -180,7 +176,6 @@ export function CronJobEditor() {
         cronExpression,
         timezone,
         workingDirectory: editingJob.workingDirectory,
-        sessionTarget: editingJob.sessionTarget,
         model: editingJob.model || '',
         deleteAfterRun: editingJob.deleteAfterRun || false,
         postSummary: false,
@@ -304,14 +299,13 @@ export function CronJobEditor() {
     if (!validate()) return;
 
     const schedule = buildSchedule();
-    const wakeMode: CronWakeMode = form.sessionTarget === 'main' ? 'next-heartbeat' : 'now';
 
     const input: CreateCronJobInput = {
       name: form.name.trim(),
       prompt: form.prompt.trim(),
       schedule,
-      sessionTarget: form.sessionTarget,
-      wakeMode,
+      sessionTarget: 'isolated',
+      wakeMode: 'now',
       workingDirectory: form.workingDirectory.trim(),
       model: form.model.trim() || undefined,
       deleteAfterRun: form.scheduleType === 'once' && form.deleteAfterRun,
@@ -565,48 +559,6 @@ export function CronJobEditor() {
                 />
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Execution Mode */}
-        <div>
-          <label className="block text-sm font-medium text-white/70 mb-2">
-            Execution Mode
-          </label>
-          <div className="space-y-2">
-            <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04] transition-colors">
-              <input
-                type="radio"
-                name="sessionTarget"
-                checked={form.sessionTarget === 'isolated'}
-                onChange={() => updateField('sessionTarget', 'isolated')}
-                className="mt-0.5"
-              />
-              <div>
-                <div className="text-sm text-white/80">
-                  Isolated session
-                  <span className="ml-2 text-xs text-[#60A5FA]">recommended</span>
-                </div>
-                <div className="text-xs text-white/40">
-                  Fresh context each run. Best for background tasks.
-                </div>
-              </div>
-            </label>
-            <label className="flex items-start gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] cursor-pointer hover:bg-white/[0.04] transition-colors">
-              <input
-                type="radio"
-                name="sessionTarget"
-                checked={form.sessionTarget === 'main'}
-                onChange={() => updateField('sessionTarget', 'main')}
-                className="mt-0.5"
-              />
-              <div>
-                <div className="text-sm text-white/80">Main session</div>
-                <div className="text-xs text-white/40">
-                  Uses current conversation context.
-                </div>
-              </div>
-            </label>
           </div>
         </div>
 
