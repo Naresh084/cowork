@@ -92,14 +92,14 @@ export class CronExecutor {
     const session = await this.agentRunner.createSession(
       job.workingDirectory,
       job.model ?? null,
-      sessionTitle
-      // Note: session type 'cron' will be added when AgentRunner is updated
+      sessionTitle,
+      'isolated'
     );
 
     try {
       // Execute with timeout
       const result = await Promise.race([
-        this.runAgentTurn(session.id, job.prompt),
+        this.runAgentTurn(session.id, job.prompt, job.maxTurns),
         this.timeoutPromise(timeout),
       ]);
 
@@ -189,7 +189,8 @@ export class CronExecutor {
    */
   private async runAgentTurn(
     sessionId: string,
-    prompt: string
+    prompt: string,
+    maxTurns?: number
   ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> {
     if (!this.agentRunner) {
       throw new Error('AgentRunner not set');
@@ -201,7 +202,7 @@ export class CronExecutor {
 
     // Send message and wait for completion
     // sendMessage is async and waits for the agent to finish
-    await this.agentRunner.sendMessage(sessionId, prompt);
+    await this.agentRunner.sendMessage(sessionId, prompt, undefined, maxTurns);
 
     // Get session after to extract the response
     const sessionAfter = this.agentRunner.getSession(sessionId);

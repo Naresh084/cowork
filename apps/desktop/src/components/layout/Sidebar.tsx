@@ -59,7 +59,14 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     deleteSession,
   } = useSessionStore();
 
-  const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
+  const {
+    defaultWorkingDirectory,
+    selectedModel,
+    availableModels,
+    modelsLoading,
+    sessionListFilters,
+    toggleSessionListFilter,
+  } = useSettingsStore();
   const { apiKey } = useAuthStore();
   const chatSessions = useChatStore((state) => state.sessions);
 
@@ -241,6 +248,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           subagentCount={installedSubagentCount}
           onOpenConnectors={() => setConnectorsModalOpen(true)}
           connectorCount={connectedConnectorCount}
+          sessionListFilters={sessionListFilters}
         />
       ) : (
         <SidebarExpanded
@@ -271,6 +279,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           subagentCount={installedSubagentCount}
           onOpenConnectors={() => setConnectorsModalOpen(true)}
           connectorCount={connectedConnectorCount}
+          sessionListFilters={sessionListFilters}
+          onToggleSessionListFilter={toggleSessionListFilter}
         />
       )}
 
@@ -356,6 +366,8 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               subagentCount={installedSubagentCount}
               onOpenConnectors={() => setConnectorsModalOpen(true)}
               connectorCount={connectedConnectorCount}
+              sessionListFilters={sessionListFilters}
+              onToggleSessionListFilter={toggleSessionListFilter}
             />
           </motion.div>
         )}
@@ -385,6 +397,7 @@ interface SidebarRailProps {
   subagentCount: number;
   onOpenConnectors: () => void;
   connectorCount: number;
+  sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
 }
 
 function SidebarRail({
@@ -408,8 +421,10 @@ function SidebarRail({
   subagentCount,
   onOpenConnectors,
   connectorCount,
+  sessionListFilters,
 }: SidebarRailProps) {
   const { userName } = useSettingsStore();
+  const filteredSessions = sessions.filter((session) => sessionListFilters[getSessionCategory(session)]);
   const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
@@ -448,7 +463,7 @@ function SidebarRail({
       <div className="flex-1 overflow-y-auto px-2 py-1">
         <div className="space-y-1">
           <AnimatePresence>
-            {sessions.map((session, index) => (
+            {filteredSessions.map((session, index) => (
               <motion.button
                 key={session.id}
                 initial={{ opacity: 0, x: -10 }}
@@ -574,6 +589,8 @@ interface SidebarExpandedProps {
   subagentCount: number;
   onOpenConnectors: () => void;
   connectorCount: number;
+  sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
+  onToggleSessionListFilter: (filter: 'chat' | 'shared' | 'cron') => void;
 }
 
 function SidebarExpanded({
@@ -604,8 +621,21 @@ function SidebarExpanded({
   subagentCount,
   onOpenConnectors,
   connectorCount,
+  sessionListFilters,
+  onToggleSessionListFilter,
 }: SidebarExpandedProps) {
   const { userName } = useSettingsStore();
+  const sessionCounts = sessions.reduce(
+    (acc, session) => {
+      const category = getSessionCategory(session);
+      acc[category] += 1;
+      return acc;
+    },
+    { chat: 0, shared: 0, cron: 0 }
+  );
+  const filteredSessions = sessions.filter(
+    (session) => sessionListFilters[getSessionCategory(session)]
+  );
   const getInitial = (name: string) => name?.charAt(0).toUpperCase() || '?';
   return (
     <motion.div
@@ -652,6 +682,31 @@ function SidebarExpanded({
       {/* Recents */}
       <div className="flex-1 min-h-0 overflow-y-auto px-2">
         <h3 className="text-[11px] font-semibold text-white/40 px-2 py-2 uppercase tracking-[0.16em]">Recents</h3>
+        <div className="px-1 pb-2 flex items-center gap-1.5">
+          {([
+            { key: 'chat', label: 'Chat' },
+            { key: 'shared', label: 'Shared' },
+            { key: 'cron', label: 'Cron' },
+          ] as const).map((item) => {
+            const isActive = sessionListFilters[item.key];
+            return (
+              <button
+                key={item.key}
+                onClick={() => onToggleSessionListFilter(item.key)}
+                className={cn(
+                  'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] border transition-colors',
+                  isActive
+                    ? 'bg-white/[0.10] border-white/[0.14] text-white/85'
+                    : 'bg-transparent border-white/[0.08] text-white/45 hover:text-white/70 hover:border-white/[0.14]'
+                )}
+                title={`${item.label} sessions`}
+              >
+                <span>{item.label}</span>
+                <span className="text-[10px] text-white/60">{sessionCounts[item.key]}</span>
+              </button>
+            );
+          })}
+        </div>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
@@ -669,15 +724,33 @@ function SidebarExpanded({
             <p className="text-sm text-white/50">No tasks yet</p>
             <p className="text-xs text-white/30 mt-1">Create a new task to get started</p>
           </motion.div>
+        ) : filteredSessions.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center justify-center py-8 text-center px-4"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-white/[0.04] flex items-center justify-center mb-3">
+              <MessageSquare className="w-6 h-6 text-white/30" />
+            </div>
+            <p className="text-sm text-white/50">No sessions in selected filters</p>
+            <p className="text-xs text-white/30 mt-1">Enable another category to view more sessions</p>
+          </motion.div>
         ) : (
           <div className="space-y-0.5">
             <AnimatePresence>
-              {sessions.map((session, index) => (
+              {filteredSessions.map((session, index) => (
                 <SessionItem
                   key={session.id}
                   id={session.id}
                   title={session.title || 'New task'}
                   firstMessage={session.firstMessage}
+                  category={getSessionCategory(session)}
+                  sourceLabel={
+                    getSessionCategory(session) === 'shared'
+                      ? inferIntegrationSourceLabel(session)
+                      : inferIsolatedSourceLabel(session)
+                  }
                   createdAt={session.createdAt}
                   isActive={activeSessionId === session.id}
                   isLive={isLiveSession(session.id)}
@@ -784,10 +857,47 @@ function formatRelativeDate(ts: number): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+type SessionCategory = 'chat' | 'shared' | 'cron';
+
+function getSessionCategory(session: Pick<SessionSummary, 'type' | 'title'>): SessionCategory {
+  if (session.type === 'integration') return 'shared';
+  if (session.type === 'isolated' || session.type === 'cron' || /^\[cron:/i.test(session.title ?? '')) {
+    return 'cron';
+  }
+  return 'chat';
+}
+
+function inferIntegrationSourceLabel(
+  session: Pick<SessionSummary, 'type' | 'firstMessage' | 'title'>
+): string | null {
+  if (getSessionCategory(session) !== 'shared') return null;
+
+  const tagMatch = session.firstMessage?.match(/^\[([^\]|]+)\s*\|/);
+  const labelFromTag = tagMatch?.[1]?.trim();
+  if (labelFromTag) return labelFromTag;
+
+  const titleMatch = session.title?.match(/\b(whatsapp|telegram|slack|twitter)\b/i);
+  if (titleMatch?.[1]) {
+    const normalized = titleMatch[1].toLowerCase();
+    if (normalized === 'whatsapp') return 'WhatsApp';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+
+  return 'Integration';
+}
+
+function inferIsolatedSourceLabel(session: Pick<SessionSummary, 'type' | 'title'>): string | null {
+  if (getSessionCategory(session) !== 'cron') return null;
+  if (/^\[cron:/i.test(session.title ?? '')) return 'Cron job';
+  return session.type === 'cron' ? 'Cron job' : 'Isolated task';
+}
+
 interface SessionItemProps {
   id: string;
   title: string;
   firstMessage: string | null;
+  category: SessionCategory;
+  sourceLabel?: string | null;
   createdAt: number;
   isActive: boolean;
   isLive: boolean;
@@ -803,6 +913,8 @@ interface SessionItemProps {
 function SessionItem({
   title,
   firstMessage,
+  category,
+  sourceLabel,
   createdAt,
   isActive,
   isLive,
@@ -815,6 +927,8 @@ function SessionItem({
   onDelete,
 }: SessionItemProps) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const isSharedSession = category === 'shared';
+  const isCronSession = category === 'cron';
   const baseTitle = title !== 'New task'
     ? title
     : (firstMessage ? firstMessage : 'New conversation');
@@ -862,7 +976,24 @@ function SessionItem({
             </span>
           )}
         </span>
-        <span className="text-xs text-white/40">{dateStr}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          {isSharedSession ? (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#1D4ED8]/15 text-[#93C5FD] text-[10px] font-medium uppercase tracking-wide flex-shrink-0">
+              Shared
+            </span>
+          ) : null}
+          {isCronSession ? (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#F59E0B]/15 text-[#FBBF24] text-[10px] font-medium uppercase tracking-wide flex-shrink-0">
+              Isolated
+            </span>
+          ) : null}
+          {(isSharedSession || isCronSession) && sourceLabel ? (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-white/[0.06] text-white/55 text-[10px] font-medium flex-shrink-0">
+              From {sourceLabel}
+            </span>
+          ) : null}
+          <span className="text-xs text-white/40 truncate">{dateStr}</span>
+        </span>
       </button>
 
       {/* Actions menu trigger */}

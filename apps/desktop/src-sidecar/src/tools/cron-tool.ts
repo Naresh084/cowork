@@ -290,6 +290,12 @@ Schedule types:
         .positive()
         .optional()
         .describe('Maximum number of times to run. Task auto-stops after this many runs. E.g., set to 5 to run 5 times then stop.'),
+      maxTurns: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('Maximum agent turns per execution. Limits how many steps the agent takes each run. Default: 25.'),
     }),
 
     execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
@@ -299,9 +305,10 @@ Schedule types:
         schedule: UserSchedule;
         workingDirectory?: string;
         maxRuns?: number;
+        maxTurns?: number;
       };
 
-      const { name, prompt, schedule, workingDirectory, maxRuns } = parsed;
+      const { name, prompt, schedule, workingDirectory, maxRuns, maxTurns } = parsed;
 
       try {
         // Convert user schedule to internal format
@@ -316,6 +323,7 @@ Schedule types:
           sessionTarget: 'isolated',
           wakeMode: 'now',
           maxRuns,
+          maxTurns,
         });
 
         return {
