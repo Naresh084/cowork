@@ -12,6 +12,7 @@ import {
   Bot,
   Plug,
   CircleHelp,
+  GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -111,6 +112,16 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const handleOpenSettings = useCallback(() => {
     setCurrentView('settings');
   }, [setCurrentView]);
+  const handleOpenWorkflows = useCallback(() => {
+    setCurrentView('workflows');
+  }, [setCurrentView]);
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      setCurrentView('chat');
+      selectSession(sessionId);
+    },
+    [selectSession, setCurrentView],
+  );
 
   const handleOpenHelp = useCallback(() => {
     openHelp('platform-overview');
@@ -230,7 +241,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           sessions={sessions}
           activeSessionId={activeSessionId}
           onNewTask={handleNewTask}
-          onSelectSession={selectSession}
+          onSelectSession={handleSelectSession}
           isLiveSession={isLiveSession}
           onOpenSettings={handleOpenSettings}
           onOpenSkills={() => setSkillsModalOpen(true)}
@@ -243,6 +254,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           subagentCount={installedSubagentCount}
           onOpenConnectors={() => setConnectorsModalOpen(true)}
           connectorCount={connectedConnectorCount}
+          onOpenWorkflows={handleOpenWorkflows}
           sessionListFilters={sessionListFilters}
           onOpenHelp={handleOpenHelp}
         />
@@ -255,7 +267,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           sessionMenuPosition={sessionMenuPosition}
           sessionMenuRef={sessionMenuRef}
           onNewTask={handleNewTask}
-          onSelectSession={selectSession}
+          onSelectSession={handleSelectSession}
           isLiveSession={isLiveSession}
           onToggleSessionMenu={handleSessionMenuToggle}
           onDeleteSession={handleDeleteSession}
@@ -271,6 +283,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           subagentCount={installedSubagentCount}
           onOpenConnectors={() => setConnectorsModalOpen(true)}
           connectorCount={connectedConnectorCount}
+          onOpenWorkflows={handleOpenWorkflows}
           sessionListFilters={sessionListFilters}
           onToggleSessionListFilter={toggleSessionListFilter}
           onOpenHelp={handleOpenHelp}
@@ -339,7 +352,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               sessionMenuPosition={sessionMenuPosition}
               sessionMenuRef={sessionMenuRef}
               onNewTask={handleNewTask}
-              onSelectSession={selectSession}
+              onSelectSession={handleSelectSession}
               isLiveSession={isLiveSession}
               onToggleSessionMenu={handleSessionMenuToggle}
               onDeleteSession={handleDeleteSession}
@@ -355,6 +368,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               subagentCount={installedSubagentCount}
               onOpenConnectors={() => setConnectorsModalOpen(true)}
               connectorCount={connectedConnectorCount}
+              onOpenWorkflows={handleOpenWorkflows}
               sessionListFilters={sessionListFilters}
               onToggleSessionListFilter={toggleSessionListFilter}
               onOpenHelp={handleOpenHelp}
@@ -383,6 +397,7 @@ interface SidebarRailProps {
   subagentCount: number;
   onOpenConnectors: () => void;
   connectorCount: number;
+  onOpenWorkflows: () => void;
   sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
   onOpenHelp: () => void;
 }
@@ -404,6 +419,7 @@ function SidebarRail({
   subagentCount,
   onOpenConnectors,
   connectorCount,
+  onOpenWorkflows,
   sessionListFilters,
   onOpenHelp,
 }: SidebarRailProps) {
@@ -483,12 +499,20 @@ function SidebarRail({
           { icon: Terminal, count: commandCount, color: '#9B59B6', onClick: onOpenCommands, title: 'Commands' },
           { icon: Plug, count: connectorCount, color: '#10B981', onClick: onOpenConnectors, title: 'Connectors' },
           { icon: Calendar, count: activeJobCount, color: '#10B981', onClick: onOpenCron, title: 'Automations' },
+          { icon: GitBranch, count: 0, color: '#06B6D4', onClick: onOpenWorkflows, title: 'Workflows' },
         ] as const).map(({ icon: Icon, count, color, onClick, title }) => (
           <motion.button
             key={title}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={onClick}
+            data-tour-id={
+              title === 'Workflows'
+                ? 'sidebar-workflows-button'
+                : title === 'Automations'
+                  ? 'sidebar-automations-button'
+                  : undefined
+            }
             className={cn(
               'relative w-10 h-8 flex items-center justify-center rounded-lg',
               'text-white/40 hover:text-white/70 hover:bg-white/[0.04]',
@@ -564,6 +588,7 @@ interface SidebarExpandedProps {
   subagentCount: number;
   onOpenConnectors: () => void;
   connectorCount: number;
+  onOpenWorkflows: () => void;
   sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
   onToggleSessionListFilter: (filter: 'chat' | 'shared' | 'cron') => void;
   onOpenHelp: () => void;
@@ -593,6 +618,7 @@ function SidebarExpanded({
   subagentCount,
   onOpenConnectors,
   connectorCount,
+  onOpenWorkflows,
   sessionListFilters,
   onToggleSessionListFilter,
   onOpenHelp,
@@ -752,12 +778,20 @@ function SidebarExpanded({
           { icon: Terminal, label: 'Commands', count: commandCount, badgeCls: 'bg-[#9B59B6]/20 text-[#BB8FCE]', onClick: onOpenCommands },
           { icon: Plug, label: 'Connectors', count: connectorCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenConnectors },
           { icon: Calendar, label: 'Automations', count: activeJobCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenCron },
+          { icon: GitBranch, label: 'Workflows', count: 0, badgeCls: 'bg-[#06B6D4]/20 text-[#67E8F9]', onClick: onOpenWorkflows },
         ] as const).map(({ icon: Icon, label, count, badgeCls, onClick }) => (
           <motion.button
             key={label}
             whileHover={{ scale: 1.01 }}
             whileTap={{ scale: 0.99 }}
             onClick={onClick}
+            data-tour-id={
+              label === 'Workflows'
+                ? 'sidebar-workflows-button'
+                : label === 'Automations'
+                  ? 'sidebar-automations-button'
+                  : undefined
+            }
             className={cn(
               'w-full flex items-center gap-2.5 px-2 py-1.5 rounded-lg',
               'hover:bg-white/[0.04] transition-colors text-white/60 hover:text-white/90'

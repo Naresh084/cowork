@@ -31,7 +31,7 @@ export function HelpCenterModal() {
               Help Center
             </DialogTitle>
             <p className="mt-1 text-sm text-white/50">
-              Learn how Cowork works, what settings do, and which tools are currently available.
+              Learn how Cowork works, build workflow automations, understand settings, and inspect current tool access.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -144,8 +144,8 @@ export function HelpCenterModal() {
               Next Steps
             </div>
             <p className="mt-1 text-xs text-white/55">
-              Use settings-level Help buttons for detailed field explanations. Replay tours anytime from here or from
-              Settings and Sidebar.
+              Use settings-level Help buttons for detailed field explanations. Build flows from the Workflows view,
+              monitor schedules from Automations, and replay tours anytime from here or from Settings and Sidebar.
             </p>
           </div>
         </section>

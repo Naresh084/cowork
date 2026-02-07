@@ -16,6 +16,7 @@ import { ApiKeyModal } from '../modals/ApiKeyModal';
 import { HelpCenterModal } from '../help/HelpCenterModal';
 import { GuidedTourOverlay } from '../help/GuidedTourOverlay';
 import { useCapabilityStore } from '../../stores/capability-store';
+import { WorkflowBuilder } from '../workflow/WorkflowBuilder';
 
 // Lazy load SettingsView for code splitting
 const SettingsView = React.lazy(() => import('../settings/SettingsView').then(m => ({ default: m.SettingsView })));
@@ -74,6 +75,10 @@ export function MainLayout() {
                 <Suspense fallback={<div className="h-full flex items-center justify-center"><div className="animate-pulse text-white/40">Loading settings...</div></div>}>
                   <SettingsView />
                 </Suspense>
+              ) : currentView === 'workflows' ? (
+                <div className="h-full p-4">
+                  <WorkflowBuilder />
+                </div>
               ) : (
                 <ChatView />
               )}

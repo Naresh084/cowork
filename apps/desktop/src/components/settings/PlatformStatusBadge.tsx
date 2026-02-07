@@ -14,8 +14,6 @@ const platformColors: Record<PlatformType, string> = {
   discord: '#5865F2',
   imessage: '#34C759',
   teams: '#6264A7',
-  line: '#06C755',
-  matrix: '#0DBD8B',
 };
 
 export function PlatformStatusBadge({

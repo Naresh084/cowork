@@ -52,14 +52,6 @@ export const INTEGRATION_PLATFORM_METADATA: Record<PlatformType, IntegrationPlat
     displayName: 'Microsoft Teams',
     supportsQr: false,
   },
-  matrix: {
-    displayName: 'Matrix',
-    supportsQr: false,
-  },
-  line: {
-    displayName: 'LINE',
-    supportsQr: false,
-  },
 };
 
 export interface IntegrationMediaPayload {

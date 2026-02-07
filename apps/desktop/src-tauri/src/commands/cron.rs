@@ -193,9 +193,10 @@ pub async fn cron_update_job(
     ensure_sidecar_started_public(&app, &state).await?;
 
     let manager = &state.manager;
-    let mut params = serde_json::to_value(&input)
-        .map_err(|e| format!("Failed to serialize input: {}", e))?;
-    params["jobId"] = serde_json::json!(job_id);
+    let params = serde_json::json!({
+        "jobId": job_id,
+        "updates": input,
+    });
     let result = manager.send_command("cron_update_job", params).await?;
 
     serde_json::from_value(result).map_err(|e| format!("Failed to parse updated job: {}", e))
@@ -279,8 +280,10 @@ pub async fn cron_get_runs(
     let manager = &state.manager;
     let params = serde_json::json!({
         "jobId": job_id,
-        "limit": limit,
-        "offset": offset,
+        "options": {
+            "limit": limit,
+            "offset": offset,
+        },
     });
     let result = manager.send_command("cron_get_runs", params).await?;
 

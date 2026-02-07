@@ -4,7 +4,7 @@
 
 ### All Platforms
 - Node.js 20+
-- pnpm 8+
+- pnpm 9+
 - Rust 1.75+
 
 ### Windows
@@ -119,8 +119,21 @@ The Node.js sidecar handles:
 - MCP server integration
 - Session management
 - Tool execution
+- Workflow runtime (definitions, compiler, engine, trigger router, run history)
 
 In development, it runs via `npx tsx`. In production, it's bundled as a standalone binary using `pkg`.
+
+### Workflow Runtime Stack
+
+Core workflow implementation lives in:
+
+- `apps/desktop/src-sidecar/src/workflow/` (service, engine, compiler, triggers, node executor)
+- `apps/desktop/src-sidecar/src/tools/workflow-tool.ts` (agent-facing workflow tools)
+- `apps/desktop/src-sidecar/src/ipc-handler.ts` (`workflow_*` IPC commands)
+- `apps/desktop/src-tauri/src/commands/workflow.rs` (Rust bridge)
+- `apps/desktop/src/components/workflow/` (visual builder + run inspector)
+- `packages/shared/src/types/workflow.ts` (workflow contracts)
+- `packages/storage/src/repositories/workflow*.ts` (workflow persistence)
 
 ### Auto-Updater
 The app automatically checks for updates using Tauri's updater plugin:
@@ -142,6 +155,21 @@ pnpm test:e2e
 
 # Type checking
 pnpm typecheck
+```
+
+Workflow-focused validation:
+
+```bash
+# Sidecar workflow logic
+pnpm --filter @gemini-cowork/sidecar typecheck
+pnpm --filter @gemini-cowork/sidecar test
+
+# Desktop workflow UI and stores
+pnpm --filter @gemini-cowork/desktop typecheck
+pnpm --filter @gemini-cowork/desktop test
+
+# Rust command bridge
+cd apps/desktop/src-tauri && cargo check
 ```
 
 ---

@@ -49,6 +49,11 @@ export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
   - \`/help <command>\` - Show help for specific command
 - **/clear** - Clear conversation (preserves memories)
 
+## Workflow + Automations
+- Use normal chat prompts to build workflows (example: "create a workflow to review repo changes every hour and post summary")
+- Open **Workflows** from the sidebar for visual editing and run timelines
+- Open **Automations** to manage schedules (legacy cron + workflow schedules)
+
 ## Tips
 - Type \`/\` to see command suggestions
 - Commands can be aliased (e.g., \`/?\` = \`/help\`)

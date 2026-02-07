@@ -11,7 +11,7 @@ describe('GuidedTourOverlay', () => {
       activeTourId: null,
       activeTourStepIndex: 0,
       completedTours: {},
-      tourVersion: 1,
+      tourVersion: 2,
     });
     document.body.innerHTML = '';
   });
@@ -19,6 +19,7 @@ describe('GuidedTourOverlay', () => {
   it('supports next, back, and skip controls', async () => {
     document.body.innerHTML = `
       <div data-tour-id=\"sidebar-root\" style=\"width:120px;height:40px;\"></div>
+      <div data-tour-id=\"sidebar-workflows-button\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-header-root\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-execution-mode-plan\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"chat-input-area\" style=\"width:120px;height:40px;\"></div>
@@ -33,7 +34,7 @@ describe('GuidedTourOverlay', () => {
     expect(await screen.findByText('Sidebar Navigation')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('Session Controls')).toBeInTheDocument();
+    expect(await screen.findByText('Workflows and Automations')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(await screen.findByText('Sidebar Navigation')).toBeInTheDocument();
@@ -65,6 +66,7 @@ describe('GuidedTourOverlay', () => {
   it('replays a completed tour from the beginning', async () => {
     document.body.innerHTML = `
       <div data-tour-id=\"sidebar-root\" style=\"width:120px;height:40px;\"></div>
+      <div data-tour-id=\"sidebar-workflows-button\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-header-root\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-execution-mode-plan\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"chat-input-area\" style=\"width:120px;height:40px;\"></div>
@@ -74,7 +76,7 @@ describe('GuidedTourOverlay', () => {
 
     act(() => {
       useHelpStore.getState().startTour('workspace', true);
-      useHelpStore.getState().setTourStep(3);
+      useHelpStore.getState().setTourStep(4);
     });
 
     expect(await screen.findByText('Input and Attachments')).toBeInTheDocument();

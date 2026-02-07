@@ -23,7 +23,7 @@ interface HelpActions {
   resetTours: () => void;
 }
 
-const TOUR_VERSION = 1;
+const TOUR_VERSION = 2;
 
 const initialState: HelpState = {
   isHelpOpen: false,

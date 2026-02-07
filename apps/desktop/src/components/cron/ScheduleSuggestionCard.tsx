@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Loader2, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useCronStore } from '@/stores/cron-store';
-import type { CronSchedule } from '@gemini-cowork/shared';
+import { invoke } from '@tauri-apps/api/core';
+import { useAppStore } from '@/stores/app-store';
+import type { CreateWorkflowDraftInput, WorkflowDefinition, WorkflowSchedule } from '@gemini-cowork/shared';
 
 interface ScheduleSuggestionCardProps {
   taskName: string;
@@ -29,15 +30,16 @@ export function ScheduleSuggestionCard({
   onAccept,
   onDecline,
 }: ScheduleSuggestionCardProps) {
-  const { createJob, openModal } = useCronStore();
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
   const [isCreating, setIsCreating] = useState(false);
   const [isCreated, setIsCreated] = useState(false);
 
-  // Convert simple schedule to CronSchedule
-  const toCronSchedule = (): CronSchedule => {
+  // Convert simple schedule to workflow schedule
+  const toWorkflowSchedule = (): WorkflowSchedule => {
     switch (schedule.type) {
       case 'once': {
-        const dateTime = new Date(`${schedule.date}T${schedule.time || '09:00'}`);
+        const datePart = schedule.date || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const dateTime = new Date(`${datePart}T${schedule.time || '09:00'}`);
         return { type: 'at', timestamp: dateTime.getTime() };
       }
       case 'daily': {
@@ -77,23 +79,49 @@ export function ScheduleSuggestionCard({
   const handleAccept = async () => {
     setIsCreating(true);
     try {
-      await createJob({
+      const input: CreateWorkflowDraftInput = {
         name: taskName,
-        prompt,
-        schedule: toCronSchedule(),
-        workingDirectory,
-      });
+        description: taskDescription || 'Created from schedule suggestion card',
+        triggers: [
+          {
+            id: `schedule_${Date.now()}`,
+            type: 'schedule',
+            enabled: true,
+            schedule: toWorkflowSchedule(),
+          },
+        ],
+        nodes: [
+          { id: 'start', type: 'start', name: 'Start', config: {} },
+          {
+            id: 'agent_step_1',
+            type: 'agent_step',
+            name: 'Suggested Task',
+            config: {
+              promptTemplate: prompt,
+              workingDirectory,
+            },
+          },
+          { id: 'end', type: 'end', name: 'End', config: {} },
+        ],
+        edges: [
+          { id: 'edge_start_to_step', from: 'start', to: 'agent_step_1', condition: 'always' },
+          { id: 'edge_step_to_end', from: 'agent_step_1', to: 'end', condition: 'always' },
+        ],
+      };
+
+      const draft = await invoke<WorkflowDefinition>('workflow_create_draft', { input });
+      await invoke<WorkflowDefinition>('workflow_publish', { workflowId: draft.id });
       setIsCreated(true);
       onAccept?.();
     } catch (error) {
-      console.error('Failed to create scheduled task:', error);
+      console.error('Failed to create workflow automation:', error);
     } finally {
       setIsCreating(false);
     }
   };
 
   const handleCustomize = () => {
-    openModal();
+    setCurrentView('workflows');
   };
 
   if (isCreated) {
@@ -108,7 +136,7 @@ export function ScheduleSuggestionCard({
       >
         <div className="flex items-center gap-2 text-[#8FDCA9]">
           <Check className="w-5 h-5" />
-          <span className="font-medium">Scheduled task created!</span>
+          <span className="font-medium">Workflow automation created!</span>
         </div>
         <p className="text-sm text-white/60 mt-1">
           "{taskName}" will run {formatScheduleDisplay().toLowerCase()}
@@ -169,7 +197,7 @@ export function ScheduleSuggestionCard({
               )}
             >
               {isCreating && <Loader2 className="w-4 h-4 animate-spin" />}
-              Create Task
+              Create Workflow
             </motion.button>
 
             <motion.button

@@ -330,7 +330,8 @@ export function Onboarding() {
             <h3 className="text-sm font-medium text-white/90">How Cowork Works</h3>
             <p className="mt-1 text-xs leading-relaxed text-white/55">
               Cowork runs locally with a desktop shell and sidecar runtime. Provider keys, routing, and tool policies
-              decide which tools are available. You can replay this guide anytime from Help Center.
+              decide which tools are available. Automations are workflow-first: build in chat or visual builder, then
+              run manually or on schedule. You can replay this guide anytime from Help Center.
             </p>
           </div>
 
@@ -346,7 +347,7 @@ export function Onboarding() {
               )}
             >
               <p className="text-sm font-medium text-white/90">Fast Path</p>
-              <p className="mt-1 text-xs text-white/50">Minimal required setup, then start immediately.</p>
+              <p className="mt-1 text-xs text-white/50">Minimal required setup, then start chat and workflow authoring immediately.</p>
             </button>
             <button
               type="button"
@@ -359,7 +360,7 @@ export function Onboarding() {
               )}
             >
               <p className="text-sm font-medium text-white/90">Deep Dive</p>
-              <p className="mt-1 text-xs text-white/50">Full guided setup with media, integrations, and tools.</p>
+              <p className="mt-1 text-xs text-white/50">Full guided setup with media, integrations, workflow automation, and tools.</p>
             </button>
           </div>
 
@@ -472,7 +473,8 @@ export function Onboarding() {
             <h3 className="text-sm font-medium text-white/90">Quick Start Capability Summary</h3>
             <p className="mt-1 text-xs text-white/55">
               You can launch immediately after completion. Media and integration details can be configured later in
-              Settings without re-running onboarding.
+              Settings without re-running onboarding. Workflows and automations can be created from chat or the
+              Workflows view as soon as setup completes.
             </p>
           </div>
           <CapabilityMatrix compact />
@@ -587,10 +589,10 @@ export function Onboarding() {
       return (
         <div className="space-y-4" data-tour-id="onboarding-capability-block">
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <h3 className="text-sm font-medium text-white/90">Search, Research, and Integrations</h3>
+            <h3 className="text-sm font-medium text-white/90">Search, Research, Integrations, and Automations</h3>
             <p className="mt-1 text-xs text-white/55">
               Configure fallback search, deep research/computer-use model overrides, messaging integrations, and
-              connectors access context.
+              connectors access context. These also affect workflow nodes and scheduled automation runs.
             </p>
           </div>
 
@@ -675,10 +677,11 @@ export function Onboarding() {
             <p className="mt-1 text-xs text-white/55">
               WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Teams can create shared sessions once
               connected. Connectors expand MCP-based tools (GitHub, docs, APIs, and more) from the sidebar Connectors
-              manager.
+              manager, and both can be used inside workflow steps.
             </p>
             <p className="mt-2 text-xs text-white/45">
-              Shared integration sessions use a default working directory set in Settings → Integrations.
+              Shared integration sessions use a default working directory set in Settings → Integrations. Scheduler
+              and workflow automations share the same runtime.
             </p>
           </div>
 
@@ -705,8 +708,9 @@ export function Onboarding() {
 
         <div className="rounded-xl border border-[#1D4ED8]/20 bg-[#1D4ED8]/10 p-4">
           <p className="text-xs text-[#93C5FD]">
-            Completion sets your profile name gate and starts the app. You can replay onboarding and guided tours
-            later from Help Center in Settings or Sidebar.
+            Completion sets your profile name gate and starts the app. Next, open Workflows to build your first flow
+            or use chat to create one from natural language. You can replay onboarding and guided tours later from
+            Help Center in Settings or Sidebar.
           </p>
         </div>
       </div>
@@ -734,21 +738,21 @@ export function Onboarding() {
             <div className="max-w-xl space-y-8">
               <div className="space-y-4">
                 <h1 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
-                  Guided setup for provider, tools, and integrations.
+                  Guided setup for provider, workflow automation, tools, and integrations.
                 </h1>
                 <p className="max-w-lg text-sm leading-relaxed text-white/75 xl:text-base">
-                  Choose Fast Path for quick start or Deep Dive for full capability education. All tours are skippable
-                  and replayable.
+                  Choose Fast Path for quick start or Deep Dive for full capability education. Build workflows from
+                  chat or the visual builder after setup. All tours are skippable and replayable.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-white/15 bg-black/20 p-4 backdrop-blur-sm">
                   <CheckCircle2 className="mb-2 h-4 w-4 text-[#93C5FD]" />
-                  <p className="text-sm text-white/85">Tool impact + key usage explained</p>
+                  <p className="text-sm text-white/85">Tool impact, key usage, and workflow runtime explained</p>
                 </div>
                 <div className="rounded-xl border border-white/15 bg-black/20 p-4 backdrop-blur-sm">
                   <CheckCircle2 className="mb-2 h-4 w-4 text-[#93C5FD]" />
-                  <p className="text-sm text-white/85">Replay tours from Help Center anytime</p>
+                  <p className="text-sm text-white/85">Replay tours and revisit workflow guidance anytime</p>
                 </div>
               </div>
             </div>
@@ -769,7 +773,7 @@ export function Onboarding() {
                   <p className="text-sm leading-relaxed text-white/65">
                     {needsOnlyName
                       ? "Let's personalize your workspace and confirm your runtime setup."
-                      : 'Complete setup to unlock tools with full context.'}
+                      : 'Complete setup to unlock tools and workflow automations with full context.'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

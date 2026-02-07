@@ -26,6 +26,11 @@ Here are the available slash commands:
 - **/help** (aliases: /?, /commands) - Show this help message
 - **/clear** (aliases: /cls, /reset) - Clear the current conversation
 
+## Workflow + Automations
+- Use normal chat requests to create workflows and scheduled automations
+- Open **Workflows** in the sidebar for visual builder and run inspection
+- Open **Automations** to manage schedule state (legacy cron + workflow schedules)
+
 ## Tips
 - Type "/" to see command suggestions with autocomplete
 - You can add additional instructions after any command

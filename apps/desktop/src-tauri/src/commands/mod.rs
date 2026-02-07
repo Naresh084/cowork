@@ -10,3 +10,4 @@ pub mod integrations;
 pub mod policy;
 pub mod skills;
 pub mod subagent;
+pub mod workflow;

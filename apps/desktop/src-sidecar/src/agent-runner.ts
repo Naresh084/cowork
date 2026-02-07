@@ -50,12 +50,13 @@ import { existsSync } from 'fs';
 import { basename, extname, join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
-import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools, createExternalCliTools } from './tools/index.js';
+import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools, createExternalCliTools, createWorkflowTools } from './tools/index.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { cronService } from './cron/index.js';
+import { workflowService } from './workflow/index.js';
 // Deep Agents middleware integration
 import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middleware-stack.js';
 import { createMemoryService, type MemoryService } from './memory/memory-service.js';
@@ -632,6 +633,7 @@ export class AgentRunner {
     // Initialize and start cron service
     cronService.initialize(this);
     await cronService.start();
+    await workflowService.initialize(appDataDir, this);
 
     const count = await this.restoreSessionsFromDisk();
     this.isInitialized = true;
@@ -4604,7 +4606,14 @@ ${additionalToolsSection}
 
 ## Scheduled Tasks with schedule_task
 
-You can create automated scheduled tasks that run in the background. Use the \`schedule_task\` tool when appropriate.
+Workflows are first-class automations. From main chat you can:
+- Create workflow drafts from natural language with \`create_workflow_from_chat\`
+- List and inspect workflows with \`manage_workflow\` (\`list\`, \`get\`)
+- Publish drafts with \`publish_workflow\`
+- Run workflows on demand with \`run_workflow\`
+- Inspect run history/events with \`get_workflow_runs\`
+
+Use \`schedule_task\` as the fast path when the user asks for a recurring automation and does not need detailed workflow editing.
 
 ### CRITICAL RULES
 1. **ALWAYS create ONE schedule_task** for any repeating request. NEVER create multiple separate tasks.
@@ -4628,17 +4637,24 @@ Proactively suggest scheduling when the user:
 - If the user clearly asked to schedule already ("set up a cron job", "schedule this", "run every..."), you may create directly.
 
 ### How schedule_task Works
-- Creates a background job managed by the cron service that runs automatically on schedule.
+- Creates a workflow-backed automation that runs automatically on the configured schedule.
 - The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
-- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the cron agent can use matching \`send_notification_<platform>\` tools to deliver results.
+- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the workflow run can use matching \`send_notification_<platform>\` tools to deliver results.
 - When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack", "post in Teams"), include that instruction in the prompt using the matching notification tool.
 - If the current request includes integration origin context, use that origin platform/channel as the default scheduled-task delivery target.
 - If no origin context is available and messaging integrations are connected but no delivery channel was chosen, ask which channel to use before creating the task.
 - If no integrations are connected, proceed without asking and keep delivery in-app.
 - Results are also delivered to the user's chat when each run completes.
 - \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
-- The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due job, fires it, then re-arms for the next one. No wasted CPU cycles.
+- The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due trigger, fires it, then re-arms for the next one.
 - Use \`manage_scheduled_task\` to list, pause, resume, run, delete, or view history.
+
+### Workflow Tool Routing Rules
+- If the user asks to "list/show my workflows", use \`manage_workflow\` with \`action: "list"\`.
+- If the user asks to run a specific existing workflow, use \`run_workflow\` with the workflow id (or call \`manage_workflow\` first to discover the id).
+- If the user asks to create a multi-step flow from chat, call \`create_workflow_from_chat\`; publish only when the user asked to activate it immediately.
+- If the user asks to pause/resume scheduled workflow triggers, use \`manage_workflow\` with \`pause_scheduled\` / \`resume_scheduled\`.
+- If the user asks for draft edits beyond a simple natural-language update, use \`update_workflow\` then \`publish_workflow\` when the user wants activation.
 
 ### Schedule Types Reference
 - **once**: One-time future execution
@@ -4796,6 +4812,11 @@ Use \`manage_scheduled_task\` to:
 - \`run\`: Trigger immediate execution of a task (doesn't count against maxRuns schedule)
 - \`history\`: View past runs with results, duration, and errors
 - \`delete\`: Permanently remove a task
+
+Use workflow-specific tools when the request is about workflow definitions or workflow run introspection:
+- \`manage_workflow\` for workflow definitions and scheduled trigger controls
+- \`run_workflow\` for manual workflow execution
+- \`get_workflow_runs\` for run history and run events
 
 ## Important Reminders
 1. In execute mode, call write_todos early and keep statuses updated continuously after each major step (not only at the end)
@@ -5507,6 +5528,11 @@ ${stitchGuidance}
             this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
           );
 
+    const workflowTools =
+      session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createWorkflowTools();
+
     const availability = this.externalCliDiscoveryService.getCachedAvailability();
     const codexToolEnabled =
       Boolean(this.externalCliRunManager) &&
@@ -5539,6 +5565,7 @@ ${stitchGuidance}
       ...connectorTools,
       ...notificationTools,
       ...cronTools,
+      ...workflowTools,
       ...externalCliTools,
     ];
 

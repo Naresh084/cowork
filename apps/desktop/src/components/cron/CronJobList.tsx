@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight, Calendar } from 'lucide-react';
+import { ChevronDown, ChevronRight, Calendar, Play, Pause, RotateCcw, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CronJobCard } from './CronJobCard';
 import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
-import type { CronJob } from '@gemini-cowork/shared';
+import { useAppStore } from '@/stores/app-store';
+import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@gemini-cowork/shared';
 
 interface JobSectionProps {
   title: string;
@@ -99,14 +100,99 @@ function FilterChip({ label, count, active, onClick }: FilterChipProps) {
   );
 }
 
+function formatNextRun(timestamp: number | null): string {
+  if (!timestamp) return 'Not scheduled';
+  const diff = timestamp - Date.now();
+  if (diff < 0) return 'Overdue';
+  if (diff < 60_000) return 'In <1m';
+  if (diff < 3_600_000) return `In ${Math.round(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `In ${Math.round(diff / 3_600_000)}h`;
+  return `In ${Math.round(diff / 86_400_000)}d`;
+}
+
+function formatWorkflowSchedule(schedule: WorkflowSchedule): string {
+  switch (schedule.type) {
+    case 'at':
+      return `Once at ${new Date(schedule.timestamp).toLocaleString()}`;
+    case 'every': {
+      const mins = Math.max(1, Math.round(schedule.intervalMs / 60_000));
+      if (mins < 60) return `Every ${mins}m`;
+      const hrs = Math.round(mins / 60);
+      return `Every ${hrs}h`;
+    }
+    case 'cron':
+      return `Cron ${schedule.expression}`;
+    default:
+      return 'Scheduled';
+  }
+}
+
+function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
+  const runWorkflowTask = useCronStore((state) => state.runWorkflowTask);
+  const pauseWorkflowTask = useCronStore((state) => state.pauseWorkflowTask);
+  const resumeWorkflowTask = useCronStore((state) => state.resumeWorkflowTask);
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
+
+  return (
+    <div className="rounded-lg border border-[#06B6D4]/20 bg-[#06B6D4]/5 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <GitBranch className="h-3.5 w-3.5 text-[#67E8F9]" />
+            <span className="truncate text-xs font-medium text-white/90">{task.name}</span>
+            <span className="rounded bg-[#06B6D4]/25 px-1.5 py-0.5 text-[10px] text-[#67E8F9]">
+              workflow
+            </span>
+          </div>
+          <div className="mt-1 text-[11px] text-white/55">
+            {task.schedules[0] ? formatWorkflowSchedule(task.schedules[0]) : 'No schedule'}
+          </div>
+          <div className="mt-0.5 text-[10px] text-white/45">
+            {task.enabled ? formatNextRun(task.nextRunAt) : 'Paused'}
+            {' · '}
+            {task.runCount} run{task.runCount === 1 ? '' : 's'}
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => void runWorkflowTask(task.workflowId)}
+            className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#60A5FA]"
+            title="Run now"
+          >
+            <Play className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() =>
+              void (task.enabled
+                ? pauseWorkflowTask(task.workflowId)
+                : resumeWorkflowTask(task.workflowId))
+            }
+            className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-yellow-300"
+            title={task.enabled ? 'Pause schedule' : 'Resume schedule'}
+          >
+            {task.enabled ? <Pause className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={() => setCurrentView('workflows')}
+            className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#67E8F9]"
+            title="Open workflow builder"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CronJobList() {
   const isLoading = useCronStore((state) => state.isLoading);
   const error = useCronStore((state) => state.error);
   const jobs = useCronStore((state) => state.jobs);
+  const workflowTasks = useCronStore((state) => state.workflowTasks);
   const automationListFilters = useSettingsStore((state) => state.automationListFilters);
   const toggleAutomationListFilter = useSettingsStore((state) => state.toggleAutomationListFilter);
 
-  // Memoize filtered jobs to prevent unnecessary re-renders
   const activeJobs = useMemo(
     () => jobs.filter((j) => j.status === 'active'),
     [jobs]
@@ -133,6 +219,7 @@ export function CronJobList() {
   );
 
   const totalJobs = activeJobs.length + pausedJobs.length + completedJobs.length + failedJobs.length;
+  const totalItems = totalJobs + workflowTasks.length;
   const visibleJobCount =
     (automationListFilters.pending ? pendingJobs.length : 0) +
     (automationListFilters.completed ? completedJobs.length : 0) +
@@ -160,7 +247,7 @@ export function CronJobList() {
     );
   }
 
-  if (totalJobs === 0) {
+  if (totalItems === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
         <div className="w-16 h-16 rounded-2xl bg-white/[0.04] flex items-center justify-center mb-4">
@@ -179,58 +266,76 @@ export function CronJobList() {
 
   return (
     <div className="space-y-2">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterChip
-          label="Pending / Running"
-          count={pendingJobs.length}
-          active={automationListFilters.pending}
-          onClick={() => toggleAutomationListFilter('pending')}
-        />
-        <FilterChip
-          label="Completed"
-          count={completedJobs.length}
-          active={automationListFilters.completed}
-          onClick={() => toggleAutomationListFilter('completed')}
-        />
-        <FilterChip
-          label="Failed"
-          count={failedJobs.length}
-          active={automationListFilters.failed}
-          onClick={() => toggleAutomationListFilter('failed')}
-        />
-      </div>
-
-      {visibleJobCount === 0 ? (
-        <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 text-center">
-          <p className="text-sm text-white/60">No automations match the selected filters.</p>
+      {workflowTasks.length > 0 && (
+        <div className="mb-5 rounded-lg border border-[#06B6D4]/20 bg-[#06B6D4]/5 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#67E8F9]">
+            <GitBranch className="h-3.5 w-3.5" />
+            Workflow Schedules ({workflowTasks.length})
+          </div>
+          <div className="space-y-2">
+            {workflowTasks.map((task) => (
+              <WorkflowTaskCard key={task.workflowId} task={task} />
+            ))}
+          </div>
         </div>
-      ) : (
+      )}
+
+      {totalJobs > 0 && (
         <>
-          {automationListFilters.pending && (
-            <JobSection
-              title="Pending / Running"
-              jobs={pendingJobs}
-              defaultOpen={true}
-              badgeColor="bg-[#50956A]/20 text-[#8FDCA9]"
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <FilterChip
+              label="Pending / Running"
+              count={pendingJobs.length}
+              active={automationListFilters.pending}
+              onClick={() => toggleAutomationListFilter('pending')}
             />
-          )}
+            <FilterChip
+              label="Completed"
+              count={completedJobs.length}
+              active={automationListFilters.completed}
+              onClick={() => toggleAutomationListFilter('completed')}
+            />
+            <FilterChip
+              label="Failed"
+              count={failedJobs.length}
+              active={automationListFilters.failed}
+              onClick={() => toggleAutomationListFilter('failed')}
+            />
+          </div>
 
-          {automationListFilters.completed && (
-            <JobSection
-              title="Completed"
-              jobs={completedJobs}
-              defaultOpen={false}
-              badgeColor="bg-white/10 text-white/50"
-            />
-          )}
+          {visibleJobCount === 0 ? (
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-4 text-center">
+              <p className="text-sm text-white/60">No cron tasks match the selected filters.</p>
+            </div>
+          ) : (
+            <>
+              {automationListFilters.pending && (
+                <JobSection
+                  title="Pending / Running"
+                  jobs={pendingJobs}
+                  defaultOpen={true}
+                  badgeColor="bg-[#50956A]/20 text-[#8FDCA9]"
+                />
+              )}
 
-          {automationListFilters.failed && (
-            <JobSection
-              title="Failed"
-              jobs={failedJobs}
-              defaultOpen={false}
-              badgeColor="bg-red-500/15 text-red-300"
-            />
+              {automationListFilters.completed && (
+                <JobSection
+                  title="Completed"
+                  jobs={completedJobs}
+                  defaultOpen={false}
+                  badgeColor="bg-white/10 text-white/50"
+                />
+              )}
+
+              {automationListFilters.failed && (
+                <JobSection
+                  title="Failed"
+                  jobs={failedJobs}
+                  defaultOpen={false}
+                  badgeColor="bg-red-500/15 text-red-300"
+                />
+              )}
+            </>
           )}
         </>
       )}

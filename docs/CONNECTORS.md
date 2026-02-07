@@ -58,6 +58,8 @@ User <-> GeminiCowork UI <-> Tauri Backend <-> Sidecar <-> MCP Server (connector
 
 Each connector is an MCP server that runs as a child process. When connected, its tools become available to the deep agent. For example, connecting the GitHub connector gives the agent tools like `create_issue`, `list_pull_requests`, `read_file`, etc.
 
+Connected connector tools are also available to workflow executions, including scheduled workflow runs and chat-triggered workflow runs, subject to the same policy and permission gates.
+
 ### Authentication Types
 
 | Type | How it works | Examples |

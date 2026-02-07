@@ -90,7 +90,9 @@ sudo rpm -i Gemini-Cowork_X.X.X_x86_64.rpm
 5. Set base URL if your provider supports editable base URLs.
 6. Select a chat model (or enter a custom model ID).
 7. Optionally configure media and integration keys (Google, OpenAI, Fal, Exa, Tavily, Stitch).
-8. Start chatting.
+8. Open **Workflows** in the sidebar and create a draft from prompt or visual builder.
+9. Use **Automations** to review scheduled workflow runs (and any legacy cron tasks).
+10. Start chatting.
 
 Detailed onboarding/settings behavior is documented in `docs/GET_STARTED.md`.
 

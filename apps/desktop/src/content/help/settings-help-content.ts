@@ -59,7 +59,7 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     title: 'Command Sandbox Mode',
     description: 'Sets technical enforcement level for shell command execution.',
     what_it_controls:
-      'Defines whether shell execution is read-only, workspace-write, or unrestricted (danger-full-access).',
+      'Defines whether shell execution is read-only, workspace-write, or unrestricted (danger-full-access), including shell/tool nodes inside workflow runs.',
     when_to_use:
       'Use read-only for planning/audits, workspace-write for normal coding, and danger-full-access only for trusted advanced workflows.',
     tool_impact: ['execute', 'Bash', 'shell_execute permission flow'],
@@ -70,7 +70,8 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     id: 'provider.commandSandbox.allowNetwork',
     title: 'Sandbox Network Access',
     description: 'Controls whether shell commands can access the network.',
-    what_it_controls: 'Blocks/permits commands like curl, wget, ssh, ping and similar network operations.',
+    what_it_controls:
+      'Blocks/permits commands like curl, wget, ssh, ping and similar network operations, including networked shell commands triggered by workflows.',
     when_to_use: 'Enable only when the task explicitly requires network access from shell commands.',
     tool_impact: ['execute', 'Bash'],
     security_notes: 'Keeping network off reduces exfiltration and remote-command risk.',
@@ -343,7 +344,12 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     what_it_controls:
       'Sets filesystem root context for messaging shared sessions (WhatsApp, Slack, Telegram, Discord, iMessage, Teams).',
     when_to_use: 'Set to your primary workspace for predictable file tool behavior.',
-    tool_impact: ['read_any_file', 'file tools', 'shell tools in shared sessions'],
+    tool_impact: [
+      'read_any_file',
+      'file tools',
+      'shell tools in shared sessions',
+      'integration-triggered workflow runs',
+    ],
     security_notes: 'Choose directories with only data you want integrations to access.',
     requires_new_session: false,
   },

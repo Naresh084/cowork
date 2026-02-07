@@ -10,12 +10,15 @@ import {
 import { cn } from '@/lib/utils';
 import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
+import { useWorkflowStore } from '@/stores/workflow-store';
+import { useAppStore } from '@/stores/app-store';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '@/components/ui/Toast';
 import type {
   CronSchedule,
   CreateCronJobInput,
+  WorkflowSchedule,
 } from '@gemini-cowork/shared';
 
 type ScheduleType = 'once' | 'daily' | 'weekly' | 'interval' | 'cron';
@@ -78,9 +81,24 @@ const inputCls = cn(
 );
 
 export function CronJobEditor() {
-  const { editorMode, selectedJobId, getJob, createJob, updateJob, closeEditor, isLoading, error, clearError } =
+  const {
+    editorMode,
+    selectedJobId,
+    getJob,
+    createJob,
+    updateJob,
+    closeEditor,
+    closeModal,
+    isLoading,
+    error,
+    clearError,
+  } =
     useCronStore();
   const { defaultWorkingDirectory, updateSetting } = useSettingsStore();
+  const createWorkflowDraft = useWorkflowStore((state) => state.createDraft);
+  const publishWorkflow = useWorkflowStore((state) => state.publishWorkflow);
+  const setSelectedWorkflow = useWorkflowStore((state) => state.setSelectedWorkflow);
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
 
   const editingJob = editorMode === 'edit' && selectedJobId ? getJob(selectedJobId) : null;
   const hasAutoOpened = useRef(false);
@@ -274,6 +292,28 @@ export function CronJobEditor() {
     }
   };
 
+  const toWorkflowSchedule = (schedule: CronSchedule): WorkflowSchedule => {
+    if (schedule.type === 'at') {
+      return {
+        type: 'at',
+        timestamp: schedule.timestamp,
+      };
+    }
+
+    if (schedule.type === 'every') {
+      return {
+        type: 'every',
+        intervalMs: schedule.intervalMs,
+      };
+    }
+
+    return {
+      type: 'cron',
+      expression: schedule.expression,
+      timezone: schedule.timezone,
+    };
+  };
+
   const validate = (): boolean => {
     if (!form.name.trim()) {
       setValidationError('Name is required');
@@ -322,6 +362,68 @@ export function CronJobEditor() {
       closeEditor();
     } catch {
       // Error is set in store
+    }
+  };
+
+  const handleCreateWorkflow = async () => {
+    if (!validate()) return;
+
+    const schedule = buildSchedule();
+    const workflowSchedule = toWorkflowSchedule(schedule);
+
+    try {
+      const draft = await createWorkflowDraft({
+        name: form.name.trim(),
+        description: 'Created from scheduler editor',
+        triggers: [
+          { id: 'manual_default', type: 'manual', enabled: true },
+          {
+            id: `schedule_${Date.now()}`,
+            type: 'schedule',
+            enabled: true,
+            schedule: workflowSchedule,
+          },
+        ],
+        nodes: [
+          { id: 'start', type: 'start', name: 'Start', config: {} },
+          {
+            id: 'agent_step_1',
+            type: 'agent_step',
+            name: 'Run Task',
+            config: {
+              promptTemplate: form.prompt.trim(),
+              workingDirectory: form.workingDirectory.trim(),
+              maxTurns: form.maxTurns > 0 ? form.maxTurns : 25,
+            },
+          },
+          { id: 'end', type: 'end', name: 'End', config: {} },
+        ],
+        edges: [
+          { id: 'edge_start_to_step', from: 'start', to: 'agent_step_1', condition: 'always' },
+          { id: 'edge_step_to_end', from: 'agent_step_1', to: 'end', condition: 'always' },
+        ],
+        defaults: {
+          workingDirectory: form.workingDirectory.trim(),
+          model: form.model.trim() || undefined,
+          maxRunTimeMs: 30 * 60 * 1000,
+          nodeTimeoutMs: 5 * 60 * 1000,
+          retry: {
+            maxAttempts: 3,
+            backoffMs: 1000,
+            maxBackoffMs: 20_000,
+            jitterRatio: 0.2,
+          },
+        },
+      });
+
+      const published = await publishWorkflow(draft.id);
+      setSelectedWorkflow(published.id);
+      closeModal();
+      setCurrentView('workflows');
+      toast.success('Workflow automation created', `${published.name} is now scheduled.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error('Failed to create workflow automation', message);
     }
   };
 
@@ -650,6 +752,22 @@ export function CronJobEditor() {
             ? 'Save Changes'
             : 'Create Task'}
         </motion.button>
+        {editorMode !== 'edit' && (
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={handleCreateWorkflow}
+            disabled={isLoading}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium',
+              'border border-[#1D4ED8]/40 text-[#BFDBFE] hover:bg-[#1D4ED8]/15',
+              'transition-colors',
+              isLoading && 'opacity-50 cursor-not-allowed'
+            )}
+          >
+            Create as Workflow
+          </motion.button>
+        )}
       </div>
     </motion.div>
   );

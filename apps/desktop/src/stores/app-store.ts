@@ -3,7 +3,7 @@ import { create } from 'zustand';
 interface AppState {
   showApiKeyModal: boolean;
   apiKeyError: string | null;
-  currentView: 'chat' | 'settings';
+  currentView: 'chat' | 'settings' | 'workflows';
   runtimeConfigNotice: {
     requiresNewSession: boolean;
     reasons: string[];
@@ -14,7 +14,7 @@ interface AppState {
 interface AppActions {
   setShowApiKeyModal: (show: boolean, error?: string) => void;
   clearApiKeyError: () => void;
-  setCurrentView: (view: 'chat' | 'settings') => void;
+  setCurrentView: (view: 'chat' | 'settings' | 'workflows') => void;
   setRuntimeConfigNotice: (notice: AppState['runtimeConfigNotice']) => void;
 }
 

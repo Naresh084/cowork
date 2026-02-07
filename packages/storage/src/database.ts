@@ -29,7 +29,7 @@ export function getDefaultDatabasePath(): string {
 /**
  * Database schema version for migrations.
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /**
  * SQL statements for creating the database schema.
@@ -88,6 +88,124 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY
 );
+
+-- Workflows table (draft and published versions)
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  tags TEXT NOT NULL DEFAULT '[]',
+  schema_version TEXT NOT NULL DEFAULT '1',
+  triggers TEXT NOT NULL DEFAULT '[]',
+  nodes TEXT NOT NULL DEFAULT '[]',
+  edges TEXT NOT NULL DEFAULT '[]',
+  defaults TEXT NOT NULL DEFAULT '{}',
+  permissions_profile TEXT,
+  created_by TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+CREATE INDEX IF NOT EXISTS idx_workflows_updated_at ON workflows(updated_at DESC);
+
+-- Workflow aliases (points to draft and latest published version)
+CREATE TABLE IF NOT EXISTS workflow_aliases (
+  workflow_id TEXT PRIMARY KEY,
+  draft_version INTEGER,
+  published_version INTEGER,
+  updated_at INTEGER NOT NULL
+);
+
+-- Workflow runs
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  workflow_version INTEGER NOT NULL,
+  trigger_type TEXT NOT NULL,
+  trigger_context TEXT NOT NULL DEFAULT '{}',
+  input TEXT NOT NULL DEFAULT '{}',
+  output TEXT,
+  status TEXT NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  current_node_id TEXT,
+  error TEXT,
+  correlation_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at ON workflow_runs(created_at DESC);
+
+-- Per-node run records
+CREATE TABLE IF NOT EXISTS workflow_node_runs (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  node_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  input TEXT NOT NULL DEFAULT '{}',
+  output TEXT,
+  error TEXT,
+  started_at INTEGER,
+  completed_at INTEGER,
+  duration_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_node ON workflow_node_runs(node_id);
+
+-- Event log for workflow runs
+CREATE TABLE IF NOT EXISTS workflow_events (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_events_run_ts ON workflow_events(run_id, ts ASC);
+
+-- Materialized trigger definitions for schedule/webhook/integration events
+CREATE TABLE IF NOT EXISTS workflow_triggers (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  workflow_version INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  config TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_triggers_type ON workflow_triggers(type);
+CREATE INDEX IF NOT EXISTS idx_workflow_triggers_next_run ON workflow_triggers(next_run_at);
+
+-- Webhook metadata references (secrets are stored outside DB)
+CREATE TABLE IF NOT EXISTS workflow_webhooks (
+  endpoint_key TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  workflow_version INTEGER NOT NULL,
+  auth_mode TEXT NOT NULL,
+  secret_ref TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Lightweight run lock table for recovery/resume semantics
+CREATE TABLE IF NOT EXISTS workflow_run_locks (
+  run_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 `;
 
 /**
@@ -139,9 +257,116 @@ export class DatabaseConnection {
   /**
    * Run database migrations.
    */
-  private runMigrations(_fromVersion: number): void {
-    // Future migrations go here
-    // For now, just update the version
+  private runMigrations(fromVersion: number): void {
+    if (fromVersion < 2) {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS workflows (
+          id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          tags TEXT NOT NULL DEFAULT '[]',
+          schema_version TEXT NOT NULL DEFAULT '1',
+          triggers TEXT NOT NULL DEFAULT '[]',
+          nodes TEXT NOT NULL DEFAULT '[]',
+          edges TEXT NOT NULL DEFAULT '[]',
+          defaults TEXT NOT NULL DEFAULT '{}',
+          permissions_profile TEXT,
+          created_by TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (id, version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+        CREATE INDEX IF NOT EXISTS idx_workflows_updated_at ON workflows(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_aliases (
+          workflow_id TEXT PRIMARY KEY,
+          draft_version INTEGER,
+          published_version INTEGER,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_runs (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL,
+          workflow_version INTEGER NOT NULL,
+          trigger_type TEXT NOT NULL,
+          trigger_context TEXT NOT NULL DEFAULT '{}',
+          input TEXT NOT NULL DEFAULT '{}',
+          output TEXT,
+          status TEXT NOT NULL,
+          started_at INTEGER,
+          completed_at INTEGER,
+          current_node_id TEXT,
+          error TEXT,
+          correlation_id TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_runs_created_at ON workflow_runs(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS workflow_node_runs (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          input TEXT NOT NULL DEFAULT '{}',
+          output TEXT,
+          error TEXT,
+          started_at INTEGER,
+          completed_at INTEGER,
+          duration_ms INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run ON workflow_node_runs(run_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_node ON workflow_node_runs(node_id);
+
+        CREATE TABLE IF NOT EXISTS workflow_events (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          ts INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          payload TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_events_run_ts ON workflow_events(run_id, ts ASC);
+
+        CREATE TABLE IF NOT EXISTS workflow_triggers (
+          id TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL,
+          workflow_version INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          config TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          next_run_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_triggers_type ON workflow_triggers(type);
+        CREATE INDEX IF NOT EXISTS idx_workflow_triggers_next_run ON workflow_triggers(next_run_at);
+
+        CREATE TABLE IF NOT EXISTS workflow_webhooks (
+          endpoint_key TEXT PRIMARY KEY,
+          workflow_id TEXT NOT NULL,
+          workflow_version INTEGER NOT NULL,
+          auth_mode TEXT NOT NULL,
+          secret_ref TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_run_locks (
+          run_id TEXT PRIMARY KEY,
+          owner TEXT NOT NULL,
+          acquired_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+    }
+
     this.db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
   }
 

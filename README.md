@@ -27,7 +27,7 @@ Current platform scope:
 - `computer_use` browser automation with provider-aware routing
 - `deep_research` long-form autonomous research flow
 - 51 skills, 10 subagents, 23 connector configs, and 5 slash-command packs
-- Session persistence, memory system, cron jobs, tool policies, permission gates
+- Session persistence, memory system, workflow automations, tool policies, permission gates
 
 ---
 
@@ -51,6 +51,14 @@ Current platform scope:
 - Command sandbox controls in Provider settings (mode, network, path scope, trusted commands, runtime/output limits)
 - Session-level Plan Mode (`Plan` -> `<proposed_plan>` -> Accept/Reject -> auto-execute on accept)
 - Runtime config apply pipeline with explicit "start new session" notice when changes cross compatibility boundaries
+
+### Workflow Platform (v1)
+
+- Workflow-first automation runtime with durable runs, node events, and replayable history
+- Build workflows from chat (`create_workflow_from_chat`) or by using workflow management tools from main chat
+- Visual workflow builder with trigger editing, step editing, publish/run actions, and run timeline inspection
+- Scheduler UI shows both legacy cron entries and workflow schedules in one automation surface
+- `schedule_task` routes new recurring automations into workflow-backed definitions
 
 ### Developer and Ops
 
@@ -98,6 +106,7 @@ flowchart LR
   SR --> AR["Agent Runner"]
   AR --> TP["Tool Policy + Permission Layer"]
   AR --> TOOLS["Tool Modules"]
+  AR --> WF["Workflow Service + Engine"]
   AR --> PROV["Provider Layer"]
   AR --> STORE["Persistence (SQLite + files)"]
 
@@ -186,6 +195,10 @@ This prevents "known missing key" runtime failures by avoiding registration when
 - `analyze_video`
 - `computer_use`
 - `deep_research`
+- `create_workflow_from_chat`
+- `create_workflow` / `update_workflow` / `publish_workflow`
+- `run_workflow` / `manage_workflow` / `get_workflow_runs`
+- `schedule_task` (workflow-backed automation creation)
 - plus file/system/integration tooling
 
 ---
@@ -221,6 +234,13 @@ Optional:
 3. **Integrations**
    - External search fallback provider + Exa/Tavily keys
 
+### Workflow Automation
+
+- Use chat for natural-language workflow creation and management.
+- Use the Workflows view for visual graph editing, trigger configuration, and run inspection.
+- Use Automations for mixed schedule visibility (legacy cron + workflow schedules).
+- New recurring automation requests through `schedule_task` are workflow-backed.
+
 ## Plan Mode Workflow
 
 Plan mode is a per-session analyze-only mode:
@@ -239,9 +259,6 @@ Plan mode tool behavior:
 Execute mode discipline:
 
 - Agent is expected to call `write_todos` early for multi-step work and continuously update todo statuses as execution progresses.
-   - Stitch key
-   - Specialized model overrides (`computer_use`, `deep_research`)
-   - Messaging integration settings (WhatsApp/Slack/Telegram/Discord/iMessage/Teams)
 
 ### Runtime Apply Behavior
 

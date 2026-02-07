@@ -161,7 +161,42 @@ Attachment behavior:
 - New integrations (Discord, iMessage, Teams) support attachment ingestion and outbound media send paths.
 - If a provider API cannot return raw bytes, Cowork preserves attachment URL + metadata so workflows still continue.
 
-## 4. Runtime Apply vs New Session
+## 4. Workflow Platform (Chat + Visual + Scheduler)
+
+Cowork uses a workflow-first automation model. Workflows are first-class objects with versions, triggers, runs, and node-level events.
+
+Entry points:
+
+- Main chat:
+  - Create workflows from natural language with `create_workflow_from_chat`.
+  - List and inspect workflows with `manage_workflow` (`list`, `get`).
+  - Run workflows with `run_workflow`.
+  - Inspect history/events with `get_workflow_runs`.
+- Visual builder:
+  - Open **Workflows** from the sidebar.
+  - Create or edit drafts, configure schedule triggers, publish versions, and run on demand.
+  - Review run timeline and run details in the workflow panels.
+- Scheduler/automation UI:
+  - **Automations** shows both legacy cron jobs and workflow schedules.
+  - Manual scheduler now supports direct workflow creation ("Create as Workflow").
+  - Pausing/resuming schedule triggers for workflow automations is supported from automation surfaces.
+
+Trigger types currently available in platform APIs:
+
+- `manual`
+- `chat`
+- `schedule`
+- `webhook`
+- `integration_event`
+- `workflow_call`
+
+Scheduling model:
+
+- New recurring automation flows are workflow-backed.
+- `schedule_task` creates workflow-backed definitions.
+- Legacy cron entries can still coexist during transition periods.
+
+## 5. Runtime Apply vs New Session
 
 ### Applies immediately
 
@@ -182,7 +217,7 @@ UI behavior:
 - Runtime returns impact metadata.
 - Chat header shows `Start new session` notice when required.
 
-## 5. Tool Registration Rules
+## 6. Tool Registration Rules
 
 Tools are conditionally registered from current runtime config. If required keys are missing, tools are not registered (instead of failing later at runtime).
 
@@ -219,7 +254,7 @@ System prompt tool list:
 - Tool instructions in system prompt are generated from currently registered tools only.
 - Missing keys => tool omitted from registration and prompt tool section.
 
-## 6. Plan Mode (Analyze -> Approve -> Execute)
+## 7. Plan Mode (Analyze -> Approve -> Execute)
 
 Plan mode is session-scoped and read-only:
 
@@ -240,7 +275,7 @@ Todo discipline in execute mode:
 - Execute mode enforces `write_todos` early for non-trivial implementation turns.
 - Agent must keep todo status updated continuously as steps complete.
 
-## 7. Command Sandboxing (Shell Safety)
+## 8. Command Sandboxing (Shell Safety)
 
 Cowork enforces command safety with two layers:
 
@@ -265,7 +300,7 @@ Capability visibility:
 - Session header shows current sandbox mode and whether enforcement is OS-level or validator-only.
 - Capability snapshot includes effective sandbox roots and network state.
 
-## 8. Provider Defaults With No Extra Google/OpenAI/Fal Keys
+## 9. Provider Defaults With No Extra Google/OpenAI/Fal Keys
 
 Assumption:
 
@@ -315,7 +350,7 @@ Assumption:
 - `web_search` works only with configured external fallback (Exa/Tavily + key) or Google key fallback.
 - Requires Google key for: `web_fetch`, fallback `computer_use`, default Google media path.
 
-## 9. Model Listing Behavior
+## 10. Model Listing Behavior
 
 Model listing in UI is provider-aware (`availableModelsByProvider` + `selectedModelByProvider`).
 
@@ -344,7 +379,7 @@ Context/output metadata:
 - Curated GLM entries include `contextWindow=200000` and `maxTokens=131072` where applicable.
 - Curated DeepSeek and Moonshot entries include provider-specific context sizing.
 
-## 10. Key Storage
+## 11. Key Storage
 
 Credentials are stored in the system credential manager via Tauri/Rust commands.
 

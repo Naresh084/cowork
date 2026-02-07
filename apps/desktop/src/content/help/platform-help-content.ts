@@ -27,12 +27,17 @@ export const HELP_ARTICLES: HelpArticle[] = [
   {
     id: 'platform-overview',
     title: 'How Cowork Works',
-    summary: 'Understand provider runtime, tools, permissions, sessions, and integrations end to end.',
+    summary: 'Understand provider runtime, workflow automations, tools, permissions, sessions, and integrations.',
     sections: [
       {
         heading: 'Runtime Model',
         body:
           'Cowork runs locally through a desktop shell and a sidecar agent runtime. Your active provider, keys, model, and routing settings determine which capabilities are enabled for new tool calls.',
+      },
+      {
+        heading: 'Workflow-First Automation',
+        body:
+          'Automations are workflow-backed. Runs are durable, inspectable, and policy-guarded with node-level event history. Scheduling, manual runs, chat-triggered runs, and integration-triggered runs share the same workflow runtime.',
       },
       {
         heading: 'Sessions and Scope',
@@ -52,7 +57,44 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Tool Availability',
         body:
-          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. The Help Center capability matrix shows your current effective access and the reason for disabled tools.',
+          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. Workflow tools (`create_workflow_from_chat`, `run_workflow`, `manage_workflow`, `get_workflow_runs`) are available in main/integration sessions and disabled in isolated/cron sessions.',
+      },
+      {
+        heading: 'Where to Build',
+        body:
+          'Use main chat when you want natural-language authoring, quick drafting, or tool-driven edits. Use the Workflows view for visual graph editing, schedule trigger control, publish actions, and run inspection.',
+      },
+    ],
+  },
+  {
+    id: 'workflow-automation',
+    title: 'Workflow Automation',
+    summary: 'Build workflows from chat or visual editor, run them manually, and schedule them with full observability.',
+    sections: [
+      {
+        heading: 'Authoring Paths',
+        body:
+          'You can author workflows from main chat (`create_workflow_from_chat`) or from the Workflows visual builder. Chat authoring is faster for intent-to-draft, while visual builder is better for trigger and step refinement.',
+      },
+      {
+        heading: 'Execution Paths',
+        body:
+          'Workflows can run manually, via schedule triggers, from chat requests, from integration events, or as subworkflow calls. Every path uses the same runtime engine and run persistence model.',
+      },
+      {
+        heading: 'Scheduler Integration',
+        body:
+          'Automations UI shows both legacy cron tasks and workflow schedules. New recurring automations can be created as workflow definitions directly from scheduler surfaces.',
+      },
+      {
+        heading: 'Agent Integration',
+        body:
+          'Main chat can list workflows, inspect definitions, publish drafts, trigger runs, and inspect runs/events through workflow tools. This enables natural language orchestration without leaving chat.',
+      },
+      {
+        heading: 'Safety and Reliability',
+        body:
+          'Workflow runs enforce policy checks, permission gates, retry/timeout behavior, and audit events for side-effect steps. Schedule pause/resume controls are available from both workflow and automation surfaces.',
       },
     ],
   },
@@ -64,7 +106,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Messaging Integrations',
         body:
-          'WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Microsoft Teams can create shared-session message workflows and outbound notifications when connected.',
+          'WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Microsoft Teams can create shared-session message flows, trigger workflow runs, and send outbound notifications when connected.',
         bullets: [
           'WhatsApp includes sender allowlist enforcement and denial messaging.',
           'Slack requires bot token + app token for realtime operation.',
@@ -127,12 +169,12 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
   {
     id: 'onboarding',
     title: 'Onboarding Tour',
-    description: 'Walk through setup mode, provider configuration, media routing, and capability setup.',
+    description: 'Walk through setup mode, provider configuration, media routing, capability setup, and workflow-first automation.',
     steps: [
       {
         id: 'onboarding-step-setup-mode',
         title: 'Choose Setup Mode',
-        description: 'Pick Fast Path for quick start or Deep Dive for full guided configuration.',
+        description: 'Pick Fast Path for quick start or Deep Dive for full guided configuration with workflow automation context.',
         targetId: 'onboarding-setup-mode',
       },
       {
@@ -156,7 +198,7 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
       {
         id: 'onboarding-step-review',
         title: 'Review and Finish',
-        description: 'Confirm your setup and complete onboarding.',
+        description: 'Confirm your setup, then continue with workflows/automations from the main app.',
         targetId: 'onboarding-review-block',
       },
     ],
@@ -208,6 +250,12 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
         title: 'Sidebar Navigation',
         description: 'Create tasks, switch sessions, and open platform modules from here.',
         targetId: 'sidebar-root',
+      },
+      {
+        id: 'workspace-step-workflows',
+        title: 'Workflows and Automations',
+        description: 'Use Workflows for visual editing and run inspection. Use Automations for schedule overview and controls.',
+        targetId: 'sidebar-workflows-button',
       },
       {
         id: 'workspace-step-session-header',

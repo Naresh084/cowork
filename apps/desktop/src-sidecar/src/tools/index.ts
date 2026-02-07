@@ -7,3 +7,4 @@ export { ChromeCDPDriver, checkChromeAvailable } from './chrome-cdp-driver.js';
 export { createCronTools, createScheduleTaskTool, createManageScheduledTaskTool } from './cron-tool.js';
 export { createNotificationTools } from './notification-tools.js';
 export { createExternalCliTools } from './external-cli-tools.js';
+export { createWorkflowTools } from './workflow-tool.js';

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { cronService } from '../cron/index.js';
 import type { CronSchedule, PlatformType } from '@gemini-cowork/shared';
+import { workflowService } from '../workflow/index.js';
 
 // ============================================================================
 // Schedule Conversion Utilities
@@ -145,6 +146,10 @@ type UserSchedule =
   | WeeklySchedule
   | IntervalSchedule
   | CronExprSchedule;
+
+function isWorkflowTaskId(taskId: string): boolean {
+  return taskId.startsWith('wf_');
+}
 
 export interface ScheduledTaskDefaultNotificationTarget {
   platform: PlatformType;
@@ -378,25 +383,59 @@ Schedule types:
         // Convert user schedule to internal format
         const cronSchedule = convertSchedule(schedule);
 
-        // Create the job
-        const job = await cronService.createJob({
+        // Create workflow draft + publish (greenfield workflow runtime).
+        const draft = workflowService.createDraft({
           name,
-          prompt: effectivePrompt,
-          schedule: cronSchedule,
-          workingDirectory: workingDirectory || context.workingDirectory,
-          maxRuns,
-          maxTurns,
+          description: 'Created via schedule_task tool',
+          triggers: [
+            {
+              id: `schedule_${Date.now()}`,
+              type: 'schedule',
+              enabled: true,
+              schedule: cronSchedule,
+              maxRuns,
+            },
+          ],
+          nodes: [
+            { id: 'start', type: 'start', name: 'Start', config: {} },
+            {
+              id: 'agent_step_1',
+              type: 'agent_step',
+              name: 'Scheduled Agent Step',
+              config: {
+                promptTemplate: effectivePrompt,
+                workingDirectory: workingDirectory || context.workingDirectory,
+                maxTurns,
+              },
+            },
+            { id: 'end', type: 'end', name: 'End', config: {} },
+          ],
+          edges: [
+            { id: 'edge_start_to_step', from: 'start', to: 'agent_step_1', condition: 'always' },
+            { id: 'edge_step_to_end', from: 'agent_step_1', to: 'end', condition: 'always' },
+          ],
+          defaults: {
+            workingDirectory: workingDirectory || context.workingDirectory,
+            maxRunTimeMs: 30 * 60 * 1000,
+            nodeTimeoutMs: 5 * 60 * 1000,
+            retry: {
+              maxAttempts: 3,
+              backoffMs: 1000,
+              maxBackoffMs: 20000,
+              jitterRatio: 0.2,
+            },
+          },
         });
+        const published = workflowService.publish(draft.id);
 
         return {
           success: true,
           data: {
-            jobId: job.id,
-            name: job.name,
-            schedule: formatSchedule(job.schedule),
-            maxRuns: job.maxRuns ?? 'unlimited',
-            nextRunAt: job.nextRunAt,
-            nextRunFormatted: formatNextRun(job.nextRunAt),
+            workflowId: published.id,
+            workflowVersion: published.version,
+            name: published.name,
+            schedule: formatSchedule(cronSchedule),
+            maxRuns: maxRuns ?? 'unlimited',
             defaultNotification: defaultNotificationTarget
               ? {
                   platform: defaultNotificationTarget.platform,
@@ -405,9 +444,9 @@ Schedule types:
               : null,
             message:
               `Scheduled task "${name}" created successfully.` +
-              `${job.maxRuns ? ` Will run ${job.maxRuns} time${job.maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
+              `${maxRuns ? ` Will run ${maxRuns} time${maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
               `${defaultNotificationTarget ? ` Default delivery set to ${platformDisplayName(defaultNotificationTarget.platform)}${defaultNotificationTarget.chatId ? ` (${defaultNotificationTarget.chatId})` : ''}.` : ''}` +
-              ` Next run: ${formatNextRun(job.nextRunAt)}`,
+              ' Managed by the workflow runtime.',
           },
         };
       } catch (error) {
@@ -460,20 +499,40 @@ Actions:
         switch (action) {
           case 'list': {
             const jobs = await cronService.listJobs();
+            const scheduledWorkflows = workflowService.listScheduledTasks(200, 0);
             return {
               success: true,
               data: {
-                count: jobs.length,
-                tasks: jobs.map(j => ({
-                  id: j.id,
-                  name: j.name,
-                  status: j.status,
-                  schedule: formatSchedule(j.schedule),
-                  nextRun: formatNextRun(j.nextRunAt),
-                  runCount: j.runCount,
-                  lastStatus: j.lastStatus,
-                  lastRunAt: j.lastRunAt ? new Date(j.lastRunAt).toLocaleString() : null,
-                })),
+                count: jobs.length + scheduledWorkflows.length,
+                tasks: [
+                  ...jobs.map(j => ({
+                    id: j.id,
+                    engine: 'cron',
+                    name: j.name,
+                    status: j.status,
+                    schedule: formatSchedule(j.schedule),
+                    nextRun: formatNextRun(j.nextRunAt),
+                    runCount: j.runCount,
+                    lastStatus: j.lastStatus,
+                    lastRunAt: j.lastRunAt ? new Date(j.lastRunAt).toLocaleString() : null,
+                  })),
+                  ...scheduledWorkflows.map((wf) => {
+                    const primarySchedule = wf.schedules[0];
+                    return {
+                      id: wf.workflowId,
+                      engine: 'workflow',
+                      name: wf.name,
+                      status: wf.enabled ? wf.status : 'paused',
+                      schedule: primarySchedule
+                        ? formatSchedule(primarySchedule as CronSchedule)
+                        : 'N/A',
+                      nextRun: wf.nextRunAt ? formatNextRun(wf.nextRunAt) : 'Not scheduled',
+                      runCount: wf.runCount,
+                      lastStatus: wf.lastRunStatus,
+                      lastRunAt: wf.lastRunAt ? new Date(wf.lastRunAt).toLocaleString() : null,
+                    };
+                  }),
+                ],
               },
             };
           }
@@ -481,6 +540,16 @@ Actions:
           case 'pause': {
             if (!taskId) {
               return { success: false, error: 'taskId is required for pause action' };
+            }
+            if (isWorkflowTaskId(taskId)) {
+              const paused = workflowService.pauseScheduledWorkflow(taskId);
+              return {
+                success: true,
+                data: {
+                  message: `Workflow task ${taskId} paused successfully`,
+                  pausedTriggers: paused.pausedTriggers,
+                },
+              };
             }
             await cronService.pauseJob(taskId);
             return {
@@ -492,6 +561,17 @@ Actions:
           case 'resume': {
             if (!taskId) {
               return { success: false, error: 'taskId is required for resume action' };
+            }
+            if (isWorkflowTaskId(taskId)) {
+              const resumed = workflowService.resumeScheduledWorkflow(taskId);
+              return {
+                success: true,
+                data: {
+                  message: `Workflow task ${taskId} resumed`,
+                  resumedTriggers: resumed.resumedTriggers,
+                  nextRun: formatNextRun(resumed.nextRunAt ?? undefined),
+                },
+              };
             }
             await cronService.resumeJob(taskId);
             const job = await cronService.getJob(taskId);
@@ -507,6 +587,21 @@ Actions:
           case 'run': {
             if (!taskId) {
               return { success: false, error: 'taskId is required for run action' };
+            }
+            if (isWorkflowTaskId(taskId)) {
+              const run = await workflowService.run({
+                workflowId: taskId,
+                triggerType: 'manual',
+                triggerContext: { source: 'manage_scheduled_task' },
+              });
+              return {
+                success: true,
+                data: {
+                  message: `Workflow task ${taskId} triggered`,
+                  runId: run.id,
+                  result: run.status,
+                },
+              };
             }
             const run = await cronService.triggerJob(taskId);
             return {
@@ -525,6 +620,13 @@ Actions:
             if (!taskId) {
               return { success: false, error: 'taskId is required for delete action' };
             }
+            if (isWorkflowTaskId(taskId)) {
+              const archived = workflowService.archive(taskId);
+              return {
+                success: true,
+                data: { message: `Workflow ${archived.id} archived successfully` },
+              };
+            }
             await cronService.deleteJob(taskId);
             return {
               success: true,
@@ -535,6 +637,32 @@ Actions:
           case 'history': {
             if (!taskId) {
               return { success: false, error: 'taskId is required for history action' };
+            }
+            if (isWorkflowTaskId(taskId)) {
+              const runs = workflowService.listRuns({
+                workflowId: taskId,
+                limit,
+              });
+              return {
+                success: true,
+                data: {
+                  taskId,
+                  count: runs.length,
+                  runs: runs.map((r) => ({
+                    id: r.id,
+                    startedAt: r.startedAt ? new Date(r.startedAt).toLocaleString() : null,
+                    completedAt: r.completedAt ? new Date(r.completedAt).toLocaleString() : null,
+                    result: r.status,
+                    duration:
+                      r.startedAt && r.completedAt ? `${r.completedAt - r.startedAt}ms` : null,
+                    error: r.error,
+                    summary:
+                      typeof r.output === 'object' && r.output && 'summary' in r.output
+                        ? String((r.output as { summary?: unknown }).summary)
+                        : undefined,
+                  })),
+                },
+              };
             }
             const runs = await cronService.getJobRuns(taskId, { limit });
             return {

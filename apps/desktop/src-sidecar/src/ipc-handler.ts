@@ -10,6 +10,7 @@ import {
   type SecretDefinition,
 } from '@gemini-cowork/shared';
 import { cronService } from './cron/index.js';
+import { workflowService } from './workflow/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { MemoryService, createMemoryService } from './memory/index.js';
@@ -20,7 +21,25 @@ import { connectorBridge } from './connector-bridge.js';
 import { getSecretService } from './connectors/secret-service.js';
 import type { SecretService } from './connectors/secret-service.js';
 import { ConnectorOAuthService } from './connectors/connector-oauth-service.js';
-import type { CronJob, CronRun, SystemEvent, ToolPolicy, ToolRule, ToolProfile, SessionType } from '@gemini-cowork/shared';
+import type {
+  CronJob,
+  CronRun,
+  CreateWorkflowDraftInput,
+  CreateWorkflowFromPromptInput,
+  SystemEvent,
+  ToolPolicy,
+  ToolRule,
+  ToolProfile,
+  SessionType,
+  UpdateWorkflowDraftInput,
+  WorkflowDefinition,
+  WorkflowEvent,
+  WorkflowRun,
+  WorkflowRunInput,
+  WorkflowScheduledTaskSummary,
+  WorkflowRunStatus,
+  WorkflowValidationReport,
+} from '@gemini-cowork/shared';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
   IPCRequest,
@@ -854,7 +873,13 @@ registerHandler('cron_create_job', async (params): Promise<CronJob> => {
 
 // Update cron job
 registerHandler('cron_update_job', async (params): Promise<CronJob> => {
-  const { jobId, updates } = params as { jobId: string; updates: UpdateCronJobInput };
+  const payload = params as unknown as {
+    jobId: string;
+    updates?: UpdateCronJobInput;
+    input?: UpdateCronJobInput;
+  } & UpdateCronJobInput;
+  const { jobId } = payload;
+  const updates = payload.updates || payload.input || payload;
   if (!jobId) throw new Error('jobId is required');
   return cronService.updateJob(jobId, updates);
 });
@@ -889,7 +914,20 @@ registerHandler('cron_trigger_job', async (params): Promise<CronRun> => {
 
 // Get run history for job
 registerHandler('cron_get_runs', async (params): Promise<CronRun[]> => {
-  const { jobId, options } = params as { jobId: string; options?: RunQueryOptions };
+  const payload = params as {
+    jobId: string;
+    options?: RunQueryOptions;
+    limit?: number;
+    offset?: number;
+    result?: 'success' | 'error' | 'timeout' | 'cancelled';
+  };
+  const { jobId } = payload;
+  const options =
+    payload.options || {
+      limit: payload.limit,
+      offset: payload.offset,
+      result: payload.result,
+    };
   if (!jobId) throw new Error('jobId is required');
   return cronService.getJobRuns(jobId, options);
 });
@@ -897,6 +935,138 @@ registerHandler('cron_get_runs', async (params): Promise<CronRun[]> => {
 // Get cron service status
 registerHandler('cron_get_status', async (): Promise<CronServiceStatus> => {
   return cronService.getStatus();
+});
+
+// ============================================================================
+// Workflow Command Handlers
+// ============================================================================
+
+registerHandler('workflow_list', async (params): Promise<WorkflowDefinition[]> => {
+  const { limit, offset } = params as { limit?: number; offset?: number };
+  return workflowService.list(limit, offset);
+});
+
+registerHandler('workflow_get', async (params): Promise<WorkflowDefinition | null> => {
+  const { workflowId, version } = params as { workflowId: string; version?: number };
+  if (!workflowId) throw new Error('workflowId is required');
+  return workflowService.get(workflowId, version);
+});
+
+registerHandler('workflow_create_draft', async (params): Promise<WorkflowDefinition> => {
+  const input = params as unknown as CreateWorkflowDraftInput;
+  if (!input.name) throw new Error('name is required');
+  return workflowService.createDraft(input);
+});
+
+registerHandler('workflow_create_from_prompt', async (params): Promise<WorkflowDefinition> => {
+  const input = params as unknown as CreateWorkflowFromPromptInput;
+  if (!input.prompt?.trim()) throw new Error('prompt is required');
+  return workflowService.createFromPrompt(input);
+});
+
+registerHandler('workflow_update_draft', async (params): Promise<WorkflowDefinition> => {
+  const { workflowId, updates } = params as {
+    workflowId: string;
+    updates: UpdateWorkflowDraftInput;
+  };
+  if (!workflowId) throw new Error('workflowId is required');
+  if (!updates) throw new Error('updates is required');
+  return workflowService.updateDraft(workflowId, updates);
+});
+
+registerHandler('workflow_validate', async (params): Promise<WorkflowValidationReport> => {
+  const definition = params as WorkflowDefinition;
+  if (!definition?.id) throw new Error('workflow definition is required');
+  return workflowService.validateDraft(definition);
+});
+
+registerHandler('workflow_publish', async (params): Promise<WorkflowDefinition> => {
+  const { workflowId } = params as { workflowId: string };
+  if (!workflowId) throw new Error('workflowId is required');
+  return workflowService.publish(workflowId);
+});
+
+registerHandler('workflow_archive', async (params): Promise<WorkflowDefinition> => {
+  const { workflowId } = params as { workflowId: string };
+  if (!workflowId) throw new Error('workflowId is required');
+  return workflowService.archive(workflowId);
+});
+
+registerHandler('workflow_run', async (params): Promise<WorkflowRun> => {
+  const input = params as WorkflowRunInput;
+  if (!input.workflowId) throw new Error('workflowId is required');
+  return workflowService.run(input);
+});
+
+registerHandler('workflow_list_runs', async (params): Promise<WorkflowRun[]> => {
+  const {
+    workflowId,
+    status,
+    limit,
+    offset,
+  } = params as {
+    workflowId?: string;
+    status?: WorkflowRunStatus;
+    limit?: number;
+    offset?: number;
+  };
+  return workflowService.listRuns({ workflowId, status, limit, offset });
+});
+
+registerHandler('workflow_get_run', async (params) => {
+  const { runId } = params as { runId: string };
+  if (!runId) throw new Error('runId is required');
+  return workflowService.getRun(runId);
+});
+
+registerHandler('workflow_get_run_events', async (params): Promise<WorkflowEvent[]> => {
+  const { runId, sinceTs } = params as { runId: string; sinceTs?: number };
+  if (!runId) throw new Error('runId is required');
+  return workflowService.getRunEvents(runId, sinceTs);
+});
+
+registerHandler('workflow_cancel_run', async (params): Promise<WorkflowRun> => {
+  const { runId } = params as { runId: string };
+  if (!runId) throw new Error('runId is required');
+  return workflowService.cancelRun(runId);
+});
+
+registerHandler('workflow_pause_run', async (params): Promise<WorkflowRun> => {
+  const { runId } = params as { runId: string };
+  if (!runId) throw new Error('runId is required');
+  return workflowService.pauseRun(runId);
+});
+
+registerHandler('workflow_resume_run', async (params): Promise<WorkflowRun> => {
+  const { runId } = params as { runId: string };
+  if (!runId) throw new Error('runId is required');
+  return workflowService.resumeRun(runId);
+});
+
+registerHandler('workflow_backfill_schedule', async (params): Promise<{ queued: number }> => {
+  const { workflowId, from, to } = params as { workflowId: string; from: number; to: number };
+  if (!workflowId) throw new Error('workflowId is required');
+  if (typeof from !== 'number' || typeof to !== 'number') {
+    throw new Error('from and to are required numbers');
+  }
+  return workflowService.backfillSchedule(workflowId, from, to);
+});
+
+registerHandler('workflow_list_scheduled', async (params): Promise<WorkflowScheduledTaskSummary[]> => {
+  const { limit, offset } = params as { limit?: number; offset?: number };
+  return workflowService.listScheduledTasks(limit, offset);
+});
+
+registerHandler('workflow_pause_scheduled', async (params) => {
+  const { workflowId } = params as { workflowId: string };
+  if (!workflowId) throw new Error('workflowId is required');
+  return workflowService.pauseScheduledWorkflow(workflowId);
+});
+
+registerHandler('workflow_resume_scheduled', async (params) => {
+  const { workflowId } = params as { workflowId: string };
+  if (!workflowId) throw new Error('workflowId is required');
+  return workflowService.resumeScheduledWorkflow(workflowId);
 });
 
 // ============================================================================

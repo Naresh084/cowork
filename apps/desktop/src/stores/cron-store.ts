@@ -7,6 +7,7 @@ import type {
   CreateCronJobInput,
   UpdateCronJobInput,
   CronServiceStatus,
+  WorkflowScheduledTaskSummary,
 } from '@gemini-cowork/shared';
 
 // ============================================================================
@@ -16,6 +17,7 @@ import type {
 interface CronState {
   // Data
   jobs: CronJob[];
+  workflowTasks: WorkflowScheduledTaskSummary[];
   selectedJobId: string | null;
   runHistory: Record<string, CronRun[]>; // jobId -> runs
   status: CronServiceStatus | null;
@@ -35,6 +37,7 @@ interface CronState {
 interface CronActions {
   // Data fetching
   loadJobs: () => Promise<void>;
+  loadWorkflowTasks: () => Promise<void>;
   loadStatus: () => Promise<void>;
   loadRunHistory: (jobId: string, limit?: number) => Promise<void>;
   refreshAll: () => Promise<void>;
@@ -48,6 +51,9 @@ interface CronActions {
   pauseJob: (jobId: string) => Promise<void>;
   resumeJob: (jobId: string) => Promise<void>;
   triggerJob: (jobId: string) => Promise<CronRun>;
+  runWorkflowTask: (workflowId: string) => Promise<void>;
+  pauseWorkflowTask: (workflowId: string) => Promise<void>;
+  resumeWorkflowTask: (workflowId: string) => Promise<void>;
 
   // UI actions
   openModal: () => void;
@@ -69,18 +75,22 @@ interface CronActions {
 // Helper Functions
 // ============================================================================
 
-function computeDerivedState(jobs: CronJob[]): {
+function computeDerivedState(
+  jobs: CronJob[],
+  workflowTasks: WorkflowScheduledTaskSummary[],
+): {
   activeJobCount: number;
   nextRunJob: CronJob | null;
 } {
   const activeJobs = jobs.filter((j) => j.status === 'active');
+  const activeWorkflowTasks = workflowTasks.filter((task) => task.enabled);
   const nextJob =
     activeJobs
       .filter((j) => j.nextRunAt)
       .sort((a, b) => (a.nextRunAt || 0) - (b.nextRunAt || 0))[0] || null;
 
   return {
-    activeJobCount: activeJobs.length,
+    activeJobCount: activeJobs.length + activeWorkflowTasks.length,
     nextRunJob: nextJob,
   };
 }
@@ -92,6 +102,7 @@ function computeDerivedState(jobs: CronJob[]): {
 export const useCronStore = create<CronState & CronActions>((set, get) => ({
   // Initial state
   jobs: [],
+  workflowTasks: [],
   selectedJobId: null,
   runHistory: {},
   status: null,
@@ -107,11 +118,15 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
   loadJobs: async () => {
     set({ isLoading: true, error: null });
     try {
-      const jobs = await invoke<CronJob[]>('cron_list_jobs');
-      const derived = computeDerivedState(jobs);
+      const [jobs, workflowTasks] = await Promise.all([
+        invoke<CronJob[]>('cron_list_jobs'),
+        invoke<WorkflowScheduledTaskSummary[]>('workflow_list_scheduled', { limit: 300, offset: 0 }),
+      ]);
+      const derived = computeDerivedState(jobs, workflowTasks);
 
       set({
         jobs,
+        workflowTasks,
         ...derived,
         isLoading: false,
       });
@@ -120,6 +135,21 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
         error: error instanceof Error ? error.message : String(error),
         isLoading: false,
       });
+    }
+  },
+
+  loadWorkflowTasks: async () => {
+    try {
+      const workflowTasks = await invoke<WorkflowScheduledTaskSummary[]>(
+        'workflow_list_scheduled',
+        { limit: 300, offset: 0 },
+      );
+      set((state) => ({
+        workflowTasks,
+        ...computeDerivedState(state.jobs, workflowTasks),
+      }));
+    } catch (error) {
+      set({ error: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -136,7 +166,7 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
     try {
       const runs = await invoke<CronRun[]>('cron_get_runs', {
         jobId,
-        limit,
+        options: { limit },
       });
       set((state) => ({
         runHistory: { ...state.runHistory, [jobId]: runs },
@@ -158,7 +188,7 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
       const job = await invoke<CronJob>('cron_create_job', { input });
       set((state) => {
         const newJobs = [...state.jobs, job];
-        const derived = computeDerivedState(newJobs);
+        const derived = computeDerivedState(newJobs, state.workflowTasks);
         return {
           jobs: newJobs,
           ...derived,
@@ -179,10 +209,10 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
   updateJob: async (jobId: string, updates: UpdateCronJobInput) => {
     set({ isLoading: true, error: null });
     try {
-      const job = await invoke<CronJob>('cron_update_job', { jobId, input: updates });
+      const job = await invoke<CronJob>('cron_update_job', { jobId, updates });
       set((state) => {
         const newJobs = state.jobs.map((j) => (j.id === jobId ? job : j));
-        const derived = computeDerivedState(newJobs);
+        const derived = computeDerivedState(newJobs, state.workflowTasks);
         return {
           jobs: newJobs,
           ...derived,
@@ -206,7 +236,7 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
       await invoke('cron_delete_job', { jobId });
       set((state) => {
         const newJobs = state.jobs.filter((j) => j.id !== jobId);
-        const derived = computeDerivedState(newJobs);
+        const derived = computeDerivedState(newJobs, state.workflowTasks);
         return {
           jobs: newJobs,
           selectedJobId: state.selectedJobId === jobId ? null : state.selectedJobId,
@@ -229,7 +259,7 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
       const job = await invoke<CronJob>('cron_pause_job', { jobId });
       set((state) => {
         const newJobs = state.jobs.map((j) => (j.id === jobId ? job : j));
-        const derived = computeDerivedState(newJobs);
+        const derived = computeDerivedState(newJobs, state.workflowTasks);
         return {
           jobs: newJobs,
           ...derived,
@@ -246,7 +276,7 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
       const job = await invoke<CronJob>('cron_resume_job', { jobId });
       set((state) => {
         const newJobs = state.jobs.map((j) => (j.id === jobId ? job : j));
-        const derived = computeDerivedState(newJobs);
+        const derived = computeDerivedState(newJobs, state.workflowTasks);
         return {
           jobs: newJobs,
           ...derived,
@@ -278,6 +308,26 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
       set({ error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
+  },
+
+  runWorkflowTask: async (workflowId: string) => {
+    await invoke('workflow_run', {
+      input: {
+        workflowId,
+        triggerType: 'manual',
+        triggerContext: { source: 'scheduler_ui' },
+      },
+    });
+  },
+
+  pauseWorkflowTask: async (workflowId: string) => {
+    await invoke('workflow_pause_scheduled', { workflowId });
+    await get().loadWorkflowTasks();
+  },
+
+  resumeWorkflowTask: async (workflowId: string) => {
+    await invoke('workflow_resume_scheduled', { workflowId });
+    await get().loadWorkflowTasks();
   },
 
   // UI actions
