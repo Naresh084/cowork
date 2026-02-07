@@ -271,6 +271,19 @@ pub async fn agent_set_runtime_config(
     manager.send_command("set_runtime_config", params).await
 }
 
+#[tauri::command]
+pub async fn agent_get_capability_snapshot(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    manager
+        .send_command("get_capability_snapshot", serde_json::json!({}))
+        .await
+}
+
 /// Set or clear the Stitch MCP API key for the sidecar runtime.
 #[tauri::command]
 pub async fn agent_set_stitch_api_key(

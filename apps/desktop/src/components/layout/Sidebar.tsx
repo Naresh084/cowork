@@ -11,6 +11,7 @@ import {
   Terminal,
   Bot,
   Plug,
+  CircleHelp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -32,6 +33,7 @@ import { SubagentManager } from '../subagents/SubagentManager';
 import { useSubagentStore } from '../../stores/subagent-store';
 import { ConnectorManager } from '../connectors/ConnectorManager';
 import { useConnectorStore } from '../../stores/connector-store';
+import { useHelpStore } from '../../stores/help-store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -58,6 +60,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     toggleSessionListFilter,
   } = useSettingsStore();
   const setCurrentView = useAppStore((state) => state.setCurrentView);
+  const openHelp = useHelpStore((state) => state.openHelp);
   const chatSessions = useChatStore((state) => state.sessions);
 
   const isLiveSession = (sessionId: string) => {
@@ -108,6 +111,10 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const handleOpenSettings = useCallback(() => {
     setCurrentView('settings');
   }, [setCurrentView]);
+
+  const handleOpenHelp = useCallback(() => {
+    openHelp('platform-overview');
+  }, [openHelp]);
 
   // Load sessions on mount
   useEffect(() => {
@@ -214,6 +221,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   return (
     <div
       className="relative h-full"
+      data-tour-id="sidebar-root"
       onMouseEnter={() => isCollapsed && setIsHovering(true)}
       onMouseLeave={() => isCollapsed && setIsHovering(false)}
     >
@@ -236,6 +244,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           onOpenConnectors={() => setConnectorsModalOpen(true)}
           connectorCount={connectedConnectorCount}
           sessionListFilters={sessionListFilters}
+          onOpenHelp={handleOpenHelp}
         />
       ) : (
         <SidebarExpanded
@@ -264,6 +273,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           connectorCount={connectedConnectorCount}
           sessionListFilters={sessionListFilters}
           onToggleSessionListFilter={toggleSessionListFilter}
+          onOpenHelp={handleOpenHelp}
         />
       )}
 
@@ -347,6 +357,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               connectorCount={connectedConnectorCount}
               sessionListFilters={sessionListFilters}
               onToggleSessionListFilter={toggleSessionListFilter}
+              onOpenHelp={handleOpenHelp}
             />
           </motion.div>
         )}
@@ -373,6 +384,7 @@ interface SidebarRailProps {
   onOpenConnectors: () => void;
   connectorCount: number;
   sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
+  onOpenHelp: () => void;
 }
 
 function SidebarRail({
@@ -393,6 +405,7 @@ function SidebarRail({
   onOpenConnectors,
   connectorCount,
   sessionListFilters,
+  onOpenHelp,
 }: SidebarRailProps) {
   const filteredSessions = sessions.filter((session) => sessionListFilters[getSessionCategory(session)]);
   return (
@@ -510,6 +523,18 @@ function SidebarRail({
         >
           <Settings className="w-4 h-4" />
         </motion.button>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={onOpenHelp}
+          className={cn(
+            'mt-2 w-10 h-10 flex items-center justify-center rounded-xl',
+            'hover:bg-white/[0.04] transition-colors text-white/60'
+          )}
+          title="Help Center"
+        >
+          <CircleHelp className="w-4 h-4" />
+        </motion.button>
       </div>
     </motion.div>
   );
@@ -541,6 +566,7 @@ interface SidebarExpandedProps {
   connectorCount: number;
   sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
   onToggleSessionListFilter: (filter: 'chat' | 'shared' | 'cron') => void;
+  onOpenHelp: () => void;
 }
 
 function SidebarExpanded({
@@ -569,6 +595,7 @@ function SidebarExpanded({
   connectorCount,
   sessionListFilters,
   onToggleSessionListFilter,
+  onOpenHelp,
 }: SidebarExpandedProps) {
   const { userName } = useSettingsStore();
   const sessionCounts = sessions.reduce(
@@ -766,6 +793,14 @@ function SidebarExpanded({
             title="Settings"
           >
             <Settings className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenHelp}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:text-white/90 hover:bg-white/[0.08] transition-colors"
+            title="Help Center"
+          >
+            <CircleHelp className="w-4 h-4" />
           </button>
         </div>
       </div>

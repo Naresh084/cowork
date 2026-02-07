@@ -4,6 +4,7 @@ import { ChevronDown, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { PlatformStatusBadge } from './PlatformStatusBadge';
+import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 
 export function SlackSettings() {
   const platform = useIntegrationStore((s) => s.platforms.slack);
@@ -39,7 +40,10 @@ export function SlackSettings() {
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium text-white/90">Connection Status</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-white/90">Connection Status</h3>
+              <SettingHelpPopover settingId="slack.connection" />
+            </div>
             <div className="mt-2">
               <PlatformStatusBadge
                 platform="slack"
@@ -97,7 +101,10 @@ export function SlackSettings() {
 
         {/* Bot Token */}
         <div>
-          <label className="block text-xs text-white/50 mb-1.5">Bot User OAuth Token</label>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">Bot User OAuth Token</label>
+            <SettingHelpPopover settingId="slack.botToken" />
+          </div>
           <div className="relative">
             <input
               type={showBotToken ? 'text' : 'password'}
@@ -130,7 +137,10 @@ export function SlackSettings() {
 
         {/* App Token */}
         <div>
-          <label className="block text-xs text-white/50 mb-1.5">App-Level Token</label>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">App-Level Token</label>
+            <SettingHelpPopover settingId="slack.appToken" />
+          </div>
           <div className="relative">
             <input
               type={showAppToken ? 'text' : 'password'}

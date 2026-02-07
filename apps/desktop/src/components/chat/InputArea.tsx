@@ -482,7 +482,7 @@ export function InputArea({
   };
 
   return (
-    <div className="px-4 pb-3 pt-1">
+    <div className="px-4 pb-3 pt-1" data-tour-id="chat-input-area">
       {/* Hidden file input */}
       <input
         ref={fileInputRef}

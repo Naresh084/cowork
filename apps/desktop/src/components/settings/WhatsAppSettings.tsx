@@ -8,6 +8,7 @@ import {
   useIntegrationStore,
 } from '../../stores/integration-store';
 import { PlatformStatusBadge } from './PlatformStatusBadge';
+import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 
 export function WhatsAppSettings() {
   const platform = useIntegrationStore((s) => s.platforms.whatsapp);
@@ -130,7 +131,10 @@ export function WhatsAppSettings() {
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="text-sm font-medium text-white/90">Connection Status</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-medium text-white/90">Connection Status</h3>
+              <SettingHelpPopover settingId="whatsapp.connection" />
+            </div>
             <div className="mt-2">
               <PlatformStatusBadge
                 platform="whatsapp"
@@ -197,7 +201,10 @@ export function WhatsAppSettings() {
         </div>
 
         <div>
-          <label className="block text-xs text-white/50 mb-2">Allowlist Numbers</label>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">Allowlist Numbers</label>
+            <SettingHelpPopover settingId="whatsapp.allowlist" />
+          </div>
           <div className="flex gap-2">
             <input
               type="text"
@@ -248,7 +255,10 @@ export function WhatsAppSettings() {
         </div>
 
         <div>
-          <label className="block text-xs text-white/50 mb-2">Unauthorized Reply Message</label>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">Unauthorized Reply Message</label>
+            <SettingHelpPopover settingId="whatsapp.denialMessage" />
+          </div>
           <textarea
             value={denialMessageDraft}
             onChange={(e) => setDenialMessageDraft(e.target.value)}
