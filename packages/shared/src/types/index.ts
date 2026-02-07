@@ -46,7 +46,16 @@ export * from './connector.js';
 // Platform Integration Types
 // ============================================================================
 
-export type PlatformType = 'whatsapp' | 'slack' | 'telegram';
+export const SUPPORTED_PLATFORM_TYPES = [
+  'whatsapp',
+  'slack',
+  'telegram',
+  'discord',
+  'imessage',
+  'teams',
+] as const;
+
+export type PlatformType = (typeof SUPPORTED_PLATFORM_TYPES)[number];
 
 export interface PlatformStatus {
   platform: PlatformType;

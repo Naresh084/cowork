@@ -2,7 +2,11 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import type { PlatformType, PlatformConfig } from '@gemini-cowork/shared';
+import {
+  SUPPORTED_PLATFORM_TYPES,
+  type PlatformType,
+  type PlatformConfig,
+} from '@gemini-cowork/shared';
 import { DEFAULT_WHATSAPP_DENIAL_MESSAGE } from './types.js';
 
 const CONFIG_DIR = join(homedir(), '.cowork', 'integrations');
@@ -151,7 +155,7 @@ export class IntegrationStore {
 
     let changed = false;
     for (const [platformKey, value] of platformEntries) {
-      if (!['whatsapp', 'slack', 'telegram'].includes(platformKey)) {
+      if (!SUPPORTED_PLATFORM_TYPES.includes(platformKey as PlatformType)) {
         changed = true;
         continue;
       }
@@ -208,6 +212,81 @@ export class IntegrationStore {
       config && typeof config === 'object' && !Array.isArray(config)
         ? { ...(config as Record<string, unknown>) }
         : {};
+
+    if (platform === 'discord') {
+      return {
+        ...objectConfig,
+        botToken:
+          typeof objectConfig.botToken === 'string'
+            ? objectConfig.botToken.trim()
+            : '',
+        allowedGuildIds: Array.isArray(objectConfig.allowedGuildIds)
+          ? objectConfig.allowedGuildIds.map((id) => String(id).trim()).filter(Boolean)
+          : [],
+        allowedChannelIds: Array.isArray(objectConfig.allowedChannelIds)
+          ? objectConfig.allowedChannelIds.map((id) => String(id).trim()).filter(Boolean)
+          : [],
+        allowDirectMessages: objectConfig.allowDirectMessages !== false,
+      };
+    }
+
+    if (platform === 'imessage') {
+      const pollIntervalSeconds =
+        typeof objectConfig.pollIntervalSeconds === 'number'
+          ? Math.max(5, Math.min(300, Math.floor(objectConfig.pollIntervalSeconds)))
+          : 20;
+
+      return {
+        ...objectConfig,
+        serverUrl:
+          typeof objectConfig.serverUrl === 'string'
+            ? objectConfig.serverUrl.trim().replace(/\/$/, '')
+            : '',
+        accessToken:
+          typeof objectConfig.accessToken === 'string'
+            ? objectConfig.accessToken.trim()
+            : '',
+        defaultChatGuid:
+          typeof objectConfig.defaultChatGuid === 'string'
+            ? objectConfig.defaultChatGuid.trim()
+            : '',
+        allowHandles: Array.isArray(objectConfig.allowHandles)
+          ? objectConfig.allowHandles.map((entry) => String(entry).trim()).filter(Boolean)
+          : [],
+        pollIntervalSeconds,
+      };
+    }
+
+    if (platform === 'teams') {
+      const pollIntervalSeconds =
+        typeof objectConfig.pollIntervalSeconds === 'number'
+          ? Math.max(10, Math.min(300, Math.floor(objectConfig.pollIntervalSeconds)))
+          : 30;
+      return {
+        ...objectConfig,
+        tenantId:
+          typeof objectConfig.tenantId === 'string'
+            ? objectConfig.tenantId.trim()
+            : '',
+        clientId:
+          typeof objectConfig.clientId === 'string'
+            ? objectConfig.clientId.trim()
+            : '',
+        clientSecret:
+          typeof objectConfig.clientSecret === 'string'
+            ? objectConfig.clientSecret.trim()
+            : '',
+        teamId:
+          typeof objectConfig.teamId === 'string'
+            ? objectConfig.teamId.trim()
+            : '',
+        channelId:
+          typeof objectConfig.channelId === 'string'
+            ? objectConfig.channelId.trim()
+            : '',
+        pollIntervalSeconds,
+      };
+    }
 
     if (platform !== 'whatsapp') {
       return objectConfig;

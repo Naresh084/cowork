@@ -121,13 +121,37 @@ Contains:
   - `computer_use`
   - `deep_research`
 - Shared integration working directory defaults
-- WhatsApp / Slack / Telegram integration sections
+- Messaging integration sections:
+  - WhatsApp
+  - Slack
+  - Telegram
+  - Discord
+  - iMessage (BlueBubbles, macOS host)
+  - Microsoft Teams (Azure Graph app)
 
 Effect on runtime/tools:
 
 - External search fallback affects `web_search` when provider-native search is unavailable.
 - Stitch tools are only registered when Stitch key exists.
 - Computer-use/deep-research model fields control those tool model IDs.
+- Notification tools are dynamically registered only for connected platforms:
+  - `send_notification_whatsapp`
+  - `send_notification_slack`
+  - `send_notification_telegram`
+  - `send_notification_discord`
+  - `send_notification_imessage`
+  - `send_notification_teams`
+
+Messaging setup prerequisites:
+
+- Discord: bot token, optional guild/channel allowlists.
+- iMessage: BlueBubbles server URL + access token (macOS only).
+- Teams: tenant ID, client ID, client secret, team ID, channel ID.
+
+Attachment behavior:
+
+- New integrations (Discord, iMessage, Teams) support attachment ingestion and outbound media send paths.
+- If a provider API cannot return raw bytes, Cowork preserves attachment URL + metadata so workflows still continue.
 
 ## 4. Runtime Apply vs New Session
 

@@ -10,6 +10,9 @@ const SETTINGS_FILES = [
   resolve(process.cwd(), 'src/components/settings/WhatsAppSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/SlackSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/TelegramSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/DiscordSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/IMessageSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/TeamsSettings.tsx'),
 ];
 
 describe('settings help content coverage', () => {

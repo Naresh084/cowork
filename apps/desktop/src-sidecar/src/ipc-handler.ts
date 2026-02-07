@@ -3,7 +3,12 @@ import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
 import { commandService } from './command-service.js';
-import type { CommandCategory, SecretDefinition } from '@gemini-cowork/shared';
+import {
+  SUPPORTED_PLATFORM_TYPES,
+  type CommandCategory,
+  type PlatformType,
+  type SecretDefinition,
+} from '@gemini-cowork/shared';
 import { cronService } from './cron/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
@@ -67,6 +72,11 @@ let connectorSecretService: SecretService | null = null;
 
 // Connector OAuth service (lazily initialized)
 let connectorOAuthService: ConnectorOAuthService | null = null;
+const VALID_INTEGRATION_PLATFORMS = new Set<PlatformType>(SUPPORTED_PLATFORM_TYPES);
+
+function isValidIntegrationPlatform(value: string): value is PlatformType {
+  return VALID_INTEGRATION_PLATFORMS.has(value as PlatformType);
+}
 
 /**
  * Get or create the SecretService for connectors.
@@ -1716,9 +1726,10 @@ registerHandler('integration_list_statuses', async () => {
 
 registerHandler('integration_connect', async (params) => {
   const { platform, config } = params as { platform: string; config: Record<string, unknown> };
-  const validPlatforms = ['whatsapp', 'slack', 'telegram'];
-  if (!platform || !validPlatforms.includes(platform)) {
-    throw new Error(`Invalid platform: ${platform}. Must be one of: ${validPlatforms.join(', ')}`);
+  if (!platform || !isValidIntegrationPlatform(platform)) {
+    throw new Error(
+      `Invalid platform: ${platform}. Must be one of: ${SUPPORTED_PLATFORM_TYPES.join(', ')}`,
+    );
   }
   // Platform-specific config validation
   const safeConfig = config || {};
@@ -1739,18 +1750,54 @@ registerHandler('integration_connect', async (params) => {
   ) {
     throw new Error('Telegram requires a botToken from @BotFather');
   }
+  if (
+    platform === 'discord' &&
+    (typeof safeConfig.botToken !== 'string' || !safeConfig.botToken)
+  ) {
+    throw new Error('Discord requires a botToken from Discord Developer Portal');
+  }
+  if (platform === 'imessage') {
+    if (process.platform !== 'darwin') {
+      throw new Error('iMessage integration is only supported on macOS');
+    }
+    if (
+      typeof safeConfig.serverUrl !== 'string' ||
+      !safeConfig.serverUrl ||
+      typeof safeConfig.accessToken !== 'string' ||
+      !safeConfig.accessToken
+    ) {
+      throw new Error('iMessage requires serverUrl and accessToken');
+    }
+  }
+  if (
+    platform === 'teams' &&
+    (
+      typeof safeConfig.tenantId !== 'string' ||
+      !safeConfig.tenantId ||
+      typeof safeConfig.clientId !== 'string' ||
+      !safeConfig.clientId ||
+      typeof safeConfig.clientSecret !== 'string' ||
+      !safeConfig.clientSecret ||
+      typeof safeConfig.teamId !== 'string' ||
+      !safeConfig.teamId ||
+      typeof safeConfig.channelId !== 'string' ||
+      !safeConfig.channelId
+    )
+  ) {
+    throw new Error('Teams requires tenantId, clientId, clientSecret, teamId, and channelId');
+  }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.connect(platform as any, safeConfig);
+  await integrationBridge.connect(platform, safeConfig);
   return integrationBridge.getStatuses().find(s => s.platform === platform);
 });
 
 registerHandler('integration_disconnect', async (params) => {
   const { platform } = params as { platform: string };
-  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+  if (!platform || !isValidIntegrationPlatform(platform)) {
     throw new Error(`Invalid platform: ${platform}`);
   }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.disconnect(platform as any);
+  await integrationBridge.disconnect(platform);
   return { success: true };
 });
 
@@ -1768,20 +1815,24 @@ registerHandler('integration_get_qr', async () => {
 
 registerHandler('integration_configure', async (params) => {
   const { platform, config } = params as { platform: string; config: Record<string, unknown> };
-  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+  if (!platform || !isValidIntegrationPlatform(platform)) {
     throw new Error(`Invalid platform: ${platform}`);
   }
+  if (platform === 'imessage' && process.platform !== 'darwin') {
+    throw new Error('iMessage integration is only supported on macOS');
+  }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.configure(platform as any, config || {});
+  await integrationBridge.configure(platform, config || {});
   return { success: true };
 });
 
 registerHandler('integration_get_config', async (params) => {
   const { platform } = params as { platform: string };
   if (!platform) throw new Error('platform is required');
+  if (!isValidIntegrationPlatform(platform)) throw new Error(`Invalid platform: ${platform}`);
   const { integrationBridge } = await import('./integrations/index.js');
   const store = integrationBridge.getStore();
-  return store.getConfig(platform as any);
+  return store.getConfig(platform);
 });
 
 registerHandler('integration_get_settings', async () => {
@@ -1807,11 +1858,11 @@ registerHandler('integration_update_settings', async (params) => {
 
 registerHandler('integration_send_test', async (params) => {
   const { platform, message } = params as { platform: string; message?: string };
-  if (!platform || !['whatsapp', 'slack', 'telegram'].includes(platform)) {
+  if (!platform || !isValidIntegrationPlatform(platform)) {
     throw new Error(`Invalid platform: ${platform}`);
   }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.sendTestMessage(platform as any, message || 'Hello from Cowork!');
+  await integrationBridge.sendTestMessage(platform, message || 'Hello from Cowork!');
   return { success: true };
 });
 

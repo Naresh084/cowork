@@ -10,6 +10,9 @@ import { toast } from '@/components/ui/Toast';
 import { WhatsAppSettings } from './WhatsAppSettings';
 import { SlackSettings } from './SlackSettings';
 import { TelegramSettings } from './TelegramSettings';
+import { DiscordSettings } from './DiscordSettings';
+import { IMessageSettings } from './IMessageSettings';
+import { TeamsSettings } from './TeamsSettings';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { CapabilityMatrix } from '@/components/help/CapabilityMatrix';
 import { useCapabilityStore } from '@/stores/capability-store';
@@ -225,7 +228,8 @@ export function IntegrationSettings() {
       <div>
         <h3 className="text-sm font-medium text-white/90">Integration & Capability Settings</h3>
         <p className="mt-1 text-xs text-white/40">
-          Configure web-search fallbacks, computer-use/deep-research models, Stitch key, and messaging integrations.
+          Configure web-search fallbacks, computer-use/deep-research models, Stitch key, and messaging integrations
+          (WhatsApp, Slack, Telegram, Discord, iMessage, Teams).
         </p>
       </div>
 
@@ -419,7 +423,7 @@ export function IntegrationSettings() {
             <SettingHelpPopover settingId="integration.sharedSessionWorkingDirectory" />
           </div>
           <p className="mt-1 text-xs text-white/40">
-            New shared integration sessions (WhatsApp/Slack/Telegram) will use this working directory.
+            New shared integration sessions (all messaging platforms) will use this working directory.
           </p>
         </div>
 
@@ -529,6 +533,38 @@ export function IntegrationSettings() {
             Telegram uses a BotFather token for connection. Once connected, inbound messages can create shared sessions.
           </p>
           <TelegramSettings />
+        </div>
+      </details>
+
+      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Discord Integration</summary>
+        <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            Discord uses a bot token with optional guild/channel allowlists. Connected Discord supports inbound shared
+            sessions and outbound notifications.
+          </p>
+          <DiscordSettings />
+        </div>
+      </details>
+
+      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">iMessage Integration</summary>
+        <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            iMessage uses a BlueBubbles bridge and is supported on macOS hosts only.
+          </p>
+          <IMessageSettings />
+        </div>
+      </details>
+
+      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Microsoft Teams Integration</summary>
+        <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            Teams integration uses Azure Graph app credentials to power inbound channel monitoring and outbound
+            notifications.
+          </p>
+          <TeamsSettings />
         </div>
       </details>
 

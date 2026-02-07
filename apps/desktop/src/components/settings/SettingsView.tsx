@@ -100,7 +100,14 @@ export function SettingsView() {
           const isActive = activeTab === tab.id;
           const isConnected =
             tab.id === 'integrations' &&
-            (platforms.whatsapp?.connected || platforms.slack?.connected || platforms.telegram?.connected);
+            (
+              platforms.whatsapp?.connected ||
+              platforms.slack?.connected ||
+              platforms.telegram?.connected ||
+              platforms.discord?.connected ||
+              platforms.imessage?.connected ||
+              platforms.teams?.connected
+            );
 
           return (
             <button

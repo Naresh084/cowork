@@ -5,7 +5,13 @@ import {
   setModelContextWindows,
 } from '@gemini-cowork/providers';
 import type { Message, PermissionRequest, PermissionDecision, MessageContentPart, SessionType } from '@gemini-cowork/shared';
-import { generateId, generateMessageId, now, generateChatItemId } from '@gemini-cowork/shared';
+import {
+  SUPPORTED_PLATFORM_TYPES,
+  generateId,
+  generateMessageId,
+  now,
+  generateChatItemId,
+} from '@gemini-cowork/shared';
 import type {
   ChatItem,
   UserMessageItem,
@@ -1773,8 +1779,7 @@ export class AgentRunner {
       integrationStatuses.map((status) => [status.platform.toLowerCase(), status.connected] as const),
     );
 
-    const platforms = ['whatsapp', 'slack', 'telegram'] as const;
-    for (const platform of platforms) {
+    for (const platform of SUPPORTED_PLATFORM_TYPES) {
       const connected = Boolean(statusByPlatform.get(platform));
       this.pushSnapshotToolAccess(
         toolAccess,
@@ -3379,7 +3384,7 @@ You can create automated scheduled tasks that run in the background. Use the \`s
 2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
 3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use web_search to search the web").
 4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
-5. **Notification channel confirmation is required when available**. If at least one messaging integration is connected and the user requests a scheduled task without naming a delivery channel, ask a single clarifying question to pick the channel (WhatsApp/Slack/Telegram) before creating the task.
+5. **Notification channel confirmation is required when available**. If at least one messaging integration is connected and the user requests a scheduled task without naming a delivery channel, ask a single clarifying question to pick the channel before creating the task.
 
 ### When to Suggest Scheduling
 Proactively suggest scheduling when the user:
@@ -3398,8 +3403,8 @@ Proactively suggest scheduling when the user:
 ### How schedule_task Works
 - Creates a background job managed by the cron service that runs automatically on schedule.
 - The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
-- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected platforms (WhatsApp, Slack, Telegram). If a messaging platform is connected at the time the task runs, the cron agent can use \`send_notification_whatsapp\` / \`send_notification_slack\` / \`send_notification_telegram\` to deliver results.
-- When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack"), include that instruction in the prompt. Example: "After searching, send a summary of the results to the user via send_notification_whatsapp."
+- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the cron agent can use matching \`send_notification_<platform>\` tools to deliver results.
+- When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack", "post in Teams"), include that instruction in the prompt using the matching notification tool.
 - If messaging integrations are connected and the user did not choose a delivery channel for the scheduled task, ask which channel to use before creating the task. If no integrations are connected, proceed without asking and keep delivery in-app.
 - Results are also delivered to the user's chat when each run completes.
 - \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
@@ -3470,26 +3475,26 @@ schedule_task({
 \`\`\`
 Result: Runs every Monday at 8 AM indefinitely.
 
-**Example 5: Search + WhatsApp notification - "Google latest news every 5 min and send to my WhatsApp"**
+**Example 5: Search + Discord notification - "Google latest news every 5 min and send to Discord"**
 \`\`\`
 schedule_task({
-  name: "News to WhatsApp",
-  prompt: "Use web_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_whatsapp.",
+  name: "News to Discord",
+  prompt: "Use web_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_discord.",
   schedule: { type: "interval", every: 5 }
 })
 \`\`\`
-Result: Searches every 5 min, sends results to WhatsApp each time. The cron agent has access to all connected platform notification tools automatically.
+Result: Searches every 5 min, sends results to Discord each time. The cron agent has access to all connected platform notification tools automatically.
 
-**Example 6: Monitoring + Slack alert - "Check API health every 5 min for 1 hour, alert on Slack if down"**
+**Example 6: Monitoring + Teams alert - "Check API health every 5 min for 1 hour, alert on Teams if down"**
 \`\`\`
 schedule_task({
   name: "API Health Monitor",
-  prompt: "Use web_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_slack with the error details. If it's up, just log the status.",
+  prompt: "Use web_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_teams with the error details. If it's up, just log the status.",
   schedule: { type: "interval", every: 5 },
   maxRuns: 12
 })
 \`\`\`
-Result: Checks every 5 minutes, alerts on Slack only if issues found, stops after 12 checks (= 1 hour).
+Result: Checks every 5 minutes, alerts on Teams only if issues found, stops after 12 checks (= 1 hour).
 
 **Example 7: Cron expression - "Run tests every weekday at 6 PM"**
 Cron expressions follow the format: \`minute hour day-of-month month day-of-week\`
@@ -3526,16 +3531,16 @@ schedule_task({
 \`\`\`
 Result: Fires once, 30 minutes from now.
 
-**Example 10: Search + Telegram with limit - "Fetch weather every hour for 8 hours, send to Telegram"**
+**Example 10: Search + iMessage with limit - "Fetch weather every hour for 8 hours, send to iMessage"**
 \`\`\`
 schedule_task({
   name: "Weather Updates",
-  prompt: "Use web_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_telegram.",
+  prompt: "Use web_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_imessage.",
   schedule: { type: "interval", every: 60 },
   maxRuns: 8
 })
 \`\`\`
-Result: Searches weather every hour, sends to Telegram, auto-stops after 8 updates.
+Result: Searches weather every hour, sends to iMessage, auto-stops after 8 updates.
 
 **Example 11: Conversation-history suggestion + confirmation**
 Conversation pattern:
@@ -3623,6 +3628,9 @@ Use \`manage_scheduled_task\` to:
         whatsapp: 'WhatsApp',
         slack: 'Slack',
         telegram: 'Telegram',
+        discord: 'Discord',
+        imessage: 'iMessage',
+        teams: 'Microsoft Teams',
       };
 
       const platformList = connected
@@ -3653,7 +3661,7 @@ ${toolList}
 - Proactively notify when scheduled/long-running tasks complete
 - Alert about important findings during operations
 - Send summaries when cron jobs finish
-- Respond to user requests like "notify me on WhatsApp when done"
+- Respond to user requests like "notify me when done" via the requested connected platform
 
 ### Guidelines
 - Keep notification messages concise (platform character limits apply)

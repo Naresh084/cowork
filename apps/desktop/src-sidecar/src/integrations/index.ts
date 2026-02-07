@@ -1,11 +1,15 @@
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter.js';
 import { SlackAdapter } from './adapters/slack-adapter.js';
 import { TelegramAdapter } from './adapters/telegram-adapter.js';
+import { DiscordAdapter } from './adapters/discord-adapter.js';
+import { IMessageBlueBubblesAdapter } from './adapters/imessage-bluebubbles-adapter.js';
+import { TeamsAdapter } from './adapters/teams-adapter.js';
 import { MessageRouter } from './message-router.js';
 import { IntegrationStore, type IntegrationGeneralSettings } from './store.js';
 import { eventEmitter } from '../event-emitter.js';
 import {
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  SUPPORTED_INTEGRATION_PLATFORMS,
   type PlatformType,
   type PlatformStatus,
 } from './types.js';
@@ -266,8 +270,7 @@ export class IntegrationBridgeService {
 
   /** Get statuses of all platforms */
   getStatuses(): PlatformStatus[] {
-    const platforms: PlatformType[] = ['whatsapp', 'slack', 'telegram'];
-    return platforms.map((p) => {
+    return SUPPORTED_INTEGRATION_PLATFORMS.map((p) => {
       const adapter = this.adapters.get(p);
       return adapter
         ? adapter.getStatus()
@@ -329,6 +332,12 @@ export class IntegrationBridgeService {
         return new SlackAdapter();
       case 'telegram':
         return new TelegramAdapter();
+      case 'discord':
+        return new DiscordAdapter();
+      case 'imessage':
+        return new IMessageBlueBubblesAdapter();
+      case 'teams':
+        return new TeamsAdapter();
       default:
         throw new Error(`Unknown platform: ${platform}`);
     }
@@ -384,32 +393,88 @@ export class IntegrationBridgeService {
     platform: PlatformType,
     config: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (platform !== 'whatsapp') {
-      return config;
-    }
-
-    const allowFromRaw = Array.isArray(config.allowFrom) ? config.allowFrom : [];
-    const allowFromSet = new Set<string>();
-    for (const value of allowFromRaw) {
-      const normalized = this.normalizeE164Like(value);
-      if (normalized) {
-        allowFromSet.add(normalized);
+    if (platform === 'whatsapp') {
+      const allowFromRaw = Array.isArray(config.allowFrom) ? config.allowFrom : [];
+      const allowFromSet = new Set<string>();
+      for (const value of allowFromRaw) {
+        const normalized = this.normalizeE164Like(value);
+        if (normalized) {
+          allowFromSet.add(normalized);
+        }
       }
+
+      const denialMessage =
+        typeof config.denialMessage === 'string' && config.denialMessage.trim()
+          ? config.denialMessage.trim().slice(0, 280)
+          : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+
+      return {
+        ...config,
+        senderPolicy: 'allowlist',
+        allowFrom: Array.from(allowFromSet),
+        denialMessage,
+      };
     }
 
-    const denialMessage =
-      typeof config.denialMessage === 'string' && config.denialMessage.trim()
-        ? config.denialMessage.trim().slice(0, 280)
-        : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+    if (platform === 'discord') {
+      const allowedGuildIds = Array.isArray(config.allowedGuildIds)
+        ? config.allowedGuildIds.map((id) => String(id).trim()).filter(Boolean)
+        : [];
+      const allowedChannelIds = Array.isArray(config.allowedChannelIds)
+        ? config.allowedChannelIds.map((id) => String(id).trim()).filter(Boolean)
+        : [];
 
-    const normalizedConfig: Record<string, unknown> = {
-      ...config,
-      senderPolicy: 'allowlist',
-      allowFrom: Array.from(allowFromSet),
-      denialMessage,
-    };
+      return {
+        ...config,
+        botToken: typeof config.botToken === 'string' ? config.botToken.trim() : '',
+        allowedGuildIds,
+        allowedChannelIds,
+        allowDirectMessages: config.allowDirectMessages !== false,
+      };
+    }
 
-    return normalizedConfig;
+    if (platform === 'imessage') {
+      const allowHandles = Array.isArray(config.allowHandles)
+        ? config.allowHandles.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      const pollIntervalSeconds =
+        typeof config.pollIntervalSeconds === 'number'
+          ? Math.max(5, Math.min(300, Math.floor(config.pollIntervalSeconds)))
+          : 20;
+
+      return {
+        ...config,
+        serverUrl:
+          typeof config.serverUrl === 'string'
+            ? config.serverUrl.trim().replace(/\/$/, '')
+            : '',
+        accessToken: typeof config.accessToken === 'string' ? config.accessToken.trim() : '',
+        defaultChatGuid:
+          typeof config.defaultChatGuid === 'string' ? config.defaultChatGuid.trim() : '',
+        allowHandles,
+        pollIntervalSeconds,
+      };
+    }
+
+    if (platform === 'teams') {
+      const pollIntervalSeconds =
+        typeof config.pollIntervalSeconds === 'number'
+          ? Math.max(10, Math.min(300, Math.floor(config.pollIntervalSeconds)))
+          : 30;
+
+      return {
+        ...config,
+        tenantId: typeof config.tenantId === 'string' ? config.tenantId.trim() : '',
+        clientId: typeof config.clientId === 'string' ? config.clientId.trim() : '',
+        clientSecret:
+          typeof config.clientSecret === 'string' ? config.clientSecret.trim() : '',
+        teamId: typeof config.teamId === 'string' ? config.teamId.trim() : '',
+        channelId: typeof config.channelId === 'string' ? config.channelId.trim() : '',
+        pollIntervalSeconds,
+      };
+    }
+
+    return config;
   }
 
   private normalizeE164Like(value: unknown): string | null {

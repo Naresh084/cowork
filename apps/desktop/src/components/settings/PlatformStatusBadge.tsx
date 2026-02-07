@@ -1,15 +1,19 @@
 import { cn } from '@/lib/utils';
+import type { PlatformType } from '@gemini-cowork/shared';
 
 interface PlatformStatusBadgeProps {
-  platform: 'whatsapp' | 'slack' | 'telegram';
+  platform: PlatformType;
   connected: boolean;
   displayName?: string;
 }
 
-const platformColors: Record<string, string> = {
+const platformColors: Record<PlatformType, string> = {
   whatsapp: '#25D366',
   slack: '#9B59B6',
   telegram: '#2AABEE',
+  discord: '#5865F2',
+  imessage: '#34C759',
+  teams: '#6264A7',
 };
 
 export function PlatformStatusBadge({
