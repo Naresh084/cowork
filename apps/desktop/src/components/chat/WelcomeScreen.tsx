@@ -47,6 +47,12 @@ const quickActions: QuickAction[] = [
     label: 'Prep for a meeting',
     prompt: 'I can help you prepare for a meeting. What\'s the meeting about?',
   },
+  {
+    id: 'plan_first',
+    icon: FileText,
+    label: 'Plan first',
+    prompt: 'Switch this session to plan mode, analyze the task, and return one detailed <proposed_plan> block before implementation.',
+  },
 ];
 
 interface WelcomeScreenProps {

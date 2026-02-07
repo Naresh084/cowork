@@ -8,11 +8,13 @@ import { type ProviderId } from './auth-store';
 import { useAppStore } from './app-store';
 
 export type SessionKind = 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
+export type ExecutionMode = 'execute' | 'plan';
 
 export interface SessionSummary {
   id: string;
   type?: SessionKind;
   provider?: ProviderId;
+  executionMode?: ExecutionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string | null;
@@ -27,6 +29,7 @@ export interface SessionInfo {
   id: string;
   type?: SessionKind;
   provider?: ProviderId;
+  executionMode?: ExecutionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -47,11 +50,17 @@ interface SessionState {
 
 interface SessionActions {
   loadSessions: () => Promise<void>;
-  createSession: (workingDirectory: string, model?: string, provider?: ProviderId) => Promise<string>;
+  createSession: (
+    workingDirectory: string,
+    model?: string,
+    provider?: ProviderId,
+    executionMode?: ExecutionMode
+  ) => Promise<string>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
+  setSessionExecutionMode: (sessionId: string, mode: ExecutionMode) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   clearError: () => void;
   waitForBackend: () => Promise<void>;
@@ -102,7 +111,11 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
         set({ isLoading: true, error: null });
         try {
-          const sessions = await invoke<SessionSummary[]>('agent_list_sessions');
+          const sessionsRaw = await invoke<SessionSummary[]>('agent_list_sessions');
+          const sessions = sessionsRaw.map((session) => ({
+            ...session,
+            executionMode: session.executionMode || 'execute',
+          }));
 
           // SAFETY: If backend returns 0 sessions but we have cached sessions,
           // this might indicate a timing issue - keep cached sessions
@@ -152,7 +165,12 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }
       },
 
-      createSession: async (workingDirectory: string, model?: string, provider?: ProviderId) => {
+      createSession: async (
+        workingDirectory: string,
+        model?: string,
+        provider?: ProviderId,
+        executionMode: ExecutionMode = 'execute'
+      ) => {
         set({ isLoading: true, error: null });
         try {
           const settingsState = useSettingsStore.getState();
@@ -163,6 +181,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             workingDirectory,
             model: providerModel,
             provider: activeProvider,
+            executionMode,
           });
 
           // Add to sessions list (new sessions are most recently accessed)
@@ -170,6 +189,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             id: session.id,
             type: session.type,
             provider: session.provider || activeProvider,
+            executionMode: session.executionMode || executionMode,
             title: session.title,
             firstMessage: null,
             workingDirectory: session.workingDirectory,
@@ -351,6 +371,28 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }
       },
 
+      setSessionExecutionMode: async (sessionId: string, mode: ExecutionMode) => {
+        const previousSessions = get().sessions;
+
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, executionMode: mode } : s
+          ),
+        }));
+
+        try {
+          await invoke('agent_set_execution_mode', { sessionId, mode });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to update execution mode', errorMessage);
+          set({
+            sessions: previousSessions,
+            error: errorMessage,
+          });
+          throw error;
+        }
+      },
+
       setActiveSession: (sessionId: string | null) => {
         set({ activeSessionId: sessionId });
       },
@@ -367,6 +409,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         sessions: state.sessions.map(s => ({
           id: s.id,
           provider: s.provider,
+          executionMode: s.executionMode || 'execute',
           title: s.title,
           firstMessage: s.firstMessage,
           workingDirectory: s.workingDirectory,

@@ -328,8 +328,10 @@ export function useAgentEvents(sessionId: string | null): void {
             options: event.request.options?.map(opt => ({
               label: opt.label,
               description: opt.description,
+              value: opt.value,
             })) || [],
             multiSelect: event.request.multiSelect,
+            allowCustom: event.request.allowCustom,
             createdAt: event.request.timestamp || Date.now(),
           });
           break;

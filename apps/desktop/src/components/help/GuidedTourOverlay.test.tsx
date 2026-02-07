@@ -20,6 +20,7 @@ describe('GuidedTourOverlay', () => {
     document.body.innerHTML = `
       <div data-tour-id=\"sidebar-root\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-header-root\" style=\"width:120px;height:40px;\"></div>
+      <div data-tour-id=\"session-execution-mode-plan\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"chat-input-area\" style=\"width:120px;height:40px;\"></div>
     `;
 
@@ -65,6 +66,7 @@ describe('GuidedTourOverlay', () => {
     document.body.innerHTML = `
       <div data-tour-id=\"sidebar-root\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"session-header-root\" style=\"width:120px;height:40px;\"></div>
+      <div data-tour-id=\"session-execution-mode-plan\" style=\"width:120px;height:40px;\"></div>
       <div data-tour-id=\"chat-input-area\" style=\"width:120px;height:40px;\"></div>
     `;
 
@@ -72,7 +74,7 @@ describe('GuidedTourOverlay', () => {
 
     act(() => {
       useHelpStore.getState().startTour('workspace', true);
-      useHelpStore.getState().setTourStep(2);
+      useHelpStore.getState().setTourStep(3);
     });
 
     expect(await screen.findByText('Input and Attachments')).toBeInTheDocument();

@@ -49,6 +49,7 @@ export interface ExtendedPermissionRequest extends PermissionRequest {
 export interface QuestionOption {
   label: string;
   description?: string;
+  value?: string;
 }
 
 /**
@@ -60,6 +61,7 @@ export interface QuestionRequest {
   options?: QuestionOption[];
   multiSelect?: boolean;
   header?: string;
+  allowCustom?: boolean;
   timestamp: number;
 }
 
@@ -149,6 +151,7 @@ export type AgentEvent =
       sessionId: string;
       title?: string;
       messageCount?: number;
+      executionMode?: 'execute' | 'plan';
     }
   // Agent state events
   | { type: 'agent:started'; sessionId: string }

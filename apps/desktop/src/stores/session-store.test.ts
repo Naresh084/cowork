@@ -35,7 +35,12 @@ describe('session-store', () => {
       await useSessionStore.getState().loadSessions();
 
       const state = useSessionStore.getState();
-      expect(state.sessions).toEqual(mockSessions);
+      expect(state.sessions).toEqual([
+        {
+          ...mockSessions[0],
+          executionMode: 'execute',
+        },
+      ]);
       expect(state.isLoading).toBe(false);
       expect(state.error).toBeNull();
     });

@@ -45,6 +45,11 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Tool policy profiles and per-action approval checks work together. Even allowed tools can still prompt for risky actions, depending on policy and operation type.',
       },
       {
+        heading: 'Plan Mode Workflow',
+        body:
+          'Plan mode is per-session and read-only. The agent analyzes and returns a <proposed_plan> block. You can Accept (auto-switch to Execute and auto-run) or Reject (request revision in Plan mode).',
+      },
+      {
         heading: 'Tool Availability',
         body:
           'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. The Help Center capability matrix shows your current effective access and the reason for disabled tools.',
@@ -209,6 +214,12 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
         title: 'Session Controls',
         description: 'Manage approval mode, connection status, and session metadata.',
         targetId: 'session-header-root',
+      },
+      {
+        id: 'workspace-step-plan-mode',
+        title: 'Plan Mode',
+        description: 'Switch between Execute and Plan mode. Plan mode is read-only and requires plan approval before execution.',
+        targetId: 'session-execution-mode-plan',
       },
       {
         id: 'workspace-step-input',

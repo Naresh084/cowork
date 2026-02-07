@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { useSessionStore } from './session-store';
 
 export type PolicyAction = 'allow' | 'ask' | 'deny';
 
@@ -18,6 +19,7 @@ export interface IntegrationAccessEntry {
 
 export interface CapabilitySnapshot {
   provider: string;
+  executionMode?: 'execute' | 'plan';
   mediaRouting: {
     imageBackend: 'google' | 'openai' | 'fal';
     videoBackend: 'google' | 'openai' | 'fal';
@@ -86,6 +88,10 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
 
   return {
     provider: asString(root.provider, 'google'),
+    executionMode:
+      root.executionMode === 'plan' || root.executionMode === 'execute'
+        ? root.executionMode
+        : 'execute',
     mediaRouting: {
       imageBackend: toMediaBackend(mediaRouting.imageBackend),
       videoBackend: toMediaBackend(mediaRouting.videoBackend),
@@ -128,7 +134,10 @@ export const useCapabilityStore = create<CapabilityState & CapabilityActions>((s
   refreshSnapshot: async () => {
     set({ isLoading: true, error: null });
     try {
-      const raw = await invoke<unknown>('agent_get_capability_snapshot');
+      const activeSessionId = useSessionStore.getState().activeSessionId;
+      const raw = await invoke<unknown>('agent_get_capability_snapshot', {
+        sessionId: activeSessionId || null,
+      });
       const snapshot = normalizeCapabilitySnapshot(raw);
       set({
         snapshot,

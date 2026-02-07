@@ -36,6 +36,7 @@ interface SessionMetadataV1 {
   id: string;
   type?: SessionType;
   provider?: ProviderId;
+  executionMode?: 'execute' | 'plan';
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -49,6 +50,7 @@ interface SessionMetadataV2 {
   id: string;
   type?: SessionType;
   provider?: ProviderId;
+  executionMode?: 'execute' | 'plan';
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -64,6 +66,7 @@ interface SessionIndex {
     id: string;
     type?: SessionType;
     provider?: ProviderId;
+    executionMode?: 'execute' | 'plan';
     title: string | null;
     firstMessage: string | null;
     workingDirectory: string;
@@ -217,6 +220,7 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
       ...v1Data.metadata,
       version: 2,
       provider: v1Data.metadata.provider || 'google',
+      executionMode: v1Data.metadata.executionMode || 'execute',
       // For migrated sessions, set lastAccessedAt to updatedAt
       lastAccessedAt: v1Data.metadata.updatedAt,
     },
@@ -396,6 +400,7 @@ export class SessionPersistence {
           ...metadata,
           version: 2,
           provider: metadata.provider || 'google',
+          executionMode: metadata.executionMode || 'execute',
           // Backward compat: if lastAccessedAt is missing, use updatedAt
           lastAccessedAt: metadata.lastAccessedAt || metadata.updatedAt,
         },
@@ -477,6 +482,7 @@ export class SessionPersistence {
           id: data.metadata.id,
           type: data.metadata.type || 'main',
           provider: data.metadata.provider || 'google',
+          executionMode: data.metadata.executionMode || 'execute',
           title: data.metadata.title,
           workingDirectory: data.metadata.workingDirectory,
           model: data.metadata.model,
@@ -535,6 +541,7 @@ export class SessionPersistence {
         id: session.id,
         type: session.type,
         provider: 'google',
+        executionMode: 'execute',
         title: session.title,
         workingDirectory: session.workingDirectory,
         model: session.model,
@@ -691,6 +698,7 @@ export class SessionPersistence {
       id: data.metadata.id,
       type: data.metadata.type || 'main',
       provider: data.metadata.provider || 'google',
+      executionMode: data.metadata.executionMode || 'execute',
       title: data.metadata.title,
       firstMessage,
       workingDirectory: data.metadata.workingDirectory,
