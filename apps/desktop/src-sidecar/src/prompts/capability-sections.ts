@@ -153,6 +153,36 @@ function buildModeGuardrailsSection(context: PromptBuildContext): PromptTemplate
   };
 }
 
+function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): PromptTemplateSection | null {
+  const toolNames = new Set(context.toolHandlers.map((tool) => tool.name));
+  const hasCodexStart = toolNames.has('start_codex_cli_run');
+  const hasClaudeStart = toolNames.has('start_claude_cli_run');
+
+  if (!hasCodexStart && !hasClaudeStart) {
+    return null;
+  }
+
+  const availableStarts: string[] = [];
+  if (hasCodexStart) availableStarts.push('`start_codex_cli_run`');
+  if (hasClaudeStart) availableStarts.push('`start_claude_cli_run`');
+
+  return {
+    key: 'external_cli_operating_practice',
+    content: [
+      '## External CLI Operating Practice',
+      `- Available launch tools: ${availableStarts.join(', ')}.`,
+      '- Before launching, run a short conversational checklist and confirm all values in natural language:',
+      '  - `working_directory`',
+      '  - `create_if_missing`',
+      '  - `bypassPermission` (default recommendation: `false`)',
+      '- If the user omitted directory, ask whether to use the current session working directory.',
+      '- If requested directory is missing, ask if it should be created before launch.',
+      '- If user asks for bypass but settings disallow it, explain and ask whether to continue with bypass disabled.',
+      '- After confirmations, call the start tool with explicit structured arguments only.',
+    ].join('\n'),
+  };
+}
+
 function buildSchedulingDefaultsSection(context: PromptBuildContext): PromptTemplateSection {
   const lines: string[] = ['## Scheduling Delivery Defaults'];
 
@@ -190,9 +220,11 @@ function buildNotesSection(context: PromptBuildContext): PromptTemplateSection |
 }
 
 export function buildCapabilitySections(context: PromptBuildContext): PromptTemplateSection[] {
+  const externalCliSection = buildExternalCliOperatingPracticeSection(context);
   const sections: PromptTemplateSection[] = [
     buildEffectiveEnvironmentSection(context),
     buildModeGuardrailsSection(context),
+    ...(externalCliSection ? [externalCliSection] : []),
     buildAvailableToolsSection(context),
     buildUnavailableToolsSection(context),
     buildIntegrationsSection(context),

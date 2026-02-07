@@ -1,11 +1,12 @@
 import { EventEmitter } from 'events';
+import { mkdir, stat } from 'fs/promises';
+import { resolve } from 'path';
 import { generateId } from '@gemini-cowork/shared';
 import { parseNaturalLanguageResponse } from './nl-response-parser.js';
 import { ExternalCliRunStateStore } from './run-state-store.js';
 import { ExternalCliDiscoveryService } from './discovery-service.js';
 import type {
   ExternalCliAdapter,
-  ExternalCliPendingInteraction,
   ExternalCliProgressEntry,
   ExternalCliRunRecord,
   ExternalCliRunSummary,
@@ -18,8 +19,17 @@ import { ExternalCliError } from './errors.js';
 
 const MAX_PROGRESS_ENTRIES = 200;
 
+function stringifyError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function isRunActive(status: ExternalCliRunRecord['status']): boolean {
   return status === 'queued' || status === 'running' || status === 'waiting_user';
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  return (error as { code?: string }).code === code;
 }
 
 function toSummary(run: ExternalCliRunRecord): ExternalCliRunSummary {
@@ -145,6 +155,10 @@ export class ExternalCliRunManager extends EventEmitter {
       );
     }
 
+    const workingDirectory = await this.prepareWorkingDirectory(input);
+    const requestedBypassPermission = input.requestedBypassPermission ?? input.bypassPermission;
+    const effectiveBypassPermission = input.bypassPermission;
+
     const now = Date.now();
     const runId = generateId('ext-run');
 
@@ -153,8 +167,12 @@ export class ExternalCliRunManager extends EventEmitter {
       sessionId: input.sessionId,
       provider: input.provider,
       prompt: input.prompt,
-      workingDirectory: input.workingDirectory,
-      bypassPermission: input.bypassPermission,
+      workingDirectory,
+      resolvedWorkingDirectory: workingDirectory,
+      createIfMissing: input.createIfMissing,
+      requestedBypassPermission,
+      effectiveBypassPermission,
+      bypassPermission: effectiveBypassPermission,
       status: 'queued',
       startedAt: now,
       updatedAt: now,
@@ -285,16 +303,17 @@ export class ExternalCliRunManager extends EventEmitter {
         },
       );
     } catch (error) {
+      const errorMessage = stringifyError(error);
       run.status = 'failed';
       run.errorCode = 'CLI_PROTOCOL_ERROR';
-      run.errorMessage = stringifyError(error);
+      run.errorMessage = errorMessage;
       run.finishedAt = Date.now();
       run.updatedAt = run.finishedAt;
       run.pendingInteraction = undefined;
       this.appendProgress(run, {
         timestamp: run.finishedAt,
         kind: 'error',
-        message: run.errorMessage,
+        message: errorMessage,
       });
       this.adapters.delete(runId);
       await adapter.dispose();
@@ -402,6 +421,63 @@ export class ExternalCliRunManager extends EventEmitter {
     );
 
     return match || null;
+  }
+
+  private async prepareWorkingDirectory(input: ExternalCliStartRunInput): Promise<string> {
+    const raw = String(input.workingDirectory || '').trim();
+    if (!raw) {
+      throw new ExternalCliError(
+        'CLI_PROTOCOL_ERROR',
+        'working_directory is required. Confirm it in conversation before starting the external CLI run.',
+      );
+    }
+
+    const resolvedWorkingDirectory = resolve(raw);
+
+    try {
+      const existing = await stat(resolvedWorkingDirectory);
+      if (!existing.isDirectory()) {
+        throw new ExternalCliError(
+          'CLI_PROTOCOL_ERROR',
+          `Working directory is not a directory: ${resolvedWorkingDirectory}`,
+        );
+      }
+      return resolvedWorkingDirectory;
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) {
+        if (!input.createIfMissing) {
+          throw new ExternalCliError(
+            'CLI_PROTOCOL_ERROR',
+            `Working directory does not exist: ${resolvedWorkingDirectory}. Ask user to confirm creation and rerun with create_if_missing=true.`,
+          );
+        }
+
+        try {
+          await mkdir(resolvedWorkingDirectory, { recursive: true });
+          const created = await stat(resolvedWorkingDirectory);
+          if (!created.isDirectory()) {
+            throw new ExternalCliError(
+              'CLI_PROTOCOL_ERROR',
+              `Failed to create directory: ${resolvedWorkingDirectory}`,
+            );
+          }
+          return resolvedWorkingDirectory;
+        } catch (createError) {
+          if (createError instanceof ExternalCliError) {
+            throw createError;
+          }
+          throw new ExternalCliError(
+            'CLI_PROTOCOL_ERROR',
+            `Unable to create working directory ${resolvedWorkingDirectory}: ${stringifyError(createError)}`,
+          );
+        }
+      }
+
+      throw new ExternalCliError(
+        'CLI_PROTOCOL_ERROR',
+        `Unable to access working directory ${resolvedWorkingDirectory}: ${stringifyError(error)}`,
+      );
+    }
   }
 
   private appendProgress(run: ExternalCliRunRecord, entry: ExternalCliProgressEntry): void {

@@ -226,7 +226,7 @@ registerHandler('get_capability_snapshot', async (params) => {
 });
 
 registerHandler('get_external_cli_availability', async (params) => {
-  const forceRefresh = Boolean(params.forceRefresh);
+  const forceRefresh = Boolean((params as { forceRefresh?: boolean } | undefined)?.forceRefresh);
   return agentRunner.getExternalCliAvailability(forceRefresh);
 });
 
@@ -1037,17 +1037,18 @@ registerHandler('deep_memory_init', async (params) => {
 // Create a new memory
 registerHandler('deep_memory_create', async (params) => {
   const p = params as unknown as MemoryCreateParams;
-  if (!p.workingDirectory || !p.title || !p.content || !p.group) {
+  const input = ((params as { input?: Partial<MemoryCreateParams> }).input || p) as Partial<MemoryCreateParams>;
+  if (!p.workingDirectory || !input.title || !input.content || !input.group) {
     throw new Error('workingDirectory, title, content, and group are required');
   }
   const service = await getMemoryService(p.workingDirectory);
   const memory = await service.create({
-    title: p.title,
-    content: p.content,
-    group: p.group,
-    tags: p.tags || [],
-    source: p.source || 'manual',
-    confidence: p.confidence,
+    title: input.title,
+    content: input.content,
+    group: input.group,
+    tags: input.tags || [],
+    source: input.source || 'manual',
+    confidence: input.confidence,
   });
   return memory;
 });
@@ -1069,18 +1070,21 @@ registerHandler('deep_memory_read', async (params) => {
 // Update a memory
 registerHandler('deep_memory_update', async (params) => {
   const p = params as unknown as MemoryUpdateParams;
-  if (!p.workingDirectory || !p.memoryId) {
+  const payload = params as { id?: string; memoryId?: string; updates?: Partial<MemoryUpdateParams>; workingDirectory?: string };
+  const memoryId = p.memoryId || payload.id;
+  const updates = payload.updates || p;
+  if (!p.workingDirectory || !memoryId) {
     throw new Error('workingDirectory and memoryId are required');
   }
   const service = await getMemoryService(p.workingDirectory);
-  const memory = await service.update(p.memoryId, {
-    title: p.title,
-    content: p.content,
-    group: p.group,
-    tags: p.tags,
+  const memory = await service.update(memoryId, {
+    title: updates.title,
+    content: updates.content,
+    group: updates.group,
+    tags: updates.tags,
   });
   if (!memory) {
-    throw new Error(`Memory not found: ${p.memoryId}`);
+    throw new Error(`Memory not found: ${memoryId}`);
   }
   return memory;
 });
@@ -1147,22 +1151,26 @@ registerHandler('deep_memory_list_groups', async (params) => {
 // Create a memory group
 registerHandler('deep_memory_create_group', async (params) => {
   const p = params as unknown as MemoryGroupCreateParams;
-  if (!p.workingDirectory || !p.groupName) {
+  const payload = params as { workingDirectory?: string; groupName?: string; name?: string };
+  const groupName = payload.groupName || payload.name;
+  if (!p.workingDirectory || !groupName) {
     throw new Error('workingDirectory and groupName are required');
   }
   const service = await getMemoryService(p.workingDirectory);
-  await service.createGroup(p.groupName);
+  await service.createGroup(groupName);
   return { success: true };
 });
 
 // Delete a memory group
 registerHandler('deep_memory_delete_group', async (params) => {
   const p = params as unknown as MemoryGroupDeleteParams;
-  if (!p.workingDirectory || !p.groupName) {
+  const payload = params as { workingDirectory?: string; groupName?: string; name?: string };
+  const groupName = payload.groupName || payload.name;
+  if (!p.workingDirectory || !groupName) {
     throw new Error('workingDirectory and groupName are required');
   }
   const service = await getMemoryService(p.workingDirectory);
-  await service.deleteGroup(p.groupName);
+  await service.deleteGroup(groupName);
   return { success: true };
 });
 

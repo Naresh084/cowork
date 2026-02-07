@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isAbsolute, resolve } from 'path';
 import type { ToolHandler, ToolResult } from '@gemini-cowork/core';
 import type { ExternalCliRunManager } from '../external-cli/run-manager.js';
 import type { ExternalCliRunOrigin } from '../external-cli/types.js';
@@ -30,37 +31,79 @@ function fail(error: unknown): ToolResult {
   };
 }
 
+function resolveWorkingDirectory(baseDirectory: string, workingDirectory: string): string {
+  const trimmed = workingDirectory.trim();
+  if (!trimmed) {
+    throw new ExternalCliError(
+      'CLI_PROTOCOL_ERROR',
+      'working_directory is required. Confirm a directory in conversation and retry.',
+    );
+  }
+
+  if (isAbsolute(trimmed)) {
+    return resolve(trimmed);
+  }
+
+  return resolve(baseDirectory, trimmed);
+}
+
+function normalizeBypassValue(input: {
+  bypassPermission?: boolean;
+  bypass_permission?: boolean;
+}): boolean {
+  const value = input.bypassPermission ?? input.bypass_permission;
+  if (typeof value !== 'boolean') {
+    throw new ExternalCliError(
+      'CLI_PROTOCOL_ERROR',
+      'bypassPermission is required. Confirm bypass choice in conversation and retry.',
+    );
+  }
+  return value;
+}
+
 export function createExternalCliTools(options: ExternalCliToolFactoryOptions): ToolHandler[] {
   const startCodexCliRun: ToolHandler = {
     name: 'start_codex_cli_run',
     description:
-      'Start a Codex CLI background run with prompt, working directory, and optional bypass-permission mode.',
+      'Start a Codex CLI background run after conversationally confirming directory, create-if-missing, and bypass mode.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Codex CLI.'),
       working_directory: z
         .string()
+        .min(1)
+        .describe('Explicit working directory confirmed in conversation.'),
+      create_if_missing: z
+        .boolean()
+        .describe('Set true only when user confirmed creating missing directory in conversation.'),
+      bypassPermission: z
+        .boolean()
         .optional()
-        .describe('Working directory for the external CLI run. Defaults to current session working directory.'),
+        .describe('Explicit bypass choice confirmed in conversation (true/false).'),
       bypass_permission: z
         .boolean()
         .optional()
-        .default(false)
-        .describe('If true, request bypass-permission mode (must be allowed in settings).'),
+        .describe('Legacy alias for bypassPermission.'),
     }),
     execute: async (args: unknown, context): Promise<ToolResult> => {
       const input = args as {
         prompt: string;
-        working_directory?: string;
+        working_directory: string;
+        create_if_missing: boolean;
+        bypassPermission?: boolean;
         bypass_permission?: boolean;
       };
 
       try {
+        const bypassPermission = normalizeBypassValue(input);
+        const resolvedWorkingDirectory = resolveWorkingDirectory(context.workingDirectory, input.working_directory);
         const result = await options.runManager.startRun({
           sessionId: context.sessionId,
           provider: 'codex',
           prompt: input.prompt,
-          workingDirectory: input.working_directory || context.workingDirectory,
-          bypassPermission: Boolean(input.bypass_permission),
+          workingDirectory: resolvedWorkingDirectory,
+          createIfMissing: input.create_if_missing,
+          requestedBypassPermission: bypassPermission,
+          bypassPermission,
           origin: options.getSessionOrigin(context.sessionId),
         });
 
@@ -74,33 +117,45 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
   const startClaudeCliRun: ToolHandler = {
     name: 'start_claude_cli_run',
     description:
-      'Start a Claude CLI background run with prompt, working directory, and optional bypass-permission mode.',
+      'Start a Claude CLI background run after conversationally confirming directory, create-if-missing, and bypass mode.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Claude CLI.'),
       working_directory: z
         .string()
+        .min(1)
+        .describe('Explicit working directory confirmed in conversation.'),
+      create_if_missing: z
+        .boolean()
+        .describe('Set true only when user confirmed creating missing directory in conversation.'),
+      bypassPermission: z
+        .boolean()
         .optional()
-        .describe('Working directory for the external CLI run. Defaults to current session working directory.'),
+        .describe('Explicit bypass choice confirmed in conversation (true/false).'),
       bypass_permission: z
         .boolean()
         .optional()
-        .default(false)
-        .describe('If true, request bypass-permission mode (must be allowed in settings).'),
+        .describe('Legacy alias for bypassPermission.'),
     }),
     execute: async (args: unknown, context): Promise<ToolResult> => {
       const input = args as {
         prompt: string;
-        working_directory?: string;
+        working_directory: string;
+        create_if_missing: boolean;
+        bypassPermission?: boolean;
         bypass_permission?: boolean;
       };
 
       try {
+        const bypassPermission = normalizeBypassValue(input);
+        const resolvedWorkingDirectory = resolveWorkingDirectory(context.workingDirectory, input.working_directory);
         const result = await options.runManager.startRun({
           sessionId: context.sessionId,
           provider: 'claude',
           prompt: input.prompt,
-          workingDirectory: input.working_directory || context.workingDirectory,
-          bypassPermission: Boolean(input.bypass_permission),
+          workingDirectory: resolvedWorkingDirectory,
+          createIfMissing: input.create_if_missing,
+          requestedBypassPermission: bypassPermission,
+          bypassPermission,
           origin: options.getSessionOrigin(context.sessionId),
         });
 
@@ -201,7 +256,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
               .listRuns(context.sessionId)
               .find((item) => item.status === 'waiting_user');
 
-        const runId = isRunSummary(run) ? run.runId : run?.runId;
+        const runId = run?.runId;
         if (!runId) {
           return ok({
             acknowledged: false,
@@ -246,7 +301,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
                 return item.status === 'running' || item.status === 'waiting_user' || item.status === 'queued';
               });
 
-        const runId = isRunSummary(selectedRun) ? selectedRun.runId : selectedRun?.runId;
+        const runId = selectedRun?.runId;
 
         if (!runId) {
           return ok({
@@ -273,12 +328,4 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
     respondTool,
     cancelTool,
   ];
-}
-
-function isRunSummary(value: unknown): value is { runId: string } {
-  return isObject(value) && typeof value.runId === 'string';
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }

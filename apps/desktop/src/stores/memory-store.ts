@@ -205,12 +205,13 @@ export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
       try {
         const memory = await invoke<Memory>('deep_memory_create', {
           workingDirectory,
-          title: input.title,
-          content: input.content,
-          group: input.group,
-          tags: input.tags || [],
-          source: input.source || 'manual',
-          confidence: input.confidence,
+          input: {
+            title: input.title,
+            content: input.content,
+            group: input.group,
+            tags: input.tags || [],
+            source: input.source || 'manual',
+          },
         });
 
         set((state) => ({
@@ -239,7 +240,7 @@ export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
         const memory = await invoke<Memory>('deep_memory_update', {
           workingDirectory,
           id,
-          ...updates,
+          updates,
         });
 
         set((state) => ({
@@ -310,6 +311,7 @@ export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
         await invoke('deep_memory_create_group', {
           workingDirectory,
           name,
+          groupName: name,
         });
 
         set({ groups: [...groups, name as MemoryGroup] });
@@ -329,6 +331,7 @@ export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
         await invoke('deep_memory_delete_group', {
           workingDirectory,
           name,
+          groupName: name,
         });
 
         set({

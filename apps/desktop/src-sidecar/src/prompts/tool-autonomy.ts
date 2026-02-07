@@ -14,6 +14,8 @@ const AUTO_USE_TOOLS = new Set<string>([
   'web_search',
   'google_grounded_search',
   'web_fetch',
+  'external_cli_get_progress',
+  'external_cli_respond',
 ]);
 
 export function getToolAutonomyLevel(toolName: string): ToolAutonomyLevel {
@@ -44,6 +46,9 @@ export function getToolAutonomyLevel(toolName: string): ToolAutonomyLevel {
     'computer_use',
     'deep_research',
     'analyze_video',
+    'start_codex_cli_run',
+    'start_claude_cli_run',
+    'external_cli_cancel_run',
   ]);
 
   if (confirmTools.has(normalized)) return 'confirm';

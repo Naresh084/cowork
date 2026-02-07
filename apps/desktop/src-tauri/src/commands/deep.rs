@@ -102,6 +102,7 @@ pub async fn deep_memory_create(
     let manager = &state.manager;
     let params = serde_json::json!({
         "workingDirectory": working_directory,
+        "input": input.clone(),
         "title": input.title,
         "content": input.content,
         "group": input.group,
@@ -147,7 +148,9 @@ pub async fn deep_memory_update(
     let manager = &state.manager;
     let params = serde_json::json!({
         "workingDirectory": working_directory,
+        "id": id.clone(),
         "memoryId": id,
+        "updates": updates.clone(),
         "title": updates.title,
         "content": updates.content,
         "group": updates.group,
@@ -240,6 +243,7 @@ pub async fn deep_memory_create_group(
     let params = serde_json::json!({
         "workingDirectory": working_directory,
         "name": name,
+        "groupName": name,
     });
 
     manager.send_command("deep_memory_create_group", params).await?;
@@ -260,6 +264,7 @@ pub async fn deep_memory_delete_group(
     let params = serde_json::json!({
         "workingDirectory": working_directory,
         "name": name,
+        "groupName": name,
     });
 
     manager.send_command("deep_memory_delete_group", params).await?;
@@ -439,4 +444,3 @@ pub async fn deep_command_create(
         .map(|s| s.to_string())
         .ok_or_else(|| "Invalid response".to_string())
 }
-

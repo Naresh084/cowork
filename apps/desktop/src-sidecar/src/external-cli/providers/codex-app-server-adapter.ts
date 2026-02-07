@@ -13,6 +13,7 @@ import {
   isJsonRpcNotification,
   isJsonRpcResponse,
   isJsonRpcServerRequest,
+  type JsonRpcRequestId,
   type JsonRpcResponse,
 } from './codex-protocol.js';
 
@@ -23,7 +24,7 @@ interface PendingRpcRequest {
 }
 
 interface PendingInteraction {
-  requestId: number;
+  requestId: JsonRpcRequestId;
   type: 'permission' | 'question';
   metadata: Record<string, unknown>;
 }
@@ -36,12 +37,61 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function extractCodexErrorMessage(params: Record<string, unknown>): string {
+  const directMessage = typeof params.message === 'string' ? params.message.trim() : '';
+  if (directMessage) {
+    return directMessage;
+  }
+
+  const nestedError = isObject(params.error) ? params.error : null;
+  const nestedMessage = nestedError && typeof nestedError.message === 'string'
+    ? nestedError.message.trim()
+    : '';
+  if (nestedMessage) {
+    return nestedMessage;
+  }
+
+  return 'Codex reported an error.';
+}
+
+function classifyCodexError(params: Record<string, unknown>): { code: string; message: string } {
+  const message = extractCodexErrorMessage(params);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('model_not_found') ||
+    (lower.includes('requested model') && lower.includes('does not exist'))
+  ) {
+    return {
+      code: 'CLI_PROTOCOL_ERROR',
+      message:
+        'Codex default model is not available. Update your Codex CLI model configuration and retry.',
+    };
+  }
+
+  if (
+    lower.includes('authentication') ||
+    lower.includes('unauthorized') ||
+    lower.includes('not logged in')
+  ) {
+    return {
+      code: 'CLI_AUTH_REQUIRED',
+      message: 'Codex is installed but not authenticated. Run `codex login` and retry.',
+    };
+  }
+
+  return {
+    code: 'CLI_PROTOCOL_ERROR',
+    message,
+  };
+}
+
 export class CodexAppServerAdapter implements ExternalCliAdapter {
   private process: ChildProcessWithoutNullStreams | null = null;
   private callbacks: ExternalCliAdapterCallbacks | null = null;
 
   private requestCounter = 1;
-  private requestMap = new Map<number, PendingRpcRequest>();
+  private requestMap = new Map<JsonRpcRequestId, PendingRpcRequest>();
   private pendingInteractions = new Map<string, PendingInteraction>();
 
   private threadId: string | null = null;
@@ -65,11 +115,7 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     this.process.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();
       if (text) {
-        callbacks.onProgress({
-          timestamp: Date.now(),
-          kind: 'event',
-          message: `[codex] ${text}`,
-        });
+        process.stderr.write(`[external-cli][codex] ${text}\n`);
       }
     });
 
@@ -183,7 +229,16 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
   }
 
   async dispose(): Promise<void> {
-    await this.cancel();
+    this.stopped = true;
+
+    if (this.process && !this.process.killed) {
+      this.process.kill('SIGTERM');
+      setTimeout(() => {
+        if (this.process && !this.process.killed) {
+          this.process.kill('SIGKILL');
+        }
+      }, 1000).unref();
+    }
 
     for (const [id, pending] of this.requestMap.entries()) {
       clearTimeout(pending.timeout);
@@ -231,7 +286,6 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
       cwd: input.workingDirectory,
       approvalPolicy: input.bypassPermission ? 'never' : 'on-request',
       sandbox: input.bypassPermission ? 'danger-full-access' : 'workspace-write',
-      model: null,
     })) as { thread?: { id?: string } };
 
     const threadId = threadStart?.thread?.id;
@@ -254,7 +308,6 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
       sandboxPolicy: input.bypassPermission
         ? { type: 'dangerFullAccess' }
         : { type: 'workspaceWrite', networkAccess: false },
-      model: null,
     });
   }
 
@@ -268,11 +321,6 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      this.callbacks?.onProgress({
-        timestamp: Date.now(),
-        kind: 'event',
-        message: `[codex/raw] ${trimmed}`,
-      });
       return;
     }
 
@@ -292,7 +340,7 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
   }
 
   private resolveResponse(response: JsonRpcResponse): void {
-    if (typeof response.id !== 'number') {
+    if (typeof response.id !== 'number' && typeof response.id !== 'string') {
       return;
     }
 
@@ -362,8 +410,8 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     }
 
     if (method === 'error') {
-      const message = typeof params.message === 'string' ? params.message : 'Codex reported an error.';
-      this.callbacks.onFailed('CLI_PROTOCOL_ERROR', message);
+      const failure = classifyCodexError(params);
+      this.callbacks.onFailed(failure.code, failure.message);
       return;
     }
 
@@ -372,10 +420,8 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
       const status = isObject(turn) && typeof turn.status === 'string' ? turn.status : 'completed';
       if (status === 'failed') {
         const error = isObject(turn) && isObject(turn.error) ? turn.error : null;
-        const message =
-          (error && typeof error.message === 'string' && error.message) ||
-          'Codex run failed.';
-        this.callbacks.onFailed('CLI_PROTOCOL_ERROR', message);
+        const failure = classifyCodexError(error || { message: 'Codex run failed.' });
+        this.callbacks.onFailed(failure.code, failure.message);
         return;
       }
 
@@ -384,7 +430,7 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
   }
 
   private handleServerRequest(
-    requestId: number,
+    requestId: JsonRpcRequestId,
     method: string,
     params: Record<string, unknown>,
   ): void {

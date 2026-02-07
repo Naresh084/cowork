@@ -136,6 +136,33 @@ export class IntegrationBridgeService {
         });
       }
     };
+
+    // Intercept question prompts/resolutions so external CLI HITL can roundtrip to origin chat.
+    const originalQuestionAsk = eventEmitter.questionAsk.bind(eventEmitter);
+    eventEmitter.questionAsk = (sessionId: string, request: unknown) => {
+      originalQuestionAsk(sessionId, request);
+      this.router.onQuestionAsk(sessionId, request).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error routing question ask: ${errMsg}\n`,
+        );
+      });
+    };
+
+    const originalQuestionAnswered = eventEmitter.questionAnswered.bind(eventEmitter);
+    eventEmitter.questionAnswered = (
+      sessionId: string,
+      questionId: string,
+      answer: string | string[],
+    ) => {
+      originalQuestionAnswered(sessionId, questionId, answer);
+      this.router.onQuestionAnswered(sessionId, questionId, answer).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error routing question answered: ${errMsg}\n`,
+        );
+      });
+    };
   }
 
   /** Connect a platform with given config */

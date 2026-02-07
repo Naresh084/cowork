@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { createInterface } from 'readline';
 import type {
   ExternalCliAdapter,
@@ -33,7 +33,7 @@ function extractAssistantText(content: unknown): string {
 export class ClaudeStreamAdapter implements ExternalCliAdapter {
   private readonly origin: ExternalCliRunOrigin;
 
-  private process: ChildProcessWithoutNullStreams | null = null;
+  private process: ChildProcess | null = null;
   private callbacks: ExternalCliAdapterCallbacks | null = null;
   private bridge: ClaudePermissionBridge | null = null;
   private stopped = false;
@@ -87,14 +87,10 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    this.process.stderr.on('data', (chunk) => {
+    this.process.stderr?.on('data', (chunk) => {
       const text = String(chunk).trim();
       if (text) {
-        this.callbacks?.onProgress({
-          timestamp: Date.now(),
-          kind: 'event',
-          message: `[claude] ${text}`,
-        });
+        process.stderr.write(`[external-cli][claude] ${text}\n`);
       }
     });
 
@@ -114,14 +110,16 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       this.callbacks?.onFailed('CLI_PROTOCOL_ERROR', `Claude process exited unexpectedly with code ${code ?? 1}.`);
     });
 
-    const rl = createInterface({
-      input: this.process.stdout,
-      terminal: false,
-    });
+    if (this.process.stdout) {
+      const rl = createInterface({
+        input: this.process.stdout,
+        terminal: false,
+      });
 
-    rl.on('line', (line) => {
-      this.handleStreamLine(line);
-    });
+      rl.on('line', (line) => {
+        this.handleStreamLine(line);
+      });
+    }
   }
 
   async respond(interactionId: string, response: ExternalCliResponsePayload): Promise<void> {
@@ -148,7 +146,16 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
   }
 
   async dispose(): Promise<void> {
-    await this.cancel();
+    this.stopped = true;
+
+    if (this.process && !this.process.killed) {
+      this.process.kill('SIGTERM');
+      setTimeout(() => {
+        if (this.process && !this.process.killed) {
+          this.process.kill('SIGKILL');
+        }
+      }, 1000).unref();
+    }
 
     if (this.bridge) {
       await this.bridge.stop();
@@ -168,11 +175,6 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      this.callbacks?.onProgress({
-        timestamp: Date.now(),
-        kind: 'event',
-        message: `[claude/raw] ${trimmed}`,
-      });
       return;
     }
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FolderOpen, Loader2, Save, Undo2, Search, Monitor, Info } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
 import { cn } from '@/lib/utils';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { useAuthStore } from '../../stores/auth-store';
@@ -16,6 +17,19 @@ import { TeamsSettings } from './TeamsSettings';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { CapabilityMatrix } from '@/components/help/CapabilityMatrix';
 import { useCapabilityStore } from '@/stores/capability-store';
+
+interface ExternalCliProviderAvailability {
+  installed: boolean;
+  binaryPath: string | null;
+  version: string | null;
+  authStatus: 'authenticated' | 'unauthenticated' | 'unknown';
+  authMessage: string | null;
+}
+
+interface ExternalCliAvailabilitySnapshot {
+  codex: ExternalCliProviderAvailability;
+  claude: ExternalCliProviderAvailability;
+}
 
 function KeyField({
   title,
@@ -123,6 +137,8 @@ export function IntegrationSettings() {
     setExternalSearchProvider,
     specializedModelsV2,
     updateSpecializedModelV2,
+    externalCli,
+    updateExternalCliSettings,
   } = useSettingsStore();
   const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
@@ -132,12 +148,18 @@ export function IntegrationSettings() {
   const [userHome, setUserHome] = useState<string | null>(null);
   const [computerUseModel, setComputerUseModel] = useState(specializedModelsV2.google.computerUse);
   const [deepResearchModel, setDeepResearchModel] = useState(specializedModelsV2.google.deepResearchAgent);
+  const [externalCliAvailability, setExternalCliAvailability] = useState<ExternalCliAvailabilitySnapshot | null>(null);
 
   useEffect(() => {
     void loadIntegrationSettings();
     void homeDir()
       .then((path) => setUserHome(path))
       .catch(() => setUserHome(null));
+    void invoke<ExternalCliAvailabilitySnapshot>('agent_get_external_cli_availability', {
+      forceRefresh: true,
+    })
+      .then((snapshot) => setExternalCliAvailability(snapshot))
+      .catch(() => setExternalCliAvailability(null));
   }, [loadIntegrationSettings]);
 
   useEffect(() => {
@@ -183,11 +205,14 @@ export function IntegrationSettings() {
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
       sandbox: settingsState.commandSandbox,
+      externalCli: settingsState.externalCli,
       activeSoul,
     });
   };
 
   const needsExternalSearchFallback = ['openrouter', 'deepseek', 'lmstudio'].includes(activeProvider);
+  const codexAvailability = externalCliAvailability?.codex;
+  const claudeAvailability = externalCliAvailability?.claude;
 
   const handlePickFolder = async () => {
     setLocalError(null);
@@ -348,6 +373,127 @@ export function IntegrationSettings() {
         isLoading={authLoading}
         settingId="integration.stitchApiKey"
       />
+
+      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4">
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-medium text-white/85">External CLI Orchestration</h4>
+            <SettingHelpPopover settingId="integration.externalCli.enableTools" />
+          </div>
+          <p className="mt-1 text-xs text-white/40">
+            Enable Codex/Claude external CLI tools only when the corresponding binary is installed locally. The agent
+            should still confirm directory and bypass choices conversationally before each launch.
+          </p>
+        </div>
+
+        {!codexAvailability?.installed && !claudeAvailability?.installed ? (
+          <p className="text-xs text-white/45">
+            No supported external CLI found in PATH. Install `codex` and/or `claude` to enable this section.
+          </p>
+        ) : null}
+
+        {codexAvailability?.installed ? (
+          <div className="rounded-lg border border-white/[0.06] bg-[#0B0C10]/60 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-white/90">Codex CLI</p>
+                <p className="text-[11px] text-white/40">
+                  {codexAvailability.version || 'unknown version'} ·{' '}
+                  {codexAvailability.authStatus === 'unauthenticated'
+                    ? 'Not authenticated'
+                    : codexAvailability.authStatus === 'authenticated'
+                      ? 'Authenticated'
+                      : 'Auth unknown'}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={externalCli.codex.enabled}
+                  onChange={(event) => {
+                    void (async () => {
+                      await updateExternalCliSettings('codex', { enabled: event.target.checked });
+                      await refreshCapabilitySnapshot();
+                    })();
+                  }}
+                />
+                Enable Tools
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-white/65">
+              <input
+                type="checkbox"
+                checked={externalCli.codex.allowBypassPermissions}
+                disabled={!externalCli.codex.enabled}
+                onChange={(event) => {
+                  void (async () => {
+                    await updateExternalCliSettings('codex', {
+                      allowBypassPermissions: event.target.checked,
+                    });
+                    await refreshCapabilitySnapshot();
+                  })();
+                }}
+              />
+              Allow bypass permissions (agent still asks each run)
+              <SettingHelpPopover settingId="integration.externalCli.allowBypassPermissions" />
+            </label>
+            {codexAvailability.authMessage ? (
+              <p className="text-[11px] text-[#FCA5A5]">{codexAvailability.authMessage}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {claudeAvailability?.installed ? (
+          <div className="rounded-lg border border-white/[0.06] bg-[#0B0C10]/60 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-white/90">Claude CLI</p>
+                <p className="text-[11px] text-white/40">
+                  {claudeAvailability.version || 'unknown version'} ·{' '}
+                  {claudeAvailability.authStatus === 'unauthenticated'
+                    ? 'Not authenticated'
+                    : claudeAvailability.authStatus === 'authenticated'
+                      ? 'Authenticated'
+                      : 'Auth checked at run time'}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={externalCli.claude.enabled}
+                  onChange={(event) => {
+                    void (async () => {
+                      await updateExternalCliSettings('claude', { enabled: event.target.checked });
+                      await refreshCapabilitySnapshot();
+                    })();
+                  }}
+                />
+                Enable Tools
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-white/65">
+              <input
+                type="checkbox"
+                checked={externalCli.claude.allowBypassPermissions}
+                disabled={!externalCli.claude.enabled}
+                onChange={(event) => {
+                  void (async () => {
+                    await updateExternalCliSettings('claude', {
+                      allowBypassPermissions: event.target.checked,
+                    });
+                    await refreshCapabilitySnapshot();
+                  })();
+                }}
+              />
+              Allow bypass permissions (agent still asks each run)
+              <SettingHelpPopover settingId="integration.externalCli.allowBypassPermissions" />
+            </label>
+            {claudeAvailability.authMessage ? (
+              <p className="text-[11px] text-[#FCA5A5]">{claudeAvailability.authMessage}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
 
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
         <div>

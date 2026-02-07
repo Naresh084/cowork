@@ -614,6 +614,9 @@ export class CoworkBackend implements SandboxBackendProtocol {
     }
 
     const normalized = normalize(raw);
+    const normalizedPosix = toPosixPath(normalized);
+    const isMemoryVirtualPath =
+      normalizedPosix === '/memories' || normalizedPosix.startsWith('/memories/');
     const isAbs = isAbsolute(normalized);
 
     let virtualPath = ensureLeadingSlash(isAbs ? normalized : `/${normalized}`);
@@ -625,7 +628,11 @@ export class CoworkBackend implements SandboxBackendProtocol {
       return ABSOLUTE_PREFIXES.some((prefix) => path.startsWith(prefix));
     };
 
-    if (isAbs) {
+    if (isMemoryVirtualPath) {
+      const relative = normalizedPosix.replace(/^\/memories\/?/, '');
+      absolutePath = join(this.workingDirectory, '.cowork', 'memories', relative);
+      virtualPath = ensureLeadingSlash(normalizedPosix);
+    } else if (isAbs) {
       const resolvedAbs = resolve(normalized);
       if (isKnownAbsolute(resolvedAbs)) {
         absolutePath = resolvedAbs;

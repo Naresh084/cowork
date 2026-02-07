@@ -138,4 +138,21 @@ describe('capability-sections', () => {
     expect(integration?.content).toContain('Connected Integrations: none');
     expect(integration?.content).toContain('Notification Tools: none');
   });
+
+  it('adds external-cli operating practice section when launch tools are available', () => {
+    const sections = buildCapabilitySections(
+      createContext({
+        toolHandlers: [
+          createTool('start_codex_cli_run', 'Launch Codex CLI run'),
+          createTool('external_cli_get_progress', 'Get run progress'),
+        ],
+      }),
+    );
+
+    const externalCli = sections.find((section) => section.key === 'external_cli_operating_practice');
+    expect(externalCli).toBeDefined();
+    expect(externalCli?.content).toContain('`working_directory`');
+    expect(externalCli?.content).toContain('`create_if_missing`');
+    expect(externalCli?.content).toContain('`bypassPermission`');
+  });
 });

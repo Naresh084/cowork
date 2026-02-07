@@ -301,6 +301,15 @@ export interface RuntimeSoulProfile {
   path?: string;
 }
 
+export type RuntimeMemoryStyle = 'conservative' | 'balanced' | 'aggressive';
+
+export interface RuntimeMemorySettings {
+  enabled: boolean;
+  autoExtract: boolean;
+  maxInPrompt: number;
+  style: RuntimeMemoryStyle;
+}
+
 export interface RuntimeConfig {
   activeProvider: ProviderId;
   providerApiKeys?: Partial<Record<ProviderId, string>>;
@@ -316,6 +325,7 @@ export interface RuntimeConfig {
   sandbox?: CommandSandboxSettings;
   externalCli?: ExternalCliRuntimeConfig;
   activeSoul?: RuntimeSoulProfile | null;
+  memory?: RuntimeMemorySettings;
 }
 
 export interface RuntimeConfigUpdateResult {

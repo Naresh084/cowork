@@ -132,6 +132,14 @@ export interface MediaRoutingSettings {
 }
 
 export type ExternalSearchProvider = 'google' | 'exa' | 'tavily';
+export type MemoryStyle = 'conservative' | 'balanced' | 'aggressive';
+
+export interface MemorySettings {
+  enabled: boolean;
+  autoExtract: boolean;
+  maxInPrompt: number;
+  style: MemoryStyle;
+}
 
 export interface ExternalCliProviderSettings {
   enabled: boolean;
@@ -149,6 +157,12 @@ export const DEFAULT_MEDIA_ROUTING: MediaRoutingSettings = {
 };
 
 export const DEFAULT_EXTERNAL_SEARCH_PROVIDER: ExternalSearchProvider = 'google';
+export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
+  enabled: true,
+  autoExtract: true,
+  maxInPrompt: 5,
+  style: 'balanced',
+};
 export const DEFAULT_EXTERNAL_CLI_SETTINGS: ExternalCliSettings = {
   codex: {
     enabled: false,
@@ -394,6 +408,7 @@ interface SettingsState {
   mediaRouting: MediaRoutingSettings;
   mediaRoutingCustomized: boolean;
   externalSearchProvider: ExternalSearchProvider;
+  memory: MemorySettings;
   souls: SoulProfile[];
   activeSoulId: string;
   defaultSoulId: string;
@@ -458,6 +473,7 @@ interface SettingsActions {
   setProviderBaseUrl: (provider: ProviderId, baseUrl: string) => Promise<void>;
   setMediaRouting: (routing: Partial<MediaRoutingSettings>) => Promise<void>;
   setExternalSearchProvider: (provider: ExternalSearchProvider) => Promise<void>;
+  setMemorySettings: (updates: Partial<MemorySettings>) => Promise<void>;
   setCommandSandbox: (updates: Partial<CommandSandboxSettings>) => Promise<void>;
   updateExternalCliSettings: (
     provider: keyof ExternalCliSettings,
@@ -624,6 +640,7 @@ function buildRuntimeConfigFromSettings(state: SettingsState) {
     activeProvider: state.activeProvider,
     providerBaseUrls: state.providerBaseUrls,
     externalSearchProvider: state.externalSearchProvider,
+    memory: state.memory,
     mediaRouting: state.mediaRouting,
     sandbox: state.commandSandbox,
     externalCli: state.externalCli,
@@ -664,6 +681,7 @@ const initialState: SettingsState = {
   mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
   mediaRoutingCustomized: false,
   externalSearchProvider: DEFAULT_EXTERNAL_SEARCH_PROVIDER,
+  memory: { ...DEFAULT_MEMORY_SETTINGS },
   souls: [{ ...FALLBACK_SOUL_PROFILE }],
   activeSoulId: DEFAULT_SOUL_ID,
   defaultSoulId: DEFAULT_SOUL_ID,
@@ -1006,6 +1024,29 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
 
       setExternalSearchProvider: async (provider) => {
         set({ externalSearchProvider: provider });
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
+      },
+
+      setMemorySettings: async (updates) => {
+        set((state) => ({
+          memory: {
+            ...state.memory,
+            ...updates,
+            maxInPrompt:
+              typeof updates.maxInPrompt === 'number' && updates.maxInPrompt > 0
+                ? Math.max(1, Math.min(20, Math.floor(updates.maxInPrompt)))
+                : state.memory.maxInPrompt,
+            style:
+              updates.style === 'conservative' ||
+              updates.style === 'balanced' ||
+              updates.style === 'aggressive'
+                ? updates.style
+                : state.memory.style,
+          },
+        }));
         const state = useSettingsStore.getState();
         await useAuthStore.getState().applyRuntimeConfig(
           buildRuntimeConfigFromSettings(state),
@@ -1777,11 +1818,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         mediaRouting: state.mediaRouting,
         mediaRoutingCustomized: state.mediaRoutingCustomized,
         externalSearchProvider: state.externalSearchProvider,
+        memory: state.memory,
         activeSoulId: state.activeSoulId,
         defaultSoulId: state.defaultSoulId,
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
         commandSandbox: state.commandSandbox,
+        externalCli: state.externalCli,
         mcpServers: state.mcpServers,
         skillsSettings: state.skillsSettings,
         installedSkillConfigs: state.installedSkillConfigs,
@@ -1829,6 +1872,21 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           persisted?.commandSandbox,
           mergedPermissionDefaults,
         );
+        const persistedExternalCli = persisted?.externalCli;
+        const validExternalCli: ExternalCliSettings = {
+          codex: {
+            enabled: persistedExternalCli?.codex?.enabled ?? DEFAULT_EXTERNAL_CLI_SETTINGS.codex.enabled,
+            allowBypassPermissions:
+              persistedExternalCli?.codex?.allowBypassPermissions ??
+              DEFAULT_EXTERNAL_CLI_SETTINGS.codex.allowBypassPermissions,
+          },
+          claude: {
+            enabled: persistedExternalCli?.claude?.enabled ?? DEFAULT_EXTERNAL_CLI_SETTINGS.claude.enabled,
+            allowBypassPermissions:
+              persistedExternalCli?.claude?.allowBypassPermissions ??
+              DEFAULT_EXTERNAL_CLI_SETTINGS.claude.allowBypassPermissions,
+          },
+        };
 
         const validSpecializedModels = normalizeSpecializedModels(persisted?.specializedModels);
         const persistedActiveProvider = persisted?.activeProvider;
@@ -1845,6 +1903,27 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           persistedExternalSearch === 'exa' || persistedExternalSearch === 'tavily'
             ? persistedExternalSearch
             : DEFAULT_EXTERNAL_SEARCH_PROVIDER;
+        const persistedMemory = persisted?.memory;
+        const validMemory: MemorySettings = {
+          enabled:
+            typeof persistedMemory?.enabled === 'boolean'
+              ? persistedMemory.enabled
+              : DEFAULT_MEMORY_SETTINGS.enabled,
+          autoExtract:
+            typeof persistedMemory?.autoExtract === 'boolean'
+              ? persistedMemory.autoExtract
+              : DEFAULT_MEMORY_SETTINGS.autoExtract,
+          maxInPrompt:
+            typeof persistedMemory?.maxInPrompt === 'number' && persistedMemory.maxInPrompt > 0
+              ? Math.max(1, Math.min(20, Math.floor(persistedMemory.maxInPrompt)))
+              : DEFAULT_MEMORY_SETTINGS.maxInPrompt,
+          style:
+            persistedMemory?.style === 'conservative' ||
+            persistedMemory?.style === 'balanced' ||
+            persistedMemory?.style === 'aggressive'
+              ? persistedMemory.style
+              : DEFAULT_MEMORY_SETTINGS.style,
+        };
         const persistedActiveSoulId =
           typeof persisted?.activeSoulId === 'string' ? persisted.activeSoulId.trim() : '';
         const persistedDefaultSoulId =
@@ -1933,10 +2012,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           mediaRouting: resolvedMediaRouting,
           mediaRoutingCustomized,
           externalSearchProvider: validExternalSearchProvider,
+          memory: validMemory,
           activeSoulId: persistedActiveSoulId || DEFAULT_SOUL_ID,
           defaultSoulId: persistedDefaultSoulId || DEFAULT_SOUL_ID,
           permissionDefaults: mergedPermissionDefaults,
           commandSandbox: validCommandSandbox,
+          externalCli: validExternalCli,
           installedCommandConfigs: migratedCommandConfigs,
           sessionListFilters: validSessionListFilters,
           automationListFilters: validAutomationListFilters,
@@ -2005,6 +2086,8 @@ export const useSpecializedModelsV2 = () =>
   useSettingsStore((state) => state.specializedModelsV2);
 export const useExternalSearchProvider = () =>
   useSettingsStore((state) => state.externalSearchProvider);
+export const useMemorySettings = () =>
+  useSettingsStore((state) => state.memory);
 export const useSoulProfiles = () =>
   useSettingsStore((state) => state.souls);
 export const useActiveSoulId = () =>

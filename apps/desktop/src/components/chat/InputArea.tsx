@@ -227,12 +227,16 @@ export function InputArea({
     textareaRef.current?.focus();
   }, []);
 
-  // Auto-resize textarea
+  // Auto-resize textarea: 2-line minimum, grows up to 10 lines, then scrolls
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
-    }
+    const ta = textareaRef.current;
+    if (!ta) return;
+    // Line height ~14px (text-[12.5px] * leading-[1.12]), 10 lines ≈ 140px
+    const maxH = 140;
+    ta.style.height = 'auto';
+    const next = Math.min(ta.scrollHeight, maxH);
+    ta.style.height = `${next}px`;
+    ta.style.overflowY = ta.scrollHeight > maxH ? 'auto' : 'hidden';
   }, [message]);
 
   useEffect(() => {
@@ -572,13 +576,14 @@ export function InputArea({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={hasMessages ? 'Reply...' : 'Ask Cowork anything... (type / for commands)'}
-              rows={1}
+              rows={2}
               className={cn(
-                'flex-1 min-h-[32px]',
+                'flex-1 min-h-[28px]',
                 'bg-transparent text-white/90',
                 'placeholder:text-white/30',
                 'resize-none focus:outline-none',
-                'max-h-24 text-[12.5px] leading-snug',
+                'text-[12.5px] leading-[1.12]',
+                'overflow-hidden',
               )}
             />
 

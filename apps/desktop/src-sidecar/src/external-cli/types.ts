@@ -85,6 +85,10 @@ export interface ExternalCliRunRecord {
   provider: ExternalCliProvider;
   prompt: string;
   workingDirectory: string;
+  resolvedWorkingDirectory?: string;
+  createIfMissing?: boolean;
+  requestedBypassPermission?: boolean;
+  effectiveBypassPermission?: boolean;
   bypassPermission: boolean;
   status: ExternalCliRunStatus;
   startedAt: number;
@@ -125,6 +129,8 @@ export interface ExternalCliStartRunInput {
   provider: ExternalCliProvider;
   prompt: string;
   workingDirectory: string;
+  createIfMissing: boolean;
+  requestedBypassPermission?: boolean;
   bypassPermission: boolean;
   origin: ExternalCliRunOrigin;
 }

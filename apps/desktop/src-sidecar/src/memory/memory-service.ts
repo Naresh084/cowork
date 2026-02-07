@@ -4,25 +4,25 @@
  * Handles persistent memory storage in .cowork/memories/
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmSync } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { randomUUID } from 'crypto';
 import type {
+  CreateMemoryInput,
   Memory,
   MemoryGroup,
   MemoryIndex,
   MemoryMetadata,
-  CreateMemoryInput,
-  UpdateMemoryInput,
   MemorySearchOptions,
   ScoredMemory,
+  UpdateMemoryInput,
 } from './types.js';
 
 /**
  * Current index version for migrations
  */
-const INDEX_VERSION = '1.0.0';
+const INDEX_VERSION = '1.1.0';
 
 /**
  * Default memory groups
@@ -45,61 +45,41 @@ export class MemoryService {
   private initialized = false;
 
   constructor(workingDir: string) {
-    // Fall back to home directory if workingDir is empty/undefined
     this.workingDir = workingDir || homedir();
     this.memoriesDir = join(this.workingDir, '.cowork', 'memories');
     this.indexPath = join(this.memoriesDir, 'index.json');
   }
 
-  /**
-   * Initialize the memory service
-   */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    // Create .cowork/memories directory structure
     this.ensureDirectoryExists(this.memoriesDir);
 
-    // Create default group directories
     for (const group of DEFAULT_GROUPS) {
       this.ensureDirectoryExists(join(this.memoriesDir, group));
     }
 
-    // Load or create index
     this.index = await this.loadOrCreateIndex();
     this.initialized = true;
   }
 
-  /**
-   * Ensure a directory exists
-   */
   private ensureDirectoryExists(dir: string): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
   }
 
-  /**
-   * Load existing index or create new one
-   */
   private async loadOrCreateIndex(): Promise<MemoryIndex> {
     if (existsSync(this.indexPath)) {
       try {
         const content = readFileSync(this.indexPath, 'utf-8');
         const index = JSON.parse(content) as MemoryIndex;
-
-        // Validate and migrate if needed
-        if (index.version !== INDEX_VERSION) {
-          return this.migrateIndex(index);
-        }
-
-        return index;
+        return this.migrateIndex(index);
       } catch {
-        // Failed to load memory index, creating new one
+        // fall through to create a new index
       }
     }
 
-    // Create new index
     const newIndex: MemoryIndex = {
       version: INDEX_VERSION,
       workingDirectory: this.workingDir,
@@ -112,30 +92,25 @@ export class MemoryService {
     return newIndex;
   }
 
-  /**
-   * Migrate index to new version
-   */
   private migrateIndex(oldIndex: MemoryIndex): MemoryIndex {
-    // Currently no migrations needed
+    const groups = new Set<MemoryGroup>([...DEFAULT_GROUPS, ...(oldIndex.groups || [])]);
+
     return {
       ...oldIndex,
       version: INDEX_VERSION,
+      groups: [...groups],
+      memories: oldIndex.memories || {},
       lastUpdated: new Date().toISOString(),
     };
   }
 
-  /**
-   * Save index to disk (atomic write)
-   */
   private async saveIndex(index: MemoryIndex): Promise<void> {
     const tempPath = `${this.indexPath}.tmp`;
     const backupPath = `${this.indexPath}.bak`;
 
     try {
-      // Write to temp file
       writeFileSync(tempPath, JSON.stringify(index, null, 2), 'utf-8');
 
-      // Backup existing if present
       if (existsSync(this.indexPath)) {
         try {
           const existing = readFileSync(this.indexPath, 'utf-8');
@@ -145,13 +120,11 @@ export class MemoryService {
         }
       }
 
-      // Rename temp to actual (atomic on most systems)
       const fs = await import('fs/promises');
       await fs.rename(tempPath, this.indexPath);
 
       this.index = index;
     } catch (error) {
-      // Clean up temp file on error
       if (existsSync(tempPath)) {
         unlinkSync(tempPath);
       }
@@ -159,51 +132,119 @@ export class MemoryService {
     }
   }
 
-  /**
-   * Generate filename from title
-   */
-  private titleToFilename(title: string): string {
-    return title
+  private slugifyTitle(title: string): string {
+    const slug = title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
-      .slice(0, 50) + '.md';
+      .slice(0, 48);
+    return slug || 'memory';
   }
 
-  /**
-   * Generate title from filename (unused but kept for future use)
-   */
-  // @ts-ignore - Kept for future use
-  private _filenameToTitle(filename: string): string {
-    return filename
-      .replace(/\.md$/, '')
-      .replace(/-/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
+  private buildFilename(title: string, id: string): string {
+    const slug = this.slugifyTitle(title);
+    const shortId = id.replace(/-/g, '').slice(0, 8) || randomUUID().replace(/-/g, '').slice(0, 8);
+    return `${slug}-${shortId}.md`;
   }
 
-  /**
-   * Get file path for a memory
-   */
   private getMemoryFilePath(group: MemoryGroup, filename: string): string {
     return join(this.memoriesDir, group, filename);
   }
 
-  /**
-   * Create a new memory
-   */
+  private normalizeForHash(content: string): string {
+    return content
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private computeContentHash(content: string): string {
+    return createHash('sha256').update(this.normalizeForHash(content)).digest('hex');
+  }
+
+  private contentSimilarity(a: string, b: string): number {
+    const normA = this.normalizeForHash(a);
+    const normB = this.normalizeForHash(b);
+
+    if (!normA || !normB) return 0;
+    if (normA === normB) return 1;
+    if (normA.includes(normB) || normB.includes(normA)) return 0.95;
+
+    const wordsA = new Set(normA.split(' ').filter((w) => w.length > 2));
+    const wordsB = new Set(normB.split(' ').filter((w) => w.length > 2));
+    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+
+    let intersection = 0;
+    for (const word of wordsA) {
+      if (wordsB.has(word)) intersection++;
+    }
+
+    const union = wordsA.size + wordsB.size - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  private async findDuplicateMemory(input: CreateMemoryInput): Promise<Memory | null> {
+    const targetHash = this.computeContentHash(input.content);
+
+    for (const [id, metadata] of Object.entries(this.index!.memories)) {
+      if (metadata.contentHash && metadata.contentHash === targetHash) {
+        return this.readById(id, false);
+      }
+    }
+
+    for (const [id, metadata] of Object.entries(this.index!.memories)) {
+      if (metadata.group !== input.group) continue;
+      const existing = await this.readById(id, false);
+      if (!existing) continue;
+      if (this.contentSimilarity(existing.content, input.content) >= 0.9) {
+        return existing;
+      }
+    }
+
+    return null;
+  }
+
+  private async mergeIntoExistingMemory(existing: Memory, input: CreateMemoryInput): Promise<Memory> {
+    const mergedTags = [...new Set([...(existing.tags || []), ...(input.tags || [])])];
+    const incomingNormalized = this.normalizeForHash(input.content);
+    const existingNormalized = this.normalizeForHash(existing.content);
+
+    const useIncomingContent =
+      incomingNormalized &&
+      incomingNormalized !== existingNormalized &&
+      input.content.trim().length > existing.content.trim().length;
+
+    const updates: UpdateMemoryInput = {
+      content: useIncomingContent ? input.content : existing.content,
+      tags: mergedTags,
+      group: existing.group,
+    };
+
+    if (existing.source === 'auto' && input.source === 'manual') {
+      updates.title = input.title;
+    }
+
+    const updated = await this.update(existing.id, updates);
+    return updated || existing;
+  }
+
   async create(input: CreateMemoryInput): Promise<Memory> {
     this.ensureInitialized();
 
+    const duplicate = await this.findDuplicateMemory(input);
+    if (duplicate) {
+      return this.mergeIntoExistingMemory(duplicate, input);
+    }
+
     const id = randomUUID();
     const now = new Date().toISOString();
-    const filename = this.titleToFilename(input.title);
+    const filename = this.buildFilename(input.title, id);
     const filePath = join(input.group, filename);
     const fullPath = this.getMemoryFilePath(input.group, filename);
 
-    // Ensure group directory exists
     this.ensureDirectoryExists(join(this.memoriesDir, input.group));
 
-    // Create memory object
     const memory: Memory = {
       id,
       title: input.title,
@@ -220,27 +261,24 @@ export class MemoryService {
       relatedMemoryIds: input.relatedMemoryIds || [],
     };
 
-    // Write memory file with frontmatter
-    const fileContent = this.memoryToFileContent(memory);
-    writeFileSync(fullPath, fileContent, 'utf-8');
+    writeFileSync(fullPath, this.memoryToFileContent(memory), 'utf-8');
 
-    // Update index
     const metadata: MemoryMetadata = {
       id,
-      title: input.title,
-      group: input.group,
+      title: memory.title,
+      group: memory.group,
       tags: memory.tags,
       filePath,
       accessCount: 0,
       lastAccessedAt: now,
-      source: input.source,
+      source: memory.source,
       confidence: memory.confidence,
+      contentHash: this.computeContentHash(memory.content),
     };
 
     this.index!.memories[id] = metadata;
     this.index!.lastUpdated = now;
 
-    // Add group if new
     if (!this.index!.groups.includes(input.group)) {
       this.index!.groups.push(input.group);
     }
@@ -250,10 +288,18 @@ export class MemoryService {
     return memory;
   }
 
-  /**
-   * Read a memory by ID
-   */
+  async upsertAutoMemory(input: CreateMemoryInput): Promise<Memory> {
+    return this.create({
+      ...input,
+      source: 'auto',
+    });
+  }
+
   async read(id: string): Promise<Memory | null> {
+    return this.readById(id, true);
+  }
+
+  private async readById(id: string, trackAccess: boolean): Promise<Memory | null> {
     this.ensureInitialized();
 
     const metadata = this.index!.memories[id];
@@ -261,7 +307,6 @@ export class MemoryService {
 
     const fullPath = join(this.memoriesDir, metadata.filePath);
     if (!existsSync(fullPath)) {
-      // Remove from index if file doesn't exist
       delete this.index!.memories[id];
       await this.saveIndex(this.index!);
       return null;
@@ -271,14 +316,17 @@ export class MemoryService {
       const content = readFileSync(fullPath, 'utf-8');
       const memory = this.fileContentToMemory(content, id, metadata);
 
-      // Update access tracking
+      if (!trackAccess) {
+        return memory;
+      }
+
       const now = new Date().toISOString();
       memory.accessCount++;
       memory.lastAccessedAt = now;
-      metadata.accessCount++;
+      metadata.accessCount = memory.accessCount;
       metadata.lastAccessedAt = now;
+      metadata.contentHash = metadata.contentHash || this.computeContentHash(memory.content);
 
-      // Save updated file and index
       writeFileSync(fullPath, this.memoryToFileContent(memory), 'utf-8');
       await this.saveIndex(this.index!);
 
@@ -288,28 +336,24 @@ export class MemoryService {
     }
   }
 
-  /**
-   * Update a memory
-   */
   async update(id: string, updates: UpdateMemoryInput): Promise<Memory | null> {
     this.ensureInitialized();
 
     const metadata = this.index!.memories[id];
     if (!metadata) return null;
 
-    const fullPath = join(this.memoriesDir, metadata.filePath);
-    if (!existsSync(fullPath)) {
+    const currentPath = join(this.memoriesDir, metadata.filePath);
+    if (!existsSync(currentPath)) {
       delete this.index!.memories[id];
       await this.saveIndex(this.index!);
       return null;
     }
 
     try {
-      const content = readFileSync(fullPath, 'utf-8');
+      const content = readFileSync(currentPath, 'utf-8');
       const memory = this.fileContentToMemory(content, id, metadata);
       const now = new Date().toISOString();
 
-      // Apply updates
       if (updates.title !== undefined) memory.title = updates.title;
       if (updates.content !== undefined) memory.content = updates.content;
       if (updates.tags !== undefined) memory.tags = updates.tags;
@@ -320,45 +364,37 @@ export class MemoryService {
       }
       if (updates.removeRelatedMemoryIds) {
         memory.relatedMemoryIds = memory.relatedMemoryIds.filter(
-          rid => !updates.removeRelatedMemoryIds!.includes(rid)
+          (rid) => !updates.removeRelatedMemoryIds!.includes(rid),
         );
       }
 
+      const nextGroup = updates.group || memory.group;
+      memory.group = nextGroup;
       memory.updatedAt = now;
 
-      // Handle group change
-      if (updates.group && updates.group !== memory.group) {
-        const newFilename = this.titleToFilename(memory.title);
-        const newFilePath = join(updates.group, newFilename);
-        const newFullPath = this.getMemoryFilePath(updates.group, newFilename);
+      const nextFilename = this.buildFilename(memory.title, id);
+      const nextFilePath = join(nextGroup, nextFilename);
+      const nextFullPath = this.getMemoryFilePath(nextGroup, nextFilename);
 
-        // Ensure new group directory exists
-        this.ensureDirectoryExists(join(this.memoriesDir, updates.group));
+      this.ensureDirectoryExists(join(this.memoriesDir, nextGroup));
+      writeFileSync(nextFullPath, this.memoryToFileContent(memory), 'utf-8');
 
-        // Write to new location
-        writeFileSync(newFullPath, this.memoryToFileContent(memory), 'utf-8');
-
-        // Delete old file
-        unlinkSync(fullPath);
-
-        // Update metadata
-        metadata.group = updates.group;
-        metadata.filePath = newFilePath;
-        memory.group = updates.group;
-
-        // Add group if new
-        if (!this.index!.groups.includes(updates.group)) {
-          this.index!.groups.push(updates.group);
-        }
-      } else {
-        // Write updated content
-        writeFileSync(fullPath, this.memoryToFileContent(memory), 'utf-8');
+      if (nextFullPath !== currentPath && existsSync(currentPath)) {
+        unlinkSync(currentPath);
       }
 
-      // Update metadata
-      if (updates.title !== undefined) metadata.title = updates.title;
-      if (updates.tags !== undefined) metadata.tags = updates.tags;
+      metadata.title = memory.title;
+      metadata.group = nextGroup;
+      metadata.tags = memory.tags;
+      metadata.filePath = nextFilePath;
+      metadata.source = memory.source;
+      metadata.confidence = memory.confidence;
+      metadata.contentHash = this.computeContentHash(memory.content);
       this.index!.lastUpdated = now;
+
+      if (!this.index!.groups.includes(nextGroup)) {
+        this.index!.groups.push(nextGroup);
+      }
 
       await this.saveIndex(this.index!);
 
@@ -368,9 +404,6 @@ export class MemoryService {
     }
   }
 
-  /**
-   * Delete a memory
-   */
   async delete(id: string): Promise<boolean> {
     this.ensureInitialized();
 
@@ -380,26 +413,20 @@ export class MemoryService {
     const fullPath = join(this.memoriesDir, metadata.filePath);
 
     try {
-      // Delete file if exists
       if (existsSync(fullPath)) {
         unlinkSync(fullPath);
       }
 
-      // Remove from index
       delete this.index!.memories[id];
       this.index!.lastUpdated = new Date().toISOString();
 
       await this.saveIndex(this.index!);
-
       return true;
     } catch {
       return false;
     }
   }
 
-  /**
-   * Create a new group
-   */
   async createGroup(name: string): Promise<void> {
     this.ensureInitialized();
 
@@ -413,69 +440,50 @@ export class MemoryService {
     }
   }
 
-  /**
-   * Delete a group (and all memories in it)
-   */
   async deleteGroup(name: string): Promise<void> {
     this.ensureInitialized();
 
-    // Don't allow deleting default groups
     if (DEFAULT_GROUPS.includes(name as MemoryGroup)) {
       throw new Error(`Cannot delete default group: ${name}`);
     }
 
     const groupDir = join(this.memoriesDir, name);
 
-    // Remove all memories in group
     for (const [id, metadata] of Object.entries(this.index!.memories)) {
       if (metadata.group === name) {
         delete this.index!.memories[id];
       }
     }
 
-    // Remove group directory
     if (existsSync(groupDir)) {
       rmSync(groupDir, { recursive: true, force: true });
     }
 
-    // Remove from groups list
-    this.index!.groups = this.index!.groups.filter(g => g !== name);
+    this.index!.groups = this.index!.groups.filter((g) => g !== name);
     this.index!.lastUpdated = new Date().toISOString();
 
     await this.saveIndex(this.index!);
   }
 
-  /**
-   * List all groups
-   */
   async listGroups(): Promise<MemoryGroup[]> {
     this.ensureInitialized();
     return [...this.index!.groups];
   }
 
-  /**
-   * Get all memories in a group
-   */
   async getMemoriesByGroup(group: string): Promise<Memory[]> {
     this.ensureInitialized();
 
     const memories: Memory[] = [];
 
     for (const [id, metadata] of Object.entries(this.index!.memories)) {
-      if (metadata.group === group) {
-        const memory = await this.read(id);
-        if (memory) {
-          memories.push(memory);
-        }
-      }
+      if (metadata.group !== group) continue;
+      const memory = await this.readById(id, false);
+      if (memory) memories.push(memory);
     }
 
     return memories;
   }
 
-  /**
-   * Search memories
-   */
   async search(options: MemorySearchOptions): Promise<Memory[]> {
     this.ensureInitialized();
 
@@ -483,52 +491,32 @@ export class MemoryService {
     const query = options.query?.toLowerCase() || '';
 
     for (const [id, metadata] of Object.entries(this.index!.memories)) {
-      // Filter by groups
-      if (options.groups && !options.groups.includes(metadata.group)) {
-        continue;
-      }
+      if (options.groups && !options.groups.includes(metadata.group)) continue;
+      if (options.source && metadata.source !== options.source) continue;
+      if (options.minConfidence && metadata.confidence < options.minConfidence) continue;
 
-      // Filter by source
-      if (options.source && metadata.source !== options.source) {
-        continue;
-      }
-
-      // Filter by confidence
-      if (options.minConfidence && metadata.confidence < options.minConfidence) {
-        continue;
-      }
-
-      // Filter by tags
       if (options.tags && options.tags.length > 0) {
-        const hasTag = options.tags.some(t => metadata.tags.includes(t));
+        const hasTag = options.tags.some((tag) => metadata.tags.includes(tag));
         if (!hasTag) continue;
       }
 
-      // Search in title and tags
       if (query) {
         const titleMatch = metadata.title.toLowerCase().includes(query);
-        const tagMatch = metadata.tags.some(t => t.toLowerCase().includes(query));
+        const tagMatch = metadata.tags.some((tag) => tag.toLowerCase().includes(query));
 
         if (!titleMatch && !tagMatch) {
-          // Check content
           const fullPath = join(this.memoriesDir, metadata.filePath);
-          if (existsSync(fullPath)) {
-            const content = readFileSync(fullPath, 'utf-8').toLowerCase();
-            if (!content.includes(query)) {
-              continue;
-            }
-          } else {
-            continue;
-          }
+          if (!existsSync(fullPath)) continue;
+          const fileContent = readFileSync(fullPath, 'utf-8').toLowerCase();
+          if (!fileContent.includes(query)) continue;
         }
       }
 
-      const memory = await this.read(id);
+      const memory = await this.readById(id, false);
       if (memory) {
         results.push(memory);
       }
 
-      // Limit results
       if (options.limit && results.length >= options.limit) {
         break;
       }
@@ -537,99 +525,68 @@ export class MemoryService {
     return results;
   }
 
-  /**
-   * Get all memories
-   */
   async getAll(): Promise<Memory[]> {
     this.ensureInitialized();
 
     const memories: Memory[] = [];
 
     for (const id of Object.keys(this.index!.memories)) {
-      const memory = await this.read(id);
-      if (memory) {
-        memories.push(memory);
-      }
+      const memory = await this.readById(id, false);
+      if (memory) memories.push(memory);
     }
 
     return memories;
   }
 
-  /**
-   * Get relevant memories for a context (simple relevance scoring)
-   */
   async getRelevantMemories(context: string, limit = 5): Promise<ScoredMemory[]> {
     this.ensureInitialized();
 
-    const scoredMemories: ScoredMemory[] = [];
+    const scored: ScoredMemory[] = [];
     const contextLower = context.toLowerCase();
-    const contextWords = contextLower.split(/\s+/).filter(w => w.length > 3);
+    const contextWords = contextLower.split(/\s+/).filter((word) => word.length > 3);
 
-    for (const [id, _metadata] of Object.entries(this.index!.memories)) {
-      const memory = await this.read(id);
+    for (const id of Object.keys(this.index!.memories)) {
+      const memory = await this.readById(id, false);
       if (!memory) continue;
 
-      // Calculate relevance score
       let score = 0;
 
-      // Title match
       const titleLower = memory.title.toLowerCase();
       for (const word of contextWords) {
-        if (titleLower.includes(word)) {
-          score += 0.2;
-        }
+        if (titleLower.includes(word)) score += 0.2;
       }
 
-      // Content match
       const contentLower = memory.content.toLowerCase();
       for (const word of contextWords) {
-        if (contentLower.includes(word)) {
-          score += 0.1;
-        }
+        if (contentLower.includes(word)) score += 0.1;
       }
 
-      // Tag match
       for (const tag of memory.tags) {
-        if (contextLower.includes(tag.toLowerCase())) {
-          score += 0.15;
-        }
+        if (contextLower.includes(tag.toLowerCase())) score += 0.15;
       }
 
-      // Recency bonus (accessed in last 24h)
       const lastAccess = new Date(memory.lastAccessedAt).getTime();
       const hoursSinceAccess = (Date.now() - lastAccess) / (1000 * 60 * 60);
       if (hoursSinceAccess < 24) {
         score += 0.1 * (1 - hoursSinceAccess / 24);
       }
 
-      // Access frequency bonus
       if (memory.accessCount > 5) {
         score += 0.05;
       }
 
-      // Confidence factor (for auto-extracted)
       score *= memory.confidence;
-
-      // Normalize to 0-1
       score = Math.min(1, Math.max(0, score));
 
       if (score > 0.1) {
-        scoredMemories.push({
-          ...memory,
-          relevanceScore: score,
-        });
+        scored.push({ ...memory, relevanceScore: score });
       }
     }
 
-    // Sort by relevance score descending
-    scoredMemories.sort((a, b) => b.relevanceScore - a.relevanceScore);
-
-    return scoredMemories.slice(0, limit);
+    scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    return scored.slice(0, limit);
   }
 
-  /**
-   * Build memory section for system prompt
-   */
   async buildMemoryPromptSection(sessionContext?: string): Promise<string> {
     this.ensureInitialized();
 
@@ -641,7 +598,7 @@ export class MemoryService {
       return '';
     }
 
-    let section = `## Relevant Memories\n\nThe following memories from previous interactions may be relevant:\n\n`;
+    let section = '## Relevant Memories\n\nThe following memories from previous interactions may be relevant:\n\n';
 
     for (const memory of memories) {
       const scoreInfo = 'relevanceScore' in memory
@@ -655,9 +612,6 @@ export class MemoryService {
     return section;
   }
 
-  /**
-   * Convert memory to file content with frontmatter
-   */
   private memoryToFileContent(memory: Memory): string {
     const frontmatter = [
       '---',
@@ -677,14 +631,10 @@ export class MemoryService {
       '',
     ].join('\n');
 
-    return frontmatter + memory.content;
+    return `${frontmatter}${memory.content}`;
   }
 
-  /**
-   * Parse file content to memory object
-   */
   private fileContentToMemory(content: string, id: string, metadata: MemoryMetadata): Memory {
-    // Parse frontmatter
     const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/);
     let memoryContent = content;
     let frontmatter: Record<string, string> = {};
@@ -694,19 +644,17 @@ export class MemoryService {
       const lines = frontmatterMatch[1].split('\n');
       for (const line of lines) {
         const colonIndex = line.indexOf(':');
-        if (colonIndex > 0) {
-          const key = line.slice(0, colonIndex).trim();
-          const value = line.slice(colonIndex + 1).trim();
-          frontmatter[key] = value;
-        }
+        if (colonIndex <= 0) continue;
+        const key = line.slice(0, colonIndex).trim();
+        const value = line.slice(colonIndex + 1).trim();
+        frontmatter[key] = value;
       }
     }
 
-    // Parse arrays from frontmatter
-    const parseTags = (str: string): string[] => {
-      const match = str.match(/\[(.*)\]/);
+    const parseArray = (value: string): string[] => {
+      const match = value.match(/\[(.*)\]/);
       if (!match) return [];
-      return match[1].split(',').map(s => s.trim()).filter(Boolean);
+      return match[1].split(',').map((entry) => entry.trim()).filter(Boolean);
     };
 
     return {
@@ -714,51 +662,36 @@ export class MemoryService {
       title: frontmatter.title || metadata.title,
       content: memoryContent.trim(),
       group: (frontmatter.group || metadata.group) as MemoryGroup,
-      tags: parseTags(frontmatter.tags || '[]'),
+      tags: parseArray(frontmatter.tags || '[]'),
       source: (frontmatter.source || metadata.source || 'manual') as 'auto' | 'manual',
       confidence: parseFloat(frontmatter.confidence || String(metadata.confidence)) || 1.0,
       createdAt: frontmatter.createdAt || new Date().toISOString(),
       updatedAt: frontmatter.updatedAt || new Date().toISOString(),
-      accessCount: parseInt(frontmatter.accessCount || '0') || metadata.accessCount,
+      accessCount: parseInt(frontmatter.accessCount || String(metadata.accessCount || 0), 10) || 0,
       lastAccessedAt: frontmatter.lastAccessedAt || metadata.lastAccessedAt,
-      relatedSessionIds: parseTags(frontmatter.relatedSessionIds || '[]'),
-      relatedMemoryIds: parseTags(frontmatter.relatedMemoryIds || '[]'),
+      relatedSessionIds: parseArray(frontmatter.relatedSessionIds || '[]'),
+      relatedMemoryIds: parseArray(frontmatter.relatedMemoryIds || '[]'),
     };
   }
 
-  /**
-   * Ensure service is initialized
-   */
   private ensureInitialized(): void {
     if (!this.initialized || !this.index) {
       throw new Error('MemoryService not initialized. Call initialize() first.');
     }
   }
 
-  /**
-   * Get the memories directory path
-   */
   getMemoriesDir(): string {
     return this.memoriesDir;
   }
 
-  /**
-   * Get the working directory
-   */
   getWorkingDir(): string {
     return this.workingDir;
   }
 
-  /**
-   * Check if initialized
-   */
   isInitialized(): boolean {
     return this.initialized;
   }
 
-  /**
-   * Add session ID to a memory's related sessions
-   */
   async addRelatedSession(memoryId: string, sessionId: string): Promise<void> {
     this.ensureInitialized();
 
@@ -778,14 +711,11 @@ export class MemoryService {
         writeFileSync(fullPath, this.memoryToFileContent(memory), 'utf-8');
       }
     } catch {
-      // Failed to add related session - continue
+      // ignore relation update failures
     }
   }
 }
 
-/**
- * Create a new MemoryService instance
- */
 export function createMemoryService(workingDir: string): MemoryService {
   return new MemoryService(workingDir);
 }

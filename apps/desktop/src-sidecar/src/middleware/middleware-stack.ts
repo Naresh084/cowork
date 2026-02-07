@@ -63,11 +63,18 @@ export async function createMiddlewareStack(
   session: SessionRef,
   memoryService: MemoryService,
   memoryExtractor: MemoryExtractor,
-  agentsMdConfig: AgentsMdConfig | null
+  agentsMdConfig: AgentsMdConfig | null,
+  options?: {
+    maxMemoriesInPrompt?: number;
+    autoExtract?: boolean;
+  },
 ): Promise<{
   beforeInvoke: (context: MiddlewareContext) => Promise<MiddlewareResult>;
   afterInvoke: (context: MiddlewareContext) => Promise<void>;
 }> {
+  const maxMemoriesInPrompt = Math.max(1, Math.floor(options?.maxMemoriesInPrompt ?? 5));
+  const autoExtract = options?.autoExtract ?? true;
+
   return {
     beforeInvoke: async (context: MiddlewareContext) => {
       const additions: string[] = [];
@@ -96,7 +103,7 @@ export async function createMiddlewareStack(
 
       // 3. Inject relevant memories based on context
       const contextText = buildContextText(context);
-      const relevantMemories = await memoryService.getRelevantMemories(contextText, 5);
+      const relevantMemories = await memoryService.getRelevantMemories(contextText, maxMemoriesInPrompt);
 
       if (relevantMemories.length > 0) {
         additions.push(formatMemoriesForPrompt(relevantMemories));
@@ -122,13 +129,17 @@ export async function createMiddlewareStack(
     },
 
     afterInvoke: async (context: MiddlewareContext) => {
+      if (!autoExtract) {
+        return;
+      }
+
       // Extract potential memories from conversation
       if (memoryExtractor.isEnabled()) {
         const result = await memoryExtractor.extract(context.messages);
 
         for (const memory of result.memories) {
           try {
-            await memoryService.create({
+            await memoryService.upsertAutoMemory({
               title: memory.title,
               content: memory.content,
               group: memory.group,

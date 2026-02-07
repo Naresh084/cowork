@@ -112,4 +112,20 @@ describe('system-prompt-builder', () => {
     const result = builder.build(createContext('google'));
     expect(result.prompt.length).toBeLessThan(40000);
   });
+
+  it('includes external-cli conversational operating practice when launch tools are available', () => {
+    const context = createContext('google');
+    context.toolHandlers = [
+      ...context.toolHandlers,
+      createTool('start_codex_cli_run', 'Launch Codex CLI run'),
+      createTool('start_claude_cli_run', 'Launch Claude CLI run'),
+      createTool('external_cli_get_progress', 'Get external CLI progress'),
+    ];
+
+    const result = builder.build(context);
+    expect(result.prompt).toContain('## External CLI Operating Practice');
+    expect(result.prompt).toContain('`working_directory`');
+    expect(result.prompt).toContain('`create_if_missing`');
+    expect(result.prompt).toContain('`bypassPermission`');
+  });
 });

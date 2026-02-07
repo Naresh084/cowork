@@ -98,6 +98,9 @@ export interface MemoryMetadata {
 
   /** Confidence score */
   confidence: number;
+
+  /** Canonical content hash for dedupe */
+  contentHash?: string;
 }
 
 /**
@@ -201,6 +204,35 @@ export interface ScoredMemory extends Memory {
 }
 
 /**
+ * Semantic memory candidate emitted by the model extractor.
+ */
+export interface SemanticMemoryCandidate {
+  /** Target group */
+  group: MemoryGroup;
+
+  /** Canonical memory statement */
+  content: string;
+
+  /** Confidence score from model */
+  confidence: number;
+
+  /** Whether this appears stable long-term */
+  stable: boolean;
+
+  /** Scope classification */
+  scope: 'user' | 'project' | 'workflow' | 'general';
+
+  /** Whether content is sensitive and should not be persisted */
+  sensitive: boolean;
+
+  /** Optional model-generated title */
+  title?: string;
+
+  /** Optional model-generated tags */
+  tags?: string[];
+}
+
+/**
  * Extracted memory from conversation
  */
 export interface ExtractedMemory {
@@ -221,6 +253,15 @@ export interface ExtractedMemory {
 
   /** Source message ID */
   sourceMessageId?: string;
+
+  /** Semantic scope classification */
+  scope?: SemanticMemoryCandidate['scope'];
+
+  /** Whether candidate was considered stable */
+  stable?: boolean;
+
+  /** Whether candidate was sensitive */
+  sensitive?: boolean;
 }
 
 /**
@@ -235,7 +276,12 @@ export interface MemoryExtractionResult {
 
   /** Extraction timestamp */
   extractedAt: string;
+
+  /** Raw model candidates */
+  candidates?: SemanticMemoryCandidate[];
 }
+
+export type MemoryExtractionStyle = 'conservative' | 'balanced' | 'aggressive';
 
 /**
  * Configuration for memory extraction
@@ -250,8 +296,11 @@ export interface MemoryExtractionConfig {
   /** Maximum memories to extract per conversation */
   maxPerConversation: number;
 
-  /** Extraction patterns by group */
-  patterns: Record<MemoryGroup, RegExp[]>;
+  /** Accepted memory style */
+  style: MemoryExtractionStyle;
+
+  /** Maximum memories to persist after filtering */
+  maxAcceptedPerTurn: number;
 }
 
 /**
@@ -261,21 +310,6 @@ export const DEFAULT_EXTRACTION_CONFIG: MemoryExtractionConfig = {
   enabled: true,
   confidenceThreshold: 0.7,
   maxPerConversation: 5,
-  patterns: {
-    preferences: [
-      /(?:I prefer|I like|I always|I usually|I want|please always)/i,
-      /(?:don't|never|avoid|skip) (?:use|add|include)/i,
-    ],
-    learnings: [
-      /(?:remember|note that|keep in mind|important:)/i,
-      /(?:the pattern is|the convention is|we use)/i,
-    ],
-    context: [
-      /(?:this project|this codebase|our architecture)/i,
-      /(?:the way we|how we handle)/i,
-    ],
-    instructions: [
-      /(?:always|never|you should|you must)/i,
-    ],
-  },
+  style: 'balanced',
+  maxAcceptedPerTurn: 2,
 };

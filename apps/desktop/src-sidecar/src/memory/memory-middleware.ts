@@ -40,11 +40,11 @@ You have access to persistent memories stored in .cowork/memories/. These contai
 
 1. **Reading Memories**: Relevant memories are automatically injected above based on conversation context.
 
-2. **Creating Memories** (Moderate approach):
-   - Save clear user preferences: "I prefer X over Y"
-   - Save recurring patterns: "We always do X this way"
-   - Save important learnings: "Remember that X because Y"
-   - Save project decisions: "We decided to use X for Y"
+2. **Creating Memories** (Semantic approach):
+   - Create memories from natural language meaning, not fixed trigger phrases.
+   - Save durable cross-session facts only (preferences, standards, architecture decisions, stable constraints).
+   - Paraphrase memories into concise canonical statements.
+   - Reject one-off temporary instructions or transient status updates.
 
 3. **Memory Groups**:
    - preferences/ - User coding style, tool preferences
@@ -63,6 +63,7 @@ You have access to persistent memories stored in .cowork/memories/. These contai
    - Session-specific context
    - Temporary workarounds
    - Trivial information
+   - Sensitive/private secrets
 `;
 
 /**
@@ -145,7 +146,7 @@ export class MemoryMiddleware {
     let saved = 0;
     for (const memory of result.memories) {
       try {
-        await this.memoryService.create({
+        await this.memoryService.upsertAutoMemory({
           title: memory.title,
           content: memory.content,
           group: memory.group,

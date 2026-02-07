@@ -1,13 +1,15 @@
+export type JsonRpcRequestId = number | string;
+
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
-  id: number;
+  id: JsonRpcRequestId;
   method: string;
   params: Record<string, unknown>;
 }
 
 export interface JsonRpcResponse {
   jsonrpc?: string;
-  id?: number;
+  id?: JsonRpcRequestId;
   result?: unknown;
   error?: {
     code?: number;
@@ -24,7 +26,7 @@ export interface JsonRpcNotification {
 
 export interface JsonRpcServerRequest {
   jsonrpc?: string;
-  id: number;
+  id: JsonRpcRequestId;
   method: string;
   params?: Record<string, unknown>;
 }
@@ -48,7 +50,8 @@ export function isJsonRpcServerRequest(value: unknown): value is JsonRpcServerRe
   }
 
   const item = value as Record<string, unknown>;
-  return typeof item.id === 'number' && typeof item.method === 'string';
+  const idValid = typeof item.id === 'number' || typeof item.id === 'string';
+  return idValid && typeof item.method === 'string';
 }
 
 export function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
@@ -57,7 +60,8 @@ export function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
   }
 
   const item = value as Record<string, unknown>;
-  return typeof item.id === 'number' && ('result' in item || 'error' in item);
+  const idValid = typeof item.id === 'number' || typeof item.id === 'string';
+  return idValid && ('result' in item || 'error' in item);
 }
 
 export function isJsonRpcNotification(value: unknown): value is JsonRpcNotification {

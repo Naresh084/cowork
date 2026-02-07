@@ -59,6 +59,22 @@ export interface RuntimeSoulProfile {
   path?: string;
 }
 
+export type RuntimeMemoryStyle = 'conservative' | 'balanced' | 'aggressive';
+
+export interface RuntimeMemorySettings {
+  enabled: boolean;
+  autoExtract: boolean;
+  maxInPrompt: number;
+  style: RuntimeMemoryStyle;
+}
+
+const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeMemorySettings = {
+  enabled: true,
+  autoExtract: true,
+  maxInPrompt: 5,
+  style: 'balanced',
+};
+
 const DEFAULT_BASE_URLS: Record<ProviderId, string> = {
   google: 'https://generativelanguage.googleapis.com',
   openai: 'https://api.openai.com',
@@ -112,6 +128,7 @@ export interface RuntimeConfigPayload {
     };
   };
   activeSoul?: RuntimeSoulProfile | null;
+  memory?: RuntimeMemorySettings;
 }
 
 export interface RuntimeConfigUpdateResult {
@@ -134,6 +151,7 @@ interface AuthState {
   tavilyApiKey: string | null;
   stitchApiKey: string | null;
   activeSoul: RuntimeSoulProfile | null;
+  memory: RuntimeMemorySettings;
   isLoading: boolean;
   error: string | null;
 }
@@ -194,6 +212,7 @@ function buildRuntimeConfig(
     externalCli: partial?.externalCli,
     specializedModels: partial?.specializedModels,
     activeSoul: partial?.activeSoul ?? state.activeSoul,
+    memory: partial?.memory ?? state.memory,
   };
 }
 
@@ -210,6 +229,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   tavilyApiKey: null,
   stitchApiKey: null,
   activeSoul: null,
+  memory: { ...DEFAULT_RUNTIME_MEMORY_SETTINGS },
   isLoading: false,
   error: null,
 
@@ -577,6 +597,9 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
 
       if (partial && Object.prototype.hasOwnProperty.call(partial, 'activeSoul')) {
         set({ activeSoul: partial.activeSoul ?? null });
+      }
+      if (partial && Object.prototype.hasOwnProperty.call(partial, 'memory')) {
+        set({ memory: partial.memory ?? { ...DEFAULT_RUNTIME_MEMORY_SETTINGS } });
       }
 
       if (result?.requiresNewSession) {

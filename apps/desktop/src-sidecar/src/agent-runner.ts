@@ -92,7 +92,7 @@ import type {
 } from './types.js';
 import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
 import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
-import { HumanMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 import { ExternalCliDiscoveryService } from './external-cli/discovery-service.js';
 import { ExternalCliRunManager } from './external-cli/run-manager.js';
@@ -151,6 +151,7 @@ interface ActiveSession {
   model: string;
   title: string | null;
   approvalMode: ApprovalMode;
+  baseSystemPrompt?: string;
   agent: DeepAgentInstance;
   abortController?: AbortController;
   stopRequested?: boolean;
@@ -258,6 +259,12 @@ interface RuntimeConfigState {
   sandbox: CommandSandboxSettings;
   externalCli: ExternalCliRuntimeConfig;
   activeSoul: RuntimeSoulProfile | null;
+  memory: {
+    enabled: boolean;
+    autoExtract: boolean;
+    maxInPrompt: number;
+    style: 'conservative' | 'balanced' | 'aggressive';
+  };
 }
 
 interface SoulCatalogResult {
@@ -320,6 +327,13 @@ const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
   maxOutputBytes: 1024 * 1024,
 };
 
+const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
+  enabled: true,
+  autoExtract: true,
+  maxInPrompt: 5,
+  style: 'balanced',
+};
+
 function normalizeCommandSandboxSettings(
   value?: Partial<CommandSandboxSettings> | null,
 ): CommandSandboxSettings {
@@ -354,6 +368,28 @@ function normalizeCommandSandboxSettings(
       typeof value?.maxOutputBytes === 'number' && value.maxOutputBytes > 0
         ? value.maxOutputBytes
         : DEFAULT_COMMAND_SANDBOX.maxOutputBytes,
+  };
+}
+
+function normalizeRuntimeMemorySettings(
+  value?: Partial<RuntimeConfigState['memory']> | null,
+): RuntimeConfigState['memory'] {
+  const style = value?.style;
+  return {
+    enabled:
+      typeof value?.enabled === 'boolean' ? value.enabled : DEFAULT_RUNTIME_MEMORY_SETTINGS.enabled,
+    autoExtract:
+      typeof value?.autoExtract === 'boolean'
+        ? value.autoExtract
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.autoExtract,
+    maxInPrompt:
+      typeof value?.maxInPrompt === 'number' && Number.isFinite(value.maxInPrompt)
+        ? Math.max(1, Math.min(20, Math.floor(value.maxInPrompt)))
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.maxInPrompt,
+    style:
+      style === 'conservative' || style === 'balanced' || style === 'aggressive'
+        ? style
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.style,
   };
 }
 
@@ -530,6 +566,7 @@ export class AgentRunner {
       claude: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.claude },
     },
     activeSoul: { ...FALLBACK_SOUL_PROFILE },
+    memory: { ...DEFAULT_RUNTIME_MEMORY_SETTINGS },
     specializedModels: {
       google: { ...DEFAULT_SPECIALIZED_MODELS.google },
       openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
@@ -549,6 +586,7 @@ export class AgentRunner {
   private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
   private externalCliDiscoveryService: ExternalCliDiscoveryService = new ExternalCliDiscoveryService();
   private externalCliRunManager: ExternalCliRunManager | null = null;
+  private externalCliQuestionMap: Map<string, { sessionId: string; questionId: string }> = new Map();
   private appDataDir: string | null = null;
   private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
   private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
@@ -579,6 +617,12 @@ export class AgentRunner {
     this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
       void this.handleExternalCliInteraction(interaction);
     });
+    this.externalCliRunManager.on(
+      'interaction_resolved',
+      (payload: { interactionId: string; sessionId: string }) => {
+        this.handleExternalCliInteractionResolved(payload.interactionId, payload.sessionId);
+      },
+    );
     await this.externalCliRunManager.initialize();
     void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
 
@@ -628,14 +672,33 @@ export class AgentRunner {
   private getMemoryExtractor(sessionId: string): MemoryExtractor {
     let extractor = this.memoryExtractors.get(sessionId);
     if (!extractor) {
+      const memorySettings = this.runtimeConfig.memory || DEFAULT_RUNTIME_MEMORY_SETTINGS;
       extractor = createMemoryExtractor({
-        enabled: true,
-        confidenceThreshold: 0.7,
+        enabled: memorySettings.autoExtract && memorySettings.enabled,
+        confidenceThreshold: memorySettings.style === 'conservative'
+          ? 0.78
+          : memorySettings.style === 'aggressive'
+            ? 0.58
+            : 0.68,
         maxPerConversation: 5,
+        style: memorySettings.style,
+        maxAcceptedPerTurn:
+          memorySettings.style === 'conservative'
+            ? 1
+            : memorySettings.style === 'aggressive'
+              ? 4
+              : 2,
       });
       this.memoryExtractors.set(sessionId, extractor);
     }
     return extractor;
+  }
+
+  private shouldUseLongTermMemory(session: ActiveSession): boolean {
+    if (!this.runtimeConfig.memory.enabled) {
+      return false;
+    }
+    return session.type === 'main' || session.type === 'integration';
   }
 
   /**
@@ -775,6 +838,7 @@ export class AgentRunner {
       model: data.metadata.model,
       title: data.metadata.title,
       approvalMode: data.metadata.approvalMode,
+      baseSystemPrompt: undefined,
       agent: {} as DeepAgentInstance, // Will be recreated on first message
       chatItems: data.chatItems,
       currentTurnId: undefined,
@@ -1536,6 +1600,10 @@ export class AgentRunner {
         ...(config.externalCli?.claude || {}),
       },
     };
+    const nextMemory = normalizeRuntimeMemorySettings({
+      ...this.runtimeConfig.memory,
+      ...(config.memory || {}),
+    });
     const nextActiveSoul = normalizeRuntimeSoulProfile(
       config.activeSoul === undefined ? this.runtimeConfig.activeSoul : config.activeSoul,
     );
@@ -1569,6 +1637,7 @@ export class AgentRunner {
       sandbox: nextSandbox,
       externalCli: nextExternalCli,
       activeSoul: nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
+      memory: nextMemory,
       specializedModels: nextSpecializedModels,
     };
 
@@ -1648,6 +1717,12 @@ export class AgentRunner {
       return;
     }
 
+    const questionId = generateId('q');
+    this.externalCliQuestionMap.set(interaction.interactionId, {
+      sessionId: interaction.sessionId,
+      questionId,
+    });
+
     try {
       const options =
         interaction.options?.map((option) => ({
@@ -1669,9 +1744,13 @@ export class AgentRunner {
           provider: interaction.provider,
           origin: interaction.origin,
         },
+        questionId,
       );
 
       const answerText = Array.isArray(answer) ? answer.join(', ') : answer;
+      if (answerText === '__external_cli_resolved__') {
+        return;
+      }
       if (!answerText || answerText === '__cancelled__') {
         await this.externalCliRunManager.respond(interaction.runId, 'cancel');
         return;
@@ -1684,6 +1763,27 @@ export class AgentRunner {
         `Failed to resolve external CLI interaction: ${error instanceof Error ? error.message : String(error)}`,
         'CLI_PROTOCOL_ERROR',
       );
+    } finally {
+      this.externalCliQuestionMap.delete(interaction.interactionId);
+    }
+  }
+
+  private handleExternalCliInteractionResolved(interactionId: string, sessionId: string): void {
+    const mapped = this.externalCliQuestionMap.get(interactionId);
+    if (!mapped) {
+      return;
+    }
+
+    if (mapped.sessionId !== sessionId) {
+      return;
+    }
+
+    try {
+      this.respondToQuestion(sessionId, mapped.questionId, '__external_cli_resolved__');
+    } catch {
+      // Question may already be answered by user.
+    } finally {
+      this.externalCliQuestionMap.delete(interactionId);
     }
   }
 
@@ -2857,6 +2957,7 @@ export class AgentRunner {
       model: actualModel,
       title: title || null,
       approvalMode: 'auto',
+      baseSystemPrompt: undefined,
       agent: {} as DeepAgentInstance,
       chatItems: [],
       currentTurnId: undefined,
@@ -3149,11 +3250,35 @@ export class AgentRunner {
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
     let streamedText = '';
+    const systemPromptAdditions: string[] = [];
 
     // Emit stream start — MUST be inside try so streamDone is guaranteed in finally/catch
     eventEmitter.streamStart(sessionId);
 
     try {
+      if (this.shouldUseLongTermMemory(session)) {
+        const middleware = this.middlewareHooks.get(sessionId);
+        if (middleware) {
+          try {
+            const beforeInvoke = await middleware.beforeInvoke({
+              sessionId,
+              input: content,
+              messages: this.deriveMessagesFromChatItems(session.chatItems),
+              systemPrompt: session.baseSystemPrompt || '',
+              systemPromptAdditions: [],
+            });
+            if (beforeInvoke.systemPromptAddition?.trim()) {
+              systemPromptAdditions.push(beforeInvoke.systemPromptAddition.trim());
+            }
+          } catch (error) {
+            console.warn(
+              '[memory] beforeInvoke failed:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+      }
+
       // Convert multimodal parts to provider-compatible LangChain content.
       const lcContent = typeof messageContent === 'string'
         ? messageContent
@@ -3162,7 +3287,11 @@ export class AgentRunner {
         ? lcContent.map((p: any) => p.type)
         : typeof lcContent);
       const newUserMessage = new HumanMessage(lcContent);
-      const lcMessages = [newUserMessage];
+      const lcMessages = [];
+      if (systemPromptAdditions.length > 0) {
+        lcMessages.push(new SystemMessage(systemPromptAdditions.join('\n\n')));
+      }
+      lcMessages.push(newUserMessage);
 
       if (agentAny.streamEvents) {
         try {
@@ -3352,6 +3481,31 @@ export class AgentRunner {
       if (assistantMessage || session.hasAssistantTextThisTurn) {
         session.updatedAt = Date.now();
       }
+
+      if (
+        this.shouldUseLongTermMemory(session) &&
+        session.executionMode !== 'plan' &&
+        !session.stopRequested
+      ) {
+        const middleware = this.middlewareHooks.get(sessionId);
+        if (middleware) {
+          try {
+            await middleware.afterInvoke({
+              sessionId,
+              input: content,
+              messages: this.deriveMessagesFromChatItems(session.chatItems),
+              systemPrompt: session.baseSystemPrompt || '',
+              systemPromptAdditions,
+            });
+          } catch (error) {
+            console.warn(
+              '[memory] afterInvoke failed:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+      }
+
       // Signal stream completion (frontend uses this for streaming state)
       eventEmitter.streamDone(sessionId, null);
 
@@ -3621,13 +3775,14 @@ export class AgentRunner {
     header?: string,
     allowCustom = true,
     metadata?: Record<string, unknown>,
+    questionIdOverride?: string,
   ): Promise<string | string[]> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const questionId = generateId('q');
+    const questionId = questionIdOverride || generateId('q');
 
     const questionRequest: QuestionRequest = {
       id: questionId,
@@ -4145,7 +4300,7 @@ export class AgentRunner {
       ? this.buildAgentsMdPrompt(agentsMdConfig)
       : '';
 
-    const memoryPrompt = MEMORY_SYSTEM_PROMPT;
+    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
     const subagentConfigs = getSubagentConfigs(session.model);
     const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
     const skillBlock = await this.buildSkillsPrompt(session);
@@ -4674,7 +4829,7 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
       : '';
 
     // Memory system prompt
-    const memoryPrompt = MEMORY_SYSTEM_PROMPT;
+    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
 
     // Subagent prompts
     const subagentConfigs = getSubagentConfigs(session.model);
@@ -4956,9 +5111,95 @@ ${stitchGuidance}
         : undefined;
 
     // Initialize Deep Agents services for this session
-    const memoryService = await this.getMemoryService(session.workingDirectory);
-    const memoryExtractor = this.getMemoryExtractor(session.id);
     const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    if (this.shouldUseLongTermMemory(session)) {
+      const memoryService = await this.getMemoryService(session.workingDirectory);
+      const memoryExtractor = this.getMemoryExtractor(session.id);
+      const memorySettings = this.runtimeConfig.memory;
+      const autoExtractEnabled = memorySettings.enabled && memorySettings.autoExtract && session.executionMode !== 'plan';
+      memoryExtractor.updateConfig({
+        enabled: autoExtractEnabled,
+        confidenceThreshold:
+          memorySettings.style === 'conservative'
+            ? 0.78
+            : memorySettings.style === 'aggressive'
+              ? 0.58
+              : 0.68,
+        maxPerConversation: 5,
+        style: memorySettings.style,
+        maxAcceptedPerTurn:
+          memorySettings.style === 'conservative'
+            ? 1
+            : memorySettings.style === 'aggressive'
+              ? 4
+              : 2,
+      });
+      memoryExtractor.setInvoker(async ({ system, user }) => {
+        const providerFactory = createProvider as unknown as (
+          id: ProviderId,
+          config: {
+            providerId?: ProviderId;
+            baseUrl?: string;
+            credentials: { type: 'api_key'; apiKey: string };
+          },
+        ) => {
+          generate: (request: {
+            model: string;
+            messages: Message[];
+          }) => Promise<{ message: Message }>;
+        };
+        try {
+          const provider = providerFactory(session.provider, {
+            providerId: session.provider,
+            baseUrl: session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+            credentials: {
+              type: 'api_key',
+              apiKey: providerKey,
+            },
+          });
+          const response = await provider.generate({
+            model: session.model,
+            messages: [
+              {
+                id: generateMessageId(),
+                role: 'system',
+                content: system,
+                createdAt: now(),
+              },
+              {
+                id: generateMessageId(),
+                role: 'user',
+                content: user,
+                createdAt: now(),
+              },
+            ],
+          });
+          return typeof response.message.content === 'string'
+            ? response.message.content
+            : this.extractTextContent(response.message) || '{"candidates":[]}';
+        } catch {
+          return '{"candidates":[]}';
+        }
+      });
+
+      const middlewareStack = await createMiddlewareStack(
+        {
+          id: session.id,
+          messages: this.deriveMessagesFromChatItems(session.chatItems),
+          model: session.model,
+        },
+        memoryService,
+        memoryExtractor,
+        agentsMdConfig,
+        {
+          maxMemoriesInPrompt: memorySettings.maxInPrompt,
+          autoExtract: autoExtractEnabled,
+        },
+      );
+      this.storeMiddlewareHooks(session.id, middlewareStack);
+    } else {
+      this.middlewareHooks.delete(session.id);
+    }
 
     // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
     // See: https://github.com/langchain-ai/langchainjs/issues/7434
@@ -4989,27 +5230,13 @@ ${stitchGuidance}
 
     const skillsDir = this.getSkillsDirectory();
 
-    // Create Deep Agents middleware stack for memory and context injection
-    const middlewareStack = await createMiddlewareStack(
-      {
-        id: session.id,
-        messages: this.deriveMessagesFromChatItems(session.chatItems),
-        model: session.model,
-      },
-      memoryService,
-      memoryExtractor,
-      agentsMdConfig
-    );
-
-    // Store middleware hooks for later invocation
-    this.storeMiddlewareHooks(session.id, middlewareStack);
-
     // Determine AGENTS.md paths for DeepAgents built-in memory loading
     const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
     const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
 
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const promptBuild = await this.buildSystemPromptForSession(session, tools);
+    session.baseSystemPrompt = promptBuild.prompt;
     const agent = createDeepAgentAny({
       model,
       tools: wrappedTools,
@@ -7505,7 +7732,9 @@ ${stitchGuidance}
       return turnId ? keepMessageIds.has(turnId) : false;
     });
     session.chatItems = [summaryItem, ...recentChatItems];
-    await this.persistSummary(session.workingDirectory, summary);
+    if (!this.shouldUseLongTermMemory(session)) {
+      await this.persistSummary(session.workingDirectory, summary);
+    }
     this.emitContextUsage(session);
   }
 

@@ -45,6 +45,13 @@ interface SessionProcessingState {
   outboundChain: Promise<void>;
 }
 
+interface PendingQuestionRoute {
+  sessionId: string;
+  questionId: string;
+  platform: PlatformType;
+  chatId: string;
+}
+
 /**
  * Routes messages between platform adapters and the agent runner.
  *
@@ -63,6 +70,7 @@ export class MessageRouter extends EventEmitter {
   private requestCounter = 0;
   private readonly maxMediaBytes: number;
   private sharedSessionWorkingDirectory: string | null = null;
+  private pendingQuestionRoutes: Map<string, PendingQuestionRoute> = new Map();
 
   constructor() {
     super();
@@ -710,6 +718,88 @@ export class MessageRouter extends EventEmitter {
     await this.processNextInQueue(sessionId, state);
   }
 
+  async onQuestionAsk(sessionId: string, request: unknown): Promise<void> {
+    if (sessionId !== this.integrationSessionId) return;
+
+    const requestAny = request as {
+      id?: string;
+      question?: string;
+      options?: Array<{ label?: string }>;
+      metadata?: Record<string, unknown>;
+    } | null;
+    if (!requestAny?.id || !requestAny.question) return;
+
+    const metadata = requestAny.metadata || {};
+    const externalCliInteraction = metadata.externalCliInteraction === true;
+    if (!externalCliInteraction) return;
+
+    const origin = (metadata.origin as { source?: string; platform?: PlatformType; chatId?: string } | undefined) || {};
+    if (origin.source !== 'integration' || !origin.platform || !origin.chatId) return;
+
+    const adapter = this.adapters.get(origin.platform);
+    if (!adapter) return;
+
+    const options = Array.isArray(requestAny.options)
+      ? requestAny.options
+          .map((option) => option?.label?.trim())
+          .filter((label): label is string => Boolean(label))
+      : [];
+    const optionsText = options.length > 0 ? `\nOptions: ${options.join(' | ')}` : '';
+
+    await adapter.sendMessage(
+      origin.chatId,
+      `Action required:\n${requestAny.question}${optionsText}`,
+    );
+    eventEmitter.integrationMessageOut(origin.platform, origin.chatId);
+
+    this.pendingQuestionRoutes.set(requestAny.id, {
+      sessionId,
+      questionId: requestAny.id,
+      platform: origin.platform,
+      chatId: origin.chatId,
+    });
+  }
+
+  async onQuestionAnswered(
+    sessionId: string,
+    questionId: string,
+    _answer: string | string[],
+  ): Promise<void> {
+    const route = this.pendingQuestionRoutes.get(questionId);
+    if (!route) return;
+    if (route.sessionId !== sessionId) return;
+    this.pendingQuestionRoutes.delete(questionId);
+  }
+
+  private async tryHandlePendingQuestionResponse(
+    sessionId: string,
+    msg: IncomingMessage,
+  ): Promise<boolean> {
+    const match = Array.from(this.pendingQuestionRoutes.values()).find(
+      (route) =>
+        route.sessionId === sessionId &&
+        route.platform === msg.platform &&
+        route.chatId === msg.chatId,
+    );
+    if (!match) return false;
+
+    if (!this.agentRunner || typeof this.agentRunner.respondToQuestion !== 'function') {
+      return false;
+    }
+
+    const responseText = this.normalizeIncomingContent(msg.content) || '[empty response]';
+    await Promise.resolve(this.agentRunner.respondToQuestion(sessionId, match.questionId, responseText));
+    this.pendingQuestionRoutes.delete(match.questionId);
+
+    const adapter = this.adapters.get(msg.platform);
+    if (adapter) {
+      await adapter.sendMessage(msg.chatId, 'Acknowledged. Continuing the pending run.');
+      eventEmitter.integrationMessageOut(msg.platform, msg.chatId);
+    }
+
+    return true;
+  }
+
   /** Handle an incoming message from any platform */
   async handleIncoming(msg: IncomingMessage): Promise<void> {
     if (!this.agentRunner) {
@@ -725,6 +815,32 @@ export class MessageRouter extends EventEmitter {
 
     const inboundSummary = this.normalizeIncomingContent(msg.content) || '[attachment]';
     eventEmitter.integrationMessageIn(msg.platform, msg.senderName, inboundSummary);
+
+    if (await this.tryHandlePendingQuestionResponse(sessionId, msg)) {
+      return;
+    }
+
+    if (
+      this.agentRunner &&
+      typeof this.agentRunner.tryHandleIntegrationExternalCliResponse === 'function'
+    ) {
+      const handled = await Promise.resolve(
+        this.agentRunner.tryHandleIntegrationExternalCliResponse(
+          sessionId,
+          msg.platform,
+          msg.chatId,
+          this.normalizeIncomingContent(msg.content),
+        ),
+      );
+      if (handled) {
+        const adapter = this.adapters.get(msg.platform);
+        if (adapter) {
+          await adapter.sendMessage(msg.chatId, 'Acknowledged. Continuing the pending run.');
+          eventEmitter.integrationMessageOut(msg.platform, msg.chatId);
+        }
+        return;
+      }
+    }
 
     if (state.isProcessing) {
       state.messageQueue.push(msg);

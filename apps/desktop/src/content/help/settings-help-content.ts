@@ -287,6 +287,36 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     requires_new_session: false,
   },
   {
+    id: 'integration.externalCli.enableTools',
+    title: 'External CLI Tool Enablement',
+    description: 'Enables external Codex/Claude orchestration tools when binaries are installed.',
+    what_it_controls:
+      'Registers or hides start/progress/respond/cancel external CLI tools for each installed provider.',
+    when_to_use:
+      'Enable for users who want Cowork to orchestrate local codex/claude workflows with conversational pre-launch confirmations.',
+    tool_impact: [
+      'start_codex_cli_run',
+      'start_claude_cli_run',
+      'external_cli_get_progress',
+      'external_cli_respond',
+      'external_cli_cancel_run',
+    ],
+    security_notes: 'Disable when you do not want agents invoking external local CLIs.',
+    requires_new_session: false,
+  },
+  {
+    id: 'integration.externalCli.allowBypassPermissions',
+    title: 'External CLI Bypass Permissions',
+    description: 'Allows bypass mode to be selected for external CLI runs.',
+    what_it_controls:
+      'Permits `bypassPermission=true` for provider start tools. The agent should still ask for conversational confirmation each launch.',
+    when_to_use:
+      'Enable only in trusted environments where bypass may be needed after user confirmation.',
+    tool_impact: ['start_codex_cli_run', 'start_claude_cli_run'],
+    security_notes: 'Bypass mode can execute high-risk actions without HITL checks. Keep disabled by default.',
+    requires_new_session: false,
+  },
+  {
     id: 'integration.computerUseModel',
     title: 'Computer Use Model',
     description: 'Model ID used by computer_use browser automation tooling.',
