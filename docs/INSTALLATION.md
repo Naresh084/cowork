@@ -1,4 +1,4 @@
-# Gemini Cowork Installation Guide
+# Cowork Installation Guide
 
 ## System Requirements
 
@@ -84,9 +84,15 @@ sudo rpm -i Gemini-Cowork_X.X.X_x86_64.rpm
 ## First Launch Setup
 
 1. Launch Gemini Cowork
-2. Enter your Google AI API key (get one at https://aistudio.google.com/apikey)
-3. Select a working directory for your projects
-4. Start chatting with your AI coding assistant!
+2. Enter your name.
+3. Select your provider (Google, OpenAI, Anthropic, OpenRouter, Moonshot, GLM, DeepSeek, or LM Studio).
+4. Add provider API key (optional for LM Studio).
+5. Set base URL if your provider supports editable base URLs.
+6. Select a chat model (or enter a custom model ID).
+7. Optionally configure media and integration keys (Google, OpenAI, Fal, Exa, Tavily, Stitch).
+8. Start chatting.
+
+Detailed onboarding/settings behavior is documented in `docs/GET_STARTED.md`.
 
 ---
 
@@ -128,7 +134,10 @@ Your API key is stored securely in your system's credential manager:
 - Windows: Credential Manager
 - Linux: Secret Service (GNOME Keyring/KWallet)
 
-To reset, go to Settings -> API Key -> Clear and re-enter.
+To reset keys, use:
+- Settings -> Provider (provider keys + base URL)
+- Settings -> Media (Google/OpenAI/Fal media keys + model routing)
+- Settings -> Integrations (Exa/Tavily/Stitch and related capability settings)
 
 ---
 

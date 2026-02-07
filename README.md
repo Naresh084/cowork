@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A desktop coding assistant powered by Google Gemini — with 51 skills, 10 subagents, 23 MCP connectors, deep research, computer use, and persistent memory.
+  A desktop coding assistant with multi-provider AI support — with 51 skills, 10 subagents, 23 MCP connectors, deep research, computer use, and persistent memory.
 </p>
 
 ---
@@ -28,11 +28,11 @@
 
 ### AI Capabilities
 
-- **Gemini Integration** — Native Gemini API with streaming, function calling, and grounded search
+- **Multi-Provider AI** — Google, OpenAI, Anthropic, OpenRouter, Moonshot (Kimi), GLM, DeepSeek, and LM Studio
 - **Deep Research** — Multi-step web research with report generation and citations
 - **Computer Use** — Live browser view with split-pane interaction
 - **Vision** — Image and video understanding from files, clipboard, or camera
-- **Image & Video Generation** — Create visuals from natural language prompts
+- **Image & Video Generation** — Unified media tools routed to Google, OpenAI, or Fal based on settings
 
 ### Agent System
 
@@ -73,7 +73,7 @@
 
 - **Frontend**: React 18, TypeScript, Tailwind CSS, Zustand, Framer Motion
 - **Desktop Framework**: Tauri 2.0 (Rust)
-- **AI Provider**: Google Gemini API
+- **AI Providers**: Google, OpenAI, Anthropic, OpenRouter, Moonshot, GLM, DeepSeek, LM Studio
 - **Storage**: SQLite (via better-sqlite3)
 - **Build Tools**: Vite, Turborepo, pnpm
 - **Testing**: Vitest, Playwright
@@ -113,9 +113,8 @@ cd geminicowork
 # Install dependencies
 pnpm install
 
-# Set up environment
+# Optional local environment overrides
 cp apps/desktop/.env.example apps/desktop/.env
-# Add your Gemini API key to apps/desktop/.env
 
 # Build the sidecar
 cd apps/desktop/src-sidecar && pnpm build && cd ../../..
@@ -124,7 +123,15 @@ cd apps/desktop/src-sidecar && pnpm build && cd ../../..
 pnpm dev
 ```
 
-> Get your API key from [Google AI Studio](https://aistudio.google.com/apikey)
+### First Run (In App)
+
+1. Enter your name.
+2. Select a provider.
+3. Add provider API key (and base URL for editable providers).
+4. Select a model (or enter a custom model ID).
+5. Optionally configure media keys/models and integration keys.
+
+For full onboarding + settings behavior (provider/media/integrations tabs, tool availability by key, runtime apply vs new session), see [docs/GET_STARTED.md](docs/GET_STARTED.md).
 
 ## Project Structure
 
