@@ -1,9 +1,60 @@
-import { spawn, type SpawnOptions } from 'child_process';
+import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { platform } from 'os';
-import type { ExecutionOptions, ExecutionResult, SandboxConfig } from './types.js';
+import type {
+  CommandPolicyEvaluation,
+  ExecutionMode,
+  ExecutionOptions,
+  ExecutionResult,
+  SandboxConfig,
+} from './types.js';
 import { DEFAULT_SANDBOX_CONFIG } from './types.js';
 import { CommandValidator } from './validator.js';
 import { PermissionError, ToolError } from '@gemini-cowork/shared';
+
+let cachedSandboxExecAvailable: boolean | null = null;
+
+function normalizeConfig(config: Partial<SandboxConfig> = {}): SandboxConfig {
+  return {
+    ...DEFAULT_SANDBOX_CONFIG,
+    ...config,
+    allowedPaths: Array.isArray(config.allowedPaths)
+      ? config.allowedPaths
+      : DEFAULT_SANDBOX_CONFIG.allowedPaths,
+    deniedPaths: Array.isArray(config.deniedPaths)
+      ? config.deniedPaths
+      : DEFAULT_SANDBOX_CONFIG.deniedPaths,
+    trustedCommands: Array.isArray(config.trustedCommands)
+      ? config.trustedCommands
+      : DEFAULT_SANDBOX_CONFIG.trustedCommands,
+    maxExecutionTimeMs:
+      typeof config.maxExecutionTimeMs === 'number'
+        ? config.maxExecutionTimeMs
+        : DEFAULT_SANDBOX_CONFIG.maxExecutionTimeMs,
+    maxOutputBytes:
+      typeof config.maxOutputBytes === 'number'
+        ? config.maxOutputBytes
+        : DEFAULT_SANDBOX_CONFIG.maxOutputBytes,
+  };
+}
+
+export function isOsSandboxAvailable(): boolean {
+  if (platform() !== 'darwin') {
+    return false;
+  }
+  if (cachedSandboxExecAvailable !== null) {
+    return cachedSandboxExecAvailable;
+  }
+  try {
+    const result = spawnSync('sandbox-exec', ['-h'], {
+      stdio: 'ignore',
+    });
+    cachedSandboxExecAvailable = result.status === 0 || result.status === 64;
+    return cachedSandboxExecAvailable;
+  } catch {
+    cachedSandboxExecAvailable = false;
+    return false;
+  }
+}
 
 // ============================================================================
 // Command Executor
@@ -14,7 +65,7 @@ export class CommandExecutor {
   private validator: CommandValidator;
 
   constructor(config: Partial<SandboxConfig> = {}) {
-    this.config = { ...DEFAULT_SANDBOX_CONFIG, ...config };
+    this.config = normalizeConfig(config);
     this.validator = new CommandValidator(this.config);
   }
 
@@ -25,28 +76,29 @@ export class CommandExecutor {
     const {
       cwd = process.cwd(),
       env = {},
-      timeout = this.config.maxExecutionTime,
+      timeout = this.config.maxExecutionTimeMs,
       mode = 'normal',
       shell = true,
       stdin,
     } = options;
 
-    // Validate command
-    const analysis = this.validator.analyze(command);
-
-    if (analysis.risk === 'blocked') {
-      throw PermissionError.shellExecute(command);
+    // Validate command using deterministic policy gate.
+    const policy = this.validator.evaluatePolicy(command, { cwd });
+    if (!policy.allowed) {
+      throw PermissionError.shellExecute(`${command}\n${policy.violations.join(' ')}`);
     }
 
     // In dry run mode, just return the analysis
     if (mode === 'dry_run') {
       return {
         exitCode: 0,
-        stdout: `[DRY RUN] Would execute: ${command}\nRisk: ${analysis.risk}\nReasons: ${analysis.reasons.join(', ') || 'None'}`,
+        stdout: `[DRY RUN] Would execute: ${command}\nAllowed: ${policy.allowed}\nViolations: ${policy.violations.join(', ') || 'None'}\nRisk: ${policy.analysis.risk}`,
         stderr: '',
         duration: 0,
       };
     }
+
+    const executionMode = this.resolveExecutionMode(mode);
 
     // Build spawn options
     const spawnOptions: SpawnOptions = {
@@ -56,12 +108,24 @@ export class CommandExecutor {
       timeout,
     };
 
-    // Apply sandboxing on macOS if requested
-    if (mode === 'sandboxed' && platform() === 'darwin') {
+    // Apply sandboxing on macOS if requested and available
+    if (executionMode === 'sandboxed' && isOsSandboxAvailable()) {
       return this.executeSandboxed(command, spawnOptions, stdin);
     }
 
     return this.executeNormal(command, spawnOptions, stdin, timeout);
+  }
+
+  /**
+   * Resolve runtime execution mode.
+   */
+  private resolveExecutionMode(mode: ExecutionMode): ExecutionMode {
+    if (mode === 'dry_run') return mode;
+    if (mode === 'sandboxed') return mode;
+    if (this.config.mode === 'danger-full-access') {
+      return 'normal';
+    }
+    return isOsSandboxAvailable() ? 'sandboxed' : 'normal';
   }
 
   /**
@@ -71,9 +135,9 @@ export class CommandExecutor {
     command: string,
     options: SpawnOptions,
     stdin?: string,
-    timeout?: number
+    timeout?: number,
   ): Promise<ExecutionResult> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolvePromise, reject) => {
       const startTime = Date.now();
       let stdout = '';
       let stderr = '';
@@ -103,8 +167,8 @@ export class CommandExecutor {
       child.stdout?.on('data', (data) => {
         if (stdoutTruncated) return;
         stdout += data.toString();
-        if (stdout.length > this.config.maxOutputSize) {
-          stdout = stdout.slice(0, this.config.maxOutputSize) + '\n[Output truncated]';
+        if (stdout.length > this.config.maxOutputBytes) {
+          stdout = stdout.slice(0, this.config.maxOutputBytes) + '\n[Output truncated]';
           stdoutTruncated = true;
         }
       });
@@ -113,8 +177,8 @@ export class CommandExecutor {
       child.stderr?.on('data', (data) => {
         if (stderrTruncated) return;
         stderr += data.toString();
-        if (stderr.length > this.config.maxOutputSize) {
-          stderr = stderr.slice(0, this.config.maxOutputSize) + '\n[Output truncated]';
+        if (stderr.length > this.config.maxOutputBytes) {
+          stderr = stderr.slice(0, this.config.maxOutputBytes) + '\n[Output truncated]';
           stderrTruncated = true;
         }
       });
@@ -129,7 +193,7 @@ export class CommandExecutor {
       child.on('close', (code, signal) => {
         if (timeoutId) clearTimeout(timeoutId);
 
-        resolve({
+        resolvePromise({
           exitCode: code ?? (killed ? 124 : 1),
           stdout,
           stderr,
@@ -143,12 +207,7 @@ export class CommandExecutor {
       child.on('error', (error) => {
         if (timeoutId) clearTimeout(timeoutId);
 
-        reject(
-          ToolError.executionFailed(
-            'shell',
-            error.message
-          )
-        );
+        reject(ToolError.executionFailed('shell', error.message));
       });
     });
   }
@@ -159,7 +218,7 @@ export class CommandExecutor {
   private async executeSandboxed(
     command: string,
     options: SpawnOptions,
-    stdin?: string
+    stdin?: string,
   ): Promise<ExecutionResult> {
     // Build a seatbelt profile for the sandbox
     const profile = this.buildSeatbeltProfile();
@@ -174,16 +233,16 @@ export class CommandExecutor {
    * Build a seatbelt profile for macOS sandbox.
    */
   private buildSeatbeltProfile(): string {
-    const allowedPaths = this.config.allowedPaths
-      .map((p) => `(subpath "${p}")`)
-      .join(' ');
+    const allowedPaths = this.config.allowedPaths.map((p) => `(subpath "${p}")`).join(' ');
+    const allowWriteClause =
+      this.config.mode === 'read-only' ? '' : `(allow file-write* ${allowedPaths})`;
 
     return `
 (version 1)
 (deny default)
 (allow process-fork process-exec)
 (allow file-read* ${allowedPaths})
-(allow file-write* ${allowedPaths})
+${allowWriteClause}
 (allow file-read-metadata)
 (allow file-read-data (literal "/dev/null"))
 (allow file-read-data (literal "/dev/urandom"))
@@ -207,7 +266,7 @@ ${this.config.allowNetwork ? '(allow network*)' : '(deny network*)'}
    * Update the sandbox configuration.
    */
   updateConfig(config: Partial<SandboxConfig>): void {
-    this.config = { ...this.config, ...config };
+    this.config = normalizeConfig({ ...this.config, ...config });
     this.validator = new CommandValidator(this.config);
   }
 
@@ -221,8 +280,15 @@ ${this.config.allowNetwork ? '(allow network*)' : '(deny network*)'}
   /**
    * Analyze a command without executing it.
    */
-  analyze(command: string) {
-    return this.validator.analyze(command);
+  analyze(command: string, cwd?: string) {
+    return this.validator.analyze(command, { cwd });
+  }
+
+  /**
+   * Evaluate command against current sandbox policy.
+   */
+  evaluatePolicy(command: string, cwd?: string): CommandPolicyEvaluation {
+    return this.validator.evaluatePolicy(command, { cwd });
   }
 }
 
@@ -238,7 +304,7 @@ export function createExecutor(config?: Partial<SandboxConfig>): CommandExecutor
  */
 export async function executeCommand(
   command: string,
-  options?: ExecutionOptions
+  options?: ExecutionOptions,
 ): Promise<ExecutionResult> {
   const executor = new CommandExecutor();
   return executor.execute(command, options);

@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile, stat, realpath, mkdir } from 'fs/promises';
 import { join, normalize, isAbsolute, resolve, dirname, sep, extname } from 'path';
 import micromatch from 'micromatch';
-import { CommandExecutor } from '@gemini-cowork/sandbox';
+import { CommandExecutor, type CommandSandboxSettings } from '@gemini-cowork/sandbox';
 import type {
   SandboxBackendProtocol,
   FileInfo,
@@ -28,6 +28,17 @@ const ABSOLUTE_PREFIXES = [
   '/opt',
   '/tmp',
 ];
+
+const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
+  mode: 'workspace-write',
+  allowNetwork: false,
+  allowProcessSpawn: true,
+  allowedPaths: [],
+  deniedPaths: ['/etc', '/System', '/usr'],
+  trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
+  maxExecutionTimeMs: 30000,
+  maxOutputBytes: 1024 * 1024,
+};
 
 function formatContentWithLineNumbers(lines: string[], startLine = 1): string {
   return lines
@@ -151,18 +162,42 @@ export class CoworkBackend implements SandboxBackendProtocol {
   private executor: CommandExecutor;
   private allowedPathProvider: () => string[];
   private skillsDir: string | null;
+  private sandboxSettingsProvider: () => CommandSandboxSettings;
 
   constructor(
     workingDirectory: string,
     id: string,
     allowedPathProvider?: () => string[],
-    skillsDir?: string
+    skillsDir?: string,
+    sandboxSettingsProvider?: () => CommandSandboxSettings,
   ) {
     this.workingDirectory = resolve(workingDirectory);
     this.id = id;
-    this.executor = new CommandExecutor();
     this.allowedPathProvider = allowedPathProvider || (() => []);
+    this.sandboxSettingsProvider = sandboxSettingsProvider || (() => ({ ...DEFAULT_COMMAND_SANDBOX }));
+    this.executor = new CommandExecutor(this.getEffectiveSandboxSettings());
     this.skillsDir = skillsDir || null;
+  }
+
+  private getEffectiveSandboxSettings(): CommandSandboxSettings {
+    const configured = this.sandboxSettingsProvider() || DEFAULT_COMMAND_SANDBOX;
+    const allowed = new Set<string>([
+      resolve(this.workingDirectory),
+      ...configured.allowedPaths.map((path) => resolve(path)),
+      ...this.allowedPathProvider().map((path) => resolve(path)),
+    ]);
+
+    return {
+      ...DEFAULT_COMMAND_SANDBOX,
+      ...configured,
+      allowedPaths: Array.from(allowed),
+      deniedPaths: Array.isArray(configured.deniedPaths)
+        ? configured.deniedPaths
+        : DEFAULT_COMMAND_SANDBOX.deniedPaths,
+      trustedCommands: Array.isArray(configured.trustedCommands)
+        ? configured.trustedCommands
+        : DEFAULT_COMMAND_SANDBOX.trustedCommands,
+    };
   }
 
   async lsInfo(path: string): Promise<FileInfo[]> {
@@ -537,9 +572,24 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   async execute(command: string): Promise<ExecuteResponse> {
+    const sandboxSettings = this.getEffectiveSandboxSettings();
+    this.executor.updateConfig(sandboxSettings);
+    const policy = this.executor.evaluatePolicy(command, this.workingDirectory);
+    if (!policy.allowed) {
+      return {
+        output: `Command blocked by sandbox policy:\n- ${policy.violations.join('\n- ')}`,
+        exitCode: 1,
+        truncated: false,
+      };
+    }
+
+    const mode = sandboxSettings.mode === 'danger-full-access' ? 'normal' : 'sandboxed';
+
     try {
       const result = await this.executor.execute(command, {
         cwd: this.workingDirectory,
+        mode,
+        timeout: sandboxSettings.maxExecutionTimeMs,
       });
       const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
       const truncated = output.includes('[Output truncated]');

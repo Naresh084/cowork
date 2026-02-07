@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import { useAuthStore, type ProviderId } from './auth-store';
+import {
+  useAuthStore,
+  type ProviderId,
+  type CommandSandboxSettings,
+  type SandboxMode,
+} from './auth-store';
 import { useAppStore } from './app-store';
 
 export interface ModelInfo {
@@ -253,6 +258,7 @@ interface SettingsState {
   // Permissions
   permissionDefaults: PermissionDefaults;
   approvalMode: ApprovalMode;
+  commandSandbox: CommandSandboxSettings;
 
   // MCP Servers
   mcpServers: MCPServerConfig[];
@@ -305,6 +311,7 @@ interface SettingsActions {
   setProviderBaseUrl: (provider: ProviderId, baseUrl: string) => Promise<void>;
   setMediaRouting: (routing: Partial<MediaRoutingSettings>) => Promise<void>;
   setExternalSearchProvider: (provider: ExternalSearchProvider) => Promise<void>;
+  setCommandSandbox: (updates: Partial<CommandSandboxSettings>) => Promise<void>;
 
   // MCP Server management
   addMCPServer: (config: Omit<MCPServerConfig, 'id' | 'status'>) => void;
@@ -401,6 +408,62 @@ const defaultPermissions: PermissionDefaults = {
   trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
 };
 
+export const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
+  mode: 'workspace-write',
+  allowNetwork: false,
+  allowProcessSpawn: true,
+  allowedPaths: [],
+  deniedPaths: ['/etc', '/System', '/usr'],
+  trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
+  maxExecutionTimeMs: 30000,
+  maxOutputBytes: 1024 * 1024,
+};
+
+function normalizeCommandSandbox(
+  value: Partial<CommandSandboxSettings> | undefined,
+  permissionDefaults?: PermissionDefaults,
+): CommandSandboxSettings {
+  const mode = value?.mode;
+  const normalizedMode: SandboxMode =
+    mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+      ? mode
+      : DEFAULT_COMMAND_SANDBOX.mode;
+
+  const fallbackAllowed = permissionDefaults?.allowedPaths || [];
+  const fallbackDenied = permissionDefaults?.deniedPaths || DEFAULT_COMMAND_SANDBOX.deniedPaths;
+  const fallbackTrusted =
+    permissionDefaults?.trustedCommands || DEFAULT_COMMAND_SANDBOX.trustedCommands;
+
+  return {
+    mode: normalizedMode,
+    allowNetwork:
+      typeof value?.allowNetwork === 'boolean'
+        ? value.allowNetwork
+        : DEFAULT_COMMAND_SANDBOX.allowNetwork,
+    allowProcessSpawn:
+      typeof value?.allowProcessSpawn === 'boolean'
+        ? value.allowProcessSpawn
+        : DEFAULT_COMMAND_SANDBOX.allowProcessSpawn,
+    allowedPaths: Array.isArray(value?.allowedPaths)
+      ? value.allowedPaths
+      : fallbackAllowed,
+    deniedPaths: Array.isArray(value?.deniedPaths)
+      ? value.deniedPaths
+      : fallbackDenied,
+    trustedCommands: Array.isArray(value?.trustedCommands)
+      ? value.trustedCommands
+      : fallbackTrusted,
+    maxExecutionTimeMs:
+      typeof value?.maxExecutionTimeMs === 'number' && value.maxExecutionTimeMs > 0
+        ? value.maxExecutionTimeMs
+        : DEFAULT_COMMAND_SANDBOX.maxExecutionTimeMs,
+    maxOutputBytes:
+      typeof value?.maxOutputBytes === 'number' && value.maxOutputBytes > 0
+        ? value.maxOutputBytes
+        : DEFAULT_COMMAND_SANDBOX.maxOutputBytes,
+  };
+}
+
 const initialState: SettingsState = {
   // User
   userName: '',
@@ -435,6 +498,7 @@ const initialState: SettingsState = {
   // Permissions
   permissionDefaults: defaultPermissions,
   approvalMode: 'auto',
+  commandSandbox: { ...DEFAULT_COMMAND_SANDBOX },
 
   // MCP Servers
   mcpServers: [],
@@ -508,6 +572,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             providerBaseUrls: state.providerBaseUrls,
             externalSearchProvider: state.externalSearchProvider,
             mediaRouting: state.mediaRouting,
+            sandbox: state.commandSandbox,
             specializedModels: state.specializedModelsV2,
           });
           if (
@@ -683,6 +748,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           providerBaseUrls: state.providerBaseUrls,
           externalSearchProvider: state.externalSearchProvider,
           mediaRouting: state.mediaRouting,
+          sandbox: state.commandSandbox,
           specializedModels: state.specializedModelsV2,
         });
       },
@@ -755,6 +821,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           providerBaseUrls: state.providerBaseUrls,
           externalSearchProvider: state.externalSearchProvider,
           mediaRouting: state.mediaRouting,
+          sandbox: state.commandSandbox,
           specializedModels: state.specializedModelsV2,
         });
       },
@@ -773,6 +840,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           providerBaseUrls: state.providerBaseUrls,
           externalSearchProvider: state.externalSearchProvider,
           mediaRouting: state.mediaRouting,
+          sandbox: state.commandSandbox,
           specializedModels: state.specializedModelsV2,
         });
       },
@@ -785,6 +853,39 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           providerBaseUrls: state.providerBaseUrls,
           externalSearchProvider: state.externalSearchProvider,
           mediaRouting: state.mediaRouting,
+          sandbox: state.commandSandbox,
+          specializedModels: state.specializedModelsV2,
+        });
+      },
+
+      setCommandSandbox: async (updates) => {
+        set((state) => {
+          const merged = normalizeCommandSandbox(
+            {
+              ...state.commandSandbox,
+              ...updates,
+            },
+            state.permissionDefaults,
+          );
+
+          return {
+            commandSandbox: merged,
+            permissionDefaults: {
+              ...state.permissionDefaults,
+              allowedPaths: [...merged.allowedPaths],
+              deniedPaths: [...merged.deniedPaths],
+              trustedCommands: [...merged.trustedCommands],
+            },
+          };
+        });
+
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider: state.activeProvider,
+          providerBaseUrls: state.providerBaseUrls,
+          externalSearchProvider: state.externalSearchProvider,
+          mediaRouting: state.mediaRouting,
+          sandbox: state.commandSandbox,
           specializedModels: state.specializedModelsV2,
         });
       },
@@ -1142,7 +1243,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       },
 
       syncSpecializedModels: async () => {
-        const { specializedModels, specializedModelsV2, activeProvider, providerBaseUrls, mediaRouting } =
+        const {
+          specializedModels,
+          specializedModelsV2,
+          activeProvider,
+          providerBaseUrls,
+          mediaRouting,
+          commandSandbox,
+        } =
           useSettingsStore.getState();
         try {
           await invoke('agent_set_specialized_models', { models: specializedModels });
@@ -1154,6 +1262,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           providerBaseUrls,
           externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
           mediaRouting,
+          sandbox: commandSandbox,
           specializedModels: specializedModelsV2,
         });
       },
@@ -1165,6 +1274,27 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             ...state.permissionDefaults,
             ...updates,
           },
+          commandSandbox: normalizeCommandSandbox(
+            {
+              ...state.commandSandbox,
+              allowedPaths:
+                Array.isArray(updates.allowedPaths)
+                  ? updates.allowedPaths
+                  : state.commandSandbox.allowedPaths,
+              deniedPaths:
+                Array.isArray(updates.deniedPaths)
+                  ? updates.deniedPaths
+                  : state.commandSandbox.deniedPaths,
+              trustedCommands:
+                Array.isArray(updates.trustedCommands)
+                  ? updates.trustedCommands
+                  : state.commandSandbox.trustedCommands,
+            },
+            {
+              ...state.permissionDefaults,
+              ...updates,
+            },
+          ),
         }));
       },
 
@@ -1174,6 +1304,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             ...state.permissionDefaults,
             allowedPaths: [
               ...state.permissionDefaults.allowedPaths.filter((p) => p !== path),
+              path,
+            ],
+          },
+          commandSandbox: {
+            ...state.commandSandbox,
+            allowedPaths: [
+              ...state.commandSandbox.allowedPaths.filter((p) => p !== path),
               path,
             ],
           },
@@ -1188,6 +1325,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
               (p) => p !== path
             ),
           },
+          commandSandbox: {
+            ...state.commandSandbox,
+            allowedPaths: state.commandSandbox.allowedPaths.filter((p) => p !== path),
+          },
         }));
       },
 
@@ -1197,6 +1338,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             ...state.permissionDefaults,
             deniedPaths: [
               ...state.permissionDefaults.deniedPaths.filter((p) => p !== path),
+              path,
+            ],
+          },
+          commandSandbox: {
+            ...state.commandSandbox,
+            deniedPaths: [
+              ...state.commandSandbox.deniedPaths.filter((p) => p !== path),
               path,
             ],
           },
@@ -1210,6 +1358,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             deniedPaths: state.permissionDefaults.deniedPaths.filter(
               (p) => p !== path
             ),
+          },
+          commandSandbox: {
+            ...state.commandSandbox,
+            deniedPaths: state.commandSandbox.deniedPaths.filter((p) => p !== path),
           },
         }));
       },
@@ -1225,6 +1377,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
               command,
             ],
           },
+          commandSandbox: {
+            ...state.commandSandbox,
+            trustedCommands: [
+              ...state.commandSandbox.trustedCommands.filter((c) => c !== command),
+              command,
+            ],
+          },
         }));
       },
 
@@ -1235,6 +1394,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             trustedCommands: state.permissionDefaults.trustedCommands.filter(
               (c) => c !== command
             ),
+          },
+          commandSandbox: {
+            ...state.commandSandbox,
+            trustedCommands: state.commandSandbox.trustedCommands.filter((c) => c !== command),
           },
         }));
       },
@@ -1356,6 +1519,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         externalSearchProvider: state.externalSearchProvider,
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
+        commandSandbox: state.commandSandbox,
         mcpServers: state.mcpServers,
         skillsSettings: state.skillsSettings,
         installedSkillConfigs: state.installedSkillConfigs,
@@ -1395,6 +1559,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         const validMode = persistedMode === 'auto' || persistedMode === 'read_only' || persistedMode === 'full'
           ? persistedMode
           : initialState.approvalMode;
+        const mergedPermissionDefaults: PermissionDefaults = {
+          ...defaultPermissions,
+          ...(persisted?.permissionDefaults || {}),
+        };
+        const validCommandSandbox = normalizeCommandSandbox(
+          persisted?.commandSandbox,
+          mergedPermissionDefaults,
+        );
 
         const validSpecializedModels = normalizeSpecializedModels(persisted?.specializedModels);
         const persistedActiveProvider = persisted?.activeProvider;
@@ -1495,6 +1667,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           mediaRouting: resolvedMediaRouting,
           mediaRoutingCustomized,
           externalSearchProvider: validExternalSearchProvider,
+          permissionDefaults: mergedPermissionDefaults,
+          commandSandbox: validCommandSandbox,
           installedCommandConfigs: migratedCommandConfigs,
           sessionListFilters: validSessionListFilters,
           automationListFilters: validAutomationListFilters,
@@ -1530,6 +1704,8 @@ export const usePermissionDefaults = () =>
   useSettingsStore((state) => state.permissionDefaults);
 export const useApprovalMode = () =>
   useSettingsStore((state) => state.approvalMode);
+export const useCommandSandboxSettings = () =>
+  useSettingsStore((state) => state.commandSandbox);
 export const useSidebarCollapsed = () =>
   useSettingsStore((state) => state.sidebarCollapsed);
 export const useRightPanelCollapsed = () =>

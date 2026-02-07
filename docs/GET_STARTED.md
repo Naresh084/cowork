@@ -67,12 +67,20 @@ Contains:
 - Active provider selector
 - Active provider key (scoped per provider)
 - Provider base URL override (editable providers only)
+- Command sandbox settings:
+  - sandbox mode (`read-only`, `workspace-write`, `danger-full-access`)
+  - network allow toggle
+  - process spawn toggle
+  - allowed/denied path roots
+  - trusted command prefixes
+  - max runtime and output limits
 
 Effect on runtime/tools:
 
 - Provider key updates can apply immediately.
 - Provider switch and base URL changes can require a new session for full runtime consistency.
 - Model list is refreshed for active provider after key/base URL changes.
+- Sandbox changes apply immediately for subsequent shell tool calls.
 
 ### 3.2 Media Tab
 
@@ -232,7 +240,32 @@ Todo discipline in execute mode:
 - Execute mode enforces `write_todos` early for non-trivial implementation turns.
 - Agent must keep todo status updated continuously as steps complete.
 
-## 7. Provider Defaults With No Extra Google/OpenAI/Fal Keys
+## 7. Command Sandboxing (Shell Safety)
+
+Cowork enforces command safety with two layers:
+
+1. Sandbox policy (technical boundary)
+2. Approval mode (human approval workflow)
+
+Sandbox modes:
+
+- `read-only`: read-safe shell commands only
+- `workspace-write`: shell commands limited to allowed roots and denied-path blocks
+- `danger-full-access`: sandbox restrictions removed (explicitly opt-in)
+
+Additional controls:
+
+- `allowNetwork`: permit/block network commands (`curl`, `wget`, `ssh`, etc.)
+- `allowProcessSpawn`: permit/block subprocess-heavy command patterns
+- `trustedCommands`: controls auto-allow behavior in approval `auto` mode
+- `maxExecutionTimeMs`, `maxOutputBytes`: runtime and output caps
+
+Capability visibility:
+
+- Session header shows current sandbox mode and whether enforcement is OS-level or validator-only.
+- Capability snapshot includes effective sandbox roots and network state.
+
+## 8. Provider Defaults With No Extra Google/OpenAI/Fal Keys
 
 Assumption:
 
@@ -282,7 +315,7 @@ Assumption:
 - `web_search` works only with configured external fallback (Exa/Tavily + key) or Google key fallback.
 - Requires Google key for: `web_fetch`, fallback `computer_use`, default Google media path.
 
-## 7. Model Listing Behavior
+## 9. Model Listing Behavior
 
 Model listing in UI is provider-aware (`availableModelsByProvider` + `selectedModelByProvider`).
 
@@ -311,7 +344,7 @@ Context/output metadata:
 - Curated GLM entries include `contextWindow=200000` and `maxTokens=131072` where applicable.
 - Curated DeepSeek and Moonshot entries include provider-specific context sizing.
 
-## 8. Key Storage
+## 10. Key Storage
 
 Credentials are stored in the system credential manager via Tauri/Rust commands.
 

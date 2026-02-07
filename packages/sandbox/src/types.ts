@@ -36,6 +36,7 @@ export interface CommandAnalysis {
   risk: CommandRisk;
   reasons: string[];
   modifiedPaths?: string[];
+  accessedPaths?: string[];
   networkAccess?: boolean;
   processSpawn?: boolean;
 }
@@ -44,16 +45,33 @@ export interface CommandAnalysis {
 // Sandbox Configuration
 // ============================================================================
 
-export interface SandboxConfig {
+export const SandboxModeSchema = z.enum(['read-only', 'workspace-write', 'danger-full-access']);
+export type SandboxMode = z.infer<typeof SandboxModeSchema>;
+
+export interface CommandSandboxSettings {
+  mode: SandboxMode;
   allowedPaths: string[];
   deniedPaths: string[];
   allowNetwork: boolean;
   allowProcessSpawn: boolean;
-  maxExecutionTime: number;
-  maxOutputSize: number;
+  trustedCommands: string[];
+  maxExecutionTimeMs: number;
+  maxOutputBytes: number;
+}
+
+export type SandboxConfig = CommandSandboxSettings;
+
+export interface CommandPolicyEvaluation {
+  allowed: boolean;
+  violations: string[];
+  analysis: CommandAnalysis;
+  mode: SandboxMode;
+  osEnforced: boolean;
+  effectiveAllowedPaths: string[];
 }
 
 export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
+  mode: 'workspace-write',
   allowedPaths: [
     process.cwd(),
     '/tmp',
@@ -75,8 +93,9 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   ],
   allowNetwork: false,
   allowProcessSpawn: true,
-  maxExecutionTime: 30000, // 30 seconds
-  maxOutputSize: 1024 * 1024, // 1MB
+  trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
+  maxExecutionTimeMs: 30000, // 30 seconds
+  maxOutputBytes: 1024 * 1024, // 1MB
 };
 
 // ============================================================================

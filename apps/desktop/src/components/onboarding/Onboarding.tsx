@@ -80,6 +80,8 @@ export function Onboarding() {
     setMediaRouting,
     setExternalSearchProvider,
     updateSpecializedModelV2,
+    commandSandbox,
+    setCommandSandbox,
     providerBaseUrls: settingsBaseUrls,
     externalSearchProvider,
   } = useSettingsStore();
@@ -112,6 +114,8 @@ export function Onboarding() {
   const [falVideoModel, setFalVideoModel] = useState(specializedModelsV2.fal.videoGeneration);
   const [computerUseModel, setComputerUseModel] = useState(specializedModelsV2.google.computerUse);
   const [deepResearchModel, setDeepResearchModel] = useState(specializedModelsV2.google.deepResearchAgent);
+  const [sandboxMode, setSandboxMode] = useState(commandSandbox.mode);
+  const [sandboxAllowNetwork, setSandboxAllowNetwork] = useState(commandSandbox.allowNetwork);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -273,12 +277,17 @@ export function Onboarding() {
       if (deepResearchModel.trim()) {
         await updateSpecializedModelV2('google', 'deepResearchAgent', deepResearchModel.trim());
       }
+      await setCommandSandbox({
+        mode: sandboxMode,
+        allowNetwork: sandboxAllowNetwork,
+      });
 
       await applyRuntimeConfig({
         activeProvider: provider,
         providerBaseUrls: useSettingsStore.getState().providerBaseUrls,
         externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
         mediaRouting: useSettingsStore.getState().mediaRouting,
+        sandbox: useSettingsStore.getState().commandSandbox,
         specializedModels: useSettingsStore.getState().specializedModelsV2,
       });
 
@@ -578,6 +587,31 @@ export function Onboarding() {
               Configure fallback search, deep research/computer-use model overrides, messaging integrations, and
               connectors access context.
             </p>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+            <h3 className="text-sm font-medium text-white/90">Command Sandboxing (optional)</h3>
+            <p className="text-xs text-white/55">
+              Controls shell execution safety for tools like execute/Bash. You can change this later in Settings.
+            </p>
+            <select
+              value={sandboxMode}
+              onChange={(e) => setSandboxMode(e.target.value as typeof sandboxMode)}
+              className="w-full rounded-xl border bg-[#0A1021]/80 py-2.5 px-4 text-sm text-white border-white/10"
+            >
+              <option value="read-only">read-only</option>
+              <option value="workspace-write">workspace-write</option>
+              <option value="danger-full-access">danger-full-access</option>
+            </select>
+            <label className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0A1021]/80 py-2.5 px-4 text-sm text-white/80">
+              <span>Allow network access for shell commands</span>
+              <input
+                type="checkbox"
+                checked={sandboxAllowNetwork}
+                onChange={(e) => setSandboxAllowNetwork(e.target.checked)}
+                className="accent-[#3B82F6]"
+              />
+            </label>
           </div>
 
           <div className="space-y-2">
