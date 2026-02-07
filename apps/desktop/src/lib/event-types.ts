@@ -229,6 +229,34 @@ export type AgentEvent =
       queueSize: number;
       timestamp: number;
     }
+  | {
+      type: 'integration:catalog_updated';
+      sessionId: string;
+      timestamp: number;
+    }
+  | {
+      type: 'integration:action_result';
+      sessionId: string;
+      channel: string;
+      action: string;
+      success: boolean;
+      unsupported?: boolean;
+      reason?: string;
+      timestamp: number;
+    }
+  | {
+      type: 'integration:hook_status';
+      sessionId: string;
+      status: string;
+      timestamp: number;
+      [key: string]: unknown;
+    }
+  | {
+      type: 'integration:hook_run';
+      sessionId: string;
+      run: unknown;
+      timestamp: number;
+    }
   // Message queue events
   | {
       type: 'queue:update';
@@ -291,6 +319,10 @@ export const TAURI_EVENT_NAMES = [
   'agent:integration:message_in',
   'agent:integration:message_out',
   'agent:integration:queued',
+  'agent:integration:catalog_updated',
+  'agent:integration:action_result',
+  'agent:integration:hook_status',
+  'agent:integration:hook_run',
   // Message queue events
   'agent:queue:update',
 ] as const;

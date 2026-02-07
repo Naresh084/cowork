@@ -64,7 +64,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Messaging Integrations',
         body:
-          'WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Microsoft Teams can create shared-session message workflows and outbound notifications when connected.',
+          'WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Microsoft Teams, Matrix, and LINE can create shared-session message workflows and outbound notifications when connected.',
         bullets: [
           'WhatsApp includes sender allowlist enforcement and denial messaging.',
           'Slack requires bot token + app token for realtime operation.',
@@ -72,6 +72,8 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Discord supports bot-token ingress with optional guild/channel scoping.',
           'iMessage uses a BlueBubbles bridge and is available on macOS hosts.',
           'Teams uses Azure Graph app credentials for channel messaging.',
+          'Matrix uses homeserver URL + access token routing.',
+          'LINE uses channel access token + optional default target.',
         ],
       },
       {
@@ -80,14 +82,19 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'A shared integration working directory defines where integration-triggered sessions run file and shell operations by default.',
       },
       {
-        heading: 'Connector Marketplace',
+        heading: 'MCP Connectors (Separate)',
         body:
-          'Connectors add external MCP-backed tools (OAuth, API-key, and utility integrations) for services like GitHub, Google Workspace, databases, and search platforms.',
+          'Connectors add MCP-backed tools and are managed independently. Integration routing, actions, and hooks do not use connector execution paths.',
       },
       {
         heading: 'Operational Safety',
         body:
           'Use scoped credentials, narrow allowlists, and trusted working directories. Treat connectors and messaging channels as runtime entry points for automated actions.',
+      },
+      {
+        heading: 'Integrations vs Connectors',
+        body:
+          'Integrations are communication channels where users access Cowork (WhatsApp/Slack/Telegram/Discord/iMessage/Teams/Matrix/LINE). Connectors are MCP tool providers and are intentionally separate from integration routing.',
       },
     ],
   },

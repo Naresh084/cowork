@@ -5,6 +5,12 @@ import type {
   OutgoingMessage,
   PlatformConfig,
   PlatformMessageAttachment,
+  IntegrationAction,
+  IntegrationActionRequest,
+  IntegrationActionResult,
+  IntegrationCapabilityMatrix,
+  IntegrationChannelManifest,
+  IntegrationPluginManifest,
 } from '@gemini-cowork/shared';
 import { SUPPORTED_PLATFORM_TYPES } from '@gemini-cowork/shared';
 
@@ -16,6 +22,12 @@ export type {
   OutgoingMessage,
   PlatformConfig,
   PlatformMessageAttachment,
+  IntegrationAction,
+  IntegrationActionRequest,
+  IntegrationActionResult,
+  IntegrationCapabilityMatrix,
+  IntegrationChannelManifest,
+  IntegrationPluginManifest,
 };
 
 export const SUPPORTED_INTEGRATION_PLATFORMS = [...SUPPORTED_PLATFORM_TYPES];
@@ -50,6 +62,14 @@ export const INTEGRATION_PLATFORM_METADATA: Record<PlatformType, IntegrationPlat
   },
   teams: {
     displayName: 'Microsoft Teams',
+    supportsQr: false,
+  },
+  matrix: {
+    displayName: 'Matrix',
+    supportsQr: false,
+  },
+  line: {
+    displayName: 'LINE',
     supportsQr: false,
   },
 };
@@ -137,6 +157,22 @@ export interface TeamsConfig {
   pollIntervalSeconds?: number;
 }
 
+export interface MatrixConfig {
+  /** Matrix homeserver URL (e.g. https://matrix.org) */
+  homeserverUrl: string;
+  /** Matrix access token for the bot/user */
+  accessToken: string;
+  /** Optional default room ID */
+  defaultRoomId?: string;
+}
+
+export interface LineConfig {
+  /** LINE Messaging API channel access token */
+  channelAccessToken: string;
+  /** Optional default user or group ID */
+  defaultTargetId?: string;
+}
+
 export type PlatformConfigMap = {
   whatsapp: WhatsAppConfig;
   slack: SlackConfig;
@@ -144,7 +180,44 @@ export type PlatformConfigMap = {
   discord: DiscordConfig;
   imessage: IMessageBlueBubblesConfig;
   teams: TeamsConfig;
+  matrix: MatrixConfig;
+  line: LineConfig;
 };
+
+export const ALL_INTEGRATION_ACTIONS: IntegrationAction[] = [
+  'send',
+  'search',
+  'read',
+  'edit',
+  'delete',
+  'react',
+  'list_reactions',
+  'pin',
+  'unpin',
+  'list_pins',
+  'poll_create',
+  'poll_vote',
+  'poll_close',
+  'thread_create',
+  'thread_reply',
+  'thread_list',
+  'moderation_timeout',
+  'moderation_kick',
+  'moderation_ban',
+];
+
+export function buildCapabilityMatrix(
+  enabledActions: IntegrationAction[],
+): IntegrationCapabilityMatrix {
+  const enabled = new Set(enabledActions);
+  return ALL_INTEGRATION_ACTIONS.reduce(
+    (acc, action) => {
+      acc[action] = enabled.has(action);
+      return acc;
+    },
+    {} as IntegrationCapabilityMatrix,
+  );
+}
 
 // ============================================================================
 // Adapter Event Interfaces

@@ -7,12 +7,9 @@ import { useIntegrationStore } from '../../stores/integration-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { toast } from '@/components/ui/Toast';
-import { WhatsAppSettings } from './WhatsAppSettings';
-import { SlackSettings } from './SlackSettings';
-import { TelegramSettings } from './TelegramSettings';
-import { DiscordSettings } from './DiscordSettings';
-import { IMessageSettings } from './IMessageSettings';
-import { TeamsSettings } from './TeamsSettings';
+import { IntegrationCatalogSettings } from './IntegrationCatalogSettings';
+import { IntegrationOpsSettings } from './IntegrationOpsSettings';
+import { IntegrationHooksSettings } from './IntegrationHooksSettings';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { CapabilityMatrix } from '@/components/help/CapabilityMatrix';
 import { useCapabilityStore } from '@/stores/capability-store';
@@ -229,7 +226,7 @@ export function IntegrationSettings() {
         <h3 className="text-sm font-medium text-white/90">Integration & Capability Settings</h3>
         <p className="mt-1 text-xs text-white/40">
           Configure web-search fallbacks, computer-use/deep-research models, Stitch key, and messaging integrations
-          (WhatsApp, Slack, Telegram, Discord, iMessage, Teams).
+          (WhatsApp, Slack, Telegram, Discord, iMessage, Teams, Matrix, LINE).
         </p>
       </div>
 
@@ -506,74 +503,30 @@ export function IntegrationSettings() {
         </p>
       </div>
 
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">WhatsApp Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            WhatsApp supports QR-based connection, sender allowlist policy, and denial messaging for unauthorized users.
-          </p>
-          <WhatsAppSettings />
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Slack Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            Slack requires both bot token and app token. Connected Slack enables shared-session ingress and notifications.
-          </p>
-          <SlackSettings />
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Telegram Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            Telegram uses a BotFather token for connection. Once connected, inbound messages can create shared sessions.
-          </p>
-          <TelegramSettings />
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Discord Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            Discord uses a bot token with optional guild/channel allowlists. Connected Discord supports inbound shared
-            sessions and outbound notifications.
-          </p>
-          <DiscordSettings />
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">iMessage Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            iMessage uses a BlueBubbles bridge and is supported on macOS hosts only.
-          </p>
-          <IMessageSettings />
-        </div>
-      </details>
-
-      <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
-        <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Microsoft Teams Integration</summary>
-        <div className="px-4 pb-4 pt-1">
-          <p className="mb-2 text-xs text-white/45">
-            Teams integration uses Azure Graph app credentials to power inbound channel monitoring and outbound
-            notifications.
-          </p>
-          <TeamsSettings />
-        </div>
-      </details>
-
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-        <h4 className="text-sm font-medium text-white/85">Connectors Ecosystem</h4>
-        <p className="mt-1 text-xs text-white/45">
-          Connectors add MCP-powered tools for external systems. Configure and connect them from the sidebar
-          Connectors manager. Tool availability appears in the capability matrix above.
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium text-white/90">Channels</h4>
+        <p className="text-xs text-white/45">
+          Integrations are channel access surfaces for user communication (ingress/egress). This is separate from MCP
+          connectors.
         </p>
+        <IntegrationCatalogSettings />
+      </div>
+
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium text-white/90">Messaging Operations</h4>
+        <p className="text-xs text-white/45">
+          Rich integration actions run through the canonical `message` tool and are capability-gated by channel.
+        </p>
+        <IntegrationOpsSettings />
+      </div>
+
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium text-white/90">Hooks &amp; Automation</h4>
+        <p className="text-xs text-white/45">
+          Build trigger-based automation rules for integration channels. Rules can be run now, paused, and observed via
+          run history.
+        </p>
+        <IntegrationHooksSettings />
       </div>
     </div>
   );

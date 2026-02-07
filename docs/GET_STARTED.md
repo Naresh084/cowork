@@ -128,30 +128,45 @@ Contains:
   - Discord
   - iMessage (BlueBubbles, macOS host)
   - Microsoft Teams (Azure Graph app)
+  - Matrix
+  - LINE
 
 Effect on runtime/tools:
 
 - External search fallback affects `web_search` when provider-native search is unavailable.
 - Stitch tools are only registered when Stitch key exists.
 - Computer-use/deep-research model fields control those tool model IDs.
-- Notification tools are dynamically registered only for connected platforms:
+- Integrations are channel access surfaces and remain separate from MCP connectors.
+- Canonical rich-ops tool is `message` (action-routed by channel capability matrix).
+- Notification compatibility tools are dynamically registered only for connected platforms:
   - `send_notification_whatsapp`
   - `send_notification_slack`
   - `send_notification_telegram`
   - `send_notification_discord`
   - `send_notification_imessage`
   - `send_notification_teams`
+  - `send_notification_matrix`
+  - `send_notification_line`
 
 Messaging setup prerequisites:
 
 - Discord: bot token, optional guild/channel allowlists.
 - iMessage: BlueBubbles server URL + access token (macOS only).
 - Teams: tenant ID, client ID, client secret, team ID, channel ID.
+- Matrix: homeserver URL, access token, optional default room ID.
+- LINE: channel access token, optional default user/group target.
 
 Attachment behavior:
 
 - New integrations (Discord, iMessage, Teams) support attachment ingestion and outbound media send paths.
 - If a provider API cannot return raw bytes, Cowork preserves attachment URL + metadata so workflows still continue.
+
+Hooks and automation:
+
+- Integration hooks are configured in Settings -> Integrations -> Hooks & Automation.
+- Active trigger families in this build: `cron`, `path`, `integration_event`, plus `run now` manual execution.
+- Hook schema also includes `webhook` and `mailbox` trigger types for forward compatibility.
+- Rules support run-now, pause/resume, run history, and safety behaviors (dedupe/retry/dead-letter metadata).
 
 ## 4. Runtime Apply vs New Session
 
@@ -232,7 +247,7 @@ Todo discipline in execute mode:
 - Execute mode enforces `write_todos` early for non-trivial implementation turns.
 - Agent must keep todo status updated continuously as steps complete.
 
-## 7. Provider Defaults With No Extra Google/OpenAI/Fal Keys
+## 8. Provider Defaults With No Extra Google/OpenAI/Fal Keys
 
 Assumption:
 
@@ -282,7 +297,7 @@ Assumption:
 - `web_search` works only with configured external fallback (Exa/Tavily + key) or Google key fallback.
 - Requires Google key for: `web_fetch`, fallback `computer_use`, default Google media path.
 
-## 7. Model Listing Behavior
+## 9. Model Listing Behavior
 
 Model listing in UI is provider-aware (`availableModelsByProvider` + `selectedModelByProvider`).
 
@@ -311,7 +326,7 @@ Context/output metadata:
 - Curated GLM entries include `contextWindow=200000` and `maxTokens=131072` where applicable.
 - Curated DeepSeek and Moonshot entries include provider-specific context sizing.
 
-## 8. Key Storage
+## 10. Key Storage
 
 Credentials are stored in the system credential manager via Tauri/Rust commands.
 

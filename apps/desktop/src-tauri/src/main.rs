@@ -182,6 +182,19 @@ fn main() {
             commands::integrations::agent_integration_get_settings,
             commands::integrations::agent_integration_update_settings,
             commands::integrations::agent_integration_send_test,
+            commands::integrations::agent_integration_list_catalog,
+            commands::integrations::agent_integration_get_channel_capabilities,
+            commands::integrations::agent_integration_call_action,
+            commands::integrations::agent_integration_list_plugins,
+            commands::integrations::agent_integration_install_plugin,
+            commands::integrations::agent_integration_uninstall_plugin,
+            commands::integrations::agent_integration_test_action,
+            commands::integrations::agent_integration_hooks_list,
+            commands::integrations::agent_integration_hooks_create,
+            commands::integrations::agent_integration_hooks_update,
+            commands::integrations::agent_integration_hooks_delete,
+            commands::integrations::agent_integration_hooks_run_now,
+            commands::integrations::agent_integration_hooks_runs,
         ])
         .setup(|app| {
             // Auto-update disabled until a proper signing key pair is configured

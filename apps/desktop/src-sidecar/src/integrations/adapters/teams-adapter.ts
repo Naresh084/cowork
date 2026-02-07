@@ -4,7 +4,11 @@ import type {
   IntegrationMediaPayload,
   PlatformMessageAttachment,
   TeamsConfig,
+  IntegrationActionRequest,
+  IntegrationActionResult,
+  IntegrationCapabilityMatrix,
 } from '../types.js';
+import { buildCapabilityMatrix } from '../types.js';
 
 interface GraphChannelMessage {
   id: string;
@@ -33,6 +37,7 @@ interface AccessTokenState {
 }
 
 const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
+type GraphRequestMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 export class TeamsAdapter extends BaseAdapter {
   private config: TeamsConfig | null = null;
@@ -90,6 +95,180 @@ export class TeamsAdapter extends BaseAdapter {
 
   async sendTypingIndicator(_chatId: string): Promise<void> {
     // Microsoft Teams Graph channel messages do not expose a simple typing API for this flow.
+  }
+
+  override getCapabilities(): IntegrationCapabilityMatrix {
+    return buildCapabilityMatrix([
+      'send',
+      'read',
+      'edit',
+      'delete',
+      'thread_reply',
+      'thread_list',
+    ]);
+  }
+
+  override async performAction(
+    request: IntegrationActionRequest,
+  ): Promise<IntegrationActionResult> {
+    if (!this.config) {
+      return {
+        success: false,
+        channel: this.getStatus().platform,
+        action: request.action,
+        reason: 'Teams adapter is not connected',
+      };
+    }
+
+    const action = request.action;
+    const targetChatId = request.target?.chatId || request.target?.channelId || '';
+
+    try {
+      switch (action) {
+        case 'send': {
+          const text = request.payload?.text?.trim() || '';
+          if (!text) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Teams send requires payload.text',
+            };
+          }
+          await this.sendMessage(targetChatId, text);
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data: { target: targetChatId || `${this.config.teamId}:${this.config.channelId}` },
+          };
+        }
+        case 'read': {
+          const target = this.resolveTarget(targetChatId);
+          const data = await this.graphRequest(
+            `/teams/${target.teamId}/channels/${target.channelId}/messages?$top=20`,
+            'GET',
+          );
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data,
+          };
+        }
+        case 'edit': {
+          const messageId = request.target?.messageId;
+          const text = request.payload?.text?.trim() || '';
+          if (!messageId || !text) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Teams edit requires target.messageId and payload.text',
+            };
+          }
+          const target = this.resolveTarget(targetChatId);
+          const data = await this.graphRequest(
+            `/teams/${target.teamId}/channels/${target.channelId}/messages/${messageId}`,
+            'PATCH',
+            {
+              body: {
+                contentType: 'html',
+                content: this.escapeHtml(text),
+              },
+            },
+          );
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data,
+          };
+        }
+        case 'delete': {
+          const messageId = request.target?.messageId;
+          if (!messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Teams delete requires target.messageId',
+            };
+          }
+          const target = this.resolveTarget(targetChatId);
+          const data = await this.graphRequest(
+            `/teams/${target.teamId}/channels/${target.channelId}/messages/${messageId}`,
+            'DELETE',
+          );
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data,
+          };
+        }
+        case 'thread_list': {
+          const messageId = request.target?.messageId;
+          if (!messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Teams thread_list requires target.messageId',
+            };
+          }
+          const target = this.resolveTarget(targetChatId);
+          const data = await this.graphRequest(
+            `/teams/${target.teamId}/channels/${target.channelId}/messages/${messageId}/replies?$top=20`,
+            'GET',
+          );
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data,
+          };
+        }
+        case 'thread_reply': {
+          const messageId = request.target?.messageId;
+          const text = request.payload?.text?.trim() || '';
+          if (!messageId || !text) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Teams thread_reply requires target.messageId and payload.text',
+            };
+          }
+          const target = this.resolveTarget(targetChatId);
+          const data = await this.graphRequest(
+            `/teams/${target.teamId}/channels/${target.channelId}/messages/${messageId}/replies`,
+            'POST',
+            {
+              body: {
+                contentType: 'html',
+                content: this.escapeHtml(text),
+              },
+            },
+          );
+          return {
+            success: true,
+            channel: this.getStatus().platform,
+            action,
+            data,
+          };
+        }
+        default:
+          return super.performAction(request);
+      }
+    } catch (error) {
+      return {
+        success: false,
+        channel: this.getStatus().platform,
+        action,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   override async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
@@ -392,7 +571,7 @@ export class TeamsAdapter extends BaseAdapter {
 
   private async graphRequest(
     path: string,
-    method: 'GET' | 'POST',
+    method: GraphRequestMethod,
     body?: Record<string, unknown>,
   ): Promise<unknown> {
     const response = await this.graphRequestRaw(path, method, body);
@@ -411,7 +590,7 @@ export class TeamsAdapter extends BaseAdapter {
 
   private async graphRequestRaw(
     pathOrUrl: string,
-    method: 'GET' | 'POST',
+    method: GraphRequestMethod,
     body?: Record<string, unknown>,
   ): Promise<Response> {
     const token = await this.getAccessToken();

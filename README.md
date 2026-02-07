@@ -21,7 +21,7 @@ Cowork combines chat, tool execution, browser automation, research, media genera
 Current platform scope:
 
 - 8 chat providers: Google, OpenAI, Anthropic, OpenRouter, Moonshot (Kimi), GLM, DeepSeek, LM Studio
-- 6 messaging integrations: WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Microsoft Teams
+- 8 messaging integrations: WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Microsoft Teams, Matrix, LINE
 - Unified web tools: `web_search` and `web_fetch` with provider-aware routing and fallback paths
 - Unified media tools: `generate_image`, `edit_image`, `generate_video`, `analyze_video`
 - `computer_use` browser automation with provider-aware routing
@@ -261,7 +261,7 @@ For deep onboarding/settings details, see:
 
 ---
 
-## Messaging Integrations (6 Platforms)
+## Messaging Integrations (8 Platforms)
 
 Cowork supports full shared-session ingress and outbound notification flows across:
 
@@ -271,10 +271,13 @@ Cowork supports full shared-session ingress and outbound notification flows acro
 - Discord
 - iMessage (BlueBubbles bridge; macOS host required)
 - Microsoft Teams (Azure Graph app credentials)
+- Matrix
+- LINE
 
 When a platform is connected:
 
 - Inbound messages can trigger shared-session workflows.
+- The canonical `message` tool is registered for rich channel operations (`send`, `search`, `read`, `edit`, `delete`, reactions, pins, threads, moderation) based on per-channel capabilities.
 - Outbound notification tool is registered dynamically:
   - `send_notification_whatsapp`
   - `send_notification_slack`
@@ -282,13 +285,18 @@ When a platform is connected:
   - `send_notification_discord`
   - `send_notification_imessage`
   - `send_notification_teams`
+  - `send_notification_matrix`
+  - `send_notification_line`
 - Attachment messages are normalized into the shared message model, with URL metadata fallback where raw bytes are unavailable.
+- Integration hooks (active: `cron`, `path`, `integration_event`, and manual run-now) execute inside the integration subsystem and remain separate from MCP connectors.
 
 Setup prerequisites:
 
 - Discord: bot token, optional guild/channel allowlists, optional DM ingress.
 - iMessage: BlueBubbles server URL + access token; unsupported on non-macOS hosts.
 - Teams: tenant ID, client ID, client secret, team ID, channel ID.
+- Matrix: homeserver URL + access token, optional default room.
+- LINE: channel access token, optional default target.
 
 ---
 

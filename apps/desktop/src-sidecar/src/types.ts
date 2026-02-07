@@ -350,6 +350,10 @@ export type AgentEventType =
   | 'integration:message_in'
   | 'integration:message_out'
   | 'integration:queued'
+  | 'integration:catalog_updated'
+  | 'integration:action_result'
+  | 'integration:hook_status'
+  | 'integration:hook_run'
   | 'error';
 
 export interface QuestionRequest {

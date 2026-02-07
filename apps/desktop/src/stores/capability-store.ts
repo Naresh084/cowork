@@ -17,6 +17,12 @@ export interface IntegrationAccessEntry {
   reason: string;
 }
 
+export interface ConnectorAccessEntry {
+  connectorName: string;
+  enabled: boolean;
+  reason: string;
+}
+
 export interface CapabilitySnapshot {
   provider: string;
   executionMode?: 'execute' | 'plan';
@@ -35,6 +41,7 @@ export interface CapabilitySnapshot {
   };
   toolAccess: ToolAccessEntry[];
   integrationAccess: IntegrationAccessEntry[];
+  connectorAccess: ConnectorAccessEntry[];
   policyProfile: string;
   notes: string[];
 }
@@ -84,6 +91,7 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
 
   const toolAccessRaw = Array.isArray(root.toolAccess) ? root.toolAccess : [];
   const integrationAccessRaw = Array.isArray(root.integrationAccess) ? root.integrationAccess : [];
+  const connectorAccessRaw = Array.isArray(root.connectorAccess) ? root.connectorAccess : [];
   const notesRaw = Array.isArray(root.notes) ? root.notes : [];
 
   return {
@@ -117,6 +125,13 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
       .filter((entry): entry is Record<string, unknown> => isRecord(entry))
       .map((entry) => ({
         integrationName: asString(entry.integrationName, 'unknown_integration'),
+        enabled: asBoolean(entry.enabled),
+        reason: asString(entry.reason, 'No reason provided'),
+      })),
+    connectorAccess: connectorAccessRaw
+      .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+      .map((entry) => ({
+        connectorName: asString(entry.connectorName, 'unknown_connector'),
         enabled: asBoolean(entry.enabled),
         reason: asString(entry.reason, 'No reason provided'),
       })),

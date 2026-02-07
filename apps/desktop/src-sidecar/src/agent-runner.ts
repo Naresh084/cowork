@@ -36,6 +36,7 @@ import { mkdir, readFile, writeFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
+import { createRequire } from 'module';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools } from './tools/index.js';
 import { connectorBridge } from './connector-bridge.js';
@@ -74,6 +75,7 @@ import { HumanMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
+const require = createRequire(import.meta.url);
 
 // ============================================================================
 // Session Manager
@@ -329,6 +331,12 @@ interface CapabilityIntegrationAccessEntry {
   reason: string;
 }
 
+interface CapabilityConnectorAccessEntry {
+  connectorName: string;
+  enabled: boolean;
+  reason: string;
+}
+
 interface CapabilitySnapshot {
   provider: ProviderId;
   executionMode: ExecutionMode;
@@ -344,6 +352,7 @@ interface CapabilitySnapshot {
   };
   toolAccess: CapabilityToolAccessEntry[];
   integrationAccess: CapabilityIntegrationAccessEntry[];
+  connectorAccess: CapabilityConnectorAccessEntry[];
   policyProfile: string;
   notes: string[];
 }
@@ -1847,6 +1856,7 @@ export class AgentRunner {
     const context = this.getToolCapabilityContext(provider);
     const toolAccess: CapabilityToolAccessEntry[] = [];
     const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
+    const connectorAccess: CapabilityConnectorAccessEntry[] = [];
     const policy = toolPolicyService.getPolicy();
 
     const providerKeyConfigured =
@@ -1981,9 +1991,19 @@ export class AgentRunner {
       });
     }
 
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'message',
+      integrationStatuses.some((status) => status.connected),
+      integrationStatuses.some((status) => status.connected)
+        ? 'At least one integration channel is connected.'
+        : 'No integration channel connected for rich messaging actions.',
+    );
+
     const connectorIds = new Set(connectorTools.map((tool) => tool.connectorId));
-    integrationAccess.push({
-      integrationName: 'connectors',
+    connectorAccess.push({
+      connectorName: 'connectors',
       enabled: connectorIds.size > 0,
       reason:
         connectorIds.size > 0
@@ -2056,6 +2076,7 @@ export class AgentRunner {
       },
       toolAccess,
       integrationAccess,
+      connectorAccess,
       policyProfile: policy.profile,
       notes,
     };
@@ -3924,6 +3945,8 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
         discord: 'Discord',
         imessage: 'iMessage',
         teams: 'Microsoft Teams',
+        matrix: 'Matrix',
+        line: 'LINE',
       };
 
       const platformList = connected
@@ -3940,6 +3963,20 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
         })
         .join('\n');
 
+      const capabilitiesList = connected
+        .map((s: any) => {
+          const name = displayNames[s.platform] || s.platform;
+          const caps = integrationBridge.getChannelCapabilities(s.platform);
+          const supported = caps
+            ? Object.entries(caps)
+                .filter(([, enabled]) => Boolean(enabled))
+                .map(([action]) => action)
+                .join(', ')
+            : 'send';
+          return `- ${name}: ${supported || 'send'}`;
+        })
+        .join('\n');
+
       return `## Messaging Integrations
 
 The user has connected the following messaging platforms. You can proactively send notifications through these platforms.
@@ -3949,6 +3986,12 @@ ${platformList}
 
 ### Notification Tools
 ${toolList}
+
+### Rich Actions (\`message\` tool)
+- Use \`message\` for channel operations such as send/search/read/edit/delete/reactions/pins/polls/threads/moderation.
+- Always prefer \`message\` when you need anything beyond a simple notification.
+- Supported actions by connected channel:
+${capabilitiesList}
 
 ### When to Use Notifications
 - Proactively notify when scheduled/long-running tasks complete
@@ -4415,14 +4458,21 @@ ${stitchGuidance}
       },
     };
 
-    // Notification tools (conditional - only for connected messaging platforms)
+    // Messaging integration tools (conditional - only for connected channels)
+    let messageTools: ToolHandler[] = [];
     let notificationTools: ToolHandler[] = [];
     try {
       // Use require() since buildToolHandlers is synchronous
       // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { createMessageTool } = require('./tools/message-tools.js');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { createNotificationTools } = require('./tools/notification-tools.js');
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { integrationBridge } = require('./integrations/index.js');
+      const messageTool = createMessageTool(() => integrationBridge);
+      if (messageTool) {
+        messageTools = [messageTool];
+      }
       notificationTools = createNotificationTools(() => integrationBridge);
     } catch {
       // Integration module not available - skip notification tools
@@ -4441,6 +4491,7 @@ ${stitchGuidance}
       ...groundingTools,
       ...mcpTools,
       ...connectorTools,
+      ...messageTools,
       ...notificationTools,
       ...cronTools,
     ];

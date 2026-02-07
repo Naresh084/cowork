@@ -5,7 +5,11 @@ import type {
   DiscordConfig,
   IntegrationMediaPayload,
   PlatformMessageAttachment,
+  IntegrationActionRequest,
+  IntegrationActionResult,
+  IntegrationCapabilityMatrix,
 } from '../types.js';
+import { buildCapabilityMatrix } from '../types.js';
 
 interface DiscordGatewayPayload {
   op: number;
@@ -40,6 +44,7 @@ interface DiscordMessageEventRaw {
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_GATEWAY_VERSION = 10;
+type DiscordRequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 const DISCORD_INTENTS = {
   GUILDS: 1,
@@ -136,6 +141,299 @@ export class DiscordAdapter extends BaseAdapter {
       await this.discordRequest(`/channels/${chatId}/typing`, 'POST');
     } catch {
       // Best effort only.
+    }
+  }
+
+  override getCapabilities(): IntegrationCapabilityMatrix {
+    return buildCapabilityMatrix([
+      'send',
+      'read',
+      'edit',
+      'delete',
+      'react',
+      'list_reactions',
+      'pin',
+      'unpin',
+      'list_pins',
+      'thread_create',
+      'thread_reply',
+      'thread_list',
+      'moderation_timeout',
+      'moderation_kick',
+      'moderation_ban',
+    ]);
+  }
+
+  override async performAction(
+    request: IntegrationActionRequest,
+  ): Promise<IntegrationActionResult> {
+    const action = request.action;
+    const channelId =
+      request.target?.channelId ||
+      request.target?.chatId ||
+      this.getDefaultChatId();
+    const messageId = request.target?.messageId;
+    const threadId = request.target?.threadId;
+
+    try {
+      switch (action) {
+        case 'send': {
+          if (!channelId || !request.payload?.text?.trim()) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord send requires channel/chat and payload.text',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages`,
+            'POST',
+            {
+              content: request.payload.text.trim(),
+            },
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'read': {
+          if (!channelId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord read requires channel/chat',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages?limit=20`,
+            'GET',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'edit': {
+          if (!channelId || !messageId || !request.payload?.text?.trim()) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord edit requires channel/chat, messageId, and payload.text',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages/${messageId}`,
+            'PATCH',
+            {
+              content: request.payload.text.trim(),
+            },
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'delete': {
+          if (!channelId || !messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord delete requires channel/chat and messageId',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages/${messageId}`,
+            'DELETE',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'react': {
+          if (!channelId || !messageId || !request.payload?.reaction?.trim()) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord react requires channel/chat, messageId, and payload.reaction',
+            };
+          }
+          const emoji = encodeURIComponent(request.payload.reaction.trim());
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages/${messageId}/reactions/${emoji}/@me`,
+            'PUT',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'list_reactions': {
+          if (!channelId || !messageId || !request.payload?.reaction?.trim()) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord list_reactions requires channel/chat, messageId, and payload.reaction',
+            };
+          }
+          const emoji = encodeURIComponent(request.payload.reaction.trim());
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages/${messageId}/reactions/${emoji}`,
+            'GET',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'pin': {
+          if (!channelId || !messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord pin requires channel/chat and messageId',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/pins/${messageId}`,
+            'PUT',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'unpin': {
+          if (!channelId || !messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord unpin requires channel/chat and messageId',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/pins/${messageId}`,
+            'DELETE',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'list_pins': {
+          if (!channelId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord list_pins requires channel/chat',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/pins`,
+            'GET',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'thread_create': {
+          if (!channelId || !messageId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord thread_create requires channel/chat and messageId',
+            };
+          }
+          const name = request.payload?.text?.trim() || `Thread ${Date.now()}`;
+          const data = await this.discordRequest(
+            `/channels/${channelId}/messages/${messageId}/threads`,
+            'POST',
+            {
+              name,
+              auto_archive_duration: 60,
+            },
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'thread_reply': {
+          if (!threadId || !request.payload?.text?.trim()) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord thread_reply requires threadId and payload.text',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${threadId}/messages`,
+            'POST',
+            {
+              content: request.payload.text.trim(),
+            },
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'thread_list': {
+          if (!channelId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: 'Discord thread_list requires channel/chat',
+            };
+          }
+          const data = await this.discordRequest(
+            `/channels/${channelId}/threads/active`,
+            'GET',
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        case 'moderation_timeout':
+        case 'moderation_kick':
+        case 'moderation_ban': {
+          const guildId =
+            (request.payload?.metadata?.guildId as string | undefined) ||
+            (request.target?.channelId as string | undefined) ||
+            '';
+          const userId = request.target?.userId;
+          if (!guildId || !userId) {
+            return {
+              success: false,
+              channel: this.getStatus().platform,
+              action,
+              reason: `${action} requires payload.metadata.guildId and target.userId`,
+            };
+          }
+
+          if (action === 'moderation_timeout') {
+            const timeoutMs = Math.max(
+              60_000,
+              Number(request.payload?.durationMs || 5 * 60_000),
+            );
+            const untilIso = new Date(Date.now() + timeoutMs).toISOString();
+            const data = await this.discordRequest(
+              `/guilds/${guildId}/members/${userId}`,
+              'PATCH',
+              {
+                communication_disabled_until: untilIso,
+                reason: request.payload?.reason || undefined,
+              },
+            );
+            return { success: true, channel: this.getStatus().platform, action, data };
+          }
+
+          if (action === 'moderation_kick') {
+            const data = await this.discordRequest(
+              `/guilds/${guildId}/members/${userId}`,
+              'DELETE',
+            );
+            return { success: true, channel: this.getStatus().platform, action, data };
+          }
+
+          const data = await this.discordRequest(
+            `/guilds/${guildId}/bans/${userId}`,
+            'PUT',
+            {
+              reason: request.payload?.reason || undefined,
+            },
+          );
+          return { success: true, channel: this.getStatus().platform, action, data };
+        }
+        default:
+          return super.performAction(request);
+      }
+    } catch (error) {
+      return {
+        success: false,
+        channel: this.getStatus().platform,
+        action,
+        reason: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 
@@ -421,7 +719,7 @@ export class DiscordAdapter extends BaseAdapter {
 
   private async discordRequest(
     path: string,
-    method: 'GET' | 'POST',
+    method: DiscordRequestMethod,
     body?: Record<string, unknown>,
   ): Promise<unknown> {
     if (!this.botToken) {

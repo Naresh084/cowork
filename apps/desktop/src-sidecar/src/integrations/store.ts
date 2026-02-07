@@ -16,10 +16,50 @@ export interface IntegrationGeneralSettings {
   sharedSessionWorkingDirectory?: string;
 }
 
+export type IntegrationHookTriggerType =
+  | 'cron'
+  | 'webhook'
+  | 'mailbox'
+  | 'path'
+  | 'integration_event'
+  | 'manual';
+
+export interface IntegrationHookRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: {
+    type: IntegrationHookTriggerType;
+    config?: Record<string, unknown>;
+  };
+  action: {
+    type: 'integration_action' | 'tool_call';
+    config?: Record<string, unknown>;
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface IntegrationHookRun {
+  id: string;
+  ruleId: string;
+  status: 'success' | 'error';
+  startedAt: number;
+  finishedAt: number;
+  error?: string;
+  result?: unknown;
+}
+
+interface IntegrationHooksState {
+  rules: Record<string, IntegrationHookRule>;
+  runs: IntegrationHookRun[];
+}
+
 interface IntegrationStoreData {
-  platforms: Record<string, PlatformConfig>;
+  channels: Record<string, PlatformConfig>;
   lastSessionId?: string;
   settings: IntegrationGeneralSettings;
+  hooks: IntegrationHooksState;
 }
 
 function normalizeE164Like(value: unknown): string | null {
@@ -30,7 +70,11 @@ function normalizeE164Like(value: unknown): string | null {
 }
 
 export class IntegrationStore {
-  private data: IntegrationStoreData = { platforms: {}, settings: {} };
+  private data: IntegrationStoreData = {
+    channels: {},
+    settings: {},
+    hooks: { rules: {}, runs: [] },
+  };
   private savePromise: Promise<void> | null = null;
   private pendingSave = false;
 
@@ -48,7 +92,7 @@ export class IntegrationStore {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[integration-store] Failed to load config: ${msg}\n`);
-      this.data = { platforms: {}, settings: {} };
+      this.data = { channels: {}, settings: {}, hooks: { rules: {}, runs: [] } };
     }
   }
 
@@ -87,7 +131,7 @@ export class IntegrationStore {
   }
 
   getConfig(platform: PlatformType): PlatformConfig | null {
-    const config = this.data.platforms[platform];
+    const config = this.data.channels[platform];
     if (!config) return null;
     return {
       ...config,
@@ -96,7 +140,7 @@ export class IntegrationStore {
   }
 
   async setConfig(platform: PlatformType, config: PlatformConfig): Promise<void> {
-    this.data.platforms[platform] = {
+    this.data.channels[platform] = {
       ...config,
       config: this.normalizePlatformConfig(platform, config.config),
     };
@@ -104,12 +148,12 @@ export class IntegrationStore {
   }
 
   async removeConfig(platform: PlatformType): Promise<void> {
-    delete this.data.platforms[platform];
+    delete this.data.channels[platform];
     await this.save();
   }
 
   getEnabledPlatforms(): PlatformConfig[] {
-    return Object.values(this.data.platforms)
+    return Object.values(this.data.channels)
       .filter((p) => p.enabled)
       .map((p) => ({
         ...p,
@@ -137,20 +181,66 @@ export class IntegrationStore {
     await this.save();
   }
 
+  listHookRules(): IntegrationHookRule[] {
+    return Object.values(this.data.hooks.rules).sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    );
+  }
+
+  getHookRule(ruleId: string): IntegrationHookRule | null {
+    return this.data.hooks.rules[ruleId] || null;
+  }
+
+  async upsertHookRule(rule: IntegrationHookRule): Promise<void> {
+    this.data.hooks.rules[rule.id] = rule;
+    await this.save();
+  }
+
+  async deleteHookRule(ruleId: string): Promise<void> {
+    delete this.data.hooks.rules[ruleId];
+    await this.save();
+  }
+
+  listHookRuns(ruleId?: string): IntegrationHookRun[] {
+    const runs = this.data.hooks.runs;
+    if (!ruleId) return [...runs];
+    return runs.filter((run) => run.ruleId === ruleId);
+  }
+
+  async addHookRun(run: IntegrationHookRun): Promise<void> {
+    this.data.hooks.runs.unshift(run);
+    if (this.data.hooks.runs.length > 500) {
+      this.data.hooks.runs = this.data.hooks.runs.slice(0, 500);
+    }
+    await this.save();
+  }
+
   private normalizeData(input: unknown): { data: IntegrationStoreData; changed: boolean } {
     if (!input || typeof input !== 'object') {
-      return { data: { platforms: {}, settings: {} }, changed: true };
+      return {
+        data: { channels: {}, settings: {}, hooks: { rules: {}, runs: [] } },
+        changed: true,
+      };
     }
 
     const parsed = input as {
+      channels?: Record<string, PlatformConfig>;
       platforms?: Record<string, PlatformConfig>;
       lastSessionId?: unknown;
       settings?: IntegrationGeneralSettings;
+      hooks?: unknown;
     };
 
-    const platforms: Record<string, PlatformConfig> = {};
-    const platformEntries = parsed.platforms && typeof parsed.platforms === 'object'
-      ? Object.entries(parsed.platforms)
+    const channels: Record<string, PlatformConfig> = {};
+    const channelsSource =
+      parsed.channels && typeof parsed.channels === 'object'
+        ? parsed.channels
+        : parsed.platforms && typeof parsed.platforms === 'object'
+          ? parsed.platforms
+          : {};
+
+    const platformEntries = channelsSource && typeof channelsSource === 'object'
+      ? Object.entries(channelsSource)
       : [];
 
     let changed = false;
@@ -171,7 +261,7 @@ export class IntegrationStore {
         enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
         config: normalizedConfig,
       };
-      platforms[platform] = normalizedPlatformConfig;
+      channels[platform] = normalizedPlatformConfig;
 
       const sourceConfig = value.config && typeof value.config === 'object' ? value.config : {};
       if (
@@ -186,6 +276,7 @@ export class IntegrationStore {
     const lastSessionId =
       typeof parsed.lastSessionId === 'string' ? parsed.lastSessionId : undefined;
     const settings = this.normalizeSettings(parsed.settings);
+    const hooks = this.normalizeHooks(parsed.hooks);
 
     if (
       JSON.stringify(parsed.settings && typeof parsed.settings === 'object' ? parsed.settings : {}) !==
@@ -193,11 +284,15 @@ export class IntegrationStore {
     ) {
       changed = true;
     }
+    if (!parsed.channels || parsed.platforms) {
+      changed = true;
+    }
 
     return {
       data: {
-        platforms,
+        channels,
         settings,
+        hooks,
         ...(lastSessionId ? { lastSessionId } : {}),
       },
       changed,
@@ -288,6 +383,38 @@ export class IntegrationStore {
       };
     }
 
+    if (platform === 'matrix') {
+      return {
+        ...objectConfig,
+        homeserverUrl:
+          typeof objectConfig.homeserverUrl === 'string'
+            ? objectConfig.homeserverUrl.trim().replace(/\/$/, '')
+            : '',
+        accessToken:
+          typeof objectConfig.accessToken === 'string'
+            ? objectConfig.accessToken.trim()
+            : '',
+        defaultRoomId:
+          typeof objectConfig.defaultRoomId === 'string'
+            ? objectConfig.defaultRoomId.trim()
+            : '',
+      };
+    }
+
+    if (platform === 'line') {
+      return {
+        ...objectConfig,
+        channelAccessToken:
+          typeof objectConfig.channelAccessToken === 'string'
+            ? objectConfig.channelAccessToken.trim()
+            : '',
+        defaultTargetId:
+          typeof objectConfig.defaultTargetId === 'string'
+            ? objectConfig.defaultTargetId.trim()
+            : '',
+      };
+    }
+
     if (platform !== 'whatsapp') {
       return objectConfig;
     }
@@ -331,5 +458,90 @@ export class IntegrationStore {
     return sharedSessionWorkingDirectory
       ? { sharedSessionWorkingDirectory }
       : {};
+  }
+
+  private normalizeHooks(rawHooks: unknown): IntegrationHooksState {
+    if (!rawHooks || typeof rawHooks !== 'object' || Array.isArray(rawHooks)) {
+      return { rules: {}, runs: [] };
+    }
+
+    const hooks = rawHooks as { rules?: unknown; runs?: unknown };
+    const rawRules =
+      hooks.rules && typeof hooks.rules === 'object' && !Array.isArray(hooks.rules)
+        ? (hooks.rules as Record<string, unknown>)
+        : {};
+    const rawRuns = Array.isArray(hooks.runs) ? hooks.runs : [];
+
+    const rules: Record<string, IntegrationHookRule> = {};
+    for (const [key, value] of Object.entries(rawRules)) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const rule = value as Record<string, unknown>;
+      const id = typeof rule.id === 'string' && rule.id.trim() ? rule.id.trim() : key;
+      const name = typeof rule.name === 'string' ? rule.name.trim() : '';
+      const trigger =
+        rule.trigger && typeof rule.trigger === 'object' && !Array.isArray(rule.trigger)
+          ? (rule.trigger as Record<string, unknown>)
+          : {};
+      const action =
+        rule.action && typeof rule.action === 'object' && !Array.isArray(rule.action)
+          ? (rule.action as Record<string, unknown>)
+          : {};
+      if (!id || !name || typeof trigger.type !== 'string' || typeof action.type !== 'string') {
+        continue;
+      }
+
+      rules[id] = {
+        id,
+        name,
+        enabled: rule.enabled !== false,
+        trigger: {
+          type: trigger.type as IntegrationHookTriggerType,
+          config:
+            trigger.config && typeof trigger.config === 'object' && !Array.isArray(trigger.config)
+              ? (trigger.config as Record<string, unknown>)
+              : undefined,
+        },
+        action: {
+          type: action.type === 'tool_call' ? 'tool_call' : 'integration_action',
+          config:
+            action.config && typeof action.config === 'object' && !Array.isArray(action.config)
+              ? (action.config as Record<string, unknown>)
+              : undefined,
+        },
+        createdAt:
+          typeof rule.createdAt === 'number' && Number.isFinite(rule.createdAt)
+            ? rule.createdAt
+            : Date.now(),
+        updatedAt:
+          typeof rule.updatedAt === 'number' && Number.isFinite(rule.updatedAt)
+            ? rule.updatedAt
+            : Date.now(),
+      };
+    }
+
+    const runs: IntegrationHookRun[] = [];
+    for (const entry of rawRuns) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const run = entry as Record<string, unknown>;
+      if (
+        typeof run.id !== 'string' ||
+        typeof run.ruleId !== 'string' ||
+        typeof run.startedAt !== 'number' ||
+        typeof run.finishedAt !== 'number'
+      ) {
+        continue;
+      }
+      runs.push({
+        id: run.id,
+        ruleId: run.ruleId,
+        status: run.status === 'success' ? 'success' : 'error',
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        error: typeof run.error === 'string' ? run.error : undefined,
+        result: run.result,
+      });
+    }
+
+    return { rules, runs };
   }
 }

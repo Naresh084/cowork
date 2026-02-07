@@ -43,69 +43,10 @@ export * from './chat-item.js';
 export * from './connector.js';
 
 // ============================================================================
-// Platform Integration Types
+// Integration Types (re-exported from integration.ts)
 // ============================================================================
 
-export const SUPPORTED_PLATFORM_TYPES = [
-  'whatsapp',
-  'slack',
-  'telegram',
-  'discord',
-  'imessage',
-  'teams',
-] as const;
-
-export type PlatformType = (typeof SUPPORTED_PLATFORM_TYPES)[number];
-
-export interface PlatformStatus {
-  platform: PlatformType;
-  connected: boolean;
-  displayName?: string;
-  identityPhone?: string;
-  identityName?: string;
-  error?: string;
-  connectedAt?: number;
-  lastMessageAt?: number;
-}
-
-export interface IncomingMessage {
-  platform: PlatformType;
-  chatId: string;
-  senderName: string;
-  senderId: string;
-  content: string;
-  attachments?: PlatformMessageAttachment[];
-  timestamp: number;
-  replyToMessageId?: string;
-}
-
-export interface OutgoingMessage {
-  platform: PlatformType;
-  chatId: string;
-  content: string;
-  replyToMessageId?: string;
-}
-
-export interface PlatformMessageAttachment {
-  type: 'image' | 'audio' | 'video' | 'file' | 'pdf' | 'text';
-  name: string;
-  mimeType?: string;
-  data?: string;
-  size?: number;
-  duration?: number;
-}
-
-export interface PlatformConfig {
-  platform: PlatformType;
-  enabled: boolean;
-  config: Record<string, unknown>;
-}
-
-export interface WhatsAppSenderControlConfig {
-  senderPolicy: 'allowlist';
-  allowFrom: string[];
-  denialMessage: string;
-}
+export * from './integration.js';
 
 // ============================================================================
 // Message Types

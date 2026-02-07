@@ -275,6 +275,42 @@ function parseTauriEvent(
         timestamp: (data.timestamp as number) ?? Date.now(),
       };
 
+    case 'integration:catalog_updated':
+      return {
+        type: 'integration:catalog_updated',
+        sessionId,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'integration:action_result':
+      return {
+        type: 'integration:action_result',
+        sessionId,
+        channel: (data.channel as string) ?? '',
+        action: (data.action as string) ?? '',
+        success: (data.success as boolean) ?? false,
+        unsupported: data.unsupported as boolean | undefined,
+        reason: data.reason as string | undefined,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'integration:hook_status':
+      return {
+        type: 'integration:hook_status',
+        sessionId,
+        status: (data.status as string) ?? 'unknown',
+        timestamp: (data.timestamp as number) ?? Date.now(),
+        ...data,
+      };
+
+    case 'integration:hook_run':
+      return {
+        type: 'integration:hook_run',
+        sessionId,
+        run: data.run,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
     case 'queue:update':
       return {
         type: 'queue:update',

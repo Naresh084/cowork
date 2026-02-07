@@ -174,6 +174,8 @@ export function useAgentEvents(sessionId: string | null): void {
           discord: 'Discord',
           imessage: 'iMessage',
           teams: 'Microsoft Teams',
+          matrix: 'Matrix',
+          line: 'LINE',
         };
         toast.info(
           `${platformNames[msgEvent.platform] || msgEvent.platform}`,
@@ -204,12 +206,49 @@ export function useAgentEvents(sessionId: string | null): void {
           discord: 'Discord',
           imessage: 'iMessage',
           teams: 'Microsoft Teams',
+          matrix: 'Matrix',
+          line: 'LINE',
         };
         toast.info(
           `${queuePlatformNames[queuedEvent.platform] || queuedEvent.platform}`,
           `Message queued (${queuedEvent.queueSize} waiting)`,
           3000
         );
+        return;
+      }
+
+      if (event.type === 'integration:catalog_updated') {
+        void useIntegrationStore.getState().refreshStatuses();
+        return;
+      }
+
+      if (event.type === 'integration:action_result') {
+        if (!event.success) {
+          toast.error(
+            'Integration action failed',
+            event.reason || `${event.channel}:${event.action}`,
+            4000,
+          );
+        }
+        return;
+      }
+
+      if (event.type === 'integration:hook_status') {
+        if (event.status === 'rule_created') {
+          toast.success('Integration hook created');
+        } else if (event.status === 'rule_deleted') {
+          toast.info('Integration hook deleted');
+        }
+        return;
+      }
+
+      if (event.type === 'integration:hook_run') {
+        const run = isRecord(event.run) ? event.run : null;
+        if (!run) return;
+        const status = String(run.status || '');
+        if (status === 'error') {
+          toast.error('Integration hook run failed');
+        }
         return;
       }
 

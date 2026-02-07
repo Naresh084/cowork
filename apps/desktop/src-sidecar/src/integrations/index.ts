@@ -4,16 +4,36 @@ import { TelegramAdapter } from './adapters/telegram-adapter.js';
 import { DiscordAdapter } from './adapters/discord-adapter.js';
 import { IMessageBlueBubblesAdapter } from './adapters/imessage-bluebubbles-adapter.js';
 import { TeamsAdapter } from './adapters/teams-adapter.js';
+import { MatrixAdapter } from './adapters/matrix-adapter.js';
+import { LineAdapter } from './adapters/line-adapter.js';
 import { MessageRouter } from './message-router.js';
-import { IntegrationStore, type IntegrationGeneralSettings } from './store.js';
+import {
+  IntegrationStore,
+  type IntegrationGeneralSettings,
+  type IntegrationHookRule,
+  type IntegrationHookRun,
+} from './store.js';
 import { eventEmitter } from '../event-emitter.js';
 import {
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
   SUPPORTED_INTEGRATION_PLATFORMS,
   type PlatformType,
   type PlatformStatus,
+  type IntegrationActionRequest,
+  type IntegrationActionResult,
+  type IntegrationCapabilityMatrix,
+  type IntegrationChannelManifest,
+  type IntegrationPluginManifest,
 } from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
+import { IntegrationActionRouter } from './action-router.js';
+import { integrationCatalogService } from './catalog-service.js';
+import { IntegrationHooksStore } from './hooks/store.js';
+import {
+  IntegrationHookEngine,
+  type CreateHookRuleInput,
+  type UpdateHookRuleInput,
+} from './hooks/engine.js';
 
 // ============================================================================
 // Integration Bridge Service
@@ -33,6 +53,8 @@ export class IntegrationBridgeService {
   private adapters: Map<PlatformType, BaseAdapter> = new Map();
   private router: MessageRouter;
   private store: IntegrationStore;
+  private actionRouter: IntegrationActionRouter;
+  private hooksEngine: IntegrationHookEngine;
   private agentRunner: any = null;
   private initialized = false;
   private platformOpInFlight: Set<PlatformType> = new Set();
@@ -40,6 +62,11 @@ export class IntegrationBridgeService {
   constructor() {
     this.router = new MessageRouter();
     this.store = new IntegrationStore();
+    this.actionRouter = new IntegrationActionRouter((platform) => this.adapters.get(platform));
+    this.hooksEngine = new IntegrationHookEngine(
+      new IntegrationHooksStore(this.store),
+      (request) => this.callAction(request),
+    );
   }
 
   /**
@@ -55,6 +82,7 @@ export class IntegrationBridgeService {
     this.router.setSharedSessionWorkingDirectory(
       this.store.getSettings().sharedSessionWorkingDirectory,
     );
+    await this.hooksEngine.initialize();
 
     // Subscribe to stream:done events for response routing
     this.subscribeToAgentEvents();
@@ -136,6 +164,32 @@ export class IntegrationBridgeService {
         });
       }
     };
+
+    const originalIntegrationMessageIn =
+      eventEmitter.integrationMessageIn.bind(eventEmitter);
+    eventEmitter.integrationMessageIn = (
+      platform: string,
+      sender: string,
+      content: string,
+    ) => {
+      originalIntegrationMessageIn(platform, sender, content);
+      void this.hooksEngine.notifyIntegrationEvent({
+        eventType: 'incoming',
+        platform,
+        payload: { sender, content },
+      });
+    };
+
+    const originalIntegrationMessageOut =
+      eventEmitter.integrationMessageOut.bind(eventEmitter);
+    eventEmitter.integrationMessageOut = (platform: string, chatId: string) => {
+      originalIntegrationMessageOut(platform, chatId);
+      void this.hooksEngine.notifyIntegrationEvent({
+        eventType: 'outgoing',
+        platform,
+        payload: { chatId },
+      });
+    };
   }
 
   /** Connect a platform with given config */
@@ -174,10 +228,23 @@ export class IntegrationBridgeService {
       ...existingConfig,
       ...config,
     });
+    const validationError = adapter.validateConfig(normalizedConfig);
+    if (validationError) {
+      throw new Error(validationError);
+    }
 
     // Wire adapter status events to integration event emitter
     adapter.on('status', (status: PlatformStatus) => {
       eventEmitter.integrationStatus(status);
+      void this.hooksEngine.notifyIntegrationEvent({
+        eventType: 'status',
+        platform: status.platform,
+        payload: {
+          connected: status.connected,
+          displayName: status.displayName,
+          error: status.error,
+        },
+      });
     });
 
     adapter.on('qr', (qrDataUrl: string) => {
@@ -232,6 +299,13 @@ export class IntegrationBridgeService {
         ...existingConfig,
         ...config,
       });
+      const existingAdapter = this.adapters.get(platform);
+      if (existingAdapter) {
+        const validationError = existingAdapter.validateConfig(normalizedConfig);
+        if (validationError) {
+          throw new Error(validationError);
+        }
+      }
 
       await this.store.setConfig(platform, {
         platform,
@@ -321,6 +395,101 @@ export class IntegrationBridgeService {
       );
     }
     await adapter.sendMessage(targetChat, message);
+    await this.hooksEngine.notifyIntegrationEvent({
+      eventType: 'outgoing',
+      platform,
+      payload: {
+        chatId: targetChat,
+        message,
+      },
+    });
+  }
+
+  async listCatalog(workingDirectory?: string): Promise<IntegrationChannelManifest[]> {
+    return integrationCatalogService.listCatalog(workingDirectory);
+  }
+
+  async listPlugins(workingDirectory?: string): Promise<IntegrationPluginManifest[]> {
+    return integrationCatalogService.listPlugins(workingDirectory);
+  }
+
+  async installPlugin(plugin: IntegrationPluginManifest): Promise<void> {
+    await integrationCatalogService.installPlugin(plugin);
+  }
+
+  async uninstallPlugin(pluginId: string): Promise<void> {
+    await integrationCatalogService.uninstallPlugin(pluginId);
+  }
+
+  getChannelCapabilities(channel: string): IntegrationCapabilityMatrix | null {
+    const platform = channel.trim().toLowerCase() as PlatformType;
+    const adapter = this.adapters.get(platform);
+    if (!adapter) return null;
+    return adapter.getCapabilities();
+  }
+
+  async callAction(
+    request: IntegrationActionRequest,
+  ): Promise<IntegrationActionResult> {
+    const result = await this.actionRouter.route(request);
+    if (result.success) {
+      const channel = request.channel.trim().toLowerCase();
+      if (channel) {
+        await this.hooksEngine.notifyIntegrationEvent({
+          eventType: 'outgoing',
+          platform: channel,
+          payload: {
+            action: request.action,
+            target: request.target,
+          },
+        });
+      }
+    }
+    eventEmitter.integrationActionResult({
+      channel: request.channel,
+      action: request.action,
+      success: result.success,
+      unsupported: result.unsupported,
+      reason: result.reason,
+    });
+    return result;
+  }
+
+  listHookRules(): IntegrationHookRule[] {
+    return this.hooksEngine.listRules();
+  }
+
+  async createHookRule(input: CreateHookRuleInput): Promise<IntegrationHookRule> {
+    const rule = await this.hooksEngine.createRule(input);
+    eventEmitter.integrationHookStatus('rule_created', {
+      ruleId: rule.id,
+      name: rule.name,
+    });
+    return rule;
+  }
+
+  async updateHookRule(input: UpdateHookRuleInput): Promise<IntegrationHookRule> {
+    const rule = await this.hooksEngine.updateRule(input);
+    eventEmitter.integrationHookStatus('rule_updated', {
+      ruleId: rule.id,
+      name: rule.name,
+    });
+    return rule;
+  }
+
+  async deleteHookRule(ruleId: string): Promise<void> {
+    await this.hooksEngine.deleteRule(ruleId);
+    eventEmitter.integrationHookStatus('rule_deleted', { ruleId });
+  }
+
+  async runHookRuleNow(ruleId: string): Promise<IntegrationHookRun> {
+    const run = await this.hooksEngine.runNow(ruleId);
+    eventEmitter.integrationHookRun(run);
+    return run;
+  }
+
+  listHookRuns(ruleId?: string): IntegrationHookRun[] {
+    return this.hooksEngine.listRuns(ruleId);
   }
 
   /** Create adapter instance by platform type */
@@ -338,6 +507,10 @@ export class IntegrationBridgeService {
         return new IMessageBlueBubblesAdapter();
       case 'teams':
         return new TeamsAdapter();
+      case 'matrix':
+        return new MatrixAdapter();
+      case 'line':
+        return new LineAdapter();
       default:
         throw new Error(`Unknown platform: ${platform}`);
     }
@@ -471,6 +644,38 @@ export class IntegrationBridgeService {
         teamId: typeof config.teamId === 'string' ? config.teamId.trim() : '',
         channelId: typeof config.channelId === 'string' ? config.channelId.trim() : '',
         pollIntervalSeconds,
+      };
+    }
+
+    if (platform === 'matrix') {
+      return {
+        ...config,
+        homeserverUrl:
+          typeof config.homeserverUrl === 'string'
+            ? config.homeserverUrl.trim().replace(/\/$/, '')
+            : '',
+        accessToken:
+          typeof config.accessToken === 'string'
+            ? config.accessToken.trim()
+            : '',
+        defaultRoomId:
+          typeof config.defaultRoomId === 'string'
+            ? config.defaultRoomId.trim()
+            : '',
+      };
+    }
+
+    if (platform === 'line') {
+      return {
+        ...config,
+        channelAccessToken:
+          typeof config.channelAccessToken === 'string'
+            ? config.channelAccessToken.trim()
+            : '',
+        defaultTargetId:
+          typeof config.defaultTargetId === 'string'
+            ? config.defaultTargetId.trim()
+            : '',
       };
     }
 

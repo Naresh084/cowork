@@ -350,6 +350,52 @@ export class EventEmitter {
   }
 
   /**
+   * Emit integration catalog update notification.
+   */
+  integrationCatalogUpdated(): void {
+    this.emit('integration:catalog_updated', undefined, {
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit integration action execution result.
+   */
+  integrationActionResult(data: {
+    channel: string;
+    action: string;
+    success: boolean;
+    unsupported?: boolean;
+    reason?: string;
+  }): void {
+    this.emit('integration:action_result', undefined, {
+      ...data,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit integration hook status lifecycle event.
+   */
+  integrationHookStatus(status: string, data?: Record<string, unknown>): void {
+    this.emit('integration:hook_status', undefined, {
+      status,
+      ...(data || {}),
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit integration hook run event.
+   */
+  integrationHookRun(run: unknown): void {
+    this.emit('integration:hook_run', undefined, {
+      run,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
    * Emit error event.
    */
   error(sessionId: string | undefined, errorMessage: string, code?: string, details?: unknown): void {

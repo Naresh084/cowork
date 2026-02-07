@@ -16,6 +16,8 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   discord: 'Discord',
   imessage: 'iMessage',
   teams: 'Microsoft Teams',
+  matrix: 'Matrix',
+  line: 'LINE',
 };
 
 /**
@@ -80,7 +82,18 @@ export function createNotificationTools(
             };
           }
 
-          await currentBridge.sendNotification(platform, message, chatId);
+          const result = await currentBridge.callAction({
+            channel: platform,
+            action: 'send',
+            target: chatId ? { chatId } : undefined,
+            payload: { text: message },
+          });
+          if (!result.success) {
+            return {
+              success: false,
+              data: `Failed to send ${displayName} notification: ${result.reason || 'unknown error'}`,
+            };
+          }
 
           const preview =
             message.length > 100

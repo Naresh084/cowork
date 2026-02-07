@@ -3,9 +3,12 @@ import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
 import { commandService } from './command-service.js';
+import { eventEmitter } from './event-emitter.js';
 import {
   SUPPORTED_PLATFORM_TYPES,
   type CommandCategory,
+  type IntegrationAction,
+  type IntegrationPluginManifest,
   type PlatformType,
   type SecretDefinition,
 } from '@gemini-cowork/shared';
@@ -1798,6 +1801,26 @@ registerHandler('integration_connect', async (params) => {
   ) {
     throw new Error('Teams requires tenantId, clientId, clientSecret, teamId, and channelId');
   }
+  if (
+    platform === 'matrix' &&
+    (
+      typeof safeConfig.homeserverUrl !== 'string' ||
+      !safeConfig.homeserverUrl ||
+      typeof safeConfig.accessToken !== 'string' ||
+      !safeConfig.accessToken
+    )
+  ) {
+    throw new Error('Matrix requires homeserverUrl and accessToken');
+  }
+  if (
+    platform === 'line' &&
+    (
+      typeof safeConfig.channelAccessToken !== 'string' ||
+      !safeConfig.channelAccessToken
+    )
+  ) {
+    throw new Error('LINE requires channelAccessToken');
+  }
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.connect(platform, safeConfig);
   return integrationBridge.getStatuses().find(s => s.platform === platform);
@@ -1876,6 +1899,152 @@ registerHandler('integration_send_test', async (params) => {
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.sendTestMessage(platform, message || 'Hello from Cowork!');
   return { success: true };
+});
+
+registerHandler('integration_list_catalog', async (params) => {
+  const workingDirectory =
+    typeof params.workingDirectory === 'string'
+      ? params.workingDirectory
+      : undefined;
+  const { integrationBridge } = await import('./integrations/index.js');
+  const catalog = await integrationBridge.listCatalog(workingDirectory);
+  return { catalog };
+});
+
+registerHandler('integration_get_channel_capabilities', async (params) => {
+  const channel = typeof params.channel === 'string' ? params.channel : '';
+  if (!channel) throw new Error('channel is required');
+  const { integrationBridge } = await import('./integrations/index.js');
+  const capabilities = integrationBridge.getChannelCapabilities(channel);
+  return { channel, capabilities };
+});
+
+registerHandler('integration_call_action', async (params) => {
+  const channel = typeof params.channel === 'string' ? params.channel : '';
+  const action = typeof params.action === 'string' ? params.action : '';
+  if (!channel || !action) {
+    throw new Error('channel and action are required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  return integrationBridge.callAction({
+    channel,
+    action: action as IntegrationAction,
+    target:
+      params.target && typeof params.target === 'object' && !Array.isArray(params.target)
+        ? (params.target as Record<string, unknown>)
+        : undefined,
+    payload:
+      params.payload && typeof params.payload === 'object' && !Array.isArray(params.payload)
+        ? (params.payload as Record<string, unknown>)
+        : undefined,
+  });
+});
+
+registerHandler('integration_list_plugins', async (params) => {
+  const workingDirectory =
+    typeof params.workingDirectory === 'string'
+      ? params.workingDirectory
+      : undefined;
+  const { integrationBridge } = await import('./integrations/index.js');
+  const plugins = await integrationBridge.listPlugins(workingDirectory);
+  return { plugins };
+});
+
+registerHandler('integration_install_plugin', async (params) => {
+  const plugin =
+    params.plugin && typeof params.plugin === 'object' && !Array.isArray(params.plugin)
+      ? params.plugin
+      : null;
+  if (!plugin) {
+    throw new Error('plugin is required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.installPlugin(
+    plugin as IntegrationPluginManifest,
+  );
+  eventEmitter.integrationCatalogUpdated();
+  return { success: true };
+});
+
+registerHandler('integration_uninstall_plugin', async (params) => {
+  const pluginId =
+    typeof params.pluginId === 'string' ? params.pluginId.trim() : '';
+  if (!pluginId) {
+    throw new Error('pluginId is required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.uninstallPlugin(pluginId);
+  eventEmitter.integrationCatalogUpdated();
+  return { success: true };
+});
+
+registerHandler('integration_test_action', async (params) => {
+  const channel = typeof params.channel === 'string' ? params.channel : '';
+  const message =
+    typeof params.message === 'string' && params.message.trim()
+      ? params.message.trim()
+      : 'Integration action test from Cowork';
+  if (!channel) throw new Error('channel is required');
+  const { integrationBridge } = await import('./integrations/index.js');
+  return integrationBridge.callAction({
+    channel,
+    action: 'send',
+    payload: { text: message },
+  });
+});
+
+registerHandler('integration_hooks_list', async (params) => {
+  const ruleId = typeof params.ruleId === 'string' ? params.ruleId : undefined;
+  const { integrationBridge } = await import('./integrations/index.js');
+  return {
+    rules: integrationBridge.listHookRules(),
+    runs: integrationBridge.listHookRuns(ruleId),
+  };
+});
+
+registerHandler('integration_hooks_create', async (params) => {
+  const input = params as unknown as import('./integrations/hooks/engine.js').CreateHookRuleInput;
+  if (!input?.name || !input?.trigger || !input?.action) {
+    throw new Error('name, trigger, and action are required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  const rule = await integrationBridge.createHookRule(input);
+  return { rule };
+});
+
+registerHandler('integration_hooks_update', async (params) => {
+  const input = params as unknown as import('./integrations/hooks/engine.js').UpdateHookRuleInput;
+  if (!input?.id) {
+    throw new Error('id is required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  const rule = await integrationBridge.updateHookRule(input);
+  return { rule };
+});
+
+registerHandler('integration_hooks_delete', async (params) => {
+  const ruleId = typeof params.ruleId === 'string' ? params.ruleId.trim() : '';
+  if (!ruleId) {
+    throw new Error('ruleId is required');
+  }
+  const { integrationBridge } = await import('./integrations/index.js');
+  await integrationBridge.deleteHookRule(ruleId);
+  return { success: true };
+});
+
+registerHandler('integration_hooks_run_now', async (params) => {
+  const ruleId = typeof params.ruleId === 'string' ? params.ruleId.trim() : '';
+  if (!ruleId) throw new Error('ruleId is required');
+  const { integrationBridge } = await import('./integrations/index.js');
+  const run = await integrationBridge.runHookRuleNow(ruleId);
+  return { run };
+});
+
+registerHandler('integration_hooks_runs', async (params) => {
+  const ruleId = typeof params.ruleId === 'string' ? params.ruleId.trim() : undefined;
+  const { integrationBridge } = await import('./integrations/index.js');
+  const runs = integrationBridge.listHookRuns(ruleId);
+  return { runs };
 });
 
 // ============================================================================

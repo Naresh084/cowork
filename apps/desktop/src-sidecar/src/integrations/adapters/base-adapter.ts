@@ -5,7 +5,12 @@ import type {
   IncomingMessage,
   IntegrationMediaPayload,
   PlatformMessageAttachment,
+  IntegrationAction,
+  IntegrationActionRequest,
+  IntegrationActionResult,
+  IntegrationCapabilityMatrix,
 } from '../types.js';
+import { buildCapabilityMatrix } from '../types.js';
 
 /**
  * Abstract base class for messaging platform adapters.
@@ -30,6 +35,14 @@ export abstract class BaseAdapter extends EventEmitter {
   constructor(platform: PlatformType) {
     super();
     this.platform = platform;
+  }
+
+  /**
+   * Validate adapter config before connect/configure.
+   * Return null when valid, otherwise an error message.
+   */
+  validateConfig(_config: Record<string, unknown>): string | null {
+    return null;
   }
 
   /** Connect to the platform. Resolves when connected. */
@@ -92,6 +105,66 @@ export abstract class BaseAdapter extends EventEmitter {
     const caption = media.caption?.trim() || `Sent ${media.mediaType}`;
     await this.sendMessage(chatId, `${caption}${suffix}`);
     return null;
+  }
+
+  /**
+   * Return supported integration actions for this adapter.
+   */
+  getCapabilities(): IntegrationCapabilityMatrix {
+    return buildCapabilityMatrix(['send']);
+  }
+
+  /**
+   * Perform a rich messaging action.
+   * Default implementation supports only `send`.
+   */
+  async performAction(
+    request: IntegrationActionRequest,
+  ): Promise<IntegrationActionResult> {
+    const action = request.action as IntegrationAction;
+    if (action === 'send') {
+      const targetChatId =
+        request.target?.chatId ||
+        request.target?.channelId ||
+        this.getDefaultChatId();
+      if (!targetChatId) {
+        return {
+          success: false,
+          channel: this.platform,
+          action,
+          reason: `No chat/channel target available for ${this.platform}`,
+        };
+      }
+
+      const text = request.payload?.text || '';
+      if (!text.trim()) {
+        return {
+          success: false,
+          channel: this.platform,
+          action,
+          reason: 'payload.text is required for send',
+        };
+      }
+
+      await this.sendMessage(targetChatId, text);
+      return {
+        success: true,
+        channel: this.platform,
+        action,
+        data: {
+          chatId: targetChatId,
+        },
+      };
+    }
+
+    return {
+      success: false,
+      channel: this.platform,
+      action,
+      unsupported: true,
+      reason: `${this.platform} adapter does not support action "${action}"`,
+      fallbackSuggestion: 'Try action "send" or a channel with richer capabilities.',
+    };
   }
 
   /** Get the current connection status. */

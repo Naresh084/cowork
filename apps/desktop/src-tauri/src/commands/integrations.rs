@@ -191,3 +191,209 @@ pub async fn agent_integration_send_test(
     manager.send_command("integration_send_test", params).await?;
     Ok(())
 }
+
+/// List integration catalog (built-ins + plugins)
+#[tauri::command]
+pub async fn agent_integration_list_catalog(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    working_directory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "workingDirectory": working_directory,
+    });
+    manager.send_command("integration_list_catalog", params).await
+}
+
+/// Get per-channel integration capabilities
+#[tauri::command]
+pub async fn agent_integration_get_channel_capabilities(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    channel: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({ "channel": channel });
+    manager
+        .send_command("integration_get_channel_capabilities", params)
+        .await
+}
+
+/// Execute a rich integration action on a channel
+#[tauri::command]
+pub async fn agent_integration_call_action(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    channel: String,
+    action: String,
+    target: Option<serde_json::Value>,
+    payload: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "channel": channel,
+        "action": action,
+        "target": target,
+        "payload": payload,
+    });
+    manager.send_command("integration_call_action", params).await
+}
+
+/// List integration plugins
+#[tauri::command]
+pub async fn agent_integration_list_plugins(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    working_directory: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "workingDirectory": working_directory,
+    });
+    manager.send_command("integration_list_plugins", params).await
+}
+
+/// Install integration plugin
+#[tauri::command]
+pub async fn agent_integration_install_plugin(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    plugin: serde_json::Value,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({ "plugin": plugin });
+    manager
+        .send_command("integration_install_plugin", params)
+        .await?;
+    Ok(())
+}
+
+/// Uninstall integration plugin
+#[tauri::command]
+pub async fn agent_integration_uninstall_plugin(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    plugin_id: String,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({ "pluginId": plugin_id });
+    manager
+        .send_command("integration_uninstall_plugin", params)
+        .await?;
+    Ok(())
+}
+
+/// Test integration action with default send
+#[tauri::command]
+pub async fn agent_integration_test_action(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    channel: String,
+    message: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "channel": channel,
+        "message": message,
+    });
+    manager.send_command("integration_test_action", params).await
+}
+
+/// List integration hooks and runs
+#[tauri::command]
+pub async fn agent_integration_hooks_list(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    rule_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "ruleId": rule_id,
+    });
+    manager.send_command("integration_hooks_list", params).await
+}
+
+/// Create integration hook rule
+#[tauri::command]
+pub async fn agent_integration_hooks_create(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = input;
+    manager.send_command("integration_hooks_create", params).await
+}
+
+/// Update integration hook rule
+#[tauri::command]
+pub async fn agent_integration_hooks_update(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = input;
+    manager.send_command("integration_hooks_update", params).await
+}
+
+/// Delete integration hook rule
+#[tauri::command]
+pub async fn agent_integration_hooks_delete(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    rule_id: String,
+) -> Result<(), String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "ruleId": rule_id,
+    });
+    manager
+        .send_command("integration_hooks_delete", params)
+        .await?;
+    Ok(())
+}
+
+/// Run integration hook rule immediately
+#[tauri::command]
+pub async fn agent_integration_hooks_run_now(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    rule_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "ruleId": rule_id,
+    });
+    manager
+        .send_command("integration_hooks_run_now", params)
+        .await
+}
+
+/// List integration hook runs
+#[tauri::command]
+pub async fn agent_integration_hooks_runs(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    rule_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "ruleId": rule_id,
+    });
+    manager.send_command("integration_hooks_runs", params).await
+}

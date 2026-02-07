@@ -13,6 +13,11 @@ const SETTINGS_FILES = [
   resolve(process.cwd(), 'src/components/settings/DiscordSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/IMessageSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/TeamsSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/MatrixSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/LineSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/IntegrationCatalogSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/IntegrationOpsSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/IntegrationHooksSettings.tsx'),
 ];
 
 describe('settings help content coverage', () => {

@@ -575,8 +575,7 @@ export function Onboarding() {
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
             <h3 className="text-sm font-medium text-white/90">Search, Research, and Integrations</h3>
             <p className="mt-1 text-xs text-white/55">
-              Configure fallback search, deep research/computer-use model overrides, messaging integrations, and
-              connectors access context.
+              Configure fallback search, deep research/computer-use model overrides, and integration channel behavior.
             </p>
           </div>
 
@@ -632,14 +631,14 @@ export function Onboarding() {
           </div>
 
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-sm font-medium text-white/85">Messaging + Connectors Overview</p>
+            <p className="text-sm font-medium text-white/85">Integrations Overview</p>
             <p className="mt-1 text-xs text-white/55">
-              WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Teams can create shared sessions once
-              connected. Connectors expand MCP-based tools (GitHub, docs, APIs, and more) from the sidebar Connectors
-              manager.
+              WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Teams, Matrix, and LINE can create shared
+              sessions once connected.
             </p>
             <p className="mt-2 text-xs text-white/45">
-              Shared integration sessions use a default working directory set in Settings → Integrations.
+              Shared integration sessions use a default working directory set in Settings → Integrations. MCP
+              connectors are configured separately in the Connectors area and are not part of integration routing.
             </p>
           </div>
 
