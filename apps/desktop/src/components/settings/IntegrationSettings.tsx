@@ -5,7 +5,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import { cn } from '@/lib/utils';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { useAuthStore } from '../../stores/auth-store';
-import { useSettingsStore } from '../../stores/settings-store';
+import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
 import { toast } from '@/components/ui/Toast';
 import { WhatsAppSettings } from './WhatsAppSettings';
 import { SlackSettings } from './SlackSettings';
@@ -171,12 +171,19 @@ export function IntegrationSettings() {
 
   const applyRuntime = async () => {
     const settingsState = useSettingsStore.getState();
+    const activeSoul = resolveActiveSoul(
+      settingsState.souls,
+      settingsState.activeSoulId,
+      settingsState.defaultSoulId,
+    );
     await applyRuntimeConfig({
       activeProvider: settingsState.activeProvider,
       providerBaseUrls: settingsState.providerBaseUrls,
       externalSearchProvider: settingsState.externalSearchProvider,
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
+      sandbox: settingsState.commandSandbox,
+      activeSoul,
     });
   };
 

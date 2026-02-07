@@ -5,7 +5,7 @@ import { AutoUpdater } from './components/AutoUpdater';
 import { BrandMark } from './components/icons/BrandMark';
 import { useAuthStore } from './stores/auth-store';
 import { useSessionStore } from './stores/session-store';
-import { useSettingsStore } from './stores/settings-store';
+import { resolveActiveSoul, useSettingsStore } from './stores/settings-store';
 import { useSkillStore } from './stores/skill-store';
 import { useCommandStore } from './stores/command-store';
 import { useSubagentStore } from './stores/subagent-store';
@@ -16,7 +16,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const { isAuthenticated, initialize, apiKey, activeProvider, applyRuntimeConfig } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
-  const { fetchProviderModels, availableModels, modelsLoading, userName } =
+  const { fetchProviderModels, availableModels, modelsLoading, userName, loadSoulProfiles } =
     useSettingsStore();
   const { discoverSkills } = useSkillStore();
   const { discoverCommands } = useCommandStore();
@@ -53,13 +53,21 @@ export function App() {
         console.error('[App] Initialization error:', error);
       });
 
-      const hydratedSettings = useSettingsStore.getState();
+      await loadSoulProfiles().catch(() => undefined);
+      const refreshedSettings = useSettingsStore.getState();
+      const activeSoul = resolveActiveSoul(
+        refreshedSettings.souls,
+        refreshedSettings.activeSoulId,
+        refreshedSettings.defaultSoulId,
+      );
       await applyRuntimeConfig({
-        activeProvider: hydratedSettings.activeProvider,
-        providerBaseUrls: hydratedSettings.providerBaseUrls,
-        externalSearchProvider: hydratedSettings.externalSearchProvider,
-        mediaRouting: hydratedSettings.mediaRouting,
-        specializedModels: hydratedSettings.specializedModelsV2,
+        activeProvider: refreshedSettings.activeProvider,
+        providerBaseUrls: refreshedSettings.providerBaseUrls,
+        externalSearchProvider: refreshedSettings.externalSearchProvider,
+        mediaRouting: refreshedSettings.mediaRouting,
+        specializedModels: refreshedSettings.specializedModelsV2,
+        sandbox: refreshedSettings.commandSandbox,
+        activeSoul,
       }).catch(() => undefined);
 
       setIsLoading(false);
@@ -69,7 +77,7 @@ export function App() {
     run();
 
     return () => clearTimeout(timeoutId);
-  }, [initialize]);
+  }, [initialize, loadSoulProfiles]);
 
   // Coordinate backend initialization with session loading
   useEffect(() => {

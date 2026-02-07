@@ -169,6 +169,10 @@ pub struct RuntimeConfigPayload {
     pub media_routing: serde_json::Value,
     #[serde(default)]
     pub specialized_models: serde_json::Value,
+    #[serde(default)]
+    pub external_cli: serde_json::Value,
+    #[serde(default)]
+    pub active_soul: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,6 +339,25 @@ pub async fn agent_get_capability_snapshot(
             "get_capability_snapshot",
             serde_json::json!({
                 "sessionId": session_id,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_get_external_cli_availability(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    force_refresh: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "get_external_cli_availability",
+            serde_json::json!({
+                "forceRefresh": force_refresh.unwrap_or(false),
             }),
         )
         .await

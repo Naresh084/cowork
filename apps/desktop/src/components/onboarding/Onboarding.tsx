@@ -17,7 +17,7 @@ import {
   useAuthStore,
   type ProviderId,
 } from '@/stores/auth-store';
-import { useSettingsStore } from '@/stores/settings-store';
+import { resolveActiveSoul, useSettingsStore } from '@/stores/settings-store';
 import { useHelpStore } from '@/stores/help-store';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { BrandMark } from '../icons/BrandMark';
@@ -283,12 +283,17 @@ export function Onboarding() {
       });
 
       await applyRuntimeConfig({
-        activeProvider: provider,
+        activeProvider: useSettingsStore.getState().activeProvider,
         providerBaseUrls: useSettingsStore.getState().providerBaseUrls,
         externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
         mediaRouting: useSettingsStore.getState().mediaRouting,
         sandbox: useSettingsStore.getState().commandSandbox,
         specializedModels: useSettingsStore.getState().specializedModelsV2,
+        activeSoul: resolveActiveSoul(
+          useSettingsStore.getState().souls,
+          useSettingsStore.getState().activeSoulId,
+          useSettingsStore.getState().defaultSoulId,
+        ),
       });
 
       await refreshCapabilitySnapshot();

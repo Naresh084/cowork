@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, Video, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
+  resolveActiveSoul,
   useSettingsStore,
   useMediaRoutingSettings,
   useSpecializedModelsV2,
@@ -229,12 +230,15 @@ export function GeneralSettings() {
 
   const applyRuntime = async () => {
     const state = useSettingsStore.getState();
+    const activeSoul = resolveActiveSoul(state.souls, state.activeSoulId, state.defaultSoulId);
     await applyRuntimeConfig({
       activeProvider: state.activeProvider,
       providerBaseUrls: state.providerBaseUrls,
       externalSearchProvider: state.externalSearchProvider,
       mediaRouting: state.mediaRouting,
       specializedModels: state.specializedModelsV2,
+      sandbox: state.commandSandbox,
+      activeSoul,
     });
   };
 

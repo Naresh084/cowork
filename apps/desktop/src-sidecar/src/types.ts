@@ -283,6 +283,24 @@ export interface SpecializedModelsV2 {
   };
 }
 
+export interface ExternalCliProviderRuntimeSettings {
+  enabled: boolean;
+  allowBypassPermissions: boolean;
+}
+
+export interface ExternalCliRuntimeConfig {
+  codex: ExternalCliProviderRuntimeSettings;
+  claude: ExternalCliProviderRuntimeSettings;
+}
+
+export interface RuntimeSoulProfile {
+  id: string;
+  title: string;
+  content: string;
+  source: 'preset' | 'custom';
+  path?: string;
+}
+
 export interface RuntimeConfig {
   activeProvider: ProviderId;
   providerApiKeys?: Partial<Record<ProviderId, string>>;
@@ -296,6 +314,8 @@ export interface RuntimeConfig {
   mediaRouting?: MediaRoutingSettings;
   specializedModels?: SpecializedModelsV2;
   sandbox?: CommandSandboxSettings;
+  externalCli?: ExternalCliRuntimeConfig;
+  activeSoul?: RuntimeSoulProfile | null;
 }
 
 export interface RuntimeConfigUpdateResult {
@@ -373,6 +393,7 @@ export interface QuestionRequest {
   multiSelect?: boolean;
   header?: string;
   allowCustom?: boolean;
+  metadata?: Record<string, unknown>;
   timestamp: number;
 }
 

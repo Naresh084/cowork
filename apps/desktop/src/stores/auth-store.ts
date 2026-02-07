@@ -51,6 +51,14 @@ export interface CommandSandboxSettings {
   maxOutputBytes: number;
 }
 
+export interface RuntimeSoulProfile {
+  id: string;
+  title: string;
+  content: string;
+  source: 'preset' | 'custom';
+  path?: string;
+}
+
 const DEFAULT_BASE_URLS: Record<ProviderId, string> = {
   google: 'https://generativelanguage.googleapis.com',
   openai: 'https://api.openai.com',
@@ -77,6 +85,16 @@ export interface RuntimeConfigPayload {
     videoBackend: 'google' | 'openai' | 'fal';
   };
   sandbox?: CommandSandboxSettings;
+  externalCli?: {
+    codex: {
+      enabled: boolean;
+      allowBypassPermissions: boolean;
+    };
+    claude: {
+      enabled: boolean;
+      allowBypassPermissions: boolean;
+    };
+  };
   specializedModels?: {
     google: {
       imageGeneration: string;
@@ -93,6 +111,7 @@ export interface RuntimeConfigPayload {
       videoGeneration: string;
     };
   };
+  activeSoul?: RuntimeSoulProfile | null;
 }
 
 export interface RuntimeConfigUpdateResult {
@@ -114,6 +133,7 @@ interface AuthState {
   exaApiKey: string | null;
   tavilyApiKey: string | null;
   stitchApiKey: string | null;
+  activeSoul: RuntimeSoulProfile | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -171,7 +191,9 @@ function buildRuntimeConfig(
     externalSearchProvider: partial?.externalSearchProvider,
     mediaRouting: partial?.mediaRouting,
     sandbox: partial?.sandbox,
+    externalCli: partial?.externalCli,
     specializedModels: partial?.specializedModels,
+    activeSoul: partial?.activeSoul ?? state.activeSoul,
   };
 }
 
@@ -187,6 +209,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   exaApiKey: null,
   tavilyApiKey: null,
   stitchApiKey: null,
+  activeSoul: null,
   isLoading: false,
   error: null,
 
@@ -551,6 +574,10 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       const state = get();
       const config = buildRuntimeConfig(state, partial);
       const result = await invoke<RuntimeConfigUpdateResult>('agent_set_runtime_config', { config });
+
+      if (partial && Object.prototype.hasOwnProperty.call(partial, 'activeSoul')) {
+        set({ activeSoul: partial.activeSoul ?? null });
+      }
 
       if (result?.requiresNewSession) {
         useAppStore.getState().setRuntimeConfigNotice({

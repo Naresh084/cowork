@@ -7,7 +7,7 @@ import {
   useAuthStore,
   type ProviderId,
 } from '@/stores/auth-store';
-import { useSettingsStore } from '@/stores/settings-store';
+import { resolveActiveSoul, useSettingsStore } from '@/stores/settings-store';
 import { toast } from '@/components/ui/Toast';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useCapabilityStore } from '@/stores/capability-store';
@@ -255,12 +255,19 @@ export function ApiKeysSettings() {
     await setProviderApiKey(activeProvider, value);
     await fetchProviderModels(activeProvider);
     const settingsState = useSettingsStore.getState();
+    const activeSoul = resolveActiveSoul(
+      settingsState.souls,
+      settingsState.activeSoulId,
+      settingsState.defaultSoulId,
+    );
     await applyRuntimeConfig({
       activeProvider,
       providerBaseUrls: settingsState.providerBaseUrls,
       externalSearchProvider: settingsState.externalSearchProvider,
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
+      sandbox: settingsState.commandSandbox,
+      activeSoul,
     });
     await refreshCapabilitySnapshot();
   };
@@ -339,12 +346,19 @@ export function ApiKeysSettings() {
           onClear={async () => {
             await clearProviderApiKey(activeProvider);
             const settingsState = useSettingsStore.getState();
+            const activeSoul = resolveActiveSoul(
+              settingsState.souls,
+              settingsState.activeSoulId,
+              settingsState.defaultSoulId,
+            );
             await applyRuntimeConfig({
               activeProvider,
               providerBaseUrls: settingsState.providerBaseUrls,
               externalSearchProvider: settingsState.externalSearchProvider,
               mediaRouting: settingsState.mediaRouting,
               specializedModels: settingsState.specializedModelsV2,
+              sandbox: settingsState.commandSandbox,
+              activeSoul,
             });
             await refreshCapabilitySnapshot();
           }}

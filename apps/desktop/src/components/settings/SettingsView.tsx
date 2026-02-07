@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image, CircleHelp, Sparkles } from 'lucide-react';
+import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image, CircleHelp, Sparkles, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
@@ -9,8 +9,9 @@ import { useCapabilityStore } from '../../stores/capability-store';
 import { GeneralSettings } from './GeneralSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
+import { SoulSettings } from './SoulSettings';
 
-type SettingsTab = 'provider' | 'media' | 'integrations';
+type SettingsTab = 'provider' | 'media' | 'integrations' | 'souls';
 
 interface TabConfig {
   id: SettingsTab;
@@ -23,12 +24,14 @@ const tabConfig: TabConfig[] = [
   { id: 'provider', label: 'Provider', icon: KeyRound },
   { id: 'media', label: 'Media', icon: Image },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
+  { id: 'souls', label: 'Souls', icon: Bot },
 ];
 
 const tabContent: Record<SettingsTab, React.ComponentType> = {
   provider: ApiKeysSettings,
   media: GeneralSettings,
   integrations: IntegrationSettings,
+  souls: SoulSettings,
 };
 
 export function SettingsView() {

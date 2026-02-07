@@ -225,9 +225,34 @@ registerHandler('get_capability_snapshot', async (params) => {
   return agentRunner.getCapabilitySnapshot(sessionId);
 });
 
+registerHandler('get_external_cli_availability', async (params) => {
+  const forceRefresh = Boolean(params.forceRefresh);
+  return agentRunner.getExternalCliAvailability(forceRefresh);
+});
+
 registerHandler('debug_preview_system_prompt', async (params) => {
   const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined;
   return agentRunner.previewSystemPrompt(sessionId);
+});
+
+registerHandler('souls_list', async () => {
+  return agentRunner.listSoulProfiles();
+});
+
+registerHandler('souls_save_custom', async (params) => {
+  const payload = params as { title?: string; content?: string; id?: string };
+  if (!payload.title || !payload.content) {
+    throw new Error('title and content are required');
+  }
+  return agentRunner.saveCustomSoul(payload.title, payload.content, payload.id);
+});
+
+registerHandler('souls_delete_custom', async (params) => {
+  const payload = params as { id?: string };
+  if (!payload.id) {
+    throw new Error('id is required');
+  }
+  return agentRunner.deleteCustomSoul(payload.id);
 });
 
 // Send message

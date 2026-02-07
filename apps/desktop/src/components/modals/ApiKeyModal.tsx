@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { KeyRound, AlertCircle, Loader2, X } from 'lucide-react';
 import { useAuthStore } from '../../stores/auth-store';
-import { useSettingsStore } from '../../stores/settings-store';
+import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
 import { cn } from '../../lib/utils';
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -57,12 +57,19 @@ export function ApiKeyModal({ isOpen, onClose, errorMessage }: ApiKeyModalProps)
 
       await setProviderApiKey(activeProvider, apiKey.trim());
       const settingsState = useSettingsStore.getState();
+      const activeSoul = resolveActiveSoul(
+        settingsState.souls,
+        settingsState.activeSoulId,
+        settingsState.defaultSoulId,
+      );
       await applyRuntimeConfig({
         activeProvider: settingsState.activeProvider,
         providerBaseUrls: settingsState.providerBaseUrls,
         externalSearchProvider: settingsState.externalSearchProvider,
         mediaRouting: settingsState.mediaRouting,
         specializedModels: settingsState.specializedModelsV2,
+        sandbox: settingsState.commandSandbox,
+        activeSoul,
       });
       onClose();
     } catch (err) {

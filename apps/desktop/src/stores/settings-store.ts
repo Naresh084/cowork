@@ -6,6 +6,7 @@ import {
   type ProviderId,
   type CommandSandboxSettings,
   type SandboxMode,
+  type RuntimeSoulProfile,
 } from './auth-store';
 import { useAppStore } from './app-store';
 
@@ -132,12 +133,151 @@ export interface MediaRoutingSettings {
 
 export type ExternalSearchProvider = 'google' | 'exa' | 'tavily';
 
+export interface ExternalCliProviderSettings {
+  enabled: boolean;
+  allowBypassPermissions: boolean;
+}
+
+export interface ExternalCliSettings {
+  codex: ExternalCliProviderSettings;
+  claude: ExternalCliProviderSettings;
+}
+
 export const DEFAULT_MEDIA_ROUTING: MediaRoutingSettings = {
   imageBackend: 'google',
   videoBackend: 'google',
 };
 
 export const DEFAULT_EXTERNAL_SEARCH_PROVIDER: ExternalSearchProvider = 'google';
+export const DEFAULT_EXTERNAL_CLI_SETTINGS: ExternalCliSettings = {
+  codex: {
+    enabled: false,
+    allowBypassPermissions: false,
+  },
+  claude: {
+    enabled: false,
+    allowBypassPermissions: false,
+  },
+};
+
+export type SoulSource = 'preset' | 'custom';
+
+export interface SoulProfile {
+  id: string;
+  title: string;
+  content: string;
+  source: SoulSource;
+  path?: string;
+}
+
+interface SoulCatalogPayload {
+  presets: SoulProfile[];
+  customSouls: SoulProfile[];
+  defaultSoulId: string;
+  projectSoulsDir: string;
+  userSoulsDir: string;
+}
+
+interface AgentCommandResult<T> {
+  result: T;
+}
+
+const DEFAULT_SOUL_ID = 'preset:professional';
+
+const FALLBACK_SOUL_PROFILE: SoulProfile = {
+  id: DEFAULT_SOUL_ID,
+  title: 'Professional',
+  source: 'preset',
+  content: [
+    '# Professional Soul',
+    '',
+    '## Voice',
+    '- Clear, factual, and respectful.',
+    '- Avoid hype and filler.',
+    '',
+    '## Behavior',
+    '- Prioritize correctness and direct execution.',
+    '- Surface assumptions and constraints explicitly.',
+  ].join('\n'),
+};
+
+function normalizeSoulProfile(value: SoulProfile): SoulProfile | null {
+  const id = value.id?.trim() || '';
+  const title = value.title?.trim() || '';
+  const content = value.content?.trim() || '';
+  const source: SoulSource = value.source === 'custom' ? 'custom' : 'preset';
+  const path = value.path?.trim() || undefined;
+  if (!id || !title || !content) return null;
+  return { id, title, content, source, path };
+}
+
+function toRuntimeSoulProfile(value: SoulProfile | null): RuntimeSoulProfile | null {
+  if (!value) return null;
+  return {
+    id: value.id,
+    title: value.title,
+    content: value.content,
+    source: value.source,
+    path: value.path,
+  };
+}
+
+function dedupeSouls(values: SoulProfile[]): SoulProfile[] {
+  const map = new Map<string, SoulProfile>();
+  for (const soul of values) {
+    const normalized = normalizeSoulProfile(soul);
+    if (!normalized) continue;
+    map.set(normalized.id, normalized);
+  }
+  return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export function resolveActiveSoul(
+  souls: SoulProfile[],
+  activeSoulId: string,
+  defaultSoulId: string,
+): SoulProfile {
+  const byId = new Map(souls.map((soul) => [soul.id, soul] as const));
+  return (
+    byId.get(activeSoulId) ||
+    byId.get(defaultSoulId) ||
+    byId.get(DEFAULT_SOUL_ID) ||
+    souls[0] ||
+    FALLBACK_SOUL_PROFILE
+  );
+}
+
+function normalizeSoulCatalog(catalog: SoulCatalogPayload): {
+  souls: SoulProfile[];
+  defaultSoulId: string;
+  projectSoulsDirectory: string;
+  userSoulsDirectory: string;
+} {
+  const combined = dedupeSouls([...(catalog.presets || []), ...(catalog.customSouls || [])]);
+  const defaultSoulId =
+    catalog.defaultSoulId?.trim() ||
+    combined.find((soul) => soul.id === DEFAULT_SOUL_ID)?.id ||
+    combined[0]?.id ||
+    DEFAULT_SOUL_ID;
+
+  return {
+    souls: combined.length > 0 ? combined : [{ ...FALLBACK_SOUL_PROFILE }],
+    defaultSoulId,
+    projectSoulsDirectory: catalog.projectSoulsDir || '',
+    userSoulsDirectory: catalog.userSoulsDir || '',
+  };
+}
+
+async function invokeAgentCommand<T>(
+  command: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  const response = await invoke<AgentCommandResult<T>>('agent_command', {
+    command,
+    params,
+  });
+  return response.result;
+}
 
 export const DEFAULT_SPECIALIZED_MODELS_V2: SpecializedModelsV2 = {
   google: { ...DEFAULT_SPECIALIZED_MODELS },
@@ -254,11 +394,18 @@ interface SettingsState {
   mediaRouting: MediaRoutingSettings;
   mediaRoutingCustomized: boolean;
   externalSearchProvider: ExternalSearchProvider;
+  souls: SoulProfile[];
+  activeSoulId: string;
+  defaultSoulId: string;
+  projectSoulsDirectory: string;
+  userSoulsDirectory: string;
+  soulsLoading: boolean;
 
   // Permissions
   permissionDefaults: PermissionDefaults;
   approvalMode: ApprovalMode;
   commandSandbox: CommandSandboxSettings;
+  externalCli: ExternalCliSettings;
 
   // MCP Servers
   mcpServers: MCPServerConfig[];
@@ -312,6 +459,14 @@ interface SettingsActions {
   setMediaRouting: (routing: Partial<MediaRoutingSettings>) => Promise<void>;
   setExternalSearchProvider: (provider: ExternalSearchProvider) => Promise<void>;
   setCommandSandbox: (updates: Partial<CommandSandboxSettings>) => Promise<void>;
+  updateExternalCliSettings: (
+    provider: keyof ExternalCliSettings,
+    updates: Partial<ExternalCliProviderSettings>,
+  ) => Promise<void>;
+  loadSoulProfiles: () => Promise<void>;
+  setActiveSoul: (soulId: string) => Promise<void>;
+  saveCustomSoul: (title: string, content: string, existingSoulId?: string) => Promise<void>;
+  deleteCustomSoul: (soulId: string) => Promise<void>;
 
   // MCP Server management
   addMCPServer: (config: Omit<MCPServerConfig, 'id' | 'status'>) => void;
@@ -464,6 +619,21 @@ function normalizeCommandSandbox(
   };
 }
 
+function buildRuntimeConfigFromSettings(state: SettingsState) {
+  return {
+    activeProvider: state.activeProvider,
+    providerBaseUrls: state.providerBaseUrls,
+    externalSearchProvider: state.externalSearchProvider,
+    mediaRouting: state.mediaRouting,
+    sandbox: state.commandSandbox,
+    externalCli: state.externalCli,
+    specializedModels: state.specializedModelsV2,
+    activeSoul: toRuntimeSoulProfile(
+      resolveActiveSoul(state.souls, state.activeSoulId, state.defaultSoulId),
+    ),
+  };
+}
+
 const initialState: SettingsState = {
   // User
   userName: '',
@@ -494,11 +664,18 @@ const initialState: SettingsState = {
   mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
   mediaRoutingCustomized: false,
   externalSearchProvider: DEFAULT_EXTERNAL_SEARCH_PROVIDER,
+  souls: [{ ...FALLBACK_SOUL_PROFILE }],
+  activeSoulId: DEFAULT_SOUL_ID,
+  defaultSoulId: DEFAULT_SOUL_ID,
+  projectSoulsDirectory: '',
+  userSoulsDirectory: '',
+  soulsLoading: false,
 
   // Permissions
   permissionDefaults: defaultPermissions,
   approvalMode: 'auto',
   commandSandbox: { ...DEFAULT_COMMAND_SANDBOX },
+  externalCli: { ...DEFAULT_EXTERNAL_CLI_SETTINGS },
 
   // MCP Servers
   mcpServers: [],
@@ -566,15 +743,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           // But we could load additional settings from backend if needed
           set({ isLoading: false });
           const state = useSettingsStore.getState();
+          await state.loadSoulProfiles();
+          const nextState = useSettingsStore.getState();
           await useAuthStore.getState().setActiveProvider(state.activeProvider);
-          await useAuthStore.getState().applyRuntimeConfig({
-            activeProvider: state.activeProvider,
-            providerBaseUrls: state.providerBaseUrls,
-            externalSearchProvider: state.externalSearchProvider,
-            mediaRouting: state.mediaRouting,
-            sandbox: state.commandSandbox,
-            specializedModels: state.specializedModelsV2,
-          });
+          await useAuthStore.getState().applyRuntimeConfig(
+            buildRuntimeConfigFromSettings(nextState),
+          );
           if (
             useAuthStore.getState().providerApiKeys[state.activeProvider] ||
             state.activeProvider === 'lmstudio'
@@ -743,14 +917,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         await useAuthStore.getState().setActiveProvider(provider);
         await useSettingsStore.getState().fetchProviderModels(provider);
         const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider: provider,
-          providerBaseUrls: state.providerBaseUrls,
-          externalSearchProvider: state.externalSearchProvider,
-          mediaRouting: state.mediaRouting,
-          sandbox: state.commandSandbox,
-          specializedModels: state.specializedModelsV2,
-        });
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
       },
 
       setSelectedModelForProvider: (provider, modelId) => {
@@ -816,14 +985,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }));
         await useAuthStore.getState().setProviderBaseUrl(provider, normalized);
         const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider: state.activeProvider,
-          providerBaseUrls: state.providerBaseUrls,
-          externalSearchProvider: state.externalSearchProvider,
-          mediaRouting: state.mediaRouting,
-          sandbox: state.commandSandbox,
-          specializedModels: state.specializedModelsV2,
-        });
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
       },
 
       setMediaRouting: async (routing) => {
@@ -835,27 +999,17 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           mediaRoutingCustomized: true,
         }));
         const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider: state.activeProvider,
-          providerBaseUrls: state.providerBaseUrls,
-          externalSearchProvider: state.externalSearchProvider,
-          mediaRouting: state.mediaRouting,
-          sandbox: state.commandSandbox,
-          specializedModels: state.specializedModelsV2,
-        });
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
       },
 
       setExternalSearchProvider: async (provider) => {
         set({ externalSearchProvider: provider });
         const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider: state.activeProvider,
-          providerBaseUrls: state.providerBaseUrls,
-          externalSearchProvider: state.externalSearchProvider,
-          mediaRouting: state.mediaRouting,
-          sandbox: state.commandSandbox,
-          specializedModels: state.specializedModelsV2,
-        });
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
       },
 
       setCommandSandbox: async (updates) => {
@@ -880,14 +1034,133 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         });
 
         const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider: state.activeProvider,
-          providerBaseUrls: state.providerBaseUrls,
-          externalSearchProvider: state.externalSearchProvider,
-          mediaRouting: state.mediaRouting,
-          sandbox: state.commandSandbox,
-          specializedModels: state.specializedModelsV2,
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
+      },
+
+      updateExternalCliSettings: async (provider, updates) => {
+        set((state) => ({
+          externalCli: {
+            ...state.externalCli,
+            [provider]: {
+              ...state.externalCli[provider],
+              ...updates,
+            },
+          },
+        }));
+
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
+      },
+
+      loadSoulProfiles: async () => {
+        set({ soulsLoading: true, error: null });
+        try {
+          const payload = await invokeAgentCommand<SoulCatalogPayload>('souls_list', {});
+          const normalized = normalizeSoulCatalog(payload);
+          const current = useSettingsStore.getState();
+          const activeSoul = resolveActiveSoul(
+            normalized.souls,
+            current.activeSoulId,
+            normalized.defaultSoulId,
+          );
+
+          set({
+            souls: normalized.souls,
+            defaultSoulId: normalized.defaultSoulId,
+            activeSoulId: activeSoul.id,
+            projectSoulsDirectory: normalized.projectSoulsDirectory,
+            userSoulsDirectory: normalized.userSoulsDirectory,
+            soulsLoading: false,
+          });
+
+          const next = useSettingsStore.getState();
+          await useAuthStore.getState().applyRuntimeConfig(
+            buildRuntimeConfigFromSettings(next),
+          );
+        } catch (error) {
+          const fallbackSoul = resolveActiveSoul(
+            useSettingsStore.getState().souls,
+            useSettingsStore.getState().activeSoulId,
+            useSettingsStore.getState().defaultSoulId,
+          );
+          set({
+            soulsLoading: false,
+            souls: dedupeSouls([...useSettingsStore.getState().souls, { ...FALLBACK_SOUL_PROFILE }]),
+            activeSoulId: fallbackSoul.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      },
+
+      setActiveSoul: async (soulId) => {
+        const current = useSettingsStore.getState();
+        const nextActive = resolveActiveSoul(current.souls, soulId, current.defaultSoulId);
+        set({ activeSoulId: nextActive.id });
+        const next = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(next),
+        );
+      },
+
+      saveCustomSoul: async (title, content, existingSoulId) => {
+        const payload = await invokeAgentCommand<{ soul: SoulProfile; catalog: SoulCatalogPayload }>(
+          'souls_save_custom',
+          {
+            title,
+            content,
+            id: existingSoulId,
+          },
+        );
+        const normalized = normalizeSoulCatalog(payload.catalog);
+        const activeSoul = resolveActiveSoul(
+          normalized.souls,
+          payload.soul.id,
+          normalized.defaultSoulId,
+        );
+
+        set({
+          souls: normalized.souls,
+          defaultSoulId: normalized.defaultSoulId,
+          activeSoulId: activeSoul.id,
+          projectSoulsDirectory: normalized.projectSoulsDirectory,
+          userSoulsDirectory: normalized.userSoulsDirectory,
         });
+
+        const next = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(next),
+        );
+      },
+
+      deleteCustomSoul: async (soulId) => {
+        const payload = await invokeAgentCommand<{ catalog: SoulCatalogPayload }>(
+          'souls_delete_custom',
+          { id: soulId },
+        );
+        const normalized = normalizeSoulCatalog(payload.catalog);
+        const current = useSettingsStore.getState();
+        const activeSoul = resolveActiveSoul(
+          normalized.souls,
+          current.activeSoulId === soulId ? normalized.defaultSoulId : current.activeSoulId,
+          normalized.defaultSoulId,
+        );
+
+        set({
+          souls: normalized.souls,
+          defaultSoulId: normalized.defaultSoulId,
+          activeSoulId: activeSoul.id,
+          projectSoulsDirectory: normalized.projectSoulsDirectory,
+          userSoulsDirectory: normalized.userSoulsDirectory,
+        });
+
+        const next = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(next),
+        );
       },
 
       // MCP Server management
@@ -1243,28 +1516,15 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       },
 
       syncSpecializedModels: async () => {
-        const {
-          specializedModels,
-          specializedModelsV2,
-          activeProvider,
-          providerBaseUrls,
-          mediaRouting,
-          commandSandbox,
-        } =
-          useSettingsStore.getState();
+        const { specializedModels } = useSettingsStore.getState();
         try {
           await invoke('agent_set_specialized_models', { models: specializedModels });
         } catch (error) {
           console.warn('Failed to sync specialized models:', error);
         }
-        await useAuthStore.getState().applyRuntimeConfig({
-          activeProvider,
-          providerBaseUrls,
-          externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
-          mediaRouting,
-          sandbox: commandSandbox,
-          specializedModels: specializedModelsV2,
-        });
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(useSettingsStore.getState()),
+        );
       },
 
       // Permission management
@@ -1517,6 +1777,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         mediaRouting: state.mediaRouting,
         mediaRoutingCustomized: state.mediaRoutingCustomized,
         externalSearchProvider: state.externalSearchProvider,
+        activeSoulId: state.activeSoulId,
+        defaultSoulId: state.defaultSoulId,
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
         commandSandbox: state.commandSandbox,
@@ -1583,6 +1845,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           persistedExternalSearch === 'exa' || persistedExternalSearch === 'tavily'
             ? persistedExternalSearch
             : DEFAULT_EXTERNAL_SEARCH_PROVIDER;
+        const persistedActiveSoulId =
+          typeof persisted?.activeSoulId === 'string' ? persisted.activeSoulId.trim() : '';
+        const persistedDefaultSoulId =
+          typeof persisted?.defaultSoulId === 'string' ? persisted.defaultSoulId.trim() : '';
 
         const persistedSpecializedV2 = persisted?.specializedModelsV2;
         const validSpecializedModelsV2: SpecializedModelsV2 = {
@@ -1667,6 +1933,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           mediaRouting: resolvedMediaRouting,
           mediaRoutingCustomized,
           externalSearchProvider: validExternalSearchProvider,
+          activeSoulId: persistedActiveSoulId || DEFAULT_SOUL_ID,
+          defaultSoulId: persistedDefaultSoulId || DEFAULT_SOUL_ID,
           permissionDefaults: mergedPermissionDefaults,
           commandSandbox: validCommandSandbox,
           installedCommandConfigs: migratedCommandConfigs,
@@ -1682,6 +1950,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           setTimeout(() => {
             void state.syncInstalledSkills();
             void useAuthStore.getState().setActiveProvider(state.activeProvider);
+            void state.loadSoulProfiles();
           }, 100);
         }
       },
@@ -1736,3 +2005,9 @@ export const useSpecializedModelsV2 = () =>
   useSettingsStore((state) => state.specializedModelsV2);
 export const useExternalSearchProvider = () =>
   useSettingsStore((state) => state.externalSearchProvider);
+export const useSoulProfiles = () =>
+  useSettingsStore((state) => state.souls);
+export const useActiveSoulId = () =>
+  useSettingsStore((state) => state.activeSoulId);
+export const useSoulsLoading = () =>
+  useSettingsStore((state) => state.soulsLoading);

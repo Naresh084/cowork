@@ -45,12 +45,12 @@ import {
   type CommandSandboxSettings,
 } from '@gemini-cowork/sandbox';
 import { z } from 'zod';
-import { mkdir, readFile, writeFile, readdir, stat } from 'fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
-import { join, isAbsolute, resolve, sep } from 'path';
+import { basename, extname, join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
-import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools } from './tools/index.js';
+import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools, createExternalCliTools } from './tools/index.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
@@ -86,12 +86,21 @@ import type {
   ProviderId,
   ExecutionMode,
   RuntimeConfig,
+  RuntimeSoulProfile,
   RuntimeConfigUpdateResult,
+  ExternalCliRuntimeConfig,
 } from './types.js';
 import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
 import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
 import { HumanMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
+import { ExternalCliDiscoveryService } from './external-cli/discovery-service.js';
+import { ExternalCliRunManager } from './external-cli/run-manager.js';
+import {
+  DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG,
+  type ExternalCliPendingInteraction,
+  type ExternalCliRunOrigin,
+} from './external-cli/types.js';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -247,7 +256,36 @@ interface RuntimeConfigState {
   mediaRouting: MediaRoutingSettingsLocal;
   specializedModels: SpecializedModelsV2Local;
   sandbox: CommandSandboxSettings;
+  externalCli: ExternalCliRuntimeConfig;
+  activeSoul: RuntimeSoulProfile | null;
 }
+
+interface SoulCatalogResult {
+  presets: RuntimeSoulProfile[];
+  customSouls: RuntimeSoulProfile[];
+  defaultSoulId: string;
+  projectSoulsDir: string;
+  userSoulsDir: string;
+}
+
+const DEFAULT_SOUL_ID = 'preset:professional';
+const FALLBACK_SOUL_PROFILE: RuntimeSoulProfile = {
+  id: DEFAULT_SOUL_ID,
+  title: 'Professional',
+  source: 'preset',
+  content: [
+    '# Professional Soul',
+    '',
+    '## Voice',
+    '- Clear, factual, and respectful.',
+    '- Avoid hype and filler.',
+    '',
+    '## Behavior',
+    '- Prioritize correctness and direct execution.',
+    '- Surface assumptions and constraints explicitly.',
+    '- Keep responses concise unless detail is requested.',
+  ].join('\n'),
+};
 
 const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
   google: {
@@ -345,6 +383,44 @@ function normalizeProvider(provider: ProviderId | string): ProviderId {
     default:
       return 'google';
   }
+}
+
+function normalizeRuntimeSoulProfile(
+  value?: RuntimeSoulProfile | null,
+): RuntimeSoulProfile | null {
+  if (!value) return null;
+
+  const id = value.id?.trim() || '';
+  const title = value.title?.trim() || '';
+  const content = value.content?.trim() || '';
+  const source: RuntimeSoulProfile['source'] =
+    value.source === 'custom' ? 'custom' : 'preset';
+  const path = value.path?.trim() || undefined;
+
+  if (!id || !title || !content) return null;
+
+  return {
+    id,
+    title,
+    content,
+    source,
+    path,
+  };
+}
+
+function runtimeSoulEquals(
+  left: RuntimeSoulProfile | null,
+  right: RuntimeSoulProfile | null,
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.title === right.title &&
+    left.content === right.content &&
+    left.source === right.source &&
+    (left.path || '') === (right.path || '')
+  );
 }
 
 interface MCPServerConfigInput {
@@ -449,6 +525,11 @@ export class AgentRunner {
     externalSearchProvider: 'google',
     mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
     sandbox: { ...DEFAULT_COMMAND_SANDBOX },
+    externalCli: {
+      codex: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.codex },
+      claude: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.claude },
+    },
+    activeSoul: { ...FALLBACK_SOUL_PROFILE },
     specializedModels: {
       google: { ...DEFAULT_SPECIALIZED_MODELS.google },
       openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
@@ -466,6 +547,8 @@ export class AgentRunner {
   private mcpServerConfigs: MCPServerConfigInput[] = [];
   private mcpServerStates: Map<string, ManagedMCPServerState> = new Map();
   private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
+  private externalCliDiscoveryService: ExternalCliDiscoveryService = new ExternalCliDiscoveryService();
+  private externalCliRunManager: ExternalCliRunManager | null = null;
   private appDataDir: string | null = null;
   private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
   private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
@@ -488,6 +571,16 @@ export class AgentRunner {
     setCheckpointerDataDir(appDataDir);
     this.persistence = new SessionPersistence(appDataDir);
     await this.persistence.initialize();
+    this.externalCliRunManager = new ExternalCliRunManager({
+      appDataDir,
+      discoveryService: this.externalCliDiscoveryService,
+      getRuntimeConfig: () => this.runtimeConfig.externalCli,
+    });
+    this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
+      void this.handleExternalCliInteraction(interaction);
+    });
+    await this.externalCliRunManager.initialize();
+    void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
 
     // Initialize tool policy service
     await toolPolicyService.initialize();
@@ -1433,6 +1526,19 @@ export class AgentRunner {
       ...this.runtimeConfig.sandbox,
       ...(config.sandbox || {}),
     });
+    const nextExternalCli: ExternalCliRuntimeConfig = {
+      codex: {
+        ...this.runtimeConfig.externalCli.codex,
+        ...(config.externalCli?.codex || {}),
+      },
+      claude: {
+        ...this.runtimeConfig.externalCli.claude,
+        ...(config.externalCli?.claude || {}),
+      },
+    };
+    const nextActiveSoul = normalizeRuntimeSoulProfile(
+      config.activeSoul === undefined ? this.runtimeConfig.activeSoul : config.activeSoul,
+    );
 
     const providerChanged = prevProvider !== nextProvider;
     if (providerChanged) {
@@ -1445,6 +1551,8 @@ export class AgentRunner {
     if (activeProviderBaseChanged) {
       reasons.push('base_url_changed');
     }
+
+    const previousSoul = this.runtimeConfig.activeSoul;
 
     this.runtimeConfig = {
       activeProvider: nextProvider,
@@ -1459,8 +1567,18 @@ export class AgentRunner {
         config.externalSearchProvider ?? this.runtimeConfig.externalSearchProvider,
       mediaRouting: nextMediaRouting,
       sandbox: nextSandbox,
+      externalCli: nextExternalCli,
+      activeSoul: nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
       specializedModels: nextSpecializedModels,
     };
+
+    const soulChanged = !runtimeSoulEquals(
+      previousSoul || { ...FALLBACK_SOUL_PROFILE },
+      nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
+    );
+    if (soulChanged && reasons.length === 0) {
+      // Prompt-only change, hot-applied via in-place rebuild.
+    }
 
     if (providerChanged || activeProviderBaseChanged) {
       for (const session of this.sessions.values()) {
@@ -1484,6 +1602,91 @@ export class AgentRunner {
     };
   }
 
+  async getExternalCliAvailability(forceRefresh = false): Promise<unknown> {
+    return this.externalCliDiscoveryService.getAvailability(forceRefresh);
+  }
+
+  async tryHandleIntegrationExternalCliResponse(
+    sessionId: string,
+    platform: PlatformType,
+    chatId: string,
+    text: string,
+  ): Promise<boolean> {
+    if (!this.externalCliRunManager) {
+      return false;
+    }
+
+    return this.externalCliRunManager.tryRespondFromIntegration(sessionId, platform, chatId, text);
+  }
+
+  private getExternalCliOrigin(sessionId: string): ExternalCliRunOrigin {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { source: 'desktop' };
+    }
+
+    const currentOrigin = this.getCurrentIntegrationOrigin(session);
+    if (!currentOrigin) {
+      return { source: 'desktop' };
+    }
+
+    return {
+      source: 'integration',
+      platform: currentOrigin.platform,
+      chatId: currentOrigin.chatId,
+      senderName: currentOrigin.senderName,
+    };
+  }
+
+  private async handleExternalCliInteraction(interaction: ExternalCliPendingInteraction): Promise<void> {
+    if (!this.externalCliRunManager) {
+      return;
+    }
+
+    const session = this.sessions.get(interaction.sessionId);
+    if (!session) {
+      return;
+    }
+
+    try {
+      const options =
+        interaction.options?.map((option) => ({
+          label: option,
+          description: '',
+        })) || [];
+
+      const answer = await this.askQuestion(
+        interaction.sessionId,
+        interaction.prompt,
+        options.length > 0 ? options : undefined,
+        false,
+        `${interaction.provider.toUpperCase()} CLI`,
+        true,
+        {
+          externalCliInteraction: true,
+          runId: interaction.runId,
+          interactionId: interaction.interactionId,
+          provider: interaction.provider,
+          origin: interaction.origin,
+        },
+      );
+
+      const answerText = Array.isArray(answer) ? answer.join(', ') : answer;
+      if (!answerText || answerText === '__cancelled__') {
+        await this.externalCliRunManager.respond(interaction.runId, 'cancel');
+        return;
+      }
+
+      await this.externalCliRunManager.respond(interaction.runId, answerText);
+    } catch (error) {
+      eventEmitter.error(
+        session.id,
+        `Failed to resolve external CLI interaction: ${error instanceof Error ? error.message : String(error)}`,
+        'CLI_PROTOCOL_ERROR',
+      );
+    }
+  }
+
   async setStitchApiKey(apiKey: string | null): Promise<void> {
     const normalized = typeof apiKey === 'string' ? apiKey.trim() : '';
     this.stitchApiKey = normalized || null;
@@ -1491,6 +1694,186 @@ export class AgentRunner {
     if (this.mcpServerConfigs.length > 0) {
       await this.setMcpServers(this.mcpServerConfigs);
     }
+  }
+
+  private getProjectSoulsDir(): string {
+    const candidates = [
+      resolve(process.cwd(), 'souls'),
+      resolve(process.cwd(), '..', 'souls'),
+      resolve(process.cwd(), '..', '..', 'souls'),
+      resolve(process.cwd(), '..', '..', '..', 'souls'),
+    ];
+    const existing = candidates.find((candidate) => existsSync(candidate));
+    return existing || candidates[candidates.length - 1];
+  }
+
+  private getUserSoulsDir(): string {
+    return join(homedir(), '.cowork', 'souls');
+  }
+
+  private extractSoulTitle(content: string, fallback: string): string {
+    const match = content.match(/^#\s+(.+)$/m);
+    const heading = match?.[1]?.trim();
+    if (heading) return heading;
+
+    const firstLine = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (firstLine) return firstLine.slice(0, 80);
+    return fallback;
+  }
+
+  private slugifySoulTitle(title: string): string {
+    const slug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return slug || `soul-${Date.now()}`;
+  }
+
+  private async readSoulProfilesFromDirectory(
+    directory: string,
+    source: RuntimeSoulProfile['source'],
+  ): Promise<RuntimeSoulProfile[]> {
+    if (!existsSync(directory)) return [];
+
+    const entries = await readdir(directory, { withFileTypes: true });
+    const souls: RuntimeSoulProfile[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (extname(entry.name).toLowerCase() !== '.md') continue;
+
+      const filePath = join(directory, entry.name);
+      const content = await readFile(filePath, 'utf8');
+      const stem = basename(entry.name, '.md');
+      const title = this.extractSoulTitle(content, stem);
+
+      souls.push({
+        id: `${source}:${stem}`,
+        title,
+        content: content.trim(),
+        source,
+        path: filePath,
+      });
+    }
+
+    souls.sort((a, b) => a.title.localeCompare(b.title));
+    return souls;
+  }
+
+  private async buildSoulCatalog(): Promise<SoulCatalogResult> {
+    const projectSoulsDir = this.getProjectSoulsDir();
+    const userSoulsDir = this.getUserSoulsDir();
+
+    let presets = await this.readSoulProfilesFromDirectory(projectSoulsDir, 'preset');
+    const customSouls = await this.readSoulProfilesFromDirectory(userSoulsDir, 'custom');
+
+    if (presets.length === 0) {
+      presets = [{ ...FALLBACK_SOUL_PROFILE }];
+    }
+
+    const defaultSoulId =
+      presets.find((soul) => soul.id === DEFAULT_SOUL_ID)?.id ||
+      presets[0]?.id ||
+      customSouls[0]?.id ||
+      FALLBACK_SOUL_PROFILE.id;
+
+    return {
+      presets,
+      customSouls,
+      defaultSoulId,
+      projectSoulsDir,
+      userSoulsDir,
+    };
+  }
+
+  async listSoulProfiles(): Promise<SoulCatalogResult> {
+    return this.buildSoulCatalog();
+  }
+
+  async saveCustomSoul(
+    title: string,
+    content: string,
+    existingSoulId?: string,
+  ): Promise<{ soul: RuntimeSoulProfile; catalog: SoulCatalogResult }> {
+    const normalizedTitle = title.trim();
+    const normalizedContent = content.trim();
+    if (!normalizedTitle) {
+      throw new Error('Soul title is required');
+    }
+    if (!normalizedContent) {
+      throw new Error('Soul content is required');
+    }
+
+    const userSoulsDir = this.getUserSoulsDir();
+    await mkdir(userSoulsDir, { recursive: true });
+
+    const previousSlug =
+      typeof existingSoulId === 'string' && existingSoulId.startsWith('custom:')
+        ? existingSoulId.replace(/^custom:/, '').trim()
+        : '';
+    const nextSlug = this.slugifySoulTitle(normalizedTitle);
+    const nextPath = join(userSoulsDir, `${nextSlug}.md`);
+
+    if (previousSlug && previousSlug !== nextSlug) {
+      const previousPath = join(userSoulsDir, `${previousSlug}.md`);
+      try {
+        await unlink(previousPath);
+      } catch {
+        // ignore missing previous file
+      }
+    }
+
+    const contentWithHeading = normalizedContent.startsWith('#')
+      ? normalizedContent
+      : `# ${normalizedTitle}\n\n${normalizedContent}`;
+    await writeFile(nextPath, `${contentWithHeading.trim()}\n`, 'utf8');
+
+    const soul: RuntimeSoulProfile = {
+      id: `custom:${nextSlug}`,
+      title: this.extractSoulTitle(contentWithHeading, normalizedTitle),
+      content: contentWithHeading.trim(),
+      source: 'custom',
+      path: nextPath,
+    };
+
+    const catalog = await this.buildSoulCatalog();
+    return { soul, catalog };
+  }
+
+  async deleteCustomSoul(id: string): Promise<{ success: boolean; catalog: SoulCatalogResult }> {
+    if (!id.startsWith('custom:')) {
+      throw new Error('Only custom souls can be deleted');
+    }
+
+    const slug = id.replace(/^custom:/, '').trim();
+    if (!slug) {
+      throw new Error('Invalid soul id');
+    }
+
+    const filePath = join(this.getUserSoulsDir(), `${slug}.md`);
+    try {
+      await unlink(filePath);
+    } catch {
+      // file may already be missing
+    }
+
+    const catalog = await this.buildSoulCatalog();
+    return { success: true, catalog };
+  }
+
+  private buildSoulPromptSection(): string {
+    const soul = this.runtimeConfig.activeSoul || FALLBACK_SOUL_PROFILE;
+    return [
+      '## Active Soul',
+      `- ID: ${soul.id}`,
+      `- Title: ${soul.title}`,
+      `- Source: ${soul.source}`,
+      '',
+      soul.content.trim(),
+    ].join('\n');
   }
 
   private sanitizeMcpName(value: string): string {
@@ -2120,6 +2503,63 @@ export class AgentRunner {
       scheduleReason,
     );
 
+    const externalAvailability = this.externalCliDiscoveryService.getCachedAvailability();
+    const codexInstalled = Boolean(externalAvailability?.codex.installed);
+    const claudeInstalled = Boolean(externalAvailability?.claude.installed);
+    const codexEnabled = codexInstalled && this.runtimeConfig.externalCli.codex.enabled;
+    const claudeEnabled = claudeInstalled && this.runtimeConfig.externalCli.claude.enabled;
+    const sharedExternalToolsEnabled = codexEnabled || claudeEnabled;
+
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'start_codex_cli_run',
+      codexEnabled,
+      codexInstalled
+        ? this.runtimeConfig.externalCli.codex.enabled
+          ? 'Codex CLI is installed and enabled in settings.'
+          : 'Codex CLI is installed but disabled in settings.'
+        : 'Codex CLI is not installed.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'start_claude_cli_run',
+      claudeEnabled,
+      claudeInstalled
+        ? this.runtimeConfig.externalCli.claude.enabled
+          ? 'Claude CLI is installed and enabled in settings.'
+          : 'Claude CLI is installed but disabled in settings.'
+        : 'Claude CLI is not installed.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_get_progress',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_respond',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_cancel_run',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+
     const notes: string[] = [];
     if (!providerKeyConfigured && provider !== 'lmstudio') {
       notes.push(`Active provider "${provider}" is missing its API key.`);
@@ -2132,6 +2572,12 @@ export class AgentRunner {
     }
     if (!stitchKeyConfigured) {
       notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
+    }
+    if (externalAvailability?.codex.installed && externalAvailability.codex.authStatus === 'unauthenticated') {
+      notes.push('Codex CLI is installed but not authenticated. Run `codex login`.');
+    }
+    if (externalAvailability?.claude.installed && externalAvailability.claude.authStatus === 'unauthenticated') {
+      notes.push('Claude CLI is installed but not authenticated. Run `claude /login`.');
     }
     if (!isOsSandboxAvailable() && activeSandbox.mode !== 'danger-full-access') {
       notes.push('OS-level sandbox is unavailable. Validator policy enforcement is active.');
@@ -3174,6 +3620,7 @@ export class AgentRunner {
     multiSelect?: boolean,
     header?: string,
     allowCustom = true,
+    metadata?: Record<string, unknown>,
   ): Promise<string | string[]> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -3189,6 +3636,7 @@ export class AgentRunner {
       multiSelect,
       header,
       allowCustom,
+      metadata,
       timestamp: Date.now(),
     };
 
@@ -3702,8 +4150,10 @@ export class AgentRunner {
     const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
     const skillBlock = await this.buildSkillsPrompt(session);
     const mcpPrompt = this.buildMcpPrompt();
+    const soulPrompt = this.buildSoulPromptSection();
 
     const additionalSections: PromptTemplateSection[] = [
+      { key: 'soul', content: soulPrompt },
       { key: 'agents_md', content: agentsMdPrompt },
       { key: 'memory', content: memoryPrompt },
       { key: 'subagents', content: subagentPrompt },
@@ -4830,6 +5280,28 @@ ${stitchGuidance}
             this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
           );
 
+    const availability = this.externalCliDiscoveryService.getCachedAvailability();
+    const codexToolEnabled =
+      Boolean(this.externalCliRunManager) &&
+      Boolean(availability?.codex.installed) &&
+      this.runtimeConfig.externalCli.codex.enabled;
+    const claudeToolEnabled =
+      Boolean(this.externalCliRunManager) &&
+      Boolean(availability?.claude.installed) &&
+      this.runtimeConfig.externalCli.claude.enabled;
+
+    let externalCliTools: ToolHandler[] = [];
+    if (this.externalCliRunManager && (codexToolEnabled || claudeToolEnabled)) {
+      externalCliTools = createExternalCliTools({
+        runManager: this.externalCliRunManager,
+        getSessionOrigin: (sessionId) => this.getExternalCliOrigin(sessionId),
+      }).filter((tool) => {
+        if (tool.name === 'start_codex_cli_run') return codexToolEnabled;
+        if (tool.name === 'start_claude_cli_run') return claudeToolEnabled;
+        return true;
+      });
+    }
+
     const handlers = [
       readAnyFileTool,
       ...researchTools,
@@ -4840,6 +5312,7 @@ ${stitchGuidance}
       ...connectorTools,
       ...notificationTools,
       ...cronTools,
+      ...externalCliTools,
     ];
 
     if (session.executionMode !== 'plan') {
