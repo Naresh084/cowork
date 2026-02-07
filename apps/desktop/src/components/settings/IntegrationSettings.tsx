@@ -10,6 +10,9 @@ import { toast } from '@/components/ui/Toast';
 import { WhatsAppSettings } from './WhatsAppSettings';
 import { SlackSettings } from './SlackSettings';
 import { TelegramSettings } from './TelegramSettings';
+import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
+import { CapabilityMatrix } from '@/components/help/CapabilityMatrix';
+import { useCapabilityStore } from '@/stores/capability-store';
 
 function KeyField({
   title,
@@ -19,6 +22,7 @@ function KeyField({
   onSave,
   onClear,
   isLoading,
+  settingId,
 }: {
   title: string;
   description: string;
@@ -27,6 +31,7 @@ function KeyField({
   onSave: (value: string) => Promise<void>;
   onClear: () => Promise<void>;
   isLoading: boolean;
+  settingId: string;
 }) {
   const [draft, setDraft] = useState(value || '');
 
@@ -37,7 +42,10 @@ function KeyField({
   return (
     <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
       <div>
-        <h4 className="text-sm font-medium text-white/90">{title}</h4>
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-medium text-white/90">{title}</h4>
+          <SettingHelpPopover settingId={settingId} />
+        </div>
         <p className="mt-1 text-xs text-white/45">{description}</p>
       </div>
       <input
@@ -113,6 +121,7 @@ export function IntegrationSettings() {
     specializedModelsV2,
     updateSpecializedModelV2,
   } = useSettingsStore();
+  const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
   const [draftWorkingDirectory, setDraftWorkingDirectory] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
@@ -199,6 +208,7 @@ export function IntegrationSettings() {
         sharedSessionWorkingDirectory: draftWorkingDirectory.trim(),
       });
       setNotice('Integration settings saved.');
+      await refreshCapabilitySnapshot();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : String(error));
     }
@@ -211,7 +221,7 @@ export function IntegrationSettings() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-id="settings-integrations-section">
       <div>
         <h3 className="text-sm font-medium text-white/90">Integration & Capability Settings</h3>
         <p className="mt-1 text-xs text-white/40">
@@ -219,10 +229,15 @@ export function IntegrationSettings() {
         </p>
       </div>
 
+      <CapabilityMatrix compact />
+
       {needsExternalSearchFallback ? (
         <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4">
           <div>
-            <h4 className="text-sm font-medium text-white/85">Web Search Fallback</h4>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-sm font-medium text-white/85">Web Search Fallback</h4>
+              <SettingHelpPopover settingId="integration.externalSearchProvider" />
+            </div>
             <p className="mt-1 text-xs text-white/40">
               Active provider <code>{activeProvider}</code> uses fallback search. Choose Google, Exa, or Tavily.
             </p>
@@ -232,7 +247,12 @@ export function IntegrationSettings() {
             <label className="text-xs text-white/55 uppercase tracking-wide">Fallback provider</label>
             <select
               value={externalSearchProvider}
-              onChange={(event) => void setExternalSearchProvider(event.target.value as 'google' | 'exa' | 'tavily')}
+              onChange={(event) => {
+                void (async () => {
+                  await setExternalSearchProvider(event.target.value as 'google' | 'exa' | 'tavily');
+                  await refreshCapabilitySnapshot();
+                })();
+              }}
               className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
             >
               <option value="google">Google</option>
@@ -263,13 +283,16 @@ export function IntegrationSettings() {
             await setExaApiKey(value);
             await applyRuntime();
             toast.success('Exa key saved');
+            await refreshCapabilitySnapshot();
           }}
           onClear={async () => {
             await clearExaApiKey();
             await applyRuntime();
             toast.success('Exa key removed');
+            await refreshCapabilitySnapshot();
           }}
           isLoading={authLoading}
+          settingId="integration.exaApiKey"
         />
       ) : null}
 
@@ -283,13 +306,16 @@ export function IntegrationSettings() {
             await setTavilyApiKey(value);
             await applyRuntime();
             toast.success('Tavily key saved');
+            await refreshCapabilitySnapshot();
           }}
           onClear={async () => {
             await clearTavilyApiKey();
             await applyRuntime();
             toast.success('Tavily key removed');
+            await refreshCapabilitySnapshot();
           }}
           isLoading={authLoading}
+          settingId="integration.tavilyApiKey"
         />
       ) : null}
 
@@ -301,12 +327,15 @@ export function IntegrationSettings() {
         onSave={async (value) => {
           await setStitchApiKey(value);
           toast.success('Stitch key saved');
+          await refreshCapabilitySnapshot();
         }}
         onClear={async () => {
           await clearStitchApiKey();
           toast.success('Stitch key removed');
+          await refreshCapabilitySnapshot();
         }}
         isLoading={authLoading}
+        settingId="integration.stitchApiKey"
       />
 
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
@@ -318,7 +347,10 @@ export function IntegrationSettings() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-xs text-white/50">Computer Use Model</label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">Computer Use Model</label>
+            <SettingHelpPopover settingId="integration.computerUseModel" />
+          </div>
           <div className="relative">
             <Monitor className="w-4 h-4 text-white/35 absolute left-3 top-2.5" />
             <input
@@ -331,7 +363,10 @@ export function IntegrationSettings() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-xs text-white/50">Deep Research Model</label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="block text-xs text-white/50">Deep Research Model</label>
+            <SettingHelpPopover settingId="integration.deepResearchModel" />
+          </div>
           <div className="relative">
             <Search className="w-4 h-4 text-white/35 absolute left-3 top-2.5" />
             <input
@@ -357,6 +392,7 @@ export function IntegrationSettings() {
                 }
                 await applyRuntime();
                 toast.success('Specialized model settings updated');
+                await refreshCapabilitySnapshot();
               } catch (error) {
                 toast.error(
                   'Failed to save specialized model settings',
@@ -378,7 +414,10 @@ export function IntegrationSettings() {
 
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4">
         <div>
-          <h4 className="text-sm font-medium text-white/85">Shared Integration Session Defaults</h4>
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-medium text-white/85">Shared Integration Session Defaults</h4>
+            <SettingHelpPopover settingId="integration.sharedSessionWorkingDirectory" />
+          </div>
           <p className="mt-1 text-xs text-white/40">
             New shared integration sessions (WhatsApp/Slack/Telegram) will use this working directory.
           </p>
@@ -466,6 +505,9 @@ export function IntegrationSettings() {
       <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
         <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">WhatsApp Integration</summary>
         <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            WhatsApp supports QR-based connection, sender allowlist policy, and denial messaging for unauthorized users.
+          </p>
           <WhatsAppSettings />
         </div>
       </details>
@@ -473,6 +515,9 @@ export function IntegrationSettings() {
       <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
         <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Slack Integration</summary>
         <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            Slack requires both bot token and app token. Connected Slack enables shared-session ingress and notifications.
+          </p>
           <SlackSettings />
         </div>
       </details>
@@ -480,9 +525,20 @@ export function IntegrationSettings() {
       <details className="rounded-xl border border-white/[0.06] bg-white/[0.02]">
         <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-white/90">Telegram Integration</summary>
         <div className="px-4 pb-4 pt-1">
+          <p className="mb-2 text-xs text-white/45">
+            Telegram uses a BotFather token for connection. Once connected, inbound messages can create shared sessions.
+          </p>
           <TelegramSettings />
         </div>
       </details>
+
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+        <h4 className="text-sm font-medium text-white/85">Connectors Ecosystem</h4>
+        <p className="mt-1 text-xs text-white/45">
+          Connectors add MCP-powered tools for external systems. Configure and connect them from the sidebar
+          Connectors manager. Tool availability appears in the capability matrix above.
+        </p>
+      </div>
     </div>
   );
 }

@@ -224,7 +224,10 @@ export function SessionHeader() {
       : 'No API key';
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-transparent">
+    <div
+      className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-transparent"
+      data-tour-id="session-header-root"
+    >
       <div className="flex items-center gap-4 min-w-0">
         <div className="relative min-w-0" ref={menuRef}>
           {isEditing ? (

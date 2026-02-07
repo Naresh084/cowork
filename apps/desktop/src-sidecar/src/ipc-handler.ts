@@ -208,6 +208,10 @@ registerHandler('set_runtime_config', async (params) => {
   return agentRunner.setRuntimeConfig(config);
 });
 
+registerHandler('get_capability_snapshot', async () => {
+  return agentRunner.getCapabilitySnapshot();
+});
+
 // Send message
 registerHandler('send_message', async (params) => {
   const p = params as unknown as SendMessageParams;

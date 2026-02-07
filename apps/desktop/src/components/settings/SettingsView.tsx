@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image } from 'lucide-react';
+import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image, CircleHelp, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
+import { useHelpStore } from '../../stores/help-store';
+import { useCapabilityStore } from '../../stores/capability-store';
 import { GeneralSettings } from './GeneralSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
@@ -33,18 +35,22 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const platforms = useIntegrationStore((s) => s.platforms);
+  const openHelp = useHelpStore((s) => s.openHelp);
+  const startTour = useHelpStore((s) => s.startTour);
+  const refreshCapabilitySnapshot = useCapabilityStore((s) => s.refreshSnapshot);
 
   // Refresh platform statuses from sidecar when settings screen opens
   useEffect(() => {
     const store = useIntegrationStore.getState();
     store.refreshStatuses();
+    void refreshCapabilitySnapshot();
 
     const interval = setInterval(() => {
       void useIntegrationStore.getState().refreshStatuses();
     }, 3000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [refreshCapabilitySnapshot]);
 
   const ActiveContent = tabContent[activeTab];
 
@@ -67,10 +73,28 @@ export function SettingsView() {
             <p className="text-xs text-white/40">Configure models and integrations</p>
           </div>
         </div>
+        <div className="ml-auto flex items-center gap-2" data-tour-id="settings-help-actions">
+          <button
+            type="button"
+            onClick={() => openHelp('platform-overview')}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.05] hover:text-white/90"
+          >
+            <CircleHelp className="w-3.5 h-3.5" />
+            Help Center
+          </button>
+          <button
+            type="button"
+            onClick={() => startTour('settings', true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.05] hover:text-white/90"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            Start Guided Tour
+          </button>
+        </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex items-center gap-1 px-6 py-3 border-b border-white/[0.08]">
+      <div className="flex items-center gap-1 px-6 py-3 border-b border-white/[0.08]" data-tour-id="settings-tab-nav">
         {tabConfig.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;

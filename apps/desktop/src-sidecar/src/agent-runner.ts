@@ -275,6 +275,55 @@ interface ManagedMCPToolMeta {
   description?: string;
 }
 
+interface ToolCapabilityContext {
+  googleCapabilityKey: string | null;
+  openAICapabilityKey: string | null;
+  falCapabilityKey: string | null;
+  mediaRouting: MediaRoutingSettingsLocal;
+  externalSearchProvider: 'google' | 'exa' | 'tavily';
+  hasConfiguredExternalSearch: boolean;
+  providerSupportsNativeSearch: boolean;
+  hasNativeSearchKey: boolean;
+  hasResearchKey: boolean;
+  hasImageMediaKey: boolean;
+  hasVideoMediaKey: boolean;
+  hasAnalyzeVideoKey: boolean;
+  hasComputerUseKey: boolean;
+  hasWebSearch: boolean;
+  hasWebFetch: boolean;
+}
+
+interface CapabilityToolAccessEntry {
+  toolName: string;
+  enabled: boolean;
+  reason: string;
+  policyAction: 'allow' | 'ask' | 'deny';
+}
+
+interface CapabilityIntegrationAccessEntry {
+  integrationName: string;
+  enabled: boolean;
+  reason: string;
+}
+
+interface CapabilitySnapshot {
+  provider: ProviderId;
+  mediaRouting: MediaRoutingSettingsLocal;
+  keyStatus: {
+    providerKeyConfigured: boolean;
+    googleKeyConfigured: boolean;
+    openaiKeyConfigured: boolean;
+    falKeyConfigured: boolean;
+    exaKeyConfigured: boolean;
+    tavilyKeyConfigured: boolean;
+    stitchKeyConfigured: boolean;
+  };
+  toolAccess: CapabilityToolAccessEntry[];
+  integrationAccess: CapabilityIntegrationAccessEntry[];
+  policyProfile: string;
+  notes: string[];
+}
+
 export class AgentRunner {
   private sessions: Map<string, ActiveSession> = new Map();
   private runtimeConfig: RuntimeConfigState = {
@@ -1469,6 +1518,334 @@ export class AgentRunner {
 
   getExternalSearchProvider(): 'google' | 'exa' | 'tavily' {
     return this.runtimeConfig.externalSearchProvider || 'google';
+  }
+
+  private getToolCapabilityContext(provider: ProviderId): ToolCapabilityContext {
+    const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
+    const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
+    const falCapabilityKey = this.getFalApiKey();
+    const mediaRouting = this.getMediaRoutingSettings();
+    const externalSearchProvider = this.getExternalSearchProvider();
+    const hasConfiguredExternalSearch =
+      (externalSearchProvider === 'exa' && Boolean(this.getExaApiKey())) ||
+      (externalSearchProvider === 'tavily' && Boolean(this.getTavilyApiKey()));
+
+    const providersWithNativeWebSearch = new Set<ProviderId>([
+      'google',
+      'openai',
+      'anthropic',
+      'moonshot',
+      'glm',
+    ]);
+    const providerSupportsNativeSearch = providersWithNativeWebSearch.has(provider);
+    const hasNativeSearchKey =
+      providerSupportsNativeSearch &&
+      (provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : Boolean(this.getProviderApiKey(provider)));
+
+    const hasResearchKey = Boolean(googleCapabilityKey);
+    const hasImageMediaKey =
+      mediaRouting.imageBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : mediaRouting.imageBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
+    const hasVideoMediaKey =
+      mediaRouting.videoBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : mediaRouting.videoBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
+    const hasAnalyzeVideoKey = Boolean(openAICapabilityKey) || Boolean(googleCapabilityKey);
+
+    const hasComputerUseKey =
+      provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : provider === 'openai'
+          ? Boolean(this.getProviderApiKey('openai'))
+          : provider === 'anthropic'
+            ? Boolean(this.getProviderApiKey('anthropic'))
+            : Boolean(googleCapabilityKey);
+
+    const hasWebSearch = hasNativeSearchKey || hasConfiguredExternalSearch || Boolean(googleCapabilityKey);
+    const hasWebFetch =
+      provider === 'anthropic'
+        ? Boolean(this.getProviderApiKey('anthropic'))
+        : provider === 'glm'
+          ? Boolean(this.getProviderApiKey('glm')) || Boolean(googleCapabilityKey)
+          : Boolean(googleCapabilityKey);
+
+    return {
+      googleCapabilityKey,
+      openAICapabilityKey,
+      falCapabilityKey,
+      mediaRouting,
+      externalSearchProvider,
+      hasConfiguredExternalSearch,
+      providerSupportsNativeSearch,
+      hasNativeSearchKey,
+      hasResearchKey,
+      hasImageMediaKey,
+      hasVideoMediaKey,
+      hasAnalyzeVideoKey,
+      hasComputerUseKey,
+      hasWebSearch,
+      hasWebFetch,
+    };
+  }
+
+  private getIntegrationStatusesForSnapshot(): Array<{ platform: string; connected: boolean; displayName?: string }> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { integrationBridge } = require('./integrations/index.js');
+      const statuses = integrationBridge?.getStatuses?.();
+      if (!Array.isArray(statuses)) return [];
+      return statuses
+        .filter((status): status is { platform: string; connected: boolean; displayName?: string } => {
+          return Boolean(status && typeof status.platform === 'string');
+        })
+        .map((status) => ({
+          platform: status.platform,
+          connected: Boolean(status.connected),
+          displayName: typeof status.displayName === 'string' ? status.displayName : undefined,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private evaluatePolicyForSnapshot(
+    toolName: string,
+    provider: ProviderId,
+  ): { action: 'allow' | 'ask' | 'deny'; reason: string } {
+    const policyResult = toolPolicyService.evaluate({
+      toolName,
+      arguments: {},
+      sessionId: 'capability-snapshot',
+      sessionType: 'main',
+      provider,
+    });
+    return {
+      action: policyResult.action,
+      reason: policyResult.reason || 'No policy rule matched',
+    };
+  }
+
+  private pushSnapshotToolAccess(
+    output: CapabilityToolAccessEntry[],
+    provider: ProviderId,
+    toolName: string,
+    enabled: boolean,
+    reason: string,
+  ): void {
+    const policy = this.evaluatePolicyForSnapshot(toolName, provider);
+    const policyDenies = policy.action === 'deny';
+
+    output.push({
+      toolName,
+      enabled: enabled && !policyDenies,
+      reason: policyDenies ? `Disabled by policy: ${policy.reason}` : reason,
+      policyAction: policy.action,
+    });
+  }
+
+  getCapabilitySnapshot(): CapabilitySnapshot {
+    const provider = this.runtimeConfig.activeProvider;
+    const context = this.getToolCapabilityContext(provider);
+    const toolAccess: CapabilityToolAccessEntry[] = [];
+    const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
+    const policy = toolPolicyService.getPolicy();
+
+    const providerKeyConfigured =
+      provider === 'lmstudio' ? true : Boolean(this.getProviderApiKey(provider));
+    const googleKeyConfigured = Boolean(this.getGoogleApiKey());
+    const openaiKeyConfigured = Boolean(this.getOpenAIApiKey());
+    const falKeyConfigured = Boolean(this.getFalApiKey());
+    const exaKeyConfigured = Boolean(this.getExaApiKey());
+    const tavilyKeyConfigured = Boolean(this.getTavilyApiKey());
+    const stitchKeyConfigured = Boolean(this.stitchApiKey);
+
+    this.pushSnapshotToolAccess(toolAccess, provider, 'read_any_file', true, 'Available for local file inspection.');
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'deep_research',
+      context.hasResearchKey,
+      context.hasResearchKey ? 'Google capability key configured.' : 'Google capability key is missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'computer_use',
+      context.hasComputerUseKey,
+      context.hasComputerUseKey
+        ? 'Provider credentials are ready for browser automation.'
+        : 'Computer-use provider credentials are missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'generate_image',
+      context.hasImageMediaKey,
+      context.hasImageMediaKey
+        ? `Image backend "${context.mediaRouting.imageBackend}" is configured.`
+        : `Missing key for image backend "${context.mediaRouting.imageBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'edit_image',
+      context.hasImageMediaKey,
+      context.hasImageMediaKey
+        ? `Image backend "${context.mediaRouting.imageBackend}" is configured.`
+        : `Missing key for image backend "${context.mediaRouting.imageBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'generate_video',
+      context.hasVideoMediaKey,
+      context.hasVideoMediaKey
+        ? `Video backend "${context.mediaRouting.videoBackend}" is configured.`
+        : `Missing key for video backend "${context.mediaRouting.videoBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'analyze_video',
+      context.hasAnalyzeVideoKey,
+      context.hasAnalyzeVideoKey ? 'Google or OpenAI capability key is configured.' : 'Google/OpenAI key is missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'web_search',
+      context.hasWebSearch,
+      context.hasWebSearch
+        ? 'Native or fallback web search path is available.'
+        : 'No native search key and no configured external fallback.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'google_grounded_search',
+      context.hasWebSearch,
+      context.hasWebSearch
+        ? 'Native or fallback web search path is available.'
+        : 'No native search key and no configured external fallback.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'web_fetch',
+      context.hasWebFetch,
+      context.hasWebFetch ? 'Fetch capability key path is configured.' : 'Missing provider key for web fetch.',
+    );
+
+    for (const generatedName of this.mcpToolRegistry.keys()) {
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        generatedName,
+        true,
+        'MCP tool is connected and registered.',
+      );
+    }
+
+    const connectorTools = connectorBridge.getTools();
+    for (const tool of connectorTools) {
+      const toolName = `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+      const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
+      const requiresStitch = haystack.includes('stitch');
+      const enabled = !requiresStitch || stitchKeyConfigured;
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        toolName,
+        enabled,
+        enabled ? 'Connector tool is connected.' : 'Stitch API key is required for this connector tool.',
+      );
+    }
+
+    const integrationStatuses = this.getIntegrationStatusesForSnapshot();
+    const statusByPlatform = new Map(
+      integrationStatuses.map((status) => [status.platform.toLowerCase(), status.connected] as const),
+    );
+
+    const platforms = ['whatsapp', 'slack', 'telegram'] as const;
+    for (const platform of platforms) {
+      const connected = Boolean(statusByPlatform.get(platform));
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        `send_notification_${platform}`,
+        connected,
+        connected ? `${platform} integration is connected.` : `${platform} integration is not connected.`,
+      );
+      integrationAccess.push({
+        integrationName: platform,
+        enabled: connected,
+        reason: connected ? 'Connected and ready.' : 'Not connected.',
+      });
+    }
+
+    const connectorIds = new Set(connectorTools.map((tool) => tool.connectorId));
+    integrationAccess.push({
+      integrationName: 'connectors',
+      enabled: connectorIds.size > 0,
+      reason:
+        connectorIds.size > 0
+          ? `${connectorIds.size} connector(s) currently expose tools.`
+          : 'No connected connectors currently expose tools.',
+    });
+
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'schedule_task',
+      true,
+      'Available in non-isolated sessions.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'manage_scheduled_task',
+      true,
+      'Available in non-isolated sessions.',
+    );
+
+    const notes: string[] = [];
+    if (!providerKeyConfigured && provider !== 'lmstudio') {
+      notes.push(`Active provider "${provider}" is missing its API key.`);
+    }
+    if (context.externalSearchProvider === 'exa' && !exaKeyConfigured) {
+      notes.push('External search provider is Exa but Exa API key is missing.');
+    }
+    if (context.externalSearchProvider === 'tavily' && !tavilyKeyConfigured) {
+      notes.push('External search provider is Tavily but Tavily API key is missing.');
+    }
+    if (!stitchKeyConfigured) {
+      notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
+    }
+
+    return {
+      provider,
+      mediaRouting: { ...context.mediaRouting },
+      keyStatus: {
+        providerKeyConfigured,
+        googleKeyConfigured,
+        openaiKeyConfigured,
+        falKeyConfigured,
+        exaKeyConfigured,
+        tavilyKeyConfigured,
+        stitchKeyConfigured,
+      },
+      toolAccess,
+      integrationAccess,
+      policyProfile: policy.profile,
+      notes,
+    };
   }
 
   private getSessionProviderKey(session: ActiveSession): string | null {
@@ -3582,68 +3959,15 @@ ${stitchGuidance}
   }
 
   private buildToolHandlers(session: ActiveSession): ToolHandler[] {
-    const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
-    const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
-    const falCapabilityKey = this.getFalApiKey();
-    const mediaRouting = this.getMediaRoutingSettings();
-    const externalSearchProvider = this.getExternalSearchProvider();
-    const hasConfiguredExternalSearch =
-      (externalSearchProvider === 'exa' && Boolean(this.getExaApiKey())) ||
-      (externalSearchProvider === 'tavily' && Boolean(this.getTavilyApiKey()));
-    const providersWithNativeWebSearch = new Set<ProviderId>([
-      'google',
-      'openai',
-      'anthropic',
-      'moonshot',
-      'glm',
-    ]);
-    const providerSupportsNativeSearch = providersWithNativeWebSearch.has(session.provider);
-    const hasNativeSearchKey =
-      providerSupportsNativeSearch &&
-      (session.provider === 'google'
-        ? Boolean(googleCapabilityKey)
-        : Boolean(this.getSessionProviderKey(session)));
+    const capabilityContext = this.getToolCapabilityContext(session.provider);
 
-    const hasResearchKey = Boolean(googleCapabilityKey);
-    const hasImageMediaKey =
-      mediaRouting.imageBackend === 'google'
-        ? Boolean(googleCapabilityKey)
-        : mediaRouting.imageBackend === 'openai'
-          ? Boolean(openAICapabilityKey)
-          : Boolean(falCapabilityKey);
-    const hasVideoMediaKey =
-      mediaRouting.videoBackend === 'google'
-        ? Boolean(googleCapabilityKey)
-        : mediaRouting.videoBackend === 'openai'
-          ? Boolean(openAICapabilityKey)
-          : Boolean(falCapabilityKey);
-    const hasAnalyzeVideoKey = Boolean(openAICapabilityKey) || Boolean(googleCapabilityKey);
-
-    const hasComputerUseKey =
-      session.provider === 'google'
-        ? Boolean(googleCapabilityKey)
-        : session.provider === 'openai'
-          ? Boolean(this.getProviderApiKey('openai'))
-          : session.provider === 'anthropic'
-            ? Boolean(this.getProviderApiKey('anthropic'))
-            : Boolean(googleCapabilityKey);
-
-    const hasWebSearch =
-      hasNativeSearchKey || hasConfiguredExternalSearch || Boolean(googleCapabilityKey);
-    const hasWebFetch =
-      session.provider === 'anthropic'
-        ? Boolean(this.getProviderApiKey('anthropic'))
-        : session.provider === 'glm'
-          ? Boolean(this.getProviderApiKey('glm')) || Boolean(googleCapabilityKey)
-          : Boolean(googleCapabilityKey);
-
-    const researchTools = hasResearchKey
+    const researchTools = capabilityContext.hasResearchKey
       ? createResearchTools(
           () => this.getGoogleApiKey(),
           () => this.getDeepResearchModel(),
         )
       : [];
-    const computerUseTools = hasComputerUseKey
+    const computerUseTools = capabilityContext.hasComputerUseKey
       ? createComputerUseTools(
           () => session.provider,
           (provider) => this.getProviderApiKey(provider),
@@ -3667,13 +3991,13 @@ ${stitchGuidance}
       () => session.model,
     ).filter((tool) => {
       if (tool.name === 'generate_image' || tool.name === 'edit_image') {
-        return hasImageMediaKey;
+        return capabilityContext.hasImageMediaKey;
       }
       if (tool.name === 'generate_video') {
-        return hasVideoMediaKey;
+        return capabilityContext.hasVideoMediaKey;
       }
       if (tool.name === 'analyze_video') {
-        return hasAnalyzeVideoKey;
+        return capabilityContext.hasAnalyzeVideoKey;
       }
       return true;
     });
@@ -3688,19 +4012,15 @@ ${stitchGuidance}
       () => session.model,
     ).filter((tool) => {
       if (tool.name === 'web_search' || tool.name === 'google_grounded_search') {
-        return hasWebSearch;
+        return capabilityContext.hasWebSearch;
       }
       if (tool.name === 'web_fetch') {
-        return hasWebFetch;
+        return capabilityContext.hasWebFetch;
       }
       return true;
     });
     const mcpTools = this.createMcpTools();
-    const connectorTools = this.createConnectorTools(session.id).filter((tool) => {
-      const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
-      if (!haystack.includes('stitch')) return true;
-      return Boolean(this.stitchApiKey);
-    });
+    const connectorTools = this.createConnectorTools(session.id);
 
     // Create read_any_file tool - unified file reading for ALL types
     const readAnyFileTool: ToolHandler = {
@@ -5338,19 +5658,25 @@ ${stitchGuidance}
 
   private createConnectorTools(_sessionId: string): ToolHandler[] {
     const tools = connectorBridge.getTools();
-    return tools.map((tool) => ({
-      name: `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
-      description: `[Connector:${tool.connectorId}] ${tool.description || tool.name}`,
-      parameters: z.record(z.unknown()),
-      execute: async (args: unknown) => {
-        const result = await connectorBridge.callTool(
-          tool.connectorId,
-          tool.name,
-          (args as Record<string, unknown>) || {}
-        );
-        return { success: true, data: result };
-      },
-    }));
+    return tools
+      .filter((tool) => {
+        const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
+        const requiresStitch = haystack.includes('stitch');
+        return !requiresStitch || Boolean(this.stitchApiKey);
+      })
+      .map((tool) => ({
+        name: `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        description: `[Connector:${tool.connectorId}] ${tool.description || tool.name}`,
+        parameters: z.record(z.unknown()),
+        execute: async (args: unknown) => {
+          const result = await connectorBridge.callTool(
+            tool.connectorId,
+            tool.name,
+            (args as Record<string, unknown>) || {}
+          );
+          return { success: true, data: result };
+        },
+      }));
   }
 
   private recordArtifactForTool(

@@ -13,6 +13,9 @@ import { useAgentEvents } from '../../hooks/useAgentEvents';
 import { ToastContainer } from '../ui/Toast';
 import { PreviewModal } from '../panels/PreviewPanel';
 import { ApiKeyModal } from '../modals/ApiKeyModal';
+import { HelpCenterModal } from '../help/HelpCenterModal';
+import { GuidedTourOverlay } from '../help/GuidedTourOverlay';
+import { useCapabilityStore } from '../../stores/capability-store';
 
 // Lazy load SettingsView for code splitting
 const SettingsView = React.lazy(() => import('../settings/SettingsView').then(m => ({ default: m.SettingsView })));
@@ -22,6 +25,7 @@ export function MainLayout() {
   const { activeSessionId } = useSessionStore();
   const { previewArtifact, setPreviewArtifact, clearPreviewArtifact } = useAgentStore();
   const { showApiKeyModal, apiKeyError, setShowApiKeyModal, currentView } = useAppStore();
+  const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
   // Close live view when switching sessions
   useEffect(() => {
@@ -34,6 +38,10 @@ export function MainLayout() {
 
   // Keep sidecar event subscription alive across all app views
   useAgentEvents(activeSessionId);
+
+  useEffect(() => {
+    void refreshCapabilitySnapshot();
+  }, [refreshCapabilitySnapshot]);
 
   const handlePreviewArtifact = (artifact: Artifact) => {
     setPreviewArtifact(artifact);
@@ -99,6 +107,10 @@ export function MainLayout() {
         onClose={() => setShowApiKeyModal(false)}
         errorMessage={apiKeyError}
       />
+
+      {/* Help + Tour overlays */}
+      <HelpCenterModal />
+      <GuidedTourOverlay />
     </div>
   );
 }

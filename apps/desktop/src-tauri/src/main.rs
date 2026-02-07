@@ -53,6 +53,7 @@ fn main() {
             // Agent commands
             commands::agent::agent_set_api_key,
             commands::agent::agent_set_runtime_config,
+            commands::agent::agent_get_capability_snapshot,
             commands::agent::agent_set_stitch_api_key,
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,

@@ -11,6 +11,8 @@ import {
 } from '@/stores/settings-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { toast } from '@/components/ui/Toast';
+import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
+import { useCapabilityStore } from '@/stores/capability-store';
 
 type MediaBackend = MediaRoutingSettings['imageBackend'];
 
@@ -21,16 +23,20 @@ interface ModelSettingFieldProps {
   value: string;
   defaultValue: string;
   onChange: (value: string) => void;
+  settingId: string;
 }
 
-function ModelSettingField({ icon, label, description, value, defaultValue, onChange }: ModelSettingFieldProps) {
+function ModelSettingField({ icon, label, description, value, defaultValue, onChange, settingId }: ModelSettingFieldProps) {
   return (
     <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/60">
-          {icon}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/60">
+            {icon}
+          </div>
+          <div className="text-sm font-medium text-white/90">{label}</div>
         </div>
-        <div className="text-sm font-medium text-white/90">{label}</div>
+        <SettingHelpPopover settingId={settingId} />
       </div>
       <input
         type="text"
@@ -46,6 +52,7 @@ function ModelSettingField({ icon, label, description, value, defaultValue, onCh
         )}
       />
       <p className="mt-2 text-xs text-white/40">{description}</p>
+      <p className="mt-1 text-[11px] text-white/35">Used by tools: generate_image, edit_image, generate_video</p>
     </div>
   );
 }
@@ -55,11 +62,13 @@ function BackendToggle({
   description,
   value,
   onChange,
+  settingId,
 }: {
   label: string;
   description: string;
   value: MediaBackend;
   onChange: (value: MediaBackend) => void;
+  settingId: string;
 }) {
   const options: Array<{ id: MediaBackend; label: string }> = [
     { id: 'google', label: 'Google' },
@@ -71,8 +80,12 @@ function BackendToggle({
     <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h4 className="text-sm font-medium text-white/90">{label}</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-medium text-white/90">{label}</h4>
+            <SettingHelpPopover settingId={settingId} />
+          </div>
           <p className="mt-1 text-xs text-white/45">{description}</p>
+          <p className="mt-1 text-[11px] text-white/35">Used by tools: generate_image, edit_image, generate_video</p>
         </div>
         <div className="inline-flex rounded-lg border border-white/[0.1] p-1 bg-[#0B0C10]">
           {options.map((backend) => (
@@ -104,6 +117,7 @@ function KeyField({
   onSave,
   onClear,
   isLoading,
+  settingId,
 }: {
   label: string;
   description: string;
@@ -112,6 +126,7 @@ function KeyField({
   onSave: (value: string) => Promise<void>;
   onClear: () => Promise<void>;
   isLoading: boolean;
+  settingId: string;
 }) {
   const [draft, setDraft] = useState(value || '');
 
@@ -122,8 +137,12 @@ function KeyField({
   return (
     <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
       <div>
-        <h4 className="text-sm font-medium text-white/90">{label}</h4>
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-medium text-white/90">{label}</h4>
+          <SettingHelpPopover settingId={settingId} />
+        </div>
         <p className="mt-1 text-xs text-white/45">{description}</p>
+        <p className="mt-1 text-[11px] text-white/35">Used by tools: generate_image, edit_image, generate_video</p>
       </div>
       <input
         type="password"
@@ -187,6 +206,7 @@ export function GeneralSettings() {
     clearFalApiKey,
     applyRuntimeConfig,
   } = useAuthStore();
+  const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
   const [localRouting, setLocalRouting] = useState<MediaRoutingSettings>(routing);
   const [localModels, setLocalModels] = useState<SpecializedModelsV2>(specializedModelsV2);
@@ -248,6 +268,7 @@ export function GeneralSettings() {
       }
 
       toast.success('Media settings updated');
+      await refreshCapabilitySnapshot();
     } catch (error) {
       toast.error('Failed to update media settings', error instanceof Error ? error.message : String(error));
     }
@@ -263,7 +284,7 @@ export function GeneralSettings() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-id="settings-media-section">
       <div>
         <h3 className="text-sm font-medium text-white/90">Media Generation Settings</h3>
         <p className="mt-1 text-xs text-white/40">
@@ -277,6 +298,7 @@ export function GeneralSettings() {
         description="Controls which backend powers `generate_image` and `edit_image`."
         value={localRouting.imageBackend}
         onChange={(value) => setLocalRouting((prev) => ({ ...prev, imageBackend: value }))}
+        settingId="media.imageBackend"
       />
 
       <BackendToggle
@@ -284,6 +306,7 @@ export function GeneralSettings() {
         description="Controls which backend powers `generate_video`."
         value={localRouting.videoBackend}
         onChange={(value) => setLocalRouting((prev) => ({ ...prev, videoBackend: value }))}
+        settingId="media.videoBackend"
       />
 
       <KeyField
@@ -295,13 +318,16 @@ export function GeneralSettings() {
           await setGoogleApiKey(value);
           await applyRuntime();
           toast.success('Google media key saved');
+          await refreshCapabilitySnapshot();
         }}
         onClear={async () => {
           await clearGoogleApiKey();
           await applyRuntime();
           toast.success('Google media key removed');
+          await refreshCapabilitySnapshot();
         }}
         isLoading={isLoading}
+        settingId="media.googleApiKey"
       />
 
       <KeyField
@@ -313,13 +339,16 @@ export function GeneralSettings() {
           await setOpenAIApiKey(value);
           await applyRuntime();
           toast.success('OpenAI media key saved');
+          await refreshCapabilitySnapshot();
         }}
         onClear={async () => {
           await clearOpenAIApiKey();
           await applyRuntime();
           toast.success('OpenAI media key removed');
+          await refreshCapabilitySnapshot();
         }}
         isLoading={isLoading}
+        settingId="media.openaiApiKey"
       />
 
       <KeyField
@@ -331,13 +360,16 @@ export function GeneralSettings() {
           await setFalApiKey(value);
           await applyRuntime();
           toast.success('Fal media key saved');
+          await refreshCapabilitySnapshot();
         }}
         onClear={async () => {
           await clearFalApiKey();
           await applyRuntime();
           toast.success('Fal media key removed');
+          await refreshCapabilitySnapshot();
         }}
         isLoading={isLoading}
+        settingId="media.falApiKey"
       />
 
       <ModelSettingField
@@ -349,6 +381,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, google: { ...prev.google, imageGeneration: value } }))
         }
+        settingId="media.googleImageModel"
       />
 
       <ModelSettingField
@@ -360,6 +393,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, google: { ...prev.google, videoGeneration: value } }))
         }
+        settingId="media.googleVideoModel"
       />
 
       <ModelSettingField
@@ -371,6 +405,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, openai: { ...prev.openai, imageGeneration: value } }))
         }
+        settingId="media.openaiImageModel"
       />
 
       <ModelSettingField
@@ -382,6 +417,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, openai: { ...prev.openai, videoGeneration: value } }))
         }
+        settingId="media.openaiVideoModel"
       />
 
       <ModelSettingField
@@ -393,6 +429,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, fal: { ...prev.fal, imageGeneration: value } }))
         }
+        settingId="media.falImageModel"
       />
 
       <ModelSettingField
@@ -404,6 +441,7 @@ export function GeneralSettings() {
         onChange={(value) =>
           setLocalModels((prev) => ({ ...prev, fal: { ...prev.fal, videoGeneration: value } }))
         }
+        settingId="media.falVideoModel"
       />
 
       <div className="flex items-start gap-3 p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">

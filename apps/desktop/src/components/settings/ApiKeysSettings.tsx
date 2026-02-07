@@ -9,6 +9,8 @@ import {
 } from '@/stores/auth-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { toast } from '@/components/ui/Toast';
+import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
+import { useCapabilityStore } from '@/stores/capability-store';
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   google: 'Google',
@@ -200,6 +202,7 @@ export function ApiKeysSettings() {
     applyRuntimeConfig,
   } = useAuthStore();
   const { setActiveProvider: setProviderInSettings, setProviderBaseUrl, fetchProviderModels } = useSettingsStore();
+  const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
   const activeProviderKey = providerApiKeys[activeProvider] || null;
   const providerBaseUrl = providerBaseUrls[activeProvider] || '';
@@ -210,6 +213,7 @@ export function ApiKeysSettings() {
   const handleProviderSwitch = async (provider: ProviderId) => {
     await setProviderInSettings(provider);
     setBaseUrlDraft(useAuthStore.getState().providerBaseUrls[provider] || '');
+    await refreshCapabilitySnapshot();
   };
 
   const handleProviderKeySave = async (value: string) => {
@@ -227,15 +231,17 @@ export function ApiKeysSettings() {
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
     });
+    await refreshCapabilitySnapshot();
   };
 
   const handleBaseUrlSave = async () => {
     await setProviderBaseUrl(activeProvider, baseUrlDraft);
     await fetchProviderModels(activeProvider);
+    await refreshCapabilitySnapshot();
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-tour-id="settings-provider-section">
       <div>
         <h3 className="text-sm font-medium text-white/90">Provider Settings</h3>
         <p className="mt-1 text-xs text-white/40">
@@ -244,7 +250,10 @@ export function ApiKeysSettings() {
       </div>
 
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
-        <label className="text-xs text-white/55 uppercase tracking-wide">Active provider</label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs text-white/55 uppercase tracking-wide">Active provider</label>
+          <SettingHelpPopover settingId="provider.activeProvider" />
+        </div>
         <select
           value={activeProvider}
           onChange={(event) => void handleProviderSwitch(event.target.value as ProviderId)}
@@ -256,18 +265,24 @@ export function ApiKeysSettings() {
             </option>
           ))}
         </select>
+        <p className="text-[11px] text-white/45">Used by tools: chat, web_search, web_fetch, computer_use</p>
       </div>
 
-      <KeyCard
-        title={`${PROVIDER_LABELS[activeProvider]} Provider Key`}
-        description="Used for chat, tool calls, and provider-native capabilities."
-        value={activeProviderKey}
-        placeholder={`Enter ${PROVIDER_LABELS[activeProvider]} API key`}
-        isSaving={isLoading}
-        onSave={handleProviderKeySave}
-        onClear={async () => {
-          await clearProviderApiKey(activeProvider);
-          const settingsState = useSettingsStore.getState();
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-white/45">Key controls provider authentication for all provider-backed tools.</p>
+          <SettingHelpPopover settingId="provider.apiKey" />
+        </div>
+        <KeyCard
+          title={`${PROVIDER_LABELS[activeProvider]} Provider Key`}
+          description="Used for chat, tool calls, and provider-native capabilities."
+          value={activeProviderKey}
+          placeholder={`Enter ${PROVIDER_LABELS[activeProvider]} API key`}
+          isSaving={isLoading}
+          onSave={handleProviderKeySave}
+          onClear={async () => {
+            await clearProviderApiKey(activeProvider);
+            const settingsState = useSettingsStore.getState();
           await applyRuntimeConfig({
             activeProvider,
             providerBaseUrls: settingsState.providerBaseUrls,
@@ -275,13 +290,19 @@ export function ApiKeysSettings() {
             mediaRouting: settingsState.mediaRouting,
             specializedModels: settingsState.specializedModelsV2,
           });
+          await refreshCapabilitySnapshot();
         }}
       />
+        <p className="text-[11px] text-white/45">Used by tools: chat, web_search, google_grounded_search, computer_use</p>
+      </div>
 
       {baseUrlEditable ? (
         <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
           <div>
-            <h4 className="text-sm font-medium text-white/90">Provider Base URL</h4>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-sm font-medium text-white/90">Provider Base URL</h4>
+              <SettingHelpPopover settingId="provider.baseUrl" />
+            </div>
             <p className="mt-1 text-xs text-white/45">
               Override API base URL for compatible endpoints.
             </p>
@@ -300,8 +321,20 @@ export function ApiKeysSettings() {
           >
             Save Base URL
           </button>
+          <p className="text-[11px] text-white/45">Used by tools: chat, provider-native web tools, computer_use</p>
         </div>
       ) : null}
+
+      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-sm font-medium text-white/90">Chat Model Selection</h4>
+          <SettingHelpPopover settingId="provider.chatModel" />
+        </div>
+        <p className="text-xs text-white/45">
+          Choose the default model from the chat input model selector. Model changes are applied to new sessions.
+        </p>
+        <p className="text-[11px] text-white/45">Used by tools: chat, planning, provider-native reasoning tools</p>
+      </div>
 
       <div className="p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
         <p className="text-xs text-[#93C5FD]">
