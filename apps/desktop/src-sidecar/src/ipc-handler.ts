@@ -225,6 +225,11 @@ registerHandler('get_capability_snapshot', async (params) => {
   return agentRunner.getCapabilitySnapshot(sessionId);
 });
 
+registerHandler('debug_preview_system_prompt', async (params) => {
+  const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined;
+  return agentRunner.previewSystemPrompt(sessionId);
+});
+
 // Send message
 registerHandler('send_message', async (params) => {
   const p = params as unknown as SendMessageParams;

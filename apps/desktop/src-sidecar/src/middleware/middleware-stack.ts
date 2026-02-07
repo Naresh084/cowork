@@ -72,14 +72,27 @@ export async function createMiddlewareStack(
     beforeInvoke: async (context: MiddlewareContext) => {
       const additions: string[] = [];
       const memoriesUsed: string[] = [];
+      const normalizedSystemPrompt = context.systemPrompt.trim();
+      const hasInSystemPrompt = (value: string): boolean => {
+        const normalized = value.trim();
+        if (!normalized) return true;
+        return normalizedSystemPrompt.includes(normalized);
+      };
+      const pushIfMissing = (value: string): void => {
+        const normalized = value.trim();
+        if (!normalized) return;
+        if (hasInSystemPrompt(normalized)) return;
+        if (additions.some((entry) => entry.trim() === normalized)) return;
+        additions.push(value);
+      };
 
       // 1. Inject AGENTS.md context
       if (agentsMdConfig) {
-        additions.push(buildAgentsMdPrompt(agentsMdConfig));
+        pushIfMissing(buildAgentsMdPrompt(agentsMdConfig));
       }
 
       // 2. Inject memory system instructions
-      additions.push(MEMORY_SYSTEM_PROMPT);
+      pushIfMissing(MEMORY_SYSTEM_PROMPT);
 
       // 3. Inject relevant memories based on context
       const contextText = buildContextText(context);
@@ -99,7 +112,7 @@ export async function createMiddlewareStack(
       const subagentService = createSubagentService();
       const subagentConfigs = await subagentService.getSubagentConfigs(session.model);
       const subagentSection = subagentService.buildSubagentPromptSection(subagentConfigs);
-      additions.push(subagentSection);
+      pushIfMissing(subagentSection);
 
       return {
         systemPromptAddition: additions.join('\n'),

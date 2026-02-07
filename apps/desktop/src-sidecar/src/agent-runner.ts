@@ -65,7 +65,14 @@ import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from
 import type { AgentsMdConfig } from './agents-md/types.js';
 import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
 import { buildSubagentPromptSection, getSubagentConfigs } from './middleware/subagent-prompts.js';
+import { SystemPromptBuilder } from './prompts/system-prompt-builder.js';
 import type { ToolCallContext } from '@gemini-cowork/shared';
+import type {
+  PromptBuildContext,
+  PromptBuildDiagnostics,
+  PromptSystemInfo,
+  PromptTemplateSection,
+} from './prompts/types.js';
 import type {
   SessionInfo,
   SessionDetails,
@@ -460,6 +467,8 @@ export class AgentRunner {
   private mcpServerStates: Map<string, ManagedMCPServerState> = new Map();
   private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
   private appDataDir: string | null = null;
+  private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
+  private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
   // Deep Agents services (per-session instances stored in map)
   private memoryServices: Map<string, MemoryService> = new Map();
   private memoryExtractors: Map<string, MemoryExtractor> = new Map();
@@ -2090,19 +2099,25 @@ export class AgentRunner {
           : 'No connected connectors currently expose tools.',
     });
 
+    const scheduleToolsEnabled =
+      session?.type !== 'isolated' &&
+      session?.type !== 'cron';
+    const scheduleReason = scheduleToolsEnabled
+      ? 'Available in non-isolated sessions.'
+      : 'Unavailable in isolated/cron sessions.';
     this.pushSnapshotToolAccess(
       toolAccess,
       provider,
       'schedule_task',
-      true,
-      'Available in non-isolated sessions.',
+      scheduleToolsEnabled,
+      scheduleReason,
     );
     this.pushSnapshotToolAccess(
       toolAccess,
       provider,
       'manage_scheduled_task',
-      true,
-      'Available in non-isolated sessions.',
+      scheduleToolsEnabled,
+      scheduleReason,
     );
 
     const notes: string[] = [];
@@ -2120,6 +2135,9 @@ export class AgentRunner {
     }
     if (!isOsSandboxAvailable() && activeSandbox.mode !== 'danger-full-access') {
       notes.push('OS-level sandbox is unavailable. Validator policy enforcement is active.');
+    }
+    if (session && (session.type === 'isolated' || session.type === 'cron')) {
+      notes.push('Scheduling tools are disabled in isolated/cron sessions.');
     }
 
     if (executionMode === 'plan') {
@@ -2166,6 +2184,38 @@ export class AgentRunner {
       integrationAccess,
       policyProfile: policy.profile,
       notes,
+    };
+  }
+
+  async previewSystemPrompt(sessionId?: string): Promise<{
+    sessionId: string;
+    provider: ProviderId;
+    executionMode: ExecutionMode;
+    usingLegacyFallback: boolean;
+    diagnostics: PromptBuildDiagnostics;
+    prompt: string;
+  }> {
+    let session: ActiveSession | undefined;
+    if (sessionId) {
+      session = this.sessions.get(sessionId);
+    } else {
+      session = Array.from(this.sessions.values()).sort((a, b) => b.lastAccessedAt - a.lastAccessedAt)[0];
+    }
+
+    if (!session) {
+      throw new Error('No session available for prompt preview.');
+    }
+
+    const toolHandlers = this.buildToolHandlers(session);
+    const built = await this.buildSystemPromptForSession(session, toolHandlers);
+
+    return {
+      sessionId: session.id,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      usingLegacyFallback: built.diagnostics.usingLegacyFallback,
+      diagnostics: built.diagnostics,
+      prompt: built.prompt,
     };
   }
 
@@ -3328,6 +3378,7 @@ export class AgentRunner {
     // Clean up Deep Agents services for this session
     this.clearSessionServices(sessionId, session.workingDirectory);
     this.middlewareHooks.delete(sessionId);
+    this.lastPromptDiagnostics.delete(sessionId);
 
     // Only delete from memory after successful disk deletion
     this.sessions.delete(sessionId);
@@ -3586,6 +3637,125 @@ export class AgentRunner {
       timezoneOffset: offsetStr,
       locale: Intl.DateTimeFormat().resolvedOptions().locale || 'en-US',
     };
+  }
+
+  private getPromptSystemInfo(): PromptSystemInfo {
+    const now = new Date();
+    const sys = this.getSystemInfo();
+    const formattedDate = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const formattedTime = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    return {
+      ...sys,
+      formattedDate,
+      formattedTime,
+    };
+  }
+
+  private shouldUseLegacySystemPrompt(): boolean {
+    const mode = process.env.COWORK_SYSTEM_PROMPT_MODE?.trim().toLowerCase();
+    if (mode === 'legacy') return true;
+    if (mode === 'dynamic' || mode === 'v2') return false;
+    return process.env.COWORK_LEGACY_SYSTEM_PROMPT === '1';
+  }
+
+  private maybeLogPromptDiagnostics(
+    sessionId: string,
+    diagnostics: PromptBuildDiagnostics,
+  ): void {
+    if (process.env.COWORK_LOG_PROMPT_DIAGNOSTICS !== '1') return;
+    const payload = {
+      sessionId,
+      provider: diagnostics.provider,
+      providerTemplateKey: diagnostics.providerTemplateKey,
+      modeTemplateKey: diagnostics.modeTemplateKey,
+      toolCount: diagnostics.toolCount,
+      restrictedToolCount: diagnostics.restrictedToolCount,
+      integrationCount: diagnostics.integrationCount,
+      sectionKeys: diagnostics.sectionKeys,
+      promptLength: diagnostics.promptLength,
+      usingLegacyFallback: diagnostics.usingLegacyFallback,
+    };
+    process.stderr.write(`[prompt:diagnostics] ${JSON.stringify(payload)}\n`);
+  }
+
+  private async buildDynamicSystemPrompt(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<{ prompt: string; diagnostics: PromptBuildDiagnostics }> {
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    const agentsMdPrompt = agentsMdConfig
+      ? this.buildAgentsMdPrompt(agentsMdConfig)
+      : '';
+
+    const memoryPrompt = MEMORY_SYSTEM_PROMPT;
+    const subagentConfigs = getSubagentConfigs(session.model);
+    const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
+    const skillBlock = await this.buildSkillsPrompt(session);
+    const mcpPrompt = this.buildMcpPrompt();
+
+    const additionalSections: PromptTemplateSection[] = [
+      { key: 'agents_md', content: agentsMdPrompt },
+      { key: 'memory', content: memoryPrompt },
+      { key: 'subagents', content: subagentPrompt },
+      { key: 'skills', content: skillBlock },
+      { key: 'mcp_summary', content: mcpPrompt },
+    ].filter((section) => section.content && section.content.trim().length > 0);
+
+    const context: PromptBuildContext = {
+      provider: session.provider,
+      executionMode: session.executionMode,
+      sessionType: session.type,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      systemInfo: this.getPromptSystemInfo(),
+      toolHandlers,
+      capabilitySnapshot: this.getCapabilitySnapshot(session.id) as PromptBuildContext['capabilitySnapshot'],
+      additionalSections,
+      defaultNotificationTarget: this.getDefaultScheduledTaskNotificationTarget(session.id),
+    };
+
+    const result = this.systemPromptBuilder.build(context);
+    this.lastPromptDiagnostics.set(session.id, result.diagnostics);
+    this.maybeLogPromptDiagnostics(session.id, result.diagnostics);
+    return {
+      prompt: result.prompt,
+      diagnostics: result.diagnostics,
+    };
+  }
+
+  private async buildSystemPromptForSession(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<{ prompt: string; diagnostics: PromptBuildDiagnostics }> {
+    if (!this.shouldUseLegacySystemPrompt()) {
+      return this.buildDynamicSystemPrompt(session, toolHandlers);
+    }
+
+    const prompt = await this.buildSystemPrompt(session, toolHandlers);
+    const diagnostics: PromptBuildDiagnostics = {
+      provider: session.provider,
+      providerTemplateKey: 'legacy-inline',
+      modeTemplateKey: session.executionMode,
+      sectionKeys: ['legacy_inline_prompt'],
+      toolCount: toolHandlers.length,
+      restrictedToolCount: 0,
+      integrationCount: 0,
+      promptLength: prompt.length,
+      usingLegacyFallback: true,
+    };
+    this.lastPromptDiagnostics.set(session.id, diagnostics);
+    this.maybeLogPromptDiagnostics(session.id, diagnostics);
+    return { prompt, diagnostics };
   }
 
   private async buildSystemPrompt(
@@ -4389,10 +4559,11 @@ ${stitchGuidance}
     const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
 
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
+    const promptBuild = await this.buildSystemPromptForSession(session, tools);
     const agent = createDeepAgentAny({
       model,
       tools: wrappedTools,
-      systemPrompt: await this.buildSystemPrompt(session, tools),
+      systemPrompt: promptBuild.prompt,
       middleware: [this.createToolMiddleware(session)],
       recursionLimit: RECURSION_LIMIT,
       skills: skillsParam,
