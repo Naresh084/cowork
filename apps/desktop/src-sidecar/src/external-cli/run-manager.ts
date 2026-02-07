@@ -255,7 +255,7 @@ export class ExternalCliRunManager extends EventEmitter {
           onCompleted: (summary) => {
             run.status = 'completed';
             run.resultSummary = summary;
-            run.pendingInteraction = undefined;
+            this.resolvePendingInteraction(run);
             run.finishedAt = Date.now();
             run.updatedAt = run.finishedAt;
             this.appendProgress(run, {
@@ -272,7 +272,7 @@ export class ExternalCliRunManager extends EventEmitter {
             run.status = 'failed';
             run.errorCode = code;
             run.errorMessage = message;
-            run.pendingInteraction = undefined;
+            this.resolvePendingInteraction(run);
             run.finishedAt = Date.now();
             run.updatedAt = run.finishedAt;
             this.appendProgress(run, {
@@ -287,7 +287,7 @@ export class ExternalCliRunManager extends EventEmitter {
           },
           onCancelled: (message) => {
             run.status = 'cancelled';
-            run.pendingInteraction = undefined;
+            this.resolvePendingInteraction(run);
             run.finishedAt = Date.now();
             run.updatedAt = run.finishedAt;
             this.appendProgress(run, {
@@ -309,7 +309,7 @@ export class ExternalCliRunManager extends EventEmitter {
       run.errorMessage = errorMessage;
       run.finishedAt = Date.now();
       run.updatedAt = run.finishedAt;
-      run.pendingInteraction = undefined;
+      this.resolvePendingInteraction(run);
       this.appendProgress(run, {
         timestamp: run.finishedAt,
         kind: 'error',
@@ -362,7 +362,7 @@ export class ExternalCliRunManager extends EventEmitter {
 
     if (isRunActive(run.status)) {
       run.status = 'cancelled';
-      run.pendingInteraction = undefined;
+      this.resolvePendingInteraction(run);
       run.finishedAt = Date.now();
       run.updatedAt = run.finishedAt;
       this.appendProgress(run, {
@@ -448,7 +448,7 @@ export class ExternalCliRunManager extends EventEmitter {
         if (!input.createIfMissing) {
           throw new ExternalCliError(
             'CLI_PROTOCOL_ERROR',
-            `Working directory does not exist: ${resolvedWorkingDirectory}. Ask user to confirm creation and rerun with create_if_missing=true.`,
+            `Working directory does not exist: ${resolvedWorkingDirectory}. Rerun with create_if_missing=true to auto-create it, or choose an existing directory.`,
           );
         }
 
@@ -485,6 +485,20 @@ export class ExternalCliRunManager extends EventEmitter {
     if (run.progress.length > MAX_PROGRESS_ENTRIES) {
       run.progress = run.progress.slice(run.progress.length - MAX_PROGRESS_ENTRIES);
     }
+  }
+
+  private resolvePendingInteraction(run: ExternalCliRunRecord): void {
+    const interactionId = run.pendingInteraction?.interactionId;
+    run.pendingInteraction = undefined;
+    if (!interactionId) {
+      return;
+    }
+
+    this.emit('interaction_resolved', {
+      runId: run.runId,
+      interactionId,
+      sessionId: run.sessionId,
+    });
   }
 
   private async persist(): Promise<void> {

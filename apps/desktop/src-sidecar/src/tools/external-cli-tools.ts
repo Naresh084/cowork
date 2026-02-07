@@ -74,7 +74,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
         .describe('Explicit working directory confirmed in conversation.'),
       create_if_missing: z
         .boolean()
-        .describe('Set true only when user confirmed creating missing directory in conversation.'),
+        .describe('Set true to auto-create missing directory (recommended unless user explicitly asked not to create).'),
       bypassPermission: z
         .boolean()
         .optional()
@@ -126,7 +126,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
         .describe('Explicit working directory confirmed in conversation.'),
       create_if_missing: z
         .boolean()
-        .describe('Set true only when user confirmed creating missing directory in conversation.'),
+        .describe('Set true to auto-create missing directory (recommended unless user explicitly asked not to create).'),
       bypassPermission: z
         .boolean()
         .optional()
