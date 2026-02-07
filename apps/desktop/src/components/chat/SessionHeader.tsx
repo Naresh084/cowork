@@ -5,6 +5,7 @@ import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { useChatStore } from '../../stores/chat-store';
+import { useAppStore } from '../../stores/app-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
@@ -21,6 +22,7 @@ export function SessionHeader() {
   const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
   const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
+  const runtimeConfigNotice = useAppStore((state) => state.runtimeConfigNotice);
 
   // Check if computer_use tool is running (V2: derive from chatItems)
   const isComputerUseRunning = useChatStore((state) => {
@@ -265,7 +267,9 @@ export function SessionHeader() {
                 />
               </motion.button>
               <div className="flex items-center gap-2 text-[11px] text-white/40 px-2 -mt-0.5">
-                <span>{activeSession?.model || 'gemini-3-flash-preview'}</span>
+                <span>{activeSession?.provider || 'google'}</span>
+                <span>•</span>
+                <span>{activeSession?.model || 'Default model'}</span>
                 <span>•</span>
                 <span>{formatRelativeDate(activeSession?.createdAt)}</span>
               </div>
@@ -345,6 +349,16 @@ export function SessionHeader() {
           <Plug className="w-3.5 h-3.5" />
           {connectionLabel}
         </div>
+
+        {runtimeConfigNotice?.requiresNewSession ? (
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#FFB020]/15 text-[#FFB020]"
+            title={`New session required due to: ${runtimeConfigNotice.reasons.join(', ')}`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5" />
+            Start new session
+          </div>
+        ) : null}
 
         {/* Approval Mode Dropdown */}
         <div className="relative" ref={modeDropdownRef}>

@@ -5,7 +5,6 @@ import { mkdir, writeFile } from 'fs/promises';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { runDeepResearch } from '@gemini-cowork/providers';
 import { eventEmitter } from '../event-emitter.js';
-import { getModel } from '../model-config.js';
 
 /**
  * Get the reports directory for a session.
@@ -16,7 +15,10 @@ function getReportsDir(context: ToolContext): string {
   return join(baseDir, 'sessions', context.sessionId, 'reports');
 }
 
-export function createDeepResearchTool(getApiKey: () => string | null): ToolHandler {
+export function createDeepResearchTool(
+  getApiKey: () => string | null,
+  getDeepResearchModel?: () => string,
+): ToolHandler {
   return {
     name: 'deep_research',
     description: 'Perform deep autonomous research on a topic. Takes 5-60 minutes. Returns a report with citations.',
@@ -43,7 +45,7 @@ export function createDeepResearchTool(getApiKey: () => string | null): ToolHand
         const result = await runDeepResearch(apiKey, {
           query,
           files: includeFiles,
-          agent: getModel('deepResearchAgent'),
+          agent: getDeepResearchModel?.() || 'deep-research-pro-preview-12-2025',
           onProgress: (status, progress) => {
             eventEmitter.researchProgress(context.sessionId, status, progress);
             eventEmitter.flushSync();
@@ -65,6 +67,9 @@ export function createDeepResearchTool(getApiKey: () => string | null): ToolHand
   };
 }
 
-export function createResearchTools(getApiKey: () => string | null): ToolHandler[] {
-  return [createDeepResearchTool(getApiKey)];
+export function createResearchTools(
+  getApiKey: () => string | null,
+  getDeepResearchModel?: () => string,
+): ToolHandler[] {
+  return [createDeepResearchTool(getApiKey, getDeepResearchModel)];
 }

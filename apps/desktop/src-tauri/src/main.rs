@@ -17,6 +17,23 @@ fn main() {
         .manage(AgentState::new())
         .invoke_handler(tauri::generate_handler![
             // Auth commands
+            commands::auth::get_provider_api_key,
+            commands::auth::set_provider_api_key,
+            commands::auth::delete_provider_api_key,
+            commands::auth::get_google_api_key,
+            commands::auth::set_google_api_key,
+            commands::auth::delete_google_api_key,
+            commands::auth::get_openai_api_key,
+            commands::auth::set_openai_api_key,
+            commands::auth::delete_openai_api_key,
+            commands::auth::get_exa_api_key,
+            commands::auth::set_exa_api_key,
+            commands::auth::delete_exa_api_key,
+            commands::auth::get_tavily_api_key,
+            commands::auth::set_tavily_api_key,
+            commands::auth::delete_tavily_api_key,
+            commands::auth::validate_provider_connection,
+            commands::auth::fetch_provider_models,
             commands::auth::get_api_key,
             commands::auth::set_api_key,
             commands::auth::delete_api_key,
@@ -32,6 +49,7 @@ fn main() {
             commands::files::open_file_preview,
             // Agent commands
             commands::agent::agent_set_api_key,
+            commands::agent::agent_set_runtime_config,
             commands::agent::agent_set_stitch_api_key,
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,

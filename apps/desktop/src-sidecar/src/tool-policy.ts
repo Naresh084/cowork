@@ -47,6 +47,7 @@ const TOOL_GROUPS: Record<string, string[]> = {
   'group:network': [
     'fetch',
     'WebFetch',
+    'web_fetch',
     'http_request',
     'google_grounded_search',
     'web_search',
@@ -112,11 +113,11 @@ const PROFILES: Record<ToolProfile, { allow: string[]; deny: string[] }> = {
     ],
   },
   readonly: {
-    allow: ['group:fs', 'grep', 'Grep', 'google_grounded_search'],
+    allow: ['group:fs', 'grep', 'Grep', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'execute', 'Bash', 'group:media'],
   },
   coding: {
-    allow: ['group:fs', 'group:tasks', 'group:memory', 'group:agents_md', 'group:commands', 'grep', 'Grep', 'google_grounded_search', 'Bash'],
+    allow: ['group:fs', 'group:tasks', 'group:memory', 'group:agents_md', 'group:commands', 'grep', 'Grep', 'web_search', 'google_grounded_search', 'web_fetch', 'Bash'],
     deny: ['group:media', 'deep_research', 'deep_memory_delete'],  // Memory deletion requires confirmation
   },
   messaging: {
@@ -124,7 +125,7 @@ const PROFILES: Record<ToolProfile, { allow: string[]; deny: string[] }> = {
     deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file'],
   },
   research: {
-    allow: ['group:network', 'group:fs', 'group:memory', 'group:agents_md', 'deep_research', 'google_grounded_search'],
+    allow: ['group:network', 'group:fs', 'group:memory', 'group:agents_md', 'deep_research', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'deep_memory_delete', 'deep_memory_create', 'deep_memory_update'],  // Research is read-only for memories
   },
   full: {

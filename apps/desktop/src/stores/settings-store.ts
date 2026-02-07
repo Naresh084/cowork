@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
+import { useAuthStore, type ProviderId } from './auth-store';
+import { useAppStore } from './app-store';
 
 export interface ModelInfo {
   id: string;
@@ -91,12 +93,49 @@ export interface SpecializedModels {
   imageGeneration: string;
   videoGeneration: string;
   computerUse: string;
+  deepResearchAgent: string;
 }
 
 export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
   imageGeneration: 'imagen-4.0-generate-001',
   videoGeneration: 'veo-3.1-generate-preview',
   computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+  deepResearchAgent: 'deep-research-pro-preview-12-2025',
+};
+
+export interface SpecializedModelsV2 {
+  google: {
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  };
+  openai: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
+}
+
+export interface MediaRoutingSettings {
+  imageBackend: 'google' | 'openai';
+  videoBackend: 'google' | 'openai';
+}
+
+export type ExternalSearchProvider = 'google' | 'exa' | 'tavily';
+
+export const DEFAULT_MEDIA_ROUTING: MediaRoutingSettings = {
+  imageBackend: 'google',
+  videoBackend: 'google',
+};
+
+export const DEFAULT_EXTERNAL_SEARCH_PROVIDER: ExternalSearchProvider = 'google';
+
+export const DEFAULT_SPECIALIZED_MODELS_V2: SpecializedModelsV2 = {
+  google: { ...DEFAULT_SPECIALIZED_MODELS },
+  openai: {
+    imageGeneration: 'gpt-image-1',
+    videoGeneration: 'sora',
+  },
 };
 
 const SPECIALIZED_MODEL_MIGRATIONS: Record<keyof SpecializedModels, Record<string, string>> = {
@@ -113,6 +152,7 @@ const SPECIALIZED_MODEL_MIGRATIONS: Record<keyof SpecializedModels, Record<strin
   computerUse: {
     'gemini-2.5-computer-use-preview': 'gemini-2.5-computer-use-preview-10-2025',
   },
+  deepResearchAgent: {},
 };
 
 function normalizeSpecializedModelValue(
@@ -147,6 +187,7 @@ function normalizeSpecializedModels(models: Partial<SpecializedModels> | undefin
     imageGeneration: normalizeSpecializedModelValue('imageGeneration', models?.imageGeneration),
     videoGeneration: normalizeSpecializedModelValue('videoGeneration', models?.videoGeneration),
     computerUse: normalizeSpecializedModelValue('computerUse', models?.computerUse),
+    deepResearchAgent: normalizeSpecializedModelValue('deepResearchAgent', models?.deepResearchAgent),
   };
 }
 
@@ -174,6 +215,8 @@ interface SettingsState {
   // User
   userName: string;
 
+  activeProvider: ProviderId;
+
   // General
   defaultWorkingDirectory: string;
   theme: Theme;
@@ -183,13 +226,21 @@ interface SettingsState {
 
   // Model
   selectedModel: string;
+  selectedModelByProvider: Partial<Record<ProviderId, string>>;
   temperature: number;
   maxOutputTokens: number;
   availableModels: ModelInfo[];
+  availableModelsByProvider: Partial<Record<ProviderId, ModelInfo[]>>;
+  customModelsByProvider: Partial<Record<ProviderId, string[]>>;
   modelsLoading: boolean;
+  providerBaseUrls: Partial<Record<ProviderId, string>>;
 
   // Specialized models (for tasks that require specific model types)
   specializedModels: SpecializedModels;
+  specializedModelsV2: SpecializedModelsV2;
+  mediaRouting: MediaRoutingSettings;
+  mediaRoutingCustomized: boolean;
+  externalSearchProvider: ExternalSearchProvider;
 
   // Permissions
   permissionDefaults: PermissionDefaults;
@@ -239,6 +290,13 @@ interface SettingsActions {
   ) => void;
   resetSettings: () => void;
   fetchModels: (apiKey: string) => Promise<void>;
+  fetchProviderModels: (provider?: ProviderId) => Promise<void>;
+  setActiveProvider: (provider: ProviderId) => Promise<void>;
+  setSelectedModelForProvider: (provider: ProviderId, modelId: string) => void;
+  addCustomModelForProvider: (provider: ProviderId, modelId: string) => void;
+  setProviderBaseUrl: (provider: ProviderId, baseUrl: string) => Promise<void>;
+  setMediaRouting: (routing: Partial<MediaRoutingSettings>) => Promise<void>;
+  setExternalSearchProvider: (provider: ExternalSearchProvider) => Promise<void>;
 
   // MCP Server management
   addMCPServer: (config: Omit<MCPServerConfig, 'id' | 'status'>) => void;
@@ -283,6 +341,11 @@ interface SettingsActions {
 
   // Specialized models management
   updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
+  updateSpecializedModelV2: (
+    provider: keyof SpecializedModelsV2,
+    key: keyof SpecializedModelsV2['google'] | keyof SpecializedModelsV2['openai'],
+    value: string
+  ) => Promise<void>;
   syncSpecializedModels: () => Promise<void>;
 
   // Permission management
@@ -331,6 +394,8 @@ const initialState: SettingsState = {
   // User
   userName: '',
 
+  activeProvider: 'google',
+
   // General
   defaultWorkingDirectory: '',
   theme: 'dark',
@@ -340,13 +405,21 @@ const initialState: SettingsState = {
 
   // Model - populated from Google Models API
   selectedModel: '',
+  selectedModelByProvider: {},
   temperature: 0.7,
   maxOutputTokens: 0,
   availableModels: [],
+  availableModelsByProvider: {},
+  customModelsByProvider: {},
   modelsLoading: false,
+  providerBaseUrls: {},
 
   // Specialized models
   specializedModels: { ...DEFAULT_SPECIALIZED_MODELS },
+  specializedModelsV2: { ...DEFAULT_SPECIALIZED_MODELS_V2 },
+  mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
+  mediaRoutingCustomized: false,
+  externalSearchProvider: DEFAULT_EXTERNAL_SEARCH_PROVIDER,
 
   // Permissions
   permissionDefaults: defaultPermissions,
@@ -418,6 +491,20 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           // But we could load additional settings from backend if needed
           set({ isLoading: false });
           const state = useSettingsStore.getState();
+          await useAuthStore.getState().setActiveProvider(state.activeProvider);
+          await useAuthStore.getState().applyRuntimeConfig({
+            activeProvider: state.activeProvider,
+            providerBaseUrls: state.providerBaseUrls,
+            externalSearchProvider: state.externalSearchProvider,
+            mediaRouting: state.mediaRouting,
+            specializedModels: state.specializedModelsV2,
+          });
+          if (
+            useAuthStore.getState().providerApiKeys[state.activeProvider] ||
+            state.activeProvider === 'lmstudio'
+          ) {
+            await state.fetchProviderModels(state.activeProvider);
+          }
           await state.syncMCPServers(state.mcpServers);
           await state.syncSkills(state.skills);
           await state.syncInstalledSkills(); // Sync marketplace/installed skills
@@ -445,6 +532,27 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       },
 
       updateSetting: (key, value) => {
+        if (key === 'selectedModel') {
+          set((state) => ({
+            selectedModel: value as SettingsState[typeof key] as string,
+            selectedModelByProvider: {
+              ...state.selectedModelByProvider,
+              [state.activeProvider]: value as SettingsState[typeof key] as string,
+            },
+          }));
+          return;
+        }
+
+        if (key === 'activeProvider') {
+          const provider = value as SettingsState[typeof key] as ProviderId;
+          set((state) => ({
+            activeProvider: provider,
+            selectedModel: state.selectedModelByProvider[provider] || '',
+            availableModels: state.availableModelsByProvider[provider] || [],
+          }));
+          return;
+        }
+
         set({ [key]: value } as Pick<SettingsState, typeof key>);
       },
 
@@ -452,16 +560,42 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         set(initialState);
       },
 
-      fetchModels: async (apiKey: string) => {
+      fetchModels: async (_apiKey: string) => {
+        await useSettingsStore.getState().fetchProviderModels();
+      },
+
+      fetchProviderModels: async (providerOverride) => {
         set({ modelsLoading: true, error: null });
         try {
+          const state = useSettingsStore.getState();
+          const authState = useAuthStore.getState();
+          const provider = providerOverride || state.activeProvider || authState.activeProvider;
+          const providerKey = authState.providerApiKeys[provider];
+          const baseUrl = authState.providerBaseUrls[provider];
+
+          if (!providerKey && provider !== 'lmstudio') {
+            set({
+              modelsLoading: false,
+              availableModels: [],
+              availableModelsByProvider: {
+                ...state.availableModelsByProvider,
+                [provider]: [],
+              },
+            });
+            return;
+          }
+
           const models = await invoke<Array<{
             id: string;
             name: string;
             description: string;
             input_token_limit: number;
             output_token_limit: number;
-          }>>('fetch_models', { apiKey });
+          }>>('fetch_provider_models', {
+            providerId: provider,
+            apiKey: providerKey || '',
+            baseUrl: baseUrl || null,
+          });
 
           const mappedModels: ModelInfo[] = models.map((m) => ({
             id: m.id,
@@ -471,18 +605,40 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             outputTokenLimit: m.output_token_limit,
           }));
 
-          const selected = useSettingsStore.getState().selectedModel;
-          const hasSelected = mappedModels.some((model) => model.id === selected);
-          const nextSelected = hasSelected ? selected : (mappedModels[0]?.id ?? selected);
+          const customModels = state.customModelsByProvider[provider] || [];
+          const mergedModels = [...mappedModels];
+          for (const custom of customModels) {
+            if (!mergedModels.some((model) => model.id === custom)) {
+              mergedModels.push({
+                id: custom,
+                name: custom,
+                description: 'Custom model ID',
+                inputTokenLimit: 0,
+                outputTokenLimit: 0,
+              });
+            }
+          }
 
-          set({
-            availableModels: mappedModels,
+          const providerSelected = state.selectedModelByProvider[provider] || '';
+          const hasSelected = mergedModels.some((model) => model.id === providerSelected);
+          const nextSelected = hasSelected ? providerSelected : (mergedModels[0]?.id ?? providerSelected);
+
+          set((prev) => ({
+            availableModels: provider === prev.activeProvider ? mergedModels : prev.availableModels,
+            availableModelsByProvider: {
+              ...prev.availableModelsByProvider,
+              [provider]: mergedModels,
+            },
+            selectedModel: provider === prev.activeProvider ? nextSelected : prev.selectedModel,
+            selectedModelByProvider: {
+              ...prev.selectedModelByProvider,
+              [provider]: nextSelected,
+            },
             modelsLoading: false,
-            selectedModel: nextSelected,
-          });
+          }));
 
           try {
-            await invoke('agent_set_models', { models: mappedModels });
+            await invoke('agent_set_models', { models: mergedModels.map((m) => ({ ...m, provider })) });
           } catch (error) {
             console.warn('[SettingsStore] Failed to sync models to sidecar:', error);
           }
@@ -492,6 +648,134 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             error: error instanceof Error ? error.message : String(error),
           });
         }
+      },
+
+      setActiveProvider: async (provider) => {
+        set((state) => {
+          const autoRouting = provider === 'openai'
+            ? { imageBackend: 'openai' as const, videoBackend: 'openai' as const }
+            : { imageBackend: 'google' as const, videoBackend: 'google' as const };
+          const nextMediaRouting = state.mediaRoutingCustomized ? state.mediaRouting : autoRouting;
+          return {
+            activeProvider: provider,
+            selectedModel: state.selectedModelByProvider[provider] || '',
+            availableModels: state.availableModelsByProvider[provider] || [],
+            mediaRouting: nextMediaRouting,
+          };
+        });
+
+        await useAuthStore.getState().setActiveProvider(provider);
+        await useSettingsStore.getState().fetchProviderModels(provider);
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider: provider,
+          providerBaseUrls: state.providerBaseUrls,
+          externalSearchProvider: state.externalSearchProvider,
+          mediaRouting: state.mediaRouting,
+          specializedModels: state.specializedModelsV2,
+        });
+      },
+
+      setSelectedModelForProvider: (provider, modelId) => {
+        set((state) => ({
+          selectedModelByProvider: {
+            ...state.selectedModelByProvider,
+            [provider]: modelId,
+          },
+          selectedModel: provider === state.activeProvider ? modelId : state.selectedModel,
+        }));
+
+        if (provider === useSettingsStore.getState().activeProvider) {
+          useAppStore.getState().setRuntimeConfigNotice({
+            requiresNewSession: true,
+            reasons: ['model_changed'],
+            affectedSessionIds: [],
+          });
+        }
+      },
+
+      addCustomModelForProvider: (provider, modelId) => {
+        const trimmed = modelId.trim();
+        if (!trimmed) return;
+        set((state) => {
+          const existing = state.customModelsByProvider[provider] || [];
+          const nextCustom = existing.includes(trimmed) ? existing : [...existing, trimmed];
+          const currentModels = state.availableModelsByProvider[provider] || [];
+          const hasModel = currentModels.some((m) => m.id === trimmed);
+          const mergedModels = hasModel
+            ? currentModels
+            : [
+                ...currentModels,
+                {
+                  id: trimmed,
+                  name: trimmed,
+                  description: 'Custom model ID',
+                  inputTokenLimit: 0,
+                  outputTokenLimit: 0,
+                },
+              ];
+
+          return {
+            customModelsByProvider: {
+              ...state.customModelsByProvider,
+              [provider]: nextCustom,
+            },
+            availableModelsByProvider: {
+              ...state.availableModelsByProvider,
+              [provider]: mergedModels,
+            },
+            availableModels: provider === state.activeProvider ? mergedModels : state.availableModels,
+          };
+        });
+      },
+
+      setProviderBaseUrl: async (provider, baseUrl) => {
+        const normalized = baseUrl.trim();
+        set((state) => ({
+          providerBaseUrls: {
+            ...state.providerBaseUrls,
+            [provider]: normalized,
+          },
+        }));
+        await useAuthStore.getState().setProviderBaseUrl(provider, normalized);
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider: state.activeProvider,
+          providerBaseUrls: state.providerBaseUrls,
+          externalSearchProvider: state.externalSearchProvider,
+          mediaRouting: state.mediaRouting,
+          specializedModels: state.specializedModelsV2,
+        });
+      },
+
+      setMediaRouting: async (routing) => {
+        set((state) => ({
+          mediaRouting: {
+            ...state.mediaRouting,
+            ...routing,
+          },
+          mediaRoutingCustomized: true,
+        }));
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider: state.activeProvider,
+          providerBaseUrls: state.providerBaseUrls,
+          externalSearchProvider: state.externalSearchProvider,
+          mediaRouting: state.mediaRouting,
+          specializedModels: state.specializedModelsV2,
+        });
+      },
+
+      setExternalSearchProvider: async (provider) => {
+        set({ externalSearchProvider: provider });
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider: state.activeProvider,
+          providerBaseUrls: state.providerBaseUrls,
+          externalSearchProvider: state.externalSearchProvider,
+          mediaRouting: state.mediaRouting,
+          specializedModels: state.specializedModelsV2,
+        });
       },
 
       // MCP Server management
@@ -784,17 +1068,70 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         const normalized = normalizeSpecializedModelValue(key, value);
         set((state) => ({
           specializedModels: { ...state.specializedModels, [key]: normalized },
+          specializedModelsV2: {
+            ...state.specializedModelsV2,
+            google: {
+              ...state.specializedModelsV2.google,
+              [key]: normalized,
+            },
+          },
         }));
         await useSettingsStore.getState().syncSpecializedModels();
       },
 
+      updateSpecializedModelV2: async (provider, key, value) => {
+        const trimmed = value.trim();
+        set((state) => {
+          if (provider === 'google') {
+            const safeKey = key as keyof SpecializedModelsV2['google'];
+            const normalized = normalizeSpecializedModelValue(
+              safeKey as keyof SpecializedModels,
+              trimmed,
+            );
+            return {
+              specializedModelsV2: {
+                ...state.specializedModelsV2,
+                google: {
+                  ...state.specializedModelsV2.google,
+                  [safeKey]: normalized,
+                },
+              },
+              specializedModels: {
+                ...state.specializedModels,
+                [safeKey]: normalized,
+              },
+            };
+          }
+
+          const safeKey = key as keyof SpecializedModelsV2['openai'];
+          return {
+            specializedModelsV2: {
+              ...state.specializedModelsV2,
+              openai: {
+                ...state.specializedModelsV2.openai,
+                [safeKey]: trimmed,
+              },
+            },
+          };
+        });
+        await useSettingsStore.getState().syncSpecializedModels();
+      },
+
       syncSpecializedModels: async () => {
-        const { specializedModels } = useSettingsStore.getState();
+        const { specializedModels, specializedModelsV2, activeProvider, providerBaseUrls, mediaRouting } =
+          useSettingsStore.getState();
         try {
           await invoke('agent_set_specialized_models', { models: specializedModels });
         } catch (error) {
           console.warn('Failed to sync specialized models:', error);
         }
+        await useAuthStore.getState().applyRuntimeConfig({
+          activeProvider,
+          providerBaseUrls,
+          externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
+          mediaRouting,
+          specializedModels: specializedModelsV2,
+        });
       },
 
       // Permission management
@@ -976,15 +1313,23 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
       name: 'settings-store',
       partialize: (state) => ({
         userName: state.userName,
+        activeProvider: state.activeProvider,
         defaultWorkingDirectory: state.defaultWorkingDirectory,
         theme: state.theme,
         fontSize: state.fontSize,
         showLineNumbers: state.showLineNumbers,
         autoSave: state.autoSave,
         selectedModel: state.selectedModel,
+        selectedModelByProvider: state.selectedModelByProvider,
         temperature: state.temperature,
         maxOutputTokens: state.maxOutputTokens,
+        customModelsByProvider: state.customModelsByProvider,
+        providerBaseUrls: state.providerBaseUrls,
         specializedModels: state.specializedModels,
+        specializedModelsV2: state.specializedModelsV2,
+        mediaRouting: state.mediaRouting,
+        mediaRoutingCustomized: state.mediaRoutingCustomized,
+        externalSearchProvider: state.externalSearchProvider,
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
         mcpServers: state.mcpServers,
@@ -1028,6 +1373,59 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           : initialState.approvalMode;
 
         const validSpecializedModels = normalizeSpecializedModels(persisted?.specializedModels);
+        const persistedActiveProvider = persisted?.activeProvider;
+        const validActiveProvider: ProviderId =
+          persistedActiveProvider &&
+          ['google', 'openai', 'anthropic', 'openrouter', 'moonshot', 'glm', 'deepseek', 'lmstudio'].includes(
+            persistedActiveProvider,
+          )
+            ? (persistedActiveProvider as ProviderId)
+            : initialState.activeProvider;
+
+        const persistedExternalSearch = persisted?.externalSearchProvider;
+        const validExternalSearchProvider: ExternalSearchProvider =
+          persistedExternalSearch === 'exa' || persistedExternalSearch === 'tavily'
+            ? persistedExternalSearch
+            : DEFAULT_EXTERNAL_SEARCH_PROVIDER;
+
+        const persistedSpecializedV2 = persisted?.specializedModelsV2;
+        const validSpecializedModelsV2: SpecializedModelsV2 = {
+          google: normalizeSpecializedModels(persistedSpecializedV2?.google || validSpecializedModels),
+          openai: {
+            imageGeneration:
+              persistedSpecializedV2?.openai?.imageGeneration?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.openai.imageGeneration,
+            videoGeneration:
+              persistedSpecializedV2?.openai?.videoGeneration?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.openai.videoGeneration,
+          },
+        };
+
+        const persistedMediaRouting = persisted?.mediaRouting;
+        const mediaRoutingCustomized = persisted?.mediaRoutingCustomized ?? false;
+        const validMediaRouting: MediaRoutingSettings = {
+          imageBackend:
+            persistedMediaRouting?.imageBackend === 'openai'
+              ? 'openai'
+              : DEFAULT_MEDIA_ROUTING.imageBackend,
+          videoBackend:
+            persistedMediaRouting?.videoBackend === 'openai'
+              ? 'openai'
+              : DEFAULT_MEDIA_ROUTING.videoBackend,
+        };
+        const autoMediaRouting: MediaRoutingSettings =
+          validActiveProvider === 'openai'
+            ? { imageBackend: 'openai', videoBackend: 'openai' }
+            : { imageBackend: 'google', videoBackend: 'google' };
+        const resolvedMediaRouting = mediaRoutingCustomized ? validMediaRouting : autoMediaRouting;
+
+        const persistedSelectedByProvider = persisted?.selectedModelByProvider || {};
+        const selectedModelByProvider = {
+          ...persistedSelectedByProvider,
+          google: persistedSelectedByProvider.google || validModel,
+        };
+
+        const activeSelectedModel = selectedModelByProvider[validActiveProvider] || validModel;
 
         // Migrate installedCommandConfigs to include enabled field (backward compat)
         const migratedCommandConfigs = (persisted?.installedCommandConfigs || []).map(
@@ -1058,9 +1456,15 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         return {
           ...currentState,
           ...persisted,
+          activeProvider: validActiveProvider,
           approvalMode: validMode,
-          selectedModel: validModel,
+          selectedModel: activeSelectedModel,
+          selectedModelByProvider,
           specializedModels: validSpecializedModels,
+          specializedModelsV2: validSpecializedModelsV2,
+          mediaRouting: resolvedMediaRouting,
+          mediaRoutingCustomized,
+          externalSearchProvider: validExternalSearchProvider,
           installedCommandConfigs: migratedCommandConfigs,
           sessionListFilters: validSessionListFilters,
           automationListFilters: validAutomationListFilters,
@@ -1073,6 +1477,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           // Use setTimeout to ensure it runs after store is fully initialized
           setTimeout(() => {
             void state.syncInstalledSkills();
+            void useAuthStore.getState().setActiveProvider(state.activeProvider);
           }, 100);
         }
       },
@@ -1117,3 +1522,11 @@ export const useUserName = () =>
   useSettingsStore((state) => state.userName);
 export const useInstalledConnectorConfigs = () =>
   useSettingsStore((state) => state.installedConnectorConfigs);
+export const useActiveProvider = () =>
+  useSettingsStore((state) => state.activeProvider);
+export const useMediaRoutingSettings = () =>
+  useSettingsStore((state) => state.mediaRouting);
+export const useSpecializedModelsV2 = () =>
+  useSettingsStore((state) => state.specializedModelsV2);
+export const useExternalSearchProvider = () =>
+  useSettingsStore((state) => state.externalSearchProvider);

@@ -3,12 +3,16 @@ import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../components/ui/Toast';
 import { useChatStore } from './chat-store';
+import { useSettingsStore } from './settings-store';
+import { type ProviderId } from './auth-store';
+import { useAppStore } from './app-store';
 
 export type SessionKind = 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
 
 export interface SessionSummary {
   id: string;
   type?: SessionKind;
+  provider?: ProviderId;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string | null;
@@ -22,6 +26,7 @@ export interface SessionSummary {
 export interface SessionInfo {
   id: string;
   type?: SessionKind;
+  provider?: ProviderId;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -42,7 +47,7 @@ interface SessionState {
 
 interface SessionActions {
   loadSessions: () => Promise<void>;
-  createSession: (workingDirectory: string, model?: string) => Promise<string>;
+  createSession: (workingDirectory: string, model?: string, provider?: ProviderId) => Promise<string>;
   selectSession: (sessionId: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
@@ -147,18 +152,24 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }
       },
 
-      createSession: async (workingDirectory: string, model?: string) => {
+      createSession: async (workingDirectory: string, model?: string, provider?: ProviderId) => {
         set({ isLoading: true, error: null });
         try {
+          const settingsState = useSettingsStore.getState();
+          const activeProvider = provider || settingsState.activeProvider;
+          const providerModel = model || settingsState.selectedModelByProvider[activeProvider] || settingsState.selectedModel;
+
           const session = await invoke<SessionInfo>('agent_create_session', {
             workingDirectory,
-            model,
+            model: providerModel,
+            provider: activeProvider,
           });
 
           // Add to sessions list (new sessions are most recently accessed)
           const newSummary: SessionSummary = {
             id: session.id,
             type: session.type,
+            provider: session.provider || activeProvider,
             title: session.title,
             firstMessage: null,
             workingDirectory: session.workingDirectory,
@@ -174,6 +185,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             activeSessionId: session.id,
             isLoading: false,
           }));
+          useAppStore.getState().setRuntimeConfigNotice(null);
 
           return session.id;
         } catch (error) {
@@ -354,6 +366,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         // Cache session list for faster startup
         sessions: state.sessions.map(s => ({
           id: s.id,
+          provider: s.provider,
           title: s.title,
           firstMessage: s.firstMessage,
           workingDirectory: s.workingDirectory,

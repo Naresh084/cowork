@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rename, rm, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import type { Task, Artifact, PersistedMessage, PersistedToolExecution, SessionType } from './types.js';
+import type { Task, Artifact, PersistedMessage, PersistedToolExecution, SessionType, ProviderId } from './types.js';
 import type {
   ChatItem,
   UserMessageItem,
@@ -35,6 +35,7 @@ interface SessionMetadataV1 {
   version: 1;
   id: string;
   type?: SessionType;
+  provider?: ProviderId;
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -47,6 +48,7 @@ interface SessionMetadataV2 {
   version: 2;
   id: string;
   type?: SessionType;
+  provider?: ProviderId;
   title: string | null;
   workingDirectory: string;
   model: string;
@@ -61,6 +63,7 @@ interface SessionIndex {
   sessions: Array<{
     id: string;
     type?: SessionType;
+    provider?: ProviderId;
     title: string | null;
     firstMessage: string | null;
     workingDirectory: string;
@@ -213,6 +216,7 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
     metadata: {
       ...v1Data.metadata,
       version: 2,
+      provider: v1Data.metadata.provider || 'google',
       // For migrated sessions, set lastAccessedAt to updatedAt
       lastAccessedAt: v1Data.metadata.updatedAt,
     },
@@ -391,6 +395,7 @@ export class SessionPersistence {
         metadata: {
           ...metadata,
           version: 2,
+          provider: metadata.provider || 'google',
           // Backward compat: if lastAccessedAt is missing, use updatedAt
           lastAccessedAt: metadata.lastAccessedAt || metadata.updatedAt,
         },
@@ -471,6 +476,7 @@ export class SessionPersistence {
           version: SCHEMA_VERSION,
           id: data.metadata.id,
           type: data.metadata.type || 'main',
+          provider: data.metadata.provider || 'google',
           title: data.metadata.title,
           workingDirectory: data.metadata.workingDirectory,
           model: data.metadata.model,
@@ -528,6 +534,7 @@ export class SessionPersistence {
         version: 1,
         id: session.id,
         type: session.type,
+        provider: 'google',
         title: session.title,
         workingDirectory: session.workingDirectory,
         model: session.model,
@@ -683,6 +690,7 @@ export class SessionPersistence {
     const entry = {
       id: data.metadata.id,
       type: data.metadata.type || 'main',
+      provider: data.metadata.provider || 'google',
       title: data.metadata.title,
       firstMessage,
       workingDirectory: data.metadata.workingDirectory,
