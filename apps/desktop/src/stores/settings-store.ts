@@ -114,11 +114,15 @@ export interface SpecializedModelsV2 {
     imageGeneration: string;
     videoGeneration: string;
   };
+  fal: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
 }
 
 export interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai';
-  videoBackend: 'google' | 'openai';
+  imageBackend: 'google' | 'openai' | 'fal';
+  videoBackend: 'google' | 'openai' | 'fal';
 }
 
 export type ExternalSearchProvider = 'google' | 'exa' | 'tavily';
@@ -135,6 +139,10 @@ export const DEFAULT_SPECIALIZED_MODELS_V2: SpecializedModelsV2 = {
   openai: {
     imageGeneration: 'gpt-image-1',
     videoGeneration: 'sora',
+  },
+  fal: {
+    imageGeneration: 'fal-ai/flux/schnell',
+    videoGeneration: 'fal-ai/kling-video/v1.6/standard/text-to-video',
   },
 };
 
@@ -343,7 +351,10 @@ interface SettingsActions {
   updateSpecializedModel: (key: keyof SpecializedModels, value: string) => Promise<void>;
   updateSpecializedModelV2: (
     provider: keyof SpecializedModelsV2,
-    key: keyof SpecializedModelsV2['google'] | keyof SpecializedModelsV2['openai'],
+    key:
+      | keyof SpecializedModelsV2['google']
+      | keyof SpecializedModelsV2['openai']
+      | keyof SpecializedModelsV2['fal'],
     value: string
   ) => Promise<void>;
   syncSpecializedModels: () => Promise<void>;
@@ -1103,12 +1114,25 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             };
           }
 
-          const safeKey = key as keyof SpecializedModelsV2['openai'];
+          if (provider === 'openai') {
+            const safeKey = key as keyof SpecializedModelsV2['openai'];
+            return {
+              specializedModelsV2: {
+                ...state.specializedModelsV2,
+                openai: {
+                  ...state.specializedModelsV2.openai,
+                  [safeKey]: trimmed,
+                },
+              },
+            };
+          }
+
+          const safeKey = key as keyof SpecializedModelsV2['fal'];
           return {
             specializedModelsV2: {
               ...state.specializedModelsV2,
-              openai: {
-                ...state.specializedModelsV2.openai,
+              fal: {
+                ...state.specializedModelsV2.fal,
                 [safeKey]: trimmed,
               },
             },
@@ -1399,19 +1423,25 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
               persistedSpecializedV2?.openai?.videoGeneration?.trim() ||
               DEFAULT_SPECIALIZED_MODELS_V2.openai.videoGeneration,
           },
+          fal: {
+            imageGeneration:
+              persistedSpecializedV2?.fal?.imageGeneration?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.fal.imageGeneration,
+            videoGeneration:
+              persistedSpecializedV2?.fal?.videoGeneration?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.fal.videoGeneration,
+          },
         };
 
         const persistedMediaRouting = persisted?.mediaRouting;
         const mediaRoutingCustomized = persisted?.mediaRoutingCustomized ?? false;
         const validMediaRouting: MediaRoutingSettings = {
-          imageBackend:
-            persistedMediaRouting?.imageBackend === 'openai'
-              ? 'openai'
-              : DEFAULT_MEDIA_ROUTING.imageBackend,
-          videoBackend:
-            persistedMediaRouting?.videoBackend === 'openai'
-              ? 'openai'
-              : DEFAULT_MEDIA_ROUTING.videoBackend,
+          imageBackend: ['google', 'openai', 'fal'].includes(String(persistedMediaRouting?.imageBackend))
+            ? (persistedMediaRouting?.imageBackend as MediaRoutingSettings['imageBackend'])
+            : DEFAULT_MEDIA_ROUTING.imageBackend,
+          videoBackend: ['google', 'openai', 'fal'].includes(String(persistedMediaRouting?.videoBackend))
+            ? (persistedMediaRouting?.videoBackend as MediaRoutingSettings['videoBackend'])
+            : DEFAULT_MEDIA_ROUTING.videoBackend,
         };
         const autoMediaRouting: MediaRoutingSettings =
           validActiveProvider === 'openai'

@@ -5,6 +5,7 @@ const LEGACY_API_KEY_ACCOUNT: &str = "api_key";
 const STITCH_API_KEY_ACCOUNT: &str = "stitch_api_key";
 const GOOGLE_API_KEY_ACCOUNT: &str = "google_api_key";
 const OPENAI_API_KEY_ACCOUNT: &str = "openai_api_key";
+const FAL_API_KEY_ACCOUNT: &str = "fal_api_key";
 const EXA_API_KEY_ACCOUNT: &str = "exa_api_key";
 const TAVILY_API_KEY_ACCOUNT: &str = "tavily_api_key";
 
@@ -575,6 +576,38 @@ pub async fn delete_openai_api_key() -> Result<(), String> {
     credentials::credentials_delete(
         API_KEY_SERVICE.to_string(),
         OPENAI_API_KEY_ACCOUNT.to_string(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_fal_api_key() -> Result<Option<String>, String> {
+    credentials::credentials_get(
+        API_KEY_SERVICE.to_string(),
+        FAL_API_KEY_ACCOUNT.to_string(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn set_fal_api_key(api_key: String) -> Result<(), String> {
+    if api_key.trim().is_empty() {
+        return Err("Fal API key cannot be empty".to_string());
+    }
+
+    credentials::credentials_set(
+        API_KEY_SERVICE.to_string(),
+        FAL_API_KEY_ACCOUNT.to_string(),
+        api_key.trim().to_string(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn delete_fal_api_key() -> Result<(), String> {
+    credentials::credentials_delete(
+        API_KEY_SERVICE.to_string(),
+        FAL_API_KEY_ACCOUNT.to_string(),
     )
     .await
 }

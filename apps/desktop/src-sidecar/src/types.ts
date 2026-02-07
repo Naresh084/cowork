@@ -241,8 +241,8 @@ export type ProviderId =
   | 'lmstudio';
 
 export interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai';
-  videoBackend: 'google' | 'openai';
+  imageBackend: 'google' | 'openai' | 'fal';
+  videoBackend: 'google' | 'openai' | 'fal';
 }
 
 export interface SpecializedModelsV2 {
@@ -256,6 +256,10 @@ export interface SpecializedModelsV2 {
     imageGeneration: string;
     videoGeneration: string;
   };
+  fal: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
 }
 
 export interface RuntimeConfig {
@@ -264,6 +268,7 @@ export interface RuntimeConfig {
   providerBaseUrls?: Partial<Record<ProviderId, string>>;
   googleApiKey?: string | null;
   openaiApiKey?: string | null;
+  falApiKey?: string | null;
   exaApiKey?: string | null;
   tavilyApiKey?: string | null;
   externalSearchProvider?: 'google' | 'exa' | 'tavily';

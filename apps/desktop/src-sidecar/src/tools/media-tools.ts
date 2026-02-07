@@ -53,8 +53,8 @@ interface SpecializedMediaModels {
 }
 
 interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai';
-  videoBackend: 'google' | 'openai';
+  imageBackend: 'google' | 'openai' | 'fal';
+  videoBackend: 'google' | 'openai' | 'fal';
 }
 
 function normalizeOpenAIBaseUrl(baseUrl?: string): string {
@@ -63,10 +63,275 @@ function normalizeOpenAIBaseUrl(baseUrl?: string): string {
   return `${trimmed}/v1`;
 }
 
+function normalizeFalModelPath(modelId: string): string {
+  return modelId.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+function buildFalQueueUrl(modelId: string): string {
+  return `https://queue.fal.run/${normalizeFalModelPath(modelId)}`;
+}
+
+function normalizeBase64Payload(
+  value: string,
+  fallbackMimeType: string,
+): { base64: string; mimeType: string } {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^data:(.+);base64,(.+)$/);
+  if (match) {
+    return {
+      mimeType: match[1] || fallbackMimeType,
+      base64: match[2] || '',
+    };
+  }
+  return { base64: trimmed, mimeType: fallbackMimeType };
+}
+
+function extractFalImageCandidates(payload: unknown): Array<{ url?: string; base64?: string; mimeType?: string }> {
+  if (!payload || typeof payload !== 'object') return [];
+  const obj = payload as Record<string, unknown>;
+  const sources = [
+    obj,
+    obj.data as Record<string, unknown> | undefined,
+    obj.output as Record<string, unknown> | undefined,
+    obj.result as Record<string, unknown> | undefined,
+    obj.response as Record<string, unknown> | undefined,
+  ].filter(Boolean) as Array<Record<string, unknown>>;
+
+  const items: Array<{ url?: string; base64?: string; mimeType?: string }> = [];
+  for (const source of sources) {
+    const fromArray = (arr: unknown) => {
+      if (!Array.isArray(arr)) return;
+      for (const row of arr) {
+        if (!row || typeof row !== 'object') continue;
+        const r = row as Record<string, unknown>;
+        const url = typeof r.url === 'string' ? r.url : undefined;
+        const base64 =
+          typeof r.base64 === 'string'
+            ? r.base64
+            : typeof r.b64_json === 'string'
+              ? r.b64_json
+              : typeof r.image_base64 === 'string'
+                ? r.image_base64
+                : undefined;
+        const mimeType =
+          typeof r.content_type === 'string'
+            ? r.content_type
+            : typeof r.mime_type === 'string'
+              ? r.mime_type
+              : undefined;
+        if (url || base64) {
+          items.push({ url, base64, mimeType });
+        }
+      }
+    };
+
+    fromArray(source.images);
+    fromArray(source.outputs);
+    fromArray(source.results);
+
+    const image = source.image;
+    if (typeof image === 'string' && image.startsWith('http')) {
+      items.push({ url: image });
+    } else if (image && typeof image === 'object') {
+      const r = image as Record<string, unknown>;
+      const url = typeof r.url === 'string' ? r.url : undefined;
+      const base64 =
+        typeof r.base64 === 'string'
+          ? r.base64
+          : typeof r.b64_json === 'string'
+            ? r.b64_json
+            : undefined;
+      const mimeType =
+        typeof r.content_type === 'string'
+          ? r.content_type
+          : typeof r.mime_type === 'string'
+            ? r.mime_type
+            : undefined;
+      if (url || base64) {
+        items.push({ url, base64, mimeType });
+      }
+    }
+  }
+
+  return items;
+}
+
+function extractFalVideoCandidates(payload: unknown): Array<{ url?: string; base64?: string; mimeType?: string }> {
+  if (!payload || typeof payload !== 'object') return [];
+  const obj = payload as Record<string, unknown>;
+  const sources = [
+    obj,
+    obj.data as Record<string, unknown> | undefined,
+    obj.output as Record<string, unknown> | undefined,
+    obj.result as Record<string, unknown> | undefined,
+    obj.response as Record<string, unknown> | undefined,
+  ].filter(Boolean) as Array<Record<string, unknown>>;
+
+  const items: Array<{ url?: string; base64?: string; mimeType?: string }> = [];
+  for (const source of sources) {
+    const fromArray = (arr: unknown) => {
+      if (!Array.isArray(arr)) return;
+      for (const row of arr) {
+        if (!row || typeof row !== 'object') continue;
+        const r = row as Record<string, unknown>;
+        const url = typeof r.url === 'string' ? r.url : undefined;
+        const base64 =
+          typeof r.base64 === 'string'
+            ? r.base64
+            : typeof r.b64_json === 'string'
+              ? r.b64_json
+              : typeof r.video_base64 === 'string'
+                ? r.video_base64
+                : undefined;
+        const mimeType =
+          typeof r.content_type === 'string'
+            ? r.content_type
+            : typeof r.mime_type === 'string'
+              ? r.mime_type
+              : undefined;
+        if (url || base64) {
+          items.push({ url, base64, mimeType });
+        }
+      }
+    };
+
+    fromArray(source.videos);
+    fromArray(source.outputs);
+    fromArray(source.results);
+
+    const video = source.video;
+    if (typeof video === 'string' && video.startsWith('http')) {
+      items.push({ url: video, mimeType: 'video/mp4' });
+    } else if (video && typeof video === 'object') {
+      const r = video as Record<string, unknown>;
+      const url = typeof r.url === 'string' ? r.url : undefined;
+      const base64 =
+        typeof r.base64 === 'string'
+          ? r.base64
+          : typeof r.b64_json === 'string'
+            ? r.b64_json
+            : undefined;
+      const mimeType =
+        typeof r.content_type === 'string'
+          ? r.content_type
+          : typeof r.mime_type === 'string'
+            ? r.mime_type
+            : 'video/mp4';
+      if (url || base64) {
+        items.push({ url, base64, mimeType });
+      }
+    }
+  }
+
+  return items;
+}
+
+async function runFalQueue(
+  apiKey: string,
+  modelId: string,
+  input: Record<string, unknown>,
+  timeoutMs = 180_000,
+): Promise<Record<string, unknown>> {
+  const queueUrl = buildFalQueueUrl(modelId);
+  const submitRes = await fetch(queueUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Key ${apiKey}`,
+    },
+    body: JSON.stringify(input),
+  });
+
+  const submitText = await submitRes.text();
+  if (!submitRes.ok) {
+    throw new Error(`Fal request failed (${submitRes.status}): ${submitText}`);
+  }
+
+  const submitJson = (submitText ? JSON.parse(submitText) : {}) as Record<string, unknown>;
+  if (submitJson && (submitJson.images || submitJson.videos || submitJson.video || submitJson.image)) {
+    return submitJson;
+  }
+
+  const requestId =
+    typeof submitJson.request_id === 'string'
+      ? submitJson.request_id
+      : typeof submitJson.id === 'string'
+        ? submitJson.id
+        : '';
+  const responseUrl =
+    typeof submitJson.response_url === 'string'
+      ? submitJson.response_url
+      : requestId
+        ? `${queueUrl}/requests/${requestId}`
+        : '';
+  const statusUrl =
+    typeof submitJson.status_url === 'string'
+      ? submitJson.status_url
+      : requestId
+        ? `${queueUrl}/requests/${requestId}/status`
+        : '';
+
+  if (!responseUrl && !statusUrl) {
+    return submitJson;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    let statusPayload: Record<string, unknown> | null = null;
+    if (statusUrl) {
+      const statusRes = await fetch(statusUrl, {
+        headers: { Authorization: `Key ${apiKey}` },
+      });
+      const statusText = await statusRes.text();
+      if (!statusRes.ok) {
+        throw new Error(`Fal status failed (${statusRes.status}): ${statusText}`);
+      }
+      statusPayload = (statusText ? JSON.parse(statusText) : {}) as Record<string, unknown>;
+      const statusValue = String(statusPayload.status || statusPayload.state || '').toLowerCase();
+      if (statusValue.includes('fail') || statusValue.includes('error') || statusValue.includes('cancel')) {
+        const err = statusPayload.error;
+        throw new Error(`Fal generation failed: ${typeof err === 'string' ? err : statusValue || 'unknown error'}`);
+      }
+      if (
+        statusPayload.response ||
+        statusPayload.result ||
+        statusPayload.images ||
+        statusPayload.videos ||
+        statusValue === 'completed' ||
+        statusValue === 'succeeded' ||
+        statusValue === 'done'
+      ) {
+        if (!responseUrl) return statusPayload;
+        const responseRes = await fetch(responseUrl, {
+          headers: { Authorization: `Key ${apiKey}` },
+        });
+        const responseText = await responseRes.text();
+        if (!responseRes.ok) {
+          throw new Error(`Fal response failed (${responseRes.status}): ${responseText}`);
+        }
+        return (responseText ? JSON.parse(responseText) : {}) as Record<string, unknown>;
+      }
+    } else if (responseUrl) {
+      const responseRes = await fetch(responseUrl, {
+        headers: { Authorization: `Key ${apiKey}` },
+      });
+      if (responseRes.ok) {
+        const responseText = await responseRes.text();
+        return (responseText ? JSON.parse(responseText) : {}) as Record<string, unknown>;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+
+  throw new Error('Fal generation timed out.');
+}
+
 export function createMediaTools(
   getProviderApiKey: (provider: 'google' | 'openai') => string | null,
   getGoogleApiKey: () => string | null,
   getOpenAIApiKey: () => string | null,
+  getFalApiKey: () => string | null,
   getOpenAIBaseUrl: () => string | undefined,
   getMediaRouting: () => MediaRoutingSettings,
   getSpecializedModels: () => SpecializedMediaModels,
@@ -77,10 +342,11 @@ export function createMediaTools(
 
   const resolveGoogleKey = () => getGoogleApiKey() || getProviderApiKey('google');
   const resolveOpenAIKey = () => getOpenAIApiKey() || getProviderApiKey('openai');
+  const resolveFalKey = () => getFalApiKey();
 
   const generateImageTool: ToolHandler = {
     name: 'generate_image',
-    description: 'Generate an image from a prompt. Backend is selected in settings (Google/OpenAI).',
+    description: 'Generate an image from a prompt. Backend is selected in settings (Google/OpenAI/Fal).',
     parameters: z.object({
       prompt: z.string().describe('Prompt describing the image'),
       model: z.string().optional().describe('Image generation model id'),
@@ -101,6 +367,62 @@ export function createMediaTools(
 
       const backend = resolveImageBackend();
       const modelId = model || getSpecializedModels().imageGeneration;
+
+      if (backend === 'fal') {
+        const apiKey = resolveFalKey();
+        if (!apiKey) {
+          return { success: false, error: 'Fal API key not set. Configure Fal API key in Media settings.' };
+        }
+
+        const falResult = await runFalQueue(apiKey, modelId, {
+          prompt,
+          num_images: numberOfImages ?? 1,
+          image_size: imageSize || size,
+          aspect_ratio: aspectRatio,
+        });
+
+        const outputs = extractFalImageCandidates(falResult);
+        if (outputs.length === 0) {
+          return {
+            success: false,
+            error: 'Fal returned no image outputs. Check model compatibility and inputs.',
+          };
+        }
+
+        const files = [];
+        for (const output of outputs.slice(0, numberOfImages ?? 1)) {
+          if (output.base64) {
+            const normalized = normalizeBase64Payload(output.base64, output.mimeType || 'image/png');
+            const filePath = await saveGeneratedFile(
+              context.appDataDir,
+              context.sessionId,
+              normalized.base64,
+              normalized.mimeType,
+              'image',
+            );
+            files.push({
+              path: filePath,
+              mimeType: normalized.mimeType,
+              data: normalized.base64,
+            });
+          } else if (output.url) {
+            files.push({
+              mimeType: output.mimeType || 'image/png',
+              url: output.url,
+            });
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            prompt,
+            backend: 'fal',
+            model: modelId,
+            images: files,
+          },
+        };
+      }
 
       if (backend === 'openai') {
         const apiKey = resolveOpenAIKey();
@@ -236,6 +558,64 @@ export function createMediaTools(
       const backend = resolveImageBackend();
       const modelId = model || getSpecializedModels().imageGeneration;
 
+      if (backend === 'fal') {
+        const apiKey = resolveFalKey();
+        if (!apiKey) {
+          return { success: false, error: 'Fal API key not set. Configure Fal API key in Media settings.' };
+        }
+
+        const dataUrl = `data:${imageMimeType || 'image/png'};base64,${image}`;
+        const falResult = await runFalQueue(apiKey, modelId, {
+          prompt,
+          image_url: dataUrl,
+          image: dataUrl,
+          image_base64: image,
+          num_images: numberOfImages ?? 1,
+        });
+
+        const outputs = extractFalImageCandidates(falResult);
+        if (outputs.length === 0) {
+          return {
+            success: false,
+            error: 'Fal returned no edited image outputs. Check model compatibility and inputs.',
+          };
+        }
+
+        const files = [];
+        for (const output of outputs.slice(0, numberOfImages ?? 1)) {
+          if (output.base64) {
+            const normalized = normalizeBase64Payload(output.base64, output.mimeType || 'image/png');
+            const filePath = await saveGeneratedFile(
+              context.appDataDir,
+              context.sessionId,
+              normalized.base64,
+              normalized.mimeType,
+              'image-edit',
+            );
+            files.push({
+              path: filePath,
+              mimeType: normalized.mimeType,
+              data: normalized.base64,
+            });
+          } else if (output.url) {
+            files.push({
+              mimeType: output.mimeType || 'image/png',
+              url: output.url,
+            });
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            prompt,
+            backend: 'fal',
+            model: modelId,
+            images: files,
+          },
+        };
+      }
+
       if (backend === 'openai') {
         const apiKey = resolveOpenAIKey();
         if (!apiKey) {
@@ -359,7 +739,7 @@ export function createMediaTools(
 
   const generateVideoTool: ToolHandler = {
     name: 'generate_video',
-    description: 'Generate a video from a prompt. Backend is selected in settings (Google/OpenAI).',
+    description: 'Generate a video from a prompt. Backend is selected in settings (Google/OpenAI/Fal).',
     parameters: z.object({
       prompt: z.string().describe('Prompt describing the video'),
       model: z.string().optional().describe('Video generation model id'),
@@ -380,6 +760,63 @@ export function createMediaTools(
 
       const backend = resolveVideoBackend();
       const modelId = model || getSpecializedModels().videoGeneration;
+
+      if (backend === 'fal') {
+        const apiKey = resolveFalKey();
+        if (!apiKey) {
+          return { success: false, error: 'Fal API key not set. Configure Fal API key in Media settings.' };
+        }
+
+        const falResult = await runFalQueue(apiKey, modelId, {
+          prompt,
+          num_videos: numberOfVideos ?? 1,
+          duration: durationSeconds,
+          duration_seconds: durationSeconds,
+          aspect_ratio: aspectRatio,
+          resolution,
+        });
+
+        const outputs = extractFalVideoCandidates(falResult);
+        if (outputs.length === 0) {
+          return {
+            success: false,
+            error: 'Fal returned no video outputs. Check model compatibility and inputs.',
+          };
+        }
+
+        const videos = [];
+        for (const output of outputs.slice(0, numberOfVideos ?? 1)) {
+          if (output.base64) {
+            const normalized = normalizeBase64Payload(output.base64, output.mimeType || 'video/mp4');
+            const filePath = await saveGeneratedFile(
+              context.appDataDir,
+              context.sessionId,
+              normalized.base64,
+              normalized.mimeType,
+              'video',
+            );
+            videos.push({
+              path: filePath,
+              mimeType: normalized.mimeType,
+            });
+          } else if (output.url) {
+            videos.push({
+              mimeType: output.mimeType || 'video/mp4',
+              url: output.url,
+            });
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            prompt,
+            backend: 'fal',
+            model: modelId,
+            videos,
+          },
+        };
+      }
 
       if (backend === 'openai') {
         const apiKey = resolveOpenAIKey();
@@ -571,7 +1008,10 @@ export function createMediaTools(
         return { success: false, error: 'Unable to load video data for analysis.' };
       }
 
-      const backend = resolveVideoBackend();
+      const configuredBackend = resolveVideoBackend();
+      const backend = configuredBackend === 'fal'
+        ? (resolveOpenAIKey() ? 'openai' : 'google')
+        : configuredBackend;
       const modelId = model || getSessionModel() || (backend === 'openai' ? 'gpt-4.1' : 'gemini-2.5-pro');
 
       if (backend === 'openai') {

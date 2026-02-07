@@ -55,12 +55,13 @@ export interface RuntimeConfigPayload {
   providerBaseUrls?: Partial<Record<ProviderId, string>>;
   googleApiKey?: string | null;
   openaiApiKey?: string | null;
+  falApiKey?: string | null;
   exaApiKey?: string | null;
   tavilyApiKey?: string | null;
   externalSearchProvider?: 'google' | 'exa' | 'tavily';
   mediaRouting?: {
-    imageBackend: 'google' | 'openai';
-    videoBackend: 'google' | 'openai';
+    imageBackend: 'google' | 'openai' | 'fal';
+    videoBackend: 'google' | 'openai' | 'fal';
   };
   specializedModels?: {
     google: {
@@ -70,6 +71,10 @@ export interface RuntimeConfigPayload {
       deepResearchAgent: string;
     };
     openai: {
+      imageGeneration: string;
+      videoGeneration: string;
+    };
+    fal: {
       imageGeneration: string;
       videoGeneration: string;
     };
@@ -91,6 +96,7 @@ interface AuthState {
   providerBaseUrls: Partial<Record<ProviderId, string>>;
   googleApiKey: string | null;
   openaiApiKey: string | null;
+  falApiKey: string | null;
   exaApiKey: string | null;
   tavilyApiKey: string | null;
   stitchApiKey: string | null;
@@ -109,6 +115,8 @@ interface AuthActions {
   clearGoogleApiKey: () => Promise<void>;
   setOpenAIApiKey: (apiKey: string) => Promise<void>;
   clearOpenAIApiKey: () => Promise<void>;
+  setFalApiKey: (apiKey: string) => Promise<void>;
+  clearFalApiKey: () => Promise<void>;
   setExaApiKey: (apiKey: string) => Promise<void>;
   clearExaApiKey: () => Promise<void>;
   setTavilyApiKey: (apiKey: string) => Promise<void>;
@@ -143,6 +151,7 @@ function buildRuntimeConfig(
     providerBaseUrls,
     googleApiKey: partial?.googleApiKey ?? state.googleApiKey,
     openaiApiKey: partial?.openaiApiKey ?? state.openaiApiKey,
+    falApiKey: partial?.falApiKey ?? state.falApiKey,
     exaApiKey: partial?.exaApiKey ?? state.exaApiKey,
     tavilyApiKey: partial?.tavilyApiKey ?? state.tavilyApiKey,
     externalSearchProvider: partial?.externalSearchProvider,
@@ -159,6 +168,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
   providerBaseUrls: {},
   googleApiKey: null,
   openaiApiKey: null,
+  falApiKey: null,
   exaApiKey: null,
   tavilyApiKey: null,
   stitchApiKey: null,
@@ -182,9 +192,10 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         return acc;
       }, {});
 
-      const [googleApiKey, openaiApiKey, exaApiKey, tavilyApiKey, stitchApiKey] = await Promise.all([
+      const [googleApiKey, openaiApiKey, falApiKey, exaApiKey, tavilyApiKey, stitchApiKey] = await Promise.all([
         invoke<string | null>('get_google_api_key'),
         invoke<string | null>('get_openai_api_key'),
+        invoke<string | null>('get_fal_api_key'),
         invoke<string | null>('get_exa_api_key'),
         invoke<string | null>('get_tavily_api_key'),
         invoke<string | null>('get_stitch_api_key'),
@@ -205,6 +216,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         providerBaseUrls: mergedBaseUrls,
         googleApiKey: googleApiKey || null,
         openaiApiKey: openaiApiKey || null,
+        falApiKey: falApiKey || null,
         exaApiKey: exaApiKey || null,
         tavilyApiKey: tavilyApiKey || null,
         stitchApiKey: stitchApiKey || null,
@@ -223,6 +235,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         providerApiKeys: {},
         googleApiKey: null,
         openaiApiKey: null,
+        falApiKey: null,
         exaApiKey: null,
         tavilyApiKey: null,
         stitchApiKey: null,
@@ -362,6 +375,38 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
       const invoke = await getTauriInvoke();
       await invoke('delete_openai_api_key');
       set({ openaiApiKey: null, isLoading: false });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+
+  setFalApiKey: async (apiKey) => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) return;
+    set({ isLoading: true, error: null });
+    try {
+      const invoke = await getTauriInvoke();
+      await invoke('set_fal_api_key', { apiKey: trimmed });
+      set({ falApiKey: trimmed, isLoading: false });
+    } catch (error) {
+      set({
+        isLoading: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+
+  clearFalApiKey: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const invoke = await getTauriInvoke();
+      await invoke('delete_fal_api_key');
+      set({ falApiKey: null, isLoading: false });
     } catch (error) {
       set({
         isLoading: false,

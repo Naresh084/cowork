@@ -168,11 +168,15 @@ interface SpecializedModelsV2Local {
     imageGeneration: string;
     videoGeneration: string;
   };
+  fal: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
 }
 
 interface MediaRoutingSettingsLocal {
-  imageBackend: 'google' | 'openai';
-  videoBackend: 'google' | 'openai';
+  imageBackend: 'google' | 'openai' | 'fal';
+  videoBackend: 'google' | 'openai' | 'fal';
 }
 
 interface RuntimeConfigState {
@@ -181,6 +185,7 @@ interface RuntimeConfigState {
   providerBaseUrls: Partial<Record<ProviderId, string>>;
   googleApiKey: string | null;
   openaiApiKey: string | null;
+  falApiKey: string | null;
   exaApiKey: string | null;
   tavilyApiKey: string | null;
   externalSearchProvider: 'google' | 'exa' | 'tavily';
@@ -198,6 +203,10 @@ const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
   openai: {
     imageGeneration: 'gpt-image-1',
     videoGeneration: 'sora',
+  },
+  fal: {
+    imageGeneration: 'fal-ai/flux/schnell',
+    videoGeneration: 'fal-ai/kling-video/v1.6/standard/text-to-video',
   },
 };
 
@@ -274,6 +283,7 @@ export class AgentRunner {
     providerBaseUrls: {},
     googleApiKey: null,
     openaiApiKey: null,
+    falApiKey: null,
     exaApiKey: null,
     tavilyApiKey: null,
     externalSearchProvider: 'google',
@@ -281,6 +291,7 @@ export class AgentRunner {
     specializedModels: {
       google: { ...DEFAULT_SPECIALIZED_MODELS.google },
       openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
+      fal: { ...DEFAULT_SPECIALIZED_MODELS.fal },
     },
   };
   private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
@@ -1082,6 +1093,10 @@ export class AgentRunner {
         ...this.runtimeConfig.specializedModels.openai,
         ...(config.specializedModels?.openai || {}),
       },
+      fal: {
+        ...this.runtimeConfig.specializedModels.fal,
+        ...(config.specializedModels?.fal || {}),
+      },
     };
 
     const providerChanged = prevProvider !== nextProvider;
@@ -1102,6 +1117,7 @@ export class AgentRunner {
       providerBaseUrls: nextProviderBaseUrls,
       googleApiKey: config.googleApiKey ?? this.runtimeConfig.googleApiKey,
       openaiApiKey: config.openaiApiKey ?? this.runtimeConfig.openaiApiKey,
+      falApiKey: config.falApiKey ?? this.runtimeConfig.falApiKey,
       exaApiKey: config.exaApiKey ?? this.runtimeConfig.exaApiKey,
       tavilyApiKey: config.tavilyApiKey ?? this.runtimeConfig.tavilyApiKey,
       externalSearchProvider:
@@ -1354,6 +1370,9 @@ export class AgentRunner {
     if (backend === 'openai') {
       return this.runtimeConfig.specializedModels.openai.imageGeneration;
     }
+    if (backend === 'fal') {
+      return this.runtimeConfig.specializedModels.fal.imageGeneration;
+    }
     return this.runtimeConfig.specializedModels.google.imageGeneration;
   }
 
@@ -1364,6 +1383,9 @@ export class AgentRunner {
     const backend = this.runtimeConfig.mediaRouting.videoBackend;
     if (backend === 'openai') {
       return this.runtimeConfig.specializedModels.openai.videoGeneration;
+    }
+    if (backend === 'fal') {
+      return this.runtimeConfig.specializedModels.fal.videoGeneration;
     }
     return this.runtimeConfig.specializedModels.google.videoGeneration;
   }
@@ -1428,6 +1450,11 @@ export class AgentRunner {
 
   getOpenAIApiKey(): string | null {
     return this.runtimeConfig.openaiApiKey?.trim() || this.getProviderApiKey('openai');
+  }
+
+  getFalApiKey(): string | null {
+    const key = this.runtimeConfig.falApiKey?.trim();
+    return key || null;
   }
 
   getExaApiKey(): string | null {
@@ -3557,6 +3584,7 @@ ${stitchGuidance}
   private buildToolHandlers(session: ActiveSession): ToolHandler[] {
     const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
     const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
+    const falCapabilityKey = this.getFalApiKey();
     const mediaRouting = this.getMediaRoutingSettings();
     const externalSearchProvider = this.getExternalSearchProvider();
     const hasConfiguredExternalSearch =
@@ -3580,11 +3608,16 @@ ${stitchGuidance}
     const hasImageMediaKey =
       mediaRouting.imageBackend === 'google'
         ? Boolean(googleCapabilityKey)
-        : Boolean(openAICapabilityKey);
+        : mediaRouting.imageBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
     const hasVideoMediaKey =
       mediaRouting.videoBackend === 'google'
         ? Boolean(googleCapabilityKey)
-        : Boolean(openAICapabilityKey);
+        : mediaRouting.videoBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
+    const hasAnalyzeVideoKey = Boolean(openAICapabilityKey) || Boolean(googleCapabilityKey);
 
     const hasComputerUseKey =
       session.provider === 'google'
@@ -3624,6 +3657,7 @@ ${stitchGuidance}
       (provider) => this.getProviderApiKey(provider),
       () => this.getGoogleApiKey(),
       () => this.getOpenAIApiKey(),
+      () => this.getFalApiKey(),
       () => this.getProviderBaseUrl('openai'),
       () => this.getMediaRoutingSettings(),
       () => ({
@@ -3635,8 +3669,11 @@ ${stitchGuidance}
       if (tool.name === 'generate_image' || tool.name === 'edit_image') {
         return hasImageMediaKey;
       }
-      if (tool.name === 'generate_video' || tool.name === 'analyze_video') {
+      if (tool.name === 'generate_video') {
         return hasVideoMediaKey;
+      }
+      if (tool.name === 'analyze_video') {
+        return hasAnalyzeVideoKey;
       }
       return true;
     });
