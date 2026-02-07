@@ -42,6 +42,7 @@ import type {
   MemoryGetRelevantParams,
   MemoryGroupCreateParams,
   MemoryGroupDeleteParams,
+  RuntimeConfig,
   // AGENTS.md params
   AgentsMdLoadParams,
   AgentsMdGenerateParams,
@@ -192,8 +193,19 @@ registerHandler('is_ready', async () => {
 registerHandler('create_session', async (params) => {
   const p = params as unknown as CreateSessionParams;
   if (!p.workingDirectory) throw new Error('workingDirectory is required');
-  const session = await agentRunner.createSession(p.workingDirectory, p.model, p.title, p.type);
+  const session = await agentRunner.createSession(
+    p.workingDirectory,
+    p.model,
+    p.title,
+    p.type,
+    p.provider,
+  );
   return session;
+});
+
+registerHandler('set_runtime_config', async (params) => {
+  const config = (params as { config?: RuntimeConfig }).config || (params as unknown as RuntimeConfig);
+  return agentRunner.setRuntimeConfig(config);
 });
 
 // Send message
@@ -305,6 +317,7 @@ registerHandler('set_specialized_models', async (params) => {
       imageGeneration: string;
       videoGeneration: string;
       computerUse: string;
+      deepResearchAgent?: string;
     };
   };
   if (!p.models) throw new Error('models are required');

@@ -30,7 +30,7 @@ import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel, fetchGeminiModels, setMod
 // ============================================================================
 
 export class GeminiProvider implements AIProvider {
-  readonly id = 'gemini' as const;
+  readonly id = 'google' as const;
   readonly name = 'Google Gemini';
 
   private client: GoogleGenerativeAI | null = null;
@@ -441,7 +441,7 @@ export class GeminiProvider implements AIProvider {
       }
 
       if (message.includes('quota') || message.includes('rate limit')) {
-        return ProviderError.rateLimit('gemini');
+        return ProviderError.rateLimit('google');
       }
 
       if (message.includes('model') && message.includes('not found')) {
@@ -449,13 +449,13 @@ export class GeminiProvider implements AIProvider {
         // Stop at colon to avoid capturing ":generateContent" from API URLs
         const modelMatch = error.message.match(/models\/([\w.-]+)/);
         const actualModel = modelMatch?.[1] || modelId || 'unknown';
-        return ProviderError.modelNotFound('gemini', actualModel);
+        return ProviderError.modelNotFound('google', actualModel);
       }
 
-      return ProviderError.requestFailed('gemini', 500, error.message);
+      return ProviderError.requestFailed('google', 500, error.message);
     }
 
-    return ProviderError.requestFailed('gemini', 500, String(error));
+    return ProviderError.requestFailed('google', 500, String(error));
   }
 
   private extractGroundingMetadata(response: unknown): {
@@ -505,4 +505,10 @@ export class GeminiProvider implements AIProvider {
  */
 export function createGeminiProvider(config: ProviderConfig): GeminiProvider {
   return new GeminiProvider(config);
+}
+
+export class GoogleProvider extends GeminiProvider {}
+
+export function createGoogleProvider(config: ProviderConfig): GoogleProvider {
+  return new GoogleProvider(config);
 }

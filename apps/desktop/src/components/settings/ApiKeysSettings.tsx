@@ -1,8 +1,27 @@
 import { useMemo, useState } from 'react';
 import { Check, Copy, Eye, EyeOff, Key, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuthStore } from '@/stores/auth-store';
+import {
+  BASE_URL_EDITABLE_PROVIDERS,
+  PROVIDERS,
+  useAuthStore,
+  type ProviderId,
+} from '@/stores/auth-store';
+import { useSettingsStore } from '@/stores/settings-store';
 import { toast } from '@/components/ui/Toast';
+
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  google: 'Google',
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  moonshot: 'Moonshot (Kimi)',
+  glm: 'GLM',
+  deepseek: 'DeepSeek',
+  lmstudio: 'LM Studio',
+};
+
+const EXTERNAL_SEARCH_PROVIDERS: ProviderId[] = ['openrouter', 'deepseek', 'lmstudio'];
 
 function maskKey(value: string | null): string {
   if (!value) return 'Not configured';
@@ -20,15 +39,7 @@ interface KeyCardProps {
   onClear: () => Promise<void>;
 }
 
-function KeyCard({
-  title,
-  description,
-  value,
-  placeholder,
-  isSaving,
-  onSave,
-  onClear,
-}: KeyCardProps) {
+function KeyCard({ title, description, value, placeholder, isSaving, onSave, onClear }: KeyCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showValue, setShowValue] = useState(false);
   const [draft, setDraft] = useState('');
@@ -47,10 +58,7 @@ function KeyCard({
       setDraft('');
       toast.success(`${title} saved`);
     } catch (error) {
-      toast.error(
-        `Failed to save ${title}`,
-        error instanceof Error ? error.message : String(error),
-      );
+      toast.error(`Failed to save ${title}`, error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -60,10 +68,7 @@ function KeyCard({
       await navigator.clipboard.writeText(value);
       toast.success(`${title} copied`);
     } catch (error) {
-      toast.error(
-        `Failed to copy ${title}`,
-        error instanceof Error ? error.message : String(error),
-      );
+      toast.error(`Failed to copy ${title}`, error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -74,10 +79,7 @@ function KeyCard({
       setDraft('');
       toast.success(`${title} removed`);
     } catch (error) {
-      toast.error(
-        `Failed to remove ${title}`,
-        error instanceof Error ? error.message : String(error),
-      );
+      toast.error(`Failed to remove ${title}`, error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -100,7 +102,7 @@ function KeyCard({
               'bg-[#0B0C10] border border-white/[0.08]',
               'text-white/90 placeholder:text-white/30',
               'focus:outline-none focus:border-[#1D4ED8]/50',
-              'font-mono'
+              'font-mono',
             )}
           />
           <div className="flex gap-2">
@@ -112,7 +114,7 @@ function KeyCard({
                 'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
                 isSaving || !draft.trim()
                   ? 'bg-white/[0.06] text-white/30 cursor-not-allowed'
-                  : 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]'
+                  : 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]',
               )}
             >
               <Check className="w-4 h-4" />
@@ -174,7 +176,7 @@ function KeyCard({
                   'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors',
                   isSaving
                     ? 'bg-[#FF5449]/10 text-[#FF5449]/40 cursor-not-allowed'
-                    : 'bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20'
+                    : 'bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20',
                 )}
               >
                 <Trash2 className="w-4 h-4" />
@@ -190,40 +192,275 @@ function KeyCard({
 
 export function ApiKeysSettings() {
   const {
-    apiKey,
+    activeProvider,
+    providerApiKeys,
+    providerBaseUrls,
+    googleApiKey,
+    openaiApiKey,
+    exaApiKey,
+    tavilyApiKey,
     stitchApiKey,
     isLoading,
-    setApiKey,
-    clearApiKey,
+    setProviderApiKey,
+    clearProviderApiKey,
+    setGoogleApiKey,
+    clearGoogleApiKey,
+    setOpenAIApiKey,
+    clearOpenAIApiKey,
+    setExaApiKey,
+    clearExaApiKey,
+    setTavilyApiKey,
+    clearTavilyApiKey,
     setStitchApiKey,
     clearStitchApiKey,
+    validateProviderConnection,
+    applyRuntimeConfig,
   } = useAuthStore();
+  const {
+    setActiveProvider: setProviderInSettings,
+    setProviderBaseUrl,
+    fetchProviderModels,
+    mediaRouting,
+    specializedModelsV2,
+    externalSearchProvider,
+    setExternalSearchProvider,
+  } =
+    useSettingsStore();
+
+  const activeProviderKey = providerApiKeys[activeProvider] || null;
+  const providerBaseUrl = providerBaseUrls[activeProvider] || '';
+  const baseUrlEditable = BASE_URL_EDITABLE_PROVIDERS.includes(activeProvider);
+  const showExternalSearchSettings = EXTERNAL_SEARCH_PROVIDERS.includes(activeProvider);
+
+  const [baseUrlDraft, setBaseUrlDraft] = useState(providerBaseUrl);
+
+  const handleProviderSwitch = async (provider: ProviderId) => {
+    await setProviderInSettings(provider);
+    setBaseUrlDraft(useAuthStore.getState().providerBaseUrls[provider] || '');
+  };
+
+  const handleProviderKeySave = async (value: string) => {
+    const isValid = await validateProviderConnection(activeProvider, value, providerBaseUrls[activeProvider]);
+    if (!isValid) {
+      throw new Error(`Failed to validate ${PROVIDER_LABELS[activeProvider]} connection`);
+    }
+    await setProviderApiKey(activeProvider, value);
+    await fetchProviderModels(activeProvider);
+    await applyRuntimeConfig({
+      activeProvider,
+      providerBaseUrls: providerBaseUrls,
+      externalSearchProvider,
+      mediaRouting,
+      specializedModels: specializedModelsV2,
+    });
+  };
+
+  const handleBaseUrlSave = async () => {
+    await setProviderBaseUrl(activeProvider, baseUrlDraft);
+    await fetchProviderModels(activeProvider);
+  };
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-medium text-white/90">API Credentials</h3>
+        <h3 className="text-sm font-medium text-white/90">Provider & API Credentials</h3>
         <p className="mt-1 text-xs text-white/40">
-          Keys are stored locally in Cowork credentials storage with restrictive file permissions and
-          are only used for runtime API calls.
+          Configure a primary provider key, plus optional Google/OpenAI keys for media/research routing.
         </p>
       </div>
 
+      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
+        <label className="text-xs text-white/55 uppercase tracking-wide">Active provider</label>
+        <select
+          value={activeProvider}
+          onChange={(event) => void handleProviderSwitch(event.target.value as ProviderId)}
+          className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
+        >
+          {PROVIDERS.map((provider) => (
+            <option key={provider} value={provider}>
+              {PROVIDER_LABELS[provider]}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <KeyCard
-        title="Google Gemini API Key"
-        description="Primary key used by Cowork for chat generation, search, media tools, and model execution."
-        value={apiKey}
-        placeholder="Enter your Gemini API key (starts with AI...)"
+        title={`${PROVIDER_LABELS[activeProvider]} Provider Key`}
+        description="Used for chat, tool calls, and provider-native capabilities."
+        value={activeProviderKey}
+        placeholder={`Enter ${PROVIDER_LABELS[activeProvider]} API key`}
         isSaving={isLoading}
-        onSave={setApiKey}
-        onClear={clearApiKey}
+        onSave={handleProviderKeySave}
+        onClear={async () => {
+          await clearProviderApiKey(activeProvider);
+          await applyRuntimeConfig({
+            activeProvider,
+            providerBaseUrls,
+            externalSearchProvider,
+            mediaRouting,
+            specializedModels: specializedModelsV2,
+          });
+        }}
+      />
+
+      {baseUrlEditable ? (
+        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+          <div>
+            <h4 className="text-sm font-medium text-white/90">Provider Base URL</h4>
+            <p className="mt-1 text-xs text-white/45">
+              Override API base URL for compatible endpoints.
+            </p>
+          </div>
+          <input
+            type="text"
+            value={baseUrlDraft}
+            onChange={(event) => setBaseUrlDraft(event.target.value)}
+            placeholder="https://..."
+            className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
+          />
+          <button
+            type="button"
+            onClick={() => void handleBaseUrlSave()}
+            className="px-3 py-2 rounded-lg text-sm bg-[#1D4ED8] text-white hover:bg-[#3B82F6] transition-colors"
+          >
+            Save Base URL
+          </button>
+        </div>
+      ) : null}
+
+      <KeyCard
+        title="Google API Key"
+        description="Used for Google image/video generation, deep research, and computer use."
+        value={googleApiKey}
+        placeholder="Enter Google API key"
+        isSaving={isLoading}
+        onSave={async (value) => {
+          await setGoogleApiKey(value);
+          await applyRuntimeConfig({
+            mediaRouting,
+            specializedModels: specializedModelsV2,
+            externalSearchProvider,
+          });
+        }}
+        onClear={async () => {
+          await clearGoogleApiKey();
+          await applyRuntimeConfig({
+            mediaRouting,
+            specializedModels: specializedModelsV2,
+            externalSearchProvider,
+          });
+        }}
       />
 
       <KeyCard
+        title="OpenAI API Key"
+        description="Used for OpenAI image/video generation backend when selected."
+        value={openaiApiKey}
+        placeholder="Enter OpenAI API key"
+        isSaving={isLoading}
+        onSave={async (value) => {
+          await setOpenAIApiKey(value);
+          await applyRuntimeConfig({
+            mediaRouting,
+            specializedModels: specializedModelsV2,
+            externalSearchProvider,
+          });
+        }}
+        onClear={async () => {
+          await clearOpenAIApiKey();
+          await applyRuntimeConfig({
+            mediaRouting,
+            specializedModels: specializedModelsV2,
+            externalSearchProvider,
+          });
+        }}
+      />
+
+      {showExternalSearchSettings ? (
+        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+          <div>
+            <h4 className="text-sm font-medium text-white/90">External Web Search Fallback</h4>
+            <p className="mt-1 text-xs text-white/45">
+              Used for providers without native search support (OpenRouter, DeepSeek, LM Studio).
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-white/55 uppercase tracking-wide">Fallback provider</label>
+            <select
+              value={externalSearchProvider}
+              onChange={(event) => void setExternalSearchProvider(event.target.value as 'google' | 'exa' | 'tavily')}
+              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
+            >
+              <option value="google">Google</option>
+              <option value="exa">Exa</option>
+              <option value="tavily">Tavily</option>
+            </select>
+          </div>
+
+          {externalSearchProvider === 'exa' ? (
+            <KeyCard
+              title="Exa API Key"
+              description="Used by web_search fallback when Exa is selected."
+              value={exaApiKey}
+              placeholder="Enter Exa API key"
+              isSaving={isLoading}
+              onSave={async (value) => {
+                await setExaApiKey(value);
+                await applyRuntimeConfig({
+                  exaApiKey: value,
+                  externalSearchProvider,
+                  mediaRouting,
+                  specializedModels: specializedModelsV2,
+                });
+              }}
+              onClear={async () => {
+                await clearExaApiKey();
+                await applyRuntimeConfig({
+                  exaApiKey: null,
+                  externalSearchProvider,
+                  mediaRouting,
+                  specializedModels: specializedModelsV2,
+                });
+              }}
+            />
+          ) : null}
+
+          {externalSearchProvider === 'tavily' ? (
+            <KeyCard
+              title="Tavily API Key"
+              description="Used by web_search fallback when Tavily is selected."
+              value={tavilyApiKey}
+              placeholder="Enter Tavily API key"
+              isSaving={isLoading}
+              onSave={async (value) => {
+                await setTavilyApiKey(value);
+                await applyRuntimeConfig({
+                  tavilyApiKey: value,
+                  externalSearchProvider,
+                  mediaRouting,
+                  specializedModels: specializedModelsV2,
+                });
+              }}
+              onClear={async () => {
+                await clearTavilyApiKey();
+                await applyRuntimeConfig({
+                  tavilyApiKey: null,
+                  externalSearchProvider,
+                  mediaRouting,
+                  specializedModels: specializedModelsV2,
+                });
+              }}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      <KeyCard
         title="Stitch MCP API Key"
-        description="Used only for Stitch MCP servers/tools. Stitch tools are loaded only when this key is configured."
+        description="Used only for Stitch MCP servers/tools."
         value={stitchApiKey}
-        placeholder="Enter your Stitch MCP API key"
+        placeholder="Enter Stitch MCP API key"
         isSaving={isLoading}
         onSave={setStitchApiKey}
         onClear={clearStitchApiKey}
@@ -231,8 +468,8 @@ export function ApiKeysSettings() {
 
       <div className="p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
         <p className="text-xs text-[#93C5FD]">
-          If Stitch MCP tools are configured via Gemini extensions, Cowork injects this key at runtime and
-          only enables Stitch tools when the key is present.
+          Runtime changes apply immediately when possible. If provider/base URL/model changes affect existing sessions,
+          start a new session to pick up the new runtime client safely.
         </p>
       </div>
     </div>

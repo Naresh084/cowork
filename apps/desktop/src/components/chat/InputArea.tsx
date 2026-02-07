@@ -86,7 +86,9 @@ export function InputArea({
     selectedModel,
     availableModels,
     modelsLoading,
-    updateSetting,
+    activeProvider,
+    setSelectedModelForProvider,
+    addCustomModelForProvider,
     defaultWorkingDirectory,
     updateSetting: updateSettings,
   } = useSettingsStore();
@@ -137,35 +139,6 @@ export function InputArea({
     return true;
   }, [userHomeDir]);
 
-  const rankModel = (model: { id: string; name?: string }) => {
-    const id = model.id.toLowerCase();
-    const name = model.name?.toLowerCase() || '';
-    const source = id.includes('gemini') ? id : name;
-    const match = source.match(/gemini-(\\d+)(?:\\.(\\d+))?/);
-    const major = match ? Number(match[1]) : 0;
-    const minor = match && match[2] ? Number(match[2]) : 0;
-    const versionScore = major * 100 + minor * 10;
-    const previewScore = source.includes('preview') ? 5 : 0;
-    const proScore = source.includes('pro') ? 3 : 0;
-    const flashScore = source.includes('flash') ? 2 : 0;
-    return versionScore + previewScore + proScore + flashScore;
-  };
-
-  const extractReleaseDate = (model: { id: string; name?: string }) => {
-    const source = `${model.id} ${model.name ?? ''}`;
-    const dateMatch = source.match(/(20\\d{2})[-_]?([01]\\d)[-_]?([0-3]\\d)/);
-    if (dateMatch) {
-      const [, y, m, d] = dateMatch;
-      return Number(`${y}${m}${d}`);
-    }
-    const monthMatch = source.match(/(20\\d{2})[-_]?([01]\\d)(?!\\d)/);
-    if (monthMatch) {
-      const [, y, m] = monthMatch;
-      return Number(`${y}${m}01`);
-    }
-    return null;
-  };
-
   const formatTokenLimit = (tokens?: number) => {
     if (!tokens || tokens <= 0) return '–';
     if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
@@ -214,15 +187,28 @@ export function InputArea({
   const displayModels = availableModels
     .slice()
     .sort((a, b) => {
-      const dateA = extractReleaseDate(a);
-      const dateB = extractReleaseDate(b);
-      if (dateA && dateB) return dateA - dateB;
-      if (dateA && !dateB) return 1;
-      if (!dateA && dateB) return -1;
-      return rankModel(a) - rankModel(b);
+      const nameA = (a.name || a.id).toLowerCase();
+      const nameB = (b.name || b.id).toLowerCase();
+      return nameA.localeCompare(nameB);
     });
 
-  const currentModel = displayModels.find((m) => m.id === selectedModel) || displayModels[0];
+  const filteredModels = displayModels.filter((model) => {
+    if (!modelSearch.trim()) return true;
+    const q = modelSearch.toLowerCase();
+    return model.name.toLowerCase().includes(q) || model.id.toLowerCase().includes(q);
+  });
+
+  const currentModel =
+    displayModels.find((m) => m.id === selectedModel) ||
+    (selectedModel
+      ? {
+          id: selectedModel,
+          name: selectedModel,
+          description: 'Custom model',
+          inputTokenLimit: 0,
+          outputTokenLimit: 0,
+        }
+      : displayModels[0]);
 
   useEffect(() => {
     if (!modelSelectorOpen) {
@@ -816,7 +802,7 @@ export function InputArea({
                     'text-white/60 hover:text-white/90 hover:bg-white/[0.08]',
                     'text-[10px] transition-colors'
                   )}
-                  disabled={modelsLoading || displayModels.length === 0}
+                  disabled={modelsLoading && displayModels.length === 0}
                 >
                   <BrandMark className="w-3.5 h-3.5" />
                   <span>
@@ -886,17 +872,11 @@ export function InputArea({
                                 No models available. Check your API key.
                               </div>
                             )}
-                            {displayModels
-                              .filter((model) => {
-                                if (!modelSearch.trim()) return true;
-                                const q = modelSearch.toLowerCase();
-                                return model.name.toLowerCase().includes(q) || model.id.toLowerCase().includes(q);
-                              })
-                              .map((model) => (
+                            {filteredModels.map((model) => (
                               <button
                                 key={model.id}
                                 onClick={() => {
-                                  updateSetting('selectedModel', model.id);
+                                  setSelectedModelForProvider(activeProvider, model.id);
                                   setModelSelectorOpen(false);
                                 }}
                                 className={cn(
@@ -920,13 +900,22 @@ export function InputArea({
                                 </div>
                               </button>
                             ))}
-                            {!modelsLoading && displayModels.length > 0 && modelSearch.trim() &&
-                              displayModels.filter((m) => {
-                                const q = modelSearch.toLowerCase();
-                                return m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
-                              }).length === 0 && (
-                              <div className="px-3 py-2 text-xs text-white/40">
-                                No models match "{modelSearch}"
+                            {!modelsLoading && displayModels.length > 0 && modelSearch.trim() && filteredModels.length === 0 && (
+                              <div className="space-y-2 px-2 py-2">
+                                <div className="px-1 text-xs text-white/40">No models match "{modelSearch}"</div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const custom = modelSearch.trim();
+                                    if (!custom) return;
+                                    addCustomModelForProvider(activeProvider, custom);
+                                    setSelectedModelForProvider(activeProvider, custom);
+                                    setModelSelectorOpen(false);
+                                  }}
+                                  className="w-full rounded-lg border border-[#1D4ED8]/35 bg-[#1D4ED8]/10 px-3 py-2 text-left text-xs text-[#93C5FD] hover:bg-[#1D4ED8]/20 transition-colors"
+                                >
+                                  Use custom model ID: {modelSearch.trim()}
+                                </button>
                               </div>
                             )}
                           </div>

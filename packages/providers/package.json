@@ -17,7 +17,8 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "refresh:catalogs": "node scripts/refresh-catalogs.mjs"
   },
   "dependencies": {
     "@gemini-cowork/shared": "workspace:*",

@@ -10,7 +10,7 @@ import { z } from 'zod';
 export const ToolGroupSchema = z.enum([
   'group:fs',       // read_file, write_file, edit_file, glob, ls
   'group:shell',    // execute, Bash
-  'group:network',  // fetch, WebFetch, google_grounded_search
+  'group:network',  // fetch, WebFetch, web_fetch, google_grounded_search
   'group:research', // deep_research
   'group:media',    // generate_image, generate_video
   'group:computer', // computer_use
@@ -27,7 +27,7 @@ export type ToolGroup = z.infer<typeof ToolGroupSchema>;
 export const TOOL_GROUP_DEFINITIONS: Record<ToolGroup, string[]> = {
   'group:fs': ['read_file', 'write_file', 'edit_file', 'glob', 'ls', 'delete_file', 'move_file', 'copy_file'],
   'group:shell': ['execute', 'Bash', 'run_command', 'shell'],
-  'group:network': ['fetch', 'WebFetch', 'http_request', 'google_grounded_search', 'web_search'],
+  'group:network': ['fetch', 'WebFetch', 'web_fetch', 'http_request', 'google_grounded_search', 'web_search'],
   'group:research': ['deep_research', 'research'],
   'group:media': ['generate_image', 'generate_video', 'text_to_speech', 'speech_to_text'],
   'group:computer': ['computer_use', 'screenshot', 'mouse_click', 'keyboard_type'],
@@ -64,11 +64,11 @@ export const TOOL_PROFILES: Record<ToolProfile, { allow: string[]; deny: string[
     deny: ['group:shell', 'group:network', 'group:media', 'write_file', 'edit_file', 'delete_file'],
   },
   readonly: {
-    allow: ['group:fs', 'grep', 'google_grounded_search'],
+    allow: ['group:fs', 'grep', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['write_file', 'edit_file', 'delete_file', 'execute', 'group:media'],
   },
   coding: {
-    allow: ['group:fs', 'group:tasks', 'grep', 'google_grounded_search'],
+    allow: ['group:fs', 'group:tasks', 'grep', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['group:media', 'deep_research'],
   },
   messaging: {
@@ -76,7 +76,7 @@ export const TOOL_PROFILES: Record<ToolProfile, { allow: string[]; deny: string[
     deny: ['group:shell', 'group:media', 'write_file', 'edit_file', 'delete_file'],
   },
   research: {
-    allow: ['group:network', 'group:fs', 'deep_research', 'google_grounded_search'],
+    allow: ['group:network', 'group:fs', 'deep_research', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['group:shell', 'group:media', 'write_file', 'edit_file', 'delete_file'],
   },
   full: {

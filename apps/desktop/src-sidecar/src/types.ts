@@ -33,6 +33,7 @@ export interface IPCEvent {
 export interface CreateSessionParams {
   workingDirectory: string;
   model?: string;
+  provider?: ProviderId;
   title?: string;
   type?: SessionType;
 }
@@ -61,6 +62,7 @@ export interface SetModelsParams {
     id: string;
     name?: string;
     description?: string;
+    provider?: ProviderId;
     inputTokenLimit?: number;
     outputTokenLimit?: number;
   }>;
@@ -209,6 +211,7 @@ export interface AgentsMdUpdateSectionParams {
 export interface SessionInfo {
   id: string;
   type: SessionType;
+  provider: ProviderId;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -225,6 +228,54 @@ export interface SessionDetails extends SessionInfo {
   tasks: Task[];
   artifacts: Artifact[];
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
+}
+
+export type ProviderId =
+  | 'google'
+  | 'openai'
+  | 'anthropic'
+  | 'openrouter'
+  | 'moonshot'
+  | 'glm'
+  | 'deepseek'
+  | 'lmstudio';
+
+export interface MediaRoutingSettings {
+  imageBackend: 'google' | 'openai';
+  videoBackend: 'google' | 'openai';
+}
+
+export interface SpecializedModelsV2 {
+  google: {
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  };
+  openai: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
+}
+
+export interface RuntimeConfig {
+  activeProvider: ProviderId;
+  providerApiKeys?: Partial<Record<ProviderId, string>>;
+  providerBaseUrls?: Partial<Record<ProviderId, string>>;
+  googleApiKey?: string | null;
+  openaiApiKey?: string | null;
+  exaApiKey?: string | null;
+  tavilyApiKey?: string | null;
+  externalSearchProvider?: 'google' | 'exa' | 'tavily';
+  mediaRouting?: MediaRoutingSettings;
+  specializedModels?: SpecializedModelsV2;
+}
+
+export interface RuntimeConfigUpdateResult {
+  appliedImmediately: boolean;
+  requiresNewSession: boolean;
+  reasons: string[];
+  affectedSessionIds: string[];
 }
 
 export interface Attachment {

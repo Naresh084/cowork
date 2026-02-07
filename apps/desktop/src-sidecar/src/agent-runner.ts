@@ -1,5 +1,9 @@
 import type { ToolHandler, ToolContext } from '@gemini-cowork/core';
-import { GeminiProvider, getModelContextWindow, setModelContextWindows } from '@gemini-cowork/providers';
+import {
+  createProvider,
+  getModelContextWindow,
+  setModelContextWindows,
+} from '@gemini-cowork/providers';
 import type { Message, PermissionRequest, PermissionDecision, MessageContentPart, SessionType } from '@gemini-cowork/shared';
 import { generateId, generateMessageId, now, generateChatItemId } from '@gemini-cowork/shared';
 import type {
@@ -52,10 +56,14 @@ import type {
   ExtendedPermissionRequest,
   QuestionRequest,
   SkillConfig,
+  ProviderId,
+  RuntimeConfig,
+  RuntimeConfigUpdateResult,
 } from './types.js';
 import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
 import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
 import { HumanMessage } from '@langchain/core/messages';
+import { ChatOpenAI } from '@langchain/openai';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -83,7 +91,9 @@ interface QueuedMessage {
 interface ActiveSession {
   id: string;
   type: SessionType;
+  provider: ProviderId;
   workingDirectory: string;
+  baseUrlSnapshot?: string;
   model: string;
   title: string | null;
   approvalMode: ApprovalMode;
@@ -147,18 +157,82 @@ interface ActiveSession {
   lastAccessedAt: number;
 }
 
-// Specialized models configuration
-interface SpecializedModels {
-  imageGeneration: string;
-  videoGeneration: string;
-  computerUse: string;
+interface SpecializedModelsV2Local {
+  google: {
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  };
+  openai: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
 }
 
-const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
-  imageGeneration: 'imagen-4.0-generate-001',
-  videoGeneration: 'veo-3.1-generate-preview',
-  computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+interface MediaRoutingSettingsLocal {
+  imageBackend: 'google' | 'openai';
+  videoBackend: 'google' | 'openai';
+}
+
+interface RuntimeConfigState {
+  activeProvider: ProviderId;
+  providerApiKeys: Partial<Record<ProviderId, string>>;
+  providerBaseUrls: Partial<Record<ProviderId, string>>;
+  googleApiKey: string | null;
+  openaiApiKey: string | null;
+  exaApiKey: string | null;
+  tavilyApiKey: string | null;
+  externalSearchProvider: 'google' | 'exa' | 'tavily';
+  mediaRouting: MediaRoutingSettingsLocal;
+  specializedModels: SpecializedModelsV2Local;
+}
+
+const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
+  google: {
+    imageGeneration: 'imagen-4.0-generate-001',
+    videoGeneration: 'veo-3.1-generate-preview',
+    computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+    deepResearchAgent: 'deep-research-pro-preview-12-2025',
+  },
+  openai: {
+    imageGeneration: 'gpt-image-1',
+    videoGeneration: 'sora',
+  },
 };
+
+const DEFAULT_MEDIA_ROUTING: MediaRoutingSettingsLocal = {
+  imageBackend: 'google',
+  videoBackend: 'google',
+};
+
+const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ProviderId, string>> = {
+  google: 'https://generativelanguage.googleapis.com',
+  openai: 'https://api.openai.com',
+  anthropic: 'https://api.anthropic.com',
+  openrouter: 'https://openrouter.ai/api',
+  moonshot: 'https://api.moonshot.ai',
+  glm: 'https://open.bigmodel.cn/api/paas',
+  deepseek: 'https://api.deepseek.com',
+  lmstudio: 'http://127.0.0.1:1234',
+};
+
+function normalizeProvider(provider: ProviderId | string): ProviderId {
+  if (provider === 'gemini') return 'google';
+  switch (provider) {
+    case 'google':
+    case 'openai':
+    case 'anthropic':
+    case 'openrouter':
+    case 'moonshot':
+    case 'glm':
+    case 'deepseek':
+    case 'lmstudio':
+      return provider;
+    default:
+      return 'google';
+  }
+}
 
 interface MCPServerConfigInput {
   id: string;
@@ -194,15 +268,27 @@ interface ManagedMCPToolMeta {
 
 export class AgentRunner {
   private sessions: Map<string, ActiveSession> = new Map();
-  private provider: GeminiProvider | null = null;
-  private apiKey: string | null = null;
+  private runtimeConfig: RuntimeConfigState = {
+    activeProvider: 'google',
+    providerApiKeys: {},
+    providerBaseUrls: {},
+    googleApiKey: null,
+    openaiApiKey: null,
+    exaApiKey: null,
+    tavilyApiKey: null,
+    externalSearchProvider: 'google',
+    mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
+    specializedModels: {
+      google: { ...DEFAULT_SPECIALIZED_MODELS.google },
+      openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
+    },
+  };
   private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
   private skills: SkillConfig[] = [];
   private enabledSkillIds: Set<string> = new Set();
   private persistence: SessionPersistence | null = null;
   private currentTurnInfo: Map<string, { turnMessageId: string; toolIds: string[] }> = new Map();
   private isInitialized = false;
-  private specializedModels: SpecializedModels = { ...DEFAULT_SPECIALIZED_MODELS };
   private stitchApiKey: string | null = null;
   private mcpManager: MCPClientManager = new MCPClientManager();
   private mcpServerConfigs: MCPServerConfigInput[] = [];
@@ -413,7 +499,11 @@ export class AgentRunner {
     const session: ActiveSession = {
       id: data.metadata.id,
       type: (data.metadata as { type?: SessionType }).type || 'main',
+      provider: (data.metadata as { provider?: ProviderId }).provider || 'google',
       workingDirectory: data.metadata.workingDirectory,
+      baseUrlSnapshot: this.getProviderBaseUrl(
+        ((data.metadata as { provider?: ProviderId }).provider || 'google') as ProviderId,
+      ),
       model: data.metadata.model,
       title: data.metadata.title,
       approvalMode: data.metadata.approvalMode,
@@ -541,23 +631,34 @@ export class AgentRunner {
 
   /**
    * Convert our MessageContentPart[] to LangChain-compatible content format.
-   * Our types (image, audio, video, file) don't match LangChain's expected formats,
-   * causing "Unknown content type" errors in @langchain/google-genai.
-   *
+   * For non-Google providers, only pass content types supported by OpenAI-compatible chat paths.
    * For parts with filePath but no data, reads the file back from disk.
    */
-  private async toLangChainContentParts(parts: MessageContentPart[]): Promise<any[]> {
+  private async toLangChainContentParts(
+    parts: MessageContentPart[],
+    provider: ProviderId,
+  ): Promise<any[]> {
     const result: any[] = [];
+    const notes: string[] = [];
+    const supportsBinaryMediaParts = provider === 'google';
+
+    const readPartData = async (
+      candidate: { data?: string; filePath?: string },
+    ): Promise<string | undefined> => {
+      if (candidate.data) return candidate.data;
+      if (candidate.filePath && this.persistence) {
+        return this.persistence.readAttachmentAsBase64(candidate.filePath);
+      }
+      return undefined;
+    };
+
     for (const part of parts) {
       switch (part.type) {
         case 'text':
           result.push({ type: 'text', text: part.text });
           break;
         case 'image': {
-          let data = part.data;
-          if (!data && (part as any).filePath && this.persistence) {
-            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
-          }
+          const data = await readPartData(part);
           if (data) {
             result.push({
               type: 'image_url',
@@ -567,32 +668,41 @@ export class AgentRunner {
           break;
         }
         case 'audio': {
-          let data = part.data;
-          if (!data && (part as any).filePath && this.persistence) {
-            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
-          }
+          const data = await readPartData(part);
           if (data) {
-            result.push({ type: 'media', mimeType: part.mimeType, data });
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[Audio attachment captured (${part.mimeType}). Inline audio parts are not supported for ${provider} chat in this path.]`,
+              );
+            }
           }
           break;
         }
         case 'video': {
-          let data = part.data;
-          if (!data && (part as any).filePath && this.persistence) {
-            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
-          }
+          const data = await readPartData(part);
           if (data) {
-            result.push({ type: 'media', mimeType: part.mimeType, data });
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[Video attachment captured (${part.mimeType}). Use the analyze_video tool for detailed video analysis.]`,
+              );
+            }
           }
           break;
         }
         case 'file': {
-          let data = part.data;
-          if (!data && (part as any).filePath && this.persistence) {
-            data = await this.persistence.readAttachmentAsBase64((part as any).filePath);
-          }
+          const data = await readPartData(part);
           if (data && part.mimeType) {
-            result.push({ type: 'media', mimeType: part.mimeType, data });
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[File attachment captured (${part.name}${part.mimeType ? `, ${part.mimeType}` : ''}). Inline binary file parts are not supported for ${provider} chat in this path.]`,
+              );
+            }
           } else {
             result.push({ type: 'text', text: `File: ${part.name}` });
           }
@@ -603,6 +713,11 @@ export class AgentRunner {
           break;
       }
     }
+
+    if (notes.length > 0) {
+      result.push({ type: 'text', text: notes.join('\n') });
+    }
+
     return result;
   }
 
@@ -928,16 +1043,93 @@ export class AgentRunner {
 
 
   /**
-   * Initialize the provider with API key.
+   * Backward-compatible API key setter.
+   * Sets the Google provider key and activates Google.
    */
   setApiKey(apiKey: string): void {
-    this.apiKey = apiKey;
-    this.provider = new GeminiProvider({
-      credentials: {
-        type: 'api_key',
-        apiKey,
+    const normalized = apiKey.trim();
+    this.runtimeConfig.activeProvider = 'google';
+    this.runtimeConfig.providerApiKeys.google = normalized;
+    this.runtimeConfig.googleApiKey = normalized;
+  }
+
+  setRuntimeConfig(config: RuntimeConfig): RuntimeConfigUpdateResult {
+    const reasons: string[] = [];
+    const affectedSessionIds: string[] = [];
+    const prevProvider = this.runtimeConfig.activeProvider;
+    const nextProvider = normalizeProvider(config.activeProvider || prevProvider);
+
+    const nextProviderApiKeys = {
+      ...this.runtimeConfig.providerApiKeys,
+      ...(config.providerApiKeys || {}),
+    };
+    const nextProviderBaseUrls = {
+      ...this.runtimeConfig.providerBaseUrls,
+      ...(config.providerBaseUrls || {}),
+    };
+
+    const nextMediaRouting: MediaRoutingSettingsLocal = {
+      ...this.runtimeConfig.mediaRouting,
+      ...(config.mediaRouting || {}),
+    };
+
+    const nextSpecializedModels: SpecializedModelsV2Local = {
+      google: {
+        ...this.runtimeConfig.specializedModels.google,
+        ...(config.specializedModels?.google || {}),
       },
-    });
+      openai: {
+        ...this.runtimeConfig.specializedModels.openai,
+        ...(config.specializedModels?.openai || {}),
+      },
+    };
+
+    const providerChanged = prevProvider !== nextProvider;
+    if (providerChanged) {
+      reasons.push('provider_changed');
+    }
+
+    const activeProviderBaseChanged =
+      (nextProviderBaseUrls[nextProvider] || '') !==
+      (this.runtimeConfig.providerBaseUrls[nextProvider] || '');
+    if (activeProviderBaseChanged) {
+      reasons.push('base_url_changed');
+    }
+
+    this.runtimeConfig = {
+      activeProvider: nextProvider,
+      providerApiKeys: nextProviderApiKeys,
+      providerBaseUrls: nextProviderBaseUrls,
+      googleApiKey: config.googleApiKey ?? this.runtimeConfig.googleApiKey,
+      openaiApiKey: config.openaiApiKey ?? this.runtimeConfig.openaiApiKey,
+      exaApiKey: config.exaApiKey ?? this.runtimeConfig.exaApiKey,
+      tavilyApiKey: config.tavilyApiKey ?? this.runtimeConfig.tavilyApiKey,
+      externalSearchProvider:
+        config.externalSearchProvider ?? this.runtimeConfig.externalSearchProvider,
+      mediaRouting: nextMediaRouting,
+      specializedModels: nextSpecializedModels,
+    };
+
+    if (providerChanged || activeProviderBaseChanged) {
+      for (const session of this.sessions.values()) {
+        if (session.provider !== nextProvider || activeProviderBaseChanged) {
+          affectedSessionIds.push(session.id);
+        }
+      }
+    }
+
+    // Hot-apply key/capability changes by rebuilding agents in-place when
+    // no provider/base-url compatibility boundary is crossed.
+    if (reasons.length === 0) {
+      void this.rebuildAllSessionAgents();
+    }
+
+    return {
+      appliedImmediately: reasons.length === 0,
+      requiresNewSession: reasons.length > 0,
+      reasons,
+      affectedSessionIds,
+    };
   }
 
   async setStitchApiKey(apiKey: string | null): Promise<void> {
@@ -1005,7 +1197,7 @@ export class AgentRunner {
   }
 
   private async rebuildAllSessionAgents(): Promise<void> {
-    if (!this.apiKey) return;
+    if (!this.isReady()) return;
 
     for (const session of this.sessions.values()) {
       const toolHandlers = this.buildToolHandlers(session);
@@ -1140,38 +1332,133 @@ export class AgentRunner {
 
   /**
    * Set specialized models for image/video generation and computer use.
+   * Backward-compatible (Google fields only).
    */
-  setSpecializedModels(models: Partial<SpecializedModels>): void {
-    this.specializedModels = { ...this.specializedModels, ...models };
+  setSpecializedModels(models: Partial<{
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  }>): void {
+    this.runtimeConfig.specializedModels.google = {
+      ...this.runtimeConfig.specializedModels.google,
+      ...models,
+    };
   }
 
   /**
    * Get the image generation model.
    */
   getImageGenerationModel(): string {
-    return this.specializedModels.imageGeneration;
+    const backend = this.runtimeConfig.mediaRouting.imageBackend;
+    if (backend === 'openai') {
+      return this.runtimeConfig.specializedModels.openai.imageGeneration;
+    }
+    return this.runtimeConfig.specializedModels.google.imageGeneration;
   }
 
   /**
    * Get the video generation model.
    */
   getVideoGenerationModel(): string {
-    return this.specializedModels.videoGeneration;
+    const backend = this.runtimeConfig.mediaRouting.videoBackend;
+    if (backend === 'openai') {
+      return this.runtimeConfig.specializedModels.openai.videoGeneration;
+    }
+    return this.runtimeConfig.specializedModels.google.videoGeneration;
   }
 
   /**
    * Get the computer use model.
    */
   getComputerUseModel(): string {
-    return this.specializedModels.computerUse;
+    return this.runtimeConfig.specializedModels.google.computerUse;
+  }
+
+  getDeepResearchModel(): string {
+    return this.runtimeConfig.specializedModels.google.deepResearchAgent;
+  }
+
+  getMediaRoutingSettings(): MediaRoutingSettingsLocal {
+    return { ...this.runtimeConfig.mediaRouting };
+  }
+
+  getProviderApiKey(provider: ProviderId): string | null {
+    const key = this.runtimeConfig.providerApiKeys[provider];
+    return key && key.trim() ? key.trim() : null;
+  }
+
+  getProviderBaseUrl(provider: ProviderId): string | undefined {
+    const configured = this.runtimeConfig.providerBaseUrls[provider]?.trim();
+    if (configured) return configured;
+    return PROVIDER_DEFAULT_BASE_URLS[provider];
+  }
+
+  private toOpenAICompatibleBaseUrl(
+    provider: ProviderId,
+    baseUrl?: string,
+  ): string | undefined {
+    if (!baseUrl) return undefined;
+    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    if (!trimmed) return undefined;
+
+    if (provider === 'openrouter') {
+      if (trimmed.endsWith('/v1') || trimmed.endsWith('/api/v1')) return trimmed;
+      return `${trimmed}/v1`;
+    }
+
+    if (
+      provider === 'openai' ||
+      provider === 'moonshot' ||
+      provider === 'glm' ||
+      provider === 'deepseek' ||
+      provider === 'lmstudio'
+    ) {
+      return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+    }
+
+    // Anthropic does not have OpenAI-compatible chat endpoints by default.
+    // Keep user-configured URL untouched for custom compatibility proxies.
+    return trimmed;
+  }
+
+  getGoogleApiKey(): string | null {
+    return this.runtimeConfig.googleApiKey?.trim() || this.getProviderApiKey('google');
+  }
+
+  getOpenAIApiKey(): string | null {
+    return this.runtimeConfig.openaiApiKey?.trim() || this.getProviderApiKey('openai');
+  }
+
+  getExaApiKey(): string | null {
+    const key = this.runtimeConfig.exaApiKey?.trim();
+    return key || null;
+  }
+
+  getTavilyApiKey(): string | null {
+    const key = this.runtimeConfig.tavilyApiKey?.trim();
+    return key || null;
+  }
+
+  getExternalSearchProvider(): 'google' | 'exa' | 'tavily' {
+    return this.runtimeConfig.externalSearchProvider || 'google';
+  }
+
+  private getSessionProviderKey(session: ActiveSession): string | null {
+    if (session.provider === 'lmstudio') {
+      return this.getProviderApiKey('lmstudio') || 'lm-studio';
+    }
+    return this.getProviderApiKey(session.provider);
   }
 
   /**
    * Check if provider is ready.
    */
   isReady(): boolean {
-    // Provider is ready if it's initialized (has API key set)
-    return this.provider !== null;
+    if (this.runtimeConfig.activeProvider === 'lmstudio') {
+      return true;
+    }
+    return Boolean(this.getProviderApiKey(this.runtimeConfig.activeProvider));
   }
 
   /**
@@ -1225,10 +1512,13 @@ export class AgentRunner {
     workingDirectory: string,
     model?: string | null,
     title?: string,
-    type: SessionType = 'main'
+    type: SessionType = 'main',
+    provider?: ProviderId | null,
   ): Promise<SessionInfo> {
-    if (!this.provider) {
-      throw new Error('Provider not initialized. Set API key first.');
+    const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
+    const providerKey = this.getProviderApiKey(selectedProvider);
+    if (!providerKey && selectedProvider !== 'lmstudio') {
+      throw new Error(`Provider "${selectedProvider}" not initialized. Set API key first.`);
     }
 
     // Use provided model or fall back to default
@@ -1245,7 +1535,9 @@ export class AgentRunner {
     const session: ActiveSession = {
       id: sessionId,
       type,
+      provider: selectedProvider,
       workingDirectory,
+      baseUrlSnapshot: this.getProviderBaseUrl(selectedProvider),
       model: actualModel,
       title: title || null,
       approvalMode: 'auto',
@@ -1287,6 +1579,7 @@ export class AgentRunner {
     const sessionInfo: SessionInfo = {
       id: sessionId,
       type,
+      provider: selectedProvider,
       title: session.title,
       firstMessage: null,
       workingDirectory,
@@ -1518,10 +1811,10 @@ export class AgentRunner {
     eventEmitter.streamStart(sessionId);
 
     try {
-      // Convert multimodal parts to LangChain-compatible format (image_url, media).
+      // Convert multimodal parts to provider-compatible LangChain content.
       const lcContent = typeof messageContent === 'string'
         ? messageContent
-        : await this.toLangChainContentParts(messageContent as MessageContentPart[]);
+        : await this.toLangChainContentParts(messageContent as MessageContentPart[], session.provider);
       console.error('[MULTIMEDIA] LangChain content types:', Array.isArray(lcContent)
         ? lcContent.map((p: any) => p.type)
         : typeof lcContent);
@@ -2038,6 +2331,7 @@ export class AgentRunner {
         return {
           id: session.id,
           type: session.type,
+          provider: session.provider,
           title: session.title,
           firstMessage,
           workingDirectory: session.workingDirectory,
@@ -2061,7 +2355,7 @@ export class AgentRunner {
     const firstMessage = this.getFirstMessagePreview(session);
 
     // Build context usage from in-memory state
-    const ctxWindow = getModelContextWindow(session.model);
+    const ctxWindow = this.getContextWindow(session.provider, session.model);
     const usedTokens = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
       : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
@@ -2070,6 +2364,7 @@ export class AgentRunner {
     return {
       id: session.id,
       type: session.type,
+      provider: session.provider,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -2154,7 +2449,7 @@ export class AgentRunner {
     if (this.persistence) {
       try {
         // Compute context usage for persistence
-        const ctxWindow = getModelContextWindow(session.model);
+        const ctxWindow = this.getContextWindow(session.provider, session.model);
         const usedTokens = session.lastKnownPromptTokens > 0
           ? session.lastKnownPromptTokens
           : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
@@ -2165,6 +2460,7 @@ export class AgentRunner {
             version: 2,
             id: session.id,
             type: session.type,
+            provider: session.provider,
             title: session.title,
             workingDirectory: session.workingDirectory,
             model: session.model,
@@ -2212,6 +2508,7 @@ export class AgentRunner {
             version: 2,
             id: session.id,
             type: session.type,
+            provider: session.provider,
             title: session.title,
             workingDirectory: session.workingDirectory,
             model: session.model,
@@ -2235,6 +2532,7 @@ export class AgentRunner {
     const sessionInfo: SessionInfo = {
       id: session.id,
       type: session.type,
+      provider: session.provider,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -2267,6 +2565,7 @@ export class AgentRunner {
             version: 2,
             id: session.id,
             type: session.type,
+            provider: session.provider,
             title: session.title,
             workingDirectory: session.workingDirectory,
             model: session.model,
@@ -2314,6 +2613,7 @@ export class AgentRunner {
             version: 2,
             id: session.id,
             type: session.type,
+            provider: session.provider,
             title: session.title,
             workingDirectory: session.workingDirectory,
             model: session.model,
@@ -2337,6 +2637,7 @@ export class AgentRunner {
     const sessionInfo: SessionInfo = {
       id: session.id,
       type: session.type,
+      provider: session.provider,
       title: session.title,
       firstMessage: firstMessageWd,
       workingDirectory: session.workingDirectory,
@@ -2373,7 +2674,7 @@ export class AgentRunner {
   getContextUsage(sessionId: string): { used: number; total: number; percentage: number } {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      const defaultContext = getModelContextWindow('gemini-3-flash-preview');
+      const defaultContext = this.getContextWindow('google', 'gemini-3-flash-preview');
       return { used: 0, total: defaultContext.input, percentage: 0 };
     }
 
@@ -2383,7 +2684,7 @@ export class AgentRunner {
       : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
 
     // Get context window from model configuration
-    const contextWindow = getModelContextWindow(session.model);
+    const contextWindow = this.getContextWindow(session.provider, session.model);
     const total = contextWindow.input;
 
     return {
@@ -2445,7 +2746,10 @@ export class AgentRunner {
     };
   }
 
-  private async buildSystemPrompt(session: ActiveSession): Promise<string> {
+  private async buildSystemPrompt(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<string> {
     const now = new Date();
     const sys = this.getSystemInfo();
     const formattedDate = now.toLocaleDateString('en-US', {
@@ -2459,6 +2763,32 @@ export class AgentRunner {
       minute: '2-digit',
       hour12: true,
     });
+    const toolNames = new Set(toolHandlers.map((tool) => tool.name));
+    const additionalToolLines: string[] = [
+      '- **read_any_file**: Read and analyze ANY file type - text, images, PDFs, video, audio (USE THIS for all file reading)',
+    ];
+    if (toolNames.has('deep_research')) {
+      additionalToolLines.push('- **deep_research**: Extensive autonomous research (5-60 min)');
+    }
+    if (toolNames.has('web_search')) {
+      additionalToolLines.push('- **web_search**: Quick web search with citations');
+    }
+    if (toolNames.has('web_fetch')) {
+      additionalToolLines.push('- **web_fetch**: Fetch and summarize a specific URL');
+    }
+    if (toolNames.has('generate_image') || toolNames.has('edit_image')) {
+      additionalToolLines.push('- **generate_image/edit_image**: Image generation and editing');
+    }
+    if (toolNames.has('generate_video') || toolNames.has('analyze_video')) {
+      additionalToolLines.push('- **generate_video/analyze_video**: Video generation and analysis');
+    }
+    if (toolNames.has('computer_use')) {
+      additionalToolLines.push(
+        '- **computer_use**: Browser automation for web tasks (session-isolated Chrome)',
+      );
+    }
+    const additionalToolsSection = additionalToolLines.join('\n');
+
     let basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
 
 ## Environment
@@ -2634,12 +2964,7 @@ execute({ command: "git status" })
 **Never without request:** Push to remote, run system-wide commands
 
 ## Additional Tools
-- **read_any_file**: Read and analyze ANY file type - text, images, PDFs, video, audio (USE THIS for all file reading)
-- **deep_research**: Extensive autonomous research (5-60 min)
-- **google_grounded_search**: Quick web search with citations
-- **generate_image/edit_image**: Image generation and editing
-- **generate_video/analyze_video**: Video generation and analysis
-- **computer_use**: Browser automation for web tasks (requires Chrome with --remote-debugging-port=9222)
+${additionalToolsSection}
 
 ## Scheduled Tasks with schedule_task
 
@@ -2648,7 +2973,7 @@ You can create automated scheduled tasks that run in the background. Use the \`s
 ### CRITICAL RULES
 1. **ALWAYS create ONE schedule_task** for any repeating request. NEVER create multiple separate tasks.
 2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
-3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use google_grounded_search to search the web").
+3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use web_search to search the web").
 4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
 5. **Notification channel confirmation is required when available**. If at least one messaging integration is connected and the user requests a scheduled task without naming a delivery channel, ask a single clarifying question to pick the channel (WhatsApp/Slack/Telegram) before creating the task.
 
@@ -2704,7 +3029,7 @@ Proactively suggest scheduling when the user:
 \`\`\`
 schedule_task({
   name: "News Updates",
-  prompt: "Use google_grounded_search to find the latest breaking news headlines worldwide. Provide a brief summary of the top 5 stories with their sources and links.",
+  prompt: "Use web_search to find the latest breaking news headlines worldwide. Provide a brief summary of the top 5 stories with their sources and links.",
   schedule: { type: "interval", every: 1 },
   maxRuns: 5
 })
@@ -2745,7 +3070,7 @@ Result: Runs every Monday at 8 AM indefinitely.
 \`\`\`
 schedule_task({
   name: "News to WhatsApp",
-  prompt: "Use google_grounded_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_whatsapp.",
+  prompt: "Use web_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_whatsapp.",
   schedule: { type: "interval", every: 5 }
 })
 \`\`\`
@@ -2755,7 +3080,7 @@ Result: Searches every 5 min, sends results to WhatsApp each time. The cron agen
 \`\`\`
 schedule_task({
   name: "API Health Monitor",
-  prompt: "Use google_grounded_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_slack with the error details. If it's up, just log the status.",
+  prompt: "Use web_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_slack with the error details. If it's up, just log the status.",
   schedule: { type: "interval", every: 5 },
   maxRuns: 12
 })
@@ -2780,7 +3105,7 @@ Result: Runs at 6 PM Monday through Friday.
 \`\`\`
 schedule_task({
   name: "Bitcoin Price Check",
-  prompt: "Use google_grounded_search to find the current Bitcoin (BTC) price in USD. Report the price, 24h change percentage, and any notable market news.",
+  prompt: "Use web_search to find the current Bitcoin (BTC) price in USD. Report the price, 24h change percentage, and any notable market news.",
   schedule: { type: "interval", every: 2 },
   maxRuns: 3
 })
@@ -2801,7 +3126,7 @@ Result: Fires once, 30 minutes from now.
 \`\`\`
 schedule_task({
   name: "Weather Updates",
-  prompt: "Use google_grounded_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_telegram.",
+  prompt: "Use web_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_telegram.",
   schedule: { type: "interval", every: 60 },
   maxRuns: 8
 })
@@ -3120,9 +3445,15 @@ ${stitchGuidance}
   }
 
   private async createDeepAgent(session: ActiveSession, tools: ToolHandler[]): Promise<DeepAgentInstance> {
-    if (!this.apiKey) {
-      throw new Error('API key not set');
+    const providerKey = this.getSessionProviderKey(session);
+    if (!providerKey) {
+      throw new Error(`API key not set for provider ${session.provider}`);
     }
+    const ctxWindow = this.getContextWindow(session.provider, session.model);
+    const glmMaxTokens =
+      session.provider === 'glm' && ctxWindow.output > 0
+        ? Math.min(ctxWindow.output, 131072)
+        : undefined;
 
     // Initialize Deep Agents services for this session
     const memoryService = await this.getMemoryService(session.workingDirectory);
@@ -3133,10 +3464,22 @@ ${stitchGuidance}
     // See: https://github.com/langchain-ai/langchainjs/issues/7434
     // The package throws "Unknown content type thinking" error when enabled
     // Thinking UI remains in place for when support is added
-    const model = new ChatGoogleGenerativeAI({
-      model: session.model,
-      apiKey: this.apiKey,
-    });
+    const model = session.provider === 'google'
+      ? new ChatGoogleGenerativeAI({
+          model: session.model,
+          apiKey: providerKey,
+        })
+      : new ChatOpenAI({
+          model: session.model,
+          apiKey: providerKey,
+          ...(glmMaxTokens ? { maxTokens: glmMaxTokens } : {}),
+          configuration: {
+            baseURL: this.toOpenAICompatibleBaseUrl(
+              session.provider,
+              session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+            ),
+          },
+        });
 
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
 
@@ -3169,7 +3512,7 @@ ${stitchGuidance}
     const agent = createDeepAgentAny({
       model,
       tools: wrappedTools,
-      systemPrompt: await this.buildSystemPrompt(session),
+      systemPrompt: await this.buildSystemPrompt(session, tools),
       middleware: [this.createToolMiddleware(session)],
       recursionLimit: RECURSION_LIMIT,
       skills: skillsParam,
@@ -3212,23 +3555,109 @@ ${stitchGuidance}
   }
 
   private buildToolHandlers(session: ActiveSession): ToolHandler[] {
-    const researchTools = createResearchTools(() => this.apiKey);
-    const computerUseTools = createComputerUseTools(
-      () => this.apiKey,
-      () => this.getComputerUseModel()
-    );
+    const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
+    const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
+    const mediaRouting = this.getMediaRoutingSettings();
+    const externalSearchProvider = this.getExternalSearchProvider();
+    const hasConfiguredExternalSearch =
+      (externalSearchProvider === 'exa' && Boolean(this.getExaApiKey())) ||
+      (externalSearchProvider === 'tavily' && Boolean(this.getTavilyApiKey()));
+    const providersWithNativeWebSearch = new Set<ProviderId>([
+      'google',
+      'openai',
+      'anthropic',
+      'moonshot',
+      'glm',
+    ]);
+    const providerSupportsNativeSearch = providersWithNativeWebSearch.has(session.provider);
+    const hasNativeSearchKey =
+      providerSupportsNativeSearch &&
+      (session.provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : Boolean(this.getSessionProviderKey(session)));
+
+    const hasResearchKey = Boolean(googleCapabilityKey);
+    const hasImageMediaKey =
+      mediaRouting.imageBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : Boolean(openAICapabilityKey);
+    const hasVideoMediaKey =
+      mediaRouting.videoBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : Boolean(openAICapabilityKey);
+
+    const hasComputerUseKey =
+      session.provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : session.provider === 'openai'
+          ? Boolean(this.getProviderApiKey('openai'))
+          : session.provider === 'anthropic'
+            ? Boolean(this.getProviderApiKey('anthropic'))
+            : Boolean(googleCapabilityKey);
+
+    const hasWebSearch =
+      hasNativeSearchKey || hasConfiguredExternalSearch || Boolean(googleCapabilityKey);
+    const hasWebFetch =
+      session.provider === 'anthropic'
+        ? Boolean(this.getProviderApiKey('anthropic'))
+        : session.provider === 'glm'
+          ? Boolean(this.getProviderApiKey('glm')) || Boolean(googleCapabilityKey)
+          : Boolean(googleCapabilityKey);
+
+    const researchTools = hasResearchKey
+      ? createResearchTools(
+          () => this.getGoogleApiKey(),
+          () => this.getDeepResearchModel(),
+        )
+      : [];
+    const computerUseTools = hasComputerUseKey
+      ? createComputerUseTools(
+          () => session.provider,
+          (provider) => this.getProviderApiKey(provider),
+          (provider) => this.getProviderBaseUrl(provider),
+          () => this.getGoogleApiKey(),
+          () => this.getComputerUseModel(),
+          () => session.model,
+        )
+      : [];
     const mediaTools = createMediaTools(
-      () => this.apiKey,
+      (provider) => this.getProviderApiKey(provider),
+      () => this.getGoogleApiKey(),
+      () => this.getOpenAIApiKey(),
+      () => this.getProviderBaseUrl('openai'),
+      () => this.getMediaRoutingSettings(),
       () => ({
         imageGeneration: this.getImageGenerationModel(),
         videoGeneration: this.getVideoGenerationModel(),
       }),
-      () => session.model  // Use session model for video analysis
-    );
+      () => session.model,
+    ).filter((tool) => {
+      if (tool.name === 'generate_image' || tool.name === 'edit_image') {
+        return hasImageMediaKey;
+      }
+      if (tool.name === 'generate_video' || tool.name === 'analyze_video') {
+        return hasVideoMediaKey;
+      }
+      return true;
+    });
     const groundingTools = createGroundingTools(
-      () => this.apiKey,
-      () => session.model  // Use session model for search
-    );
+      () => session.provider,
+      (provider) => this.getProviderApiKey(provider),
+      (provider) => this.getProviderBaseUrl(provider),
+      () => this.getGoogleApiKey(),
+      () => this.getExternalSearchProvider(),
+      () => this.getExaApiKey(),
+      () => this.getTavilyApiKey(),
+      () => session.model,
+    ).filter((tool) => {
+      if (tool.name === 'web_search' || tool.name === 'google_grounded_search') {
+        return hasWebSearch;
+      }
+      if (tool.name === 'web_fetch') {
+        return hasWebFetch;
+      }
+      return true;
+    });
     const mcpTools = this.createMcpTools();
     const connectorTools = this.createConnectorTools(session.id).filter((tool) => {
       const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
@@ -3290,7 +3719,12 @@ ${stitchGuidance}
                 mimeType: result.mimeType,
                 path: result.path,
                 size: result.size,
-                message: 'File content captured for visual analysis. I can now see and analyze this file.',
+                message:
+                  session.provider === 'google' || result.mimeType.startsWith('image/')
+                    ? 'File content captured for visual analysis. I can now see and analyze this file.'
+                    : result.mimeType.startsWith('video/')
+                      ? 'Video captured. For this provider, ask me to use analyze_video for detailed analysis.'
+                      : 'File captured. Inline binary analysis is limited for this provider path.',
               },
             };
           }
@@ -3503,25 +3937,39 @@ ${stitchGuidance}
     return createMiddleware({
       name: 'CoworkToolMiddleware',
       wrapModelCall: async (request, handler) => {
-        // Inject pending multimodal content into messages so Gemini can "see" files
+        // Inject pending multimodal content into messages in a provider-safe format.
         if (session.pendingMultimodalContent?.length) {
+          const supportsBinaryMediaParts = session.provider === 'google';
           const parts: Array<{ type: string; [key: string]: unknown }> = [];
+          const notes: string[] = [];
           for (const mc of session.pendingMultimodalContent) {
             if (mc.type === 'image') {
               parts.push({
                 type: 'image_url',
                 image_url: { url: `data:${mc.mimeType};base64,${mc.data}` },
               });
-            } else {
-              // video, audio, pdf → use 'media' part type for Gemini
+            } else if (supportsBinaryMediaParts) {
               parts.push({ type: 'media', mimeType: mc.mimeType, data: mc.data });
+            } else if (mc.type === 'video') {
+              const videoPath = mc.path ? ` at ${mc.path}` : '';
+              notes.push(
+                `Video attachment captured (${mc.mimeType})${videoPath}. Use analyze_video${mc.path ? ` with videoPath: "${mc.path}"` : ''} for detailed analysis.`,
+              );
+            } else {
+              notes.push(
+                `${mc.type} attachment captured (${mc.mimeType}). Inline binary input is not supported for ${session.provider} in this chat path.`,
+              );
             }
           }
+          const content: Array<{ type: string; [key: string]: unknown }> = [
+            { type: 'text', text: `[Multimodal file content for analysis - ${session.pendingMultimodalContent.length} file(s)]` },
+          ];
+          if (notes.length > 0) {
+            content.push({ type: 'text', text: notes.join('\n') });
+          }
+          content.push(...parts);
           const injectedMsg = new HumanMessage({
-            content: [
-              { type: 'text', text: `[Multimodal file content for analysis - ${session.pendingMultimodalContent.length} file(s)]` },
-              ...parts,
-            ],
+            content,
           });
           request = {
             ...request,
@@ -4385,12 +4833,28 @@ ${stitchGuidance}
     return String(content);
   }
 
+  private getContextWindow(provider: ProviderId, model: string): { input: number; output: number } {
+    if (provider === 'google') {
+      return getModelContextWindow(model);
+    }
+
+    const fromCatalog = this.modelCatalog.find((entry) => entry.id === model);
+    if (fromCatalog?.inputTokenLimit && fromCatalog?.outputTokenLimit) {
+      return {
+        input: fromCatalog.inputTokenLimit,
+        output: fromCatalog.outputTokenLimit,
+      };
+    }
+
+    return { input: 128000, output: 8192 };
+  }
+
   private emitContextUsage(session: ActiveSession): void {
     // Prefer API-reported token count (accurate) over character-based estimation
     const used = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
       : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
-    const contextWindow = getModelContextWindow(session.model);
+    const contextWindow = this.getContextWindow(session.provider, session.model);
     eventEmitter.contextUpdate(session.id, used, contextWindow.input);
 
     // V2: Emit context usage update with percentage
@@ -5164,8 +5628,8 @@ ${stitchGuidance}
   }
 
   private async maybeCompactContext(session: ActiveSession): Promise<void> {
-    if (!this.provider) return;
-    const contextWindow = getModelContextWindow(session.model);
+    if (!this.getSessionProviderKey(session)) return;
+    const contextWindow = this.getContextWindow(session.provider, session.model);
     const messages = this.deriveMessagesFromChatItems(session.chatItems);
     const used = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
@@ -5177,7 +5641,7 @@ ${stitchGuidance}
     if (messages.length <= keepLast + 2) return;
 
     const toSummarize = messages.slice(0, -keepLast);
-    const summary = await this.summarizeMessages(toSummarize, session.model);
+    const summary = await this.summarizeMessages(session, toSummarize, session.model);
     if (!summary) return;
 
     // Create a system_message chatItem with the summary and remove old items
@@ -5202,8 +5666,13 @@ ${stitchGuidance}
     this.emitContextUsage(session);
   }
 
-  private async summarizeMessages(messages: Message[], model: string): Promise<string> {
-    if (!this.provider) return '';
+  private async summarizeMessages(
+    session: ActiveSession,
+    messages: Message[],
+    model: string,
+  ): Promise<string> {
+    const providerKey = this.getSessionProviderKey(session);
+    if (!providerKey) return '';
     const transcript = messages
       .map((msg) => {
         const content = typeof msg.content === 'string'
@@ -5213,7 +5682,30 @@ ${stitchGuidance}
       })
       .join('\n\n');
 
-    const response = await this.provider.generate({
+    const providerFactory = createProvider as unknown as (
+      id: ProviderId,
+      config: {
+        providerId?: ProviderId;
+        baseUrl?: string;
+        credentials: { type: 'api_key'; apiKey: string };
+      },
+    ) => {
+      generate: (request: {
+        model: string;
+        messages: Message[];
+      }) => Promise<{ message: Message }>;
+    };
+
+    const provider = providerFactory(session.provider, {
+      providerId: session.provider,
+      baseUrl: session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+      credentials: {
+        type: 'api_key',
+        apiKey: providerKey,
+      },
+    });
+
+    const response = await provider.generate({
       model,
       messages: [
         {

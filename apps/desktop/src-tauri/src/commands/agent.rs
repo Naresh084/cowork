@@ -10,6 +10,8 @@ pub struct SessionInfo {
     pub id: String,
     #[serde(default)]
     pub r#type: Option<String>,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub title: Option<String>,
     pub working_directory: String,
     pub model: String,
@@ -23,6 +25,8 @@ pub struct SessionSummary {
     pub id: String,
     #[serde(default)]
     pub r#type: Option<String>,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub title: Option<String>,
     pub working_directory: Option<String>,
     pub model: Option<String>,
@@ -38,6 +42,8 @@ pub struct SessionDetails {
     pub id: String,
     #[serde(default)]
     pub r#type: Option<String>,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -60,6 +66,10 @@ pub struct SessionDetails {
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+}
+
+fn default_provider() -> String {
+    "google".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +123,32 @@ pub struct SpecializedModels {
     pub image_generation: String,
     pub video_generation: String,
     pub computer_use: String,
+    #[serde(default)]
+    pub deep_research_agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeConfigPayload {
+    pub active_provider: String,
+    #[serde(default)]
+    pub provider_api_keys: serde_json::Value,
+    #[serde(default)]
+    pub provider_base_urls: serde_json::Value,
+    #[serde(default)]
+    pub google_api_key: Option<String>,
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+    #[serde(default)]
+    pub exa_api_key: Option<String>,
+    #[serde(default)]
+    pub tavily_api_key: Option<String>,
+    #[serde(default)]
+    pub external_search_provider: Option<String>,
+    #[serde(default)]
+    pub media_routing: serde_json::Value,
+    #[serde(default)]
+    pub specialized_models: serde_json::Value,
 }
 
 
@@ -217,6 +253,22 @@ pub async fn agent_set_api_key(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn agent_set_runtime_config(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    config: RuntimeConfigPayload,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "config": config,
+    });
+
+    manager.send_command("set_runtime_config", params).await
+}
+
 /// Set or clear the Stitch MCP API key for the sidecar runtime.
 #[tauri::command]
 pub async fn agent_set_stitch_api_key(
@@ -240,6 +292,7 @@ pub async fn agent_create_session(
     state: State<'_, AgentState>,
     working_directory: String,
     model: Option<String>,
+    provider: Option<String>,
 ) -> Result<SessionInfo, String> {
     ensure_sidecar_started(&app, &state).await?;
 
@@ -247,6 +300,7 @@ pub async fn agent_create_session(
     let params = serde_json::json!({
         "workingDirectory": working_directory,
         "model": model,
+        "provider": provider,
     });
 
     let result = manager.send_command("create_session", params).await?;
@@ -657,6 +711,7 @@ pub async fn agent_set_specialized_models(
             "imageGeneration": models.image_generation,
             "videoGeneration": models.video_generation,
             "computerUse": models.computer_use,
+            "deepResearchAgent": models.deep_research_agent,
         }
     });
     manager.send_command("set_specialized_models", params).await?;

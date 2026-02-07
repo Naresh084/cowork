@@ -5,8 +5,46 @@ import type { Message, ToolDefinition, GenerationConfig, StreamChunk } from '@ge
 // Provider Types
 // ============================================================================
 
-export const ProviderIdSchema = z.enum(['gemini']);
+export const ProviderIdSchema = z.enum([
+  'google',
+  'openai',
+  'anthropic',
+  'openrouter',
+  'moonshot',
+  'glm',
+  'deepseek',
+  'lmstudio',
+  // Backward-compat alias; normalized to `google`.
+  'gemini',
+]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
+
+export const CanonicalProviderIdSchema = z.enum([
+  'google',
+  'openai',
+  'anthropic',
+  'openrouter',
+  'moonshot',
+  'glm',
+  'deepseek',
+  'lmstudio',
+]);
+export type CanonicalProviderId = z.infer<typeof CanonicalProviderIdSchema>;
+
+export const PROVIDER_ALIAS_MAP: Record<string, CanonicalProviderId> = {
+  gemini: 'google',
+};
+
+export function normalizeProviderId(providerId: ProviderId | string): CanonicalProviderId {
+  const normalized = String(providerId).toLowerCase();
+  if (normalized in PROVIDER_ALIAS_MAP) {
+    return PROVIDER_ALIAS_MAP[normalized]!;
+  }
+  if (CanonicalProviderIdSchema.safeParse(normalized).success) {
+    return normalized as CanonicalProviderId;
+  }
+  throw new Error(`Unknown provider: ${providerId}`);
+}
 
 export interface ProviderCredentials {
   type: 'api_key' | 'oauth';
@@ -15,9 +53,34 @@ export interface ProviderCredentials {
 }
 
 export interface ProviderConfig {
+  providerId?: ProviderId;
   credentials: ProviderCredentials;
   baseUrl?: string;
   timeout?: number;
+}
+
+export interface ProviderDefinition {
+  id: CanonicalProviderId;
+  name: string;
+  defaultBaseUrl?: string;
+  baseUrlEditable: boolean;
+  modelApiSupported: boolean;
+  nativeWebSearchSupported: boolean;
+  media: {
+    imageGeneration: boolean;
+    videoGeneration: boolean;
+  };
+}
+
+export interface ProviderConnectionSettings {
+  providerId: CanonicalProviderId;
+  baseUrl?: string;
+  selectedModel: string;
+}
+
+export interface MediaRoutingSettings {
+  imageBackend: 'google' | 'openai';
+  videoBackend: 'google' | 'openai';
 }
 
 // ============================================================================
@@ -28,12 +91,13 @@ export interface ModelInfo {
   id: string;
   name: string;
   description?: string;
-  provider: ProviderId;
+  provider: CanonicalProviderId;
   capabilities: ModelCapability[];
   maxTokens?: number;
   contextWindow?: number;
   inputPricing?: number; // per 1M tokens
   outputPricing?: number; // per 1M tokens
+  metadata?: Record<string, unknown>;
 }
 
 export type ModelCapability =
@@ -43,13 +107,26 @@ export type ModelCapability =
   | 'function_calling'
   | 'streaming'
   | 'thinking'
-  | 'grounding';
+  | 'grounding'
+  | 'web_search'
+  | 'image_generation'
+  | 'video_generation';
+
+export interface ProviderCapabilities {
+  supportsChat: boolean;
+  supportsToolCalling: boolean;
+  supportsNativeWebSearch: boolean;
+  supportsVision: boolean;
+  supportsImageGen: boolean;
+  supportsVideoGen: boolean;
+}
 
 // ============================================================================
 // Request/Response Types
 // ============================================================================
 
 export interface GenerateRequest {
+  providerId?: CanonicalProviderId;
   model: string;
   messages: Message[];
   tools?: ToolDefinition[];
@@ -71,12 +148,17 @@ export interface StreamGenerateRequest extends GenerateRequest {
   onChunk?: (chunk: StreamChunk) => void;
 }
 
+export interface ModelResolutionResult {
+  models: ModelInfo[];
+  source: 'api' | 'curated';
+}
+
 // ============================================================================
 // Provider Interface
 // ============================================================================
 
 export interface AIProvider {
-  readonly id: ProviderId;
+  readonly id: CanonicalProviderId;
   readonly name: string;
 
   /**

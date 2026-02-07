@@ -10,12 +10,14 @@ import { useSkillStore } from './stores/skill-store';
 import { useCommandStore } from './stores/command-store';
 import { useSubagentStore } from './stores/subagent-store';
 import { useCronStore } from './stores/cron-store';
+import type { ProviderId } from './stores/auth-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
-  const { isAuthenticated, initialize, apiKey } = useAuthStore();
+  const { isAuthenticated, initialize, apiKey, activeProvider, applyRuntimeConfig } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
-  const { fetchModels, availableModels, modelsLoading, userName } = useSettingsStore();
+  const { fetchProviderModels, availableModels, modelsLoading, userName } =
+    useSettingsStore();
   const { discoverSkills } = useSkillStore();
   const { discoverCommands } = useCommandStore();
   const { loadSubagents } = useSubagentStore();
@@ -38,10 +40,27 @@ export function App() {
         });
       }
 
+      const hydratedProvider = useSettingsStore.getState().activeProvider;
+      await useAuthStore.getState().setActiveProvider(hydratedProvider);
+      const persistedBaseUrls = useSettingsStore.getState().providerBaseUrls;
+      for (const [provider, baseUrl] of Object.entries(persistedBaseUrls)) {
+        if (!baseUrl) continue;
+        await useAuthStore.getState().setProviderBaseUrl(provider as ProviderId, baseUrl);
+      }
+
       // Initialize auth (reads API key from file storage)
       await initialize().catch((error) => {
         console.error('[App] Initialization error:', error);
       });
+
+      const hydratedSettings = useSettingsStore.getState();
+      await applyRuntimeConfig({
+        activeProvider: hydratedSettings.activeProvider,
+        providerBaseUrls: hydratedSettings.providerBaseUrls,
+        externalSearchProvider: hydratedSettings.externalSearchProvider,
+        mediaRouting: hydratedSettings.mediaRouting,
+        specializedModels: hydratedSettings.specializedModelsV2,
+      }).catch(() => undefined);
 
       setIsLoading(false);
       clearTimeout(timeoutId);
@@ -73,11 +92,11 @@ export function App() {
   }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents, loadCronJobs]);
 
   useEffect(() => {
-    if (!apiKey || modelsLoading || availableModels.length > 0) return;
-    fetchModels(apiKey).catch((error) => {
+    if ((!apiKey && activeProvider !== 'lmstudio') || modelsLoading || availableModels.length > 0) return;
+    fetchProviderModels(activeProvider).catch((error) => {
       console.warn('[App] Failed to fetch models:', error);
     });
-  }, [apiKey, availableModels.length, fetchModels, modelsLoading]);
+  }, [activeProvider, apiKey, availableModels.length, fetchProviderModels, modelsLoading]);
 
   // Detect system theme
   useEffect(() => {
