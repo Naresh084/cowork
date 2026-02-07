@@ -13,6 +13,9 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   whatsapp: 'WhatsApp',
   slack: 'Slack',
   telegram: 'Telegram',
+  discord: 'Discord',
+  imessage: 'iMessage',
+  teams: 'Microsoft Teams',
 };
 
 /**

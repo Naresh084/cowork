@@ -1,22 +1,16 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import {
+  SUPPORTED_PLATFORM_TYPES,
+  type PlatformType,
+  type PlatformStatus as SharedPlatformStatus,
+} from '@gemini-cowork/shared';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-type PlatformType = 'whatsapp' | 'slack' | 'telegram';
-
-interface PlatformStatus {
-  platform: PlatformType;
-  connected: boolean;
-  displayName?: string;
-  identityPhone?: string;
-  identityName?: string;
-  error?: string;
-  connectedAt?: number;
-  lastMessageAt?: number;
-}
+type PlatformStatus = SharedPlatformStatus;
 
 export interface WhatsAppSenderControlConfig {
   senderPolicy: 'allowlist';
@@ -68,18 +62,20 @@ const defaultPlatformStatus = (platform: PlatformType): PlatformStatus => ({
   connected: false,
 });
 
+function createPlatformRecord<T>(
+  factory: (platform: PlatformType) => T,
+): Record<PlatformType, T> {
+  const output = {} as Record<PlatformType, T>;
+  for (const platform of SUPPORTED_PLATFORM_TYPES) {
+    output[platform] = factory(platform);
+  }
+  return output;
+}
+
 const initialState: IntegrationState = {
-  platforms: {
-    whatsapp: defaultPlatformStatus('whatsapp'),
-    slack: defaultPlatformStatus('slack'),
-    telegram: defaultPlatformStatus('telegram'),
-  },
+  platforms: createPlatformRecord((platform) => defaultPlatformStatus(platform)),
   whatsappQR: null,
-  isConnecting: {
-    whatsapp: false,
-    slack: false,
-    telegram: false,
-  },
+  isConnecting: createPlatformRecord(() => false),
   whatsappConfig: {
     senderPolicy: 'allowlist',
     allowFrom: [],

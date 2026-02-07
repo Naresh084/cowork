@@ -634,8 +634,9 @@ export function Onboarding() {
           <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm font-medium text-white/85">Messaging + Connectors Overview</p>
             <p className="mt-1 text-xs text-white/55">
-              WhatsApp, Slack, and Telegram can create shared sessions once connected. Connectors expand MCP-based
-              tools (GitHub, docs, APIs, and more) from the sidebar Connectors manager.
+              WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Teams can create shared sessions once
+              connected. Connectors expand MCP-based tools (GitHub, docs, APIs, and more) from the sidebar Connectors
+              manager.
             </p>
             <p className="mt-2 text-xs text-white/45">
               Shared integration sessions use a default working directory set in Settings → Integrations.

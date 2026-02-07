@@ -7,6 +7,7 @@ import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
 import { toast } from '../components/ui/Toast';
+import type { PlatformType } from '@gemini-cowork/shared';
 
 function isRecord(val: unknown): val is Record<string, unknown> {
   return val !== null && typeof val === 'object' && !Array.isArray(val);
@@ -146,7 +147,7 @@ export function useAgentEvents(sessionId: string | null): void {
           lastMessageAt?: number;
         };
         useIntegrationStore.getState().updatePlatformStatus({
-          platform: statusEvent.platform as 'whatsapp' | 'slack' | 'telegram',
+          platform: statusEvent.platform as PlatformType,
           connected: statusEvent.connected,
           displayName: statusEvent.displayName,
           identityPhone: statusEvent.identityPhone,
@@ -166,7 +167,14 @@ export function useAgentEvents(sessionId: string | null): void {
 
       if (event.type === 'integration:message_in') {
         const msgEvent = event as unknown as { platform: string; sender: string; content: string };
-        const platformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+        const platformNames: Record<string, string> = {
+          whatsapp: 'WhatsApp',
+          slack: 'Slack',
+          telegram: 'Telegram',
+          discord: 'Discord',
+          imessage: 'iMessage',
+          teams: 'Microsoft Teams',
+        };
         toast.info(
           `${platformNames[msgEvent.platform] || msgEvent.platform}`,
           `${msgEvent.sender}: ${msgEvent.content}`,
@@ -177,7 +185,7 @@ export function useAgentEvents(sessionId: string | null): void {
 
       if (event.type === 'integration:message_out') {
         const outEvent = event as unknown as { platform: string; timestamp: number };
-        const currentStatus = useIntegrationStore.getState().platforms[outEvent.platform as 'whatsapp' | 'slack' | 'telegram'];
+        const currentStatus = useIntegrationStore.getState().platforms[outEvent.platform as PlatformType];
         if (currentStatus) {
           useIntegrationStore.getState().updatePlatformStatus({
             ...currentStatus,
@@ -189,7 +197,14 @@ export function useAgentEvents(sessionId: string | null): void {
 
       if (event.type === 'integration:queued') {
         const queuedEvent = event as unknown as { platform: string; queueSize: number };
-        const queuePlatformNames: Record<string, string> = { whatsapp: 'WhatsApp', slack: 'Slack', telegram: 'Telegram' };
+        const queuePlatformNames: Record<string, string> = {
+          whatsapp: 'WhatsApp',
+          slack: 'Slack',
+          telegram: 'Telegram',
+          discord: 'Discord',
+          imessage: 'iMessage',
+          teams: 'Microsoft Teams',
+        };
         toast.info(
           `${queuePlatformNames[queuedEvent.platform] || queuedEvent.platform}`,
           `Message queued (${queuedEvent.queueSize} waiting)`,

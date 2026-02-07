@@ -19,7 +19,14 @@ function stripMarkdownForPlain(input: string): string {
 }
 
 function truncateForPlatform(text: string, platform: PlatformType): string {
-  const limit = platform === 'whatsapp' ? 4000 : platform === 'telegram' ? 4096 : 8000;
+  const limit =
+    platform === 'whatsapp'
+      ? 4000
+      : platform === 'telegram'
+        ? 4096
+        : platform === 'imessage'
+          ? 5000
+          : 8000;
   if (text.length <= limit) return text;
   return `${text.slice(0, limit - 64)}\n\n...(truncated, see Cowork desktop for full response)`;
 }

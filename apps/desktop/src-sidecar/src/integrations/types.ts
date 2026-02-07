@@ -6,6 +6,7 @@ import type {
   PlatformConfig,
   PlatformMessageAttachment,
 } from '@gemini-cowork/shared';
+import { SUPPORTED_PLATFORM_TYPES } from '@gemini-cowork/shared';
 
 // Re-export shared types for convenience within integrations
 export type {
@@ -15,6 +16,42 @@ export type {
   OutgoingMessage,
   PlatformConfig,
   PlatformMessageAttachment,
+};
+
+export const SUPPORTED_INTEGRATION_PLATFORMS = [...SUPPORTED_PLATFORM_TYPES];
+
+export interface IntegrationPlatformMetadata {
+  displayName: string;
+  supportsQr: boolean;
+  osConstraint?: 'darwin';
+}
+
+export const INTEGRATION_PLATFORM_METADATA: Record<PlatformType, IntegrationPlatformMetadata> = {
+  whatsapp: {
+    displayName: 'WhatsApp',
+    supportsQr: true,
+  },
+  slack: {
+    displayName: 'Slack',
+    supportsQr: false,
+  },
+  telegram: {
+    displayName: 'Telegram',
+    supportsQr: false,
+  },
+  discord: {
+    displayName: 'Discord',
+    supportsQr: false,
+  },
+  imessage: {
+    displayName: 'iMessage',
+    supportsQr: false,
+    osConstraint: 'darwin',
+  },
+  teams: {
+    displayName: 'Microsoft Teams',
+    supportsQr: false,
+  },
 };
 
 export interface IntegrationMediaPayload {
@@ -61,10 +98,52 @@ export interface TelegramConfig {
   allowedChatIds?: string[];
 }
 
+export interface DiscordConfig {
+  /** Bot token from Discord Developer Portal */
+  botToken: string;
+  /** Optional allowlist of guild IDs */
+  allowedGuildIds?: string[];
+  /** Optional allowlist of channel IDs */
+  allowedChannelIds?: string[];
+  /** Enable/disable DM ingress (default true) */
+  allowDirectMessages?: boolean;
+}
+
+export interface IMessageBlueBubblesConfig {
+  /** BlueBubbles server URL, e.g. http://localhost:1234 */
+  serverUrl: string;
+  /** BlueBubbles API token */
+  accessToken: string;
+  /** Optional default chat GUID for outbound messages */
+  defaultChatGuid?: string;
+  /** Optional allowlist of handles/chat GUID fragments */
+  allowHandles?: string[];
+  /** Poll interval fallback in seconds if websocket stream is unavailable */
+  pollIntervalSeconds?: number;
+}
+
+export interface TeamsConfig {
+  /** Azure tenant ID */
+  tenantId: string;
+  /** Azure app client ID */
+  clientId: string;
+  /** Azure app client secret */
+  clientSecret: string;
+  /** Default Team ID */
+  teamId: string;
+  /** Default Channel ID */
+  channelId: string;
+  /** Poll interval for inbound messages */
+  pollIntervalSeconds?: number;
+}
+
 export type PlatformConfigMap = {
   whatsapp: WhatsAppConfig;
   slack: SlackConfig;
   telegram: TelegramConfig;
+  discord: DiscordConfig;
+  imessage: IMessageBlueBubblesConfig;
+  teams: TeamsConfig;
 };
 
 // ============================================================================

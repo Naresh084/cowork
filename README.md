@@ -21,6 +21,7 @@ Cowork combines chat, tool execution, browser automation, research, media genera
 Current platform scope:
 
 - 8 chat providers: Google, OpenAI, Anthropic, OpenRouter, Moonshot (Kimi), GLM, DeepSeek, LM Studio
+- 6 messaging integrations: WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Microsoft Teams
 - Unified web tools: `web_search` and `web_fetch` with provider-aware routing and fallback paths
 - Unified media tools: `generate_image`, `edit_image`, `generate_video`, `analyze_video`
 - `computer_use` browser automation with provider-aware routing
@@ -219,7 +220,7 @@ Optional:
    - External search fallback provider + Exa/Tavily keys
    - Stitch key
    - Specialized model overrides (`computer_use`, `deep_research`)
-   - Messaging integration settings
+   - Messaging integration settings (WhatsApp/Slack/Telegram/Discord/iMessage/Teams)
 
 ### Runtime Apply Behavior
 
@@ -237,6 +238,37 @@ When required, UI surfaces a "Start new session" notice in chat header.
 For deep onboarding/settings details, see:
 
 - [docs/GET_STARTED.md](docs/GET_STARTED.md)
+
+---
+
+## Messaging Integrations (6 Platforms)
+
+Cowork supports full shared-session ingress and outbound notification flows across:
+
+- WhatsApp
+- Slack
+- Telegram
+- Discord
+- iMessage (BlueBubbles bridge; macOS host required)
+- Microsoft Teams (Azure Graph app credentials)
+
+When a platform is connected:
+
+- Inbound messages can trigger shared-session workflows.
+- Outbound notification tool is registered dynamically:
+  - `send_notification_whatsapp`
+  - `send_notification_slack`
+  - `send_notification_telegram`
+  - `send_notification_discord`
+  - `send_notification_imessage`
+  - `send_notification_teams`
+- Attachment messages are normalized into the shared message model, with URL metadata fallback where raw bytes are unavailable.
+
+Setup prerequisites:
+
+- Discord: bot token, optional guild/channel allowlists, optional DM ingress.
+- iMessage: BlueBubbles server URL + access token; unsupported on non-macOS hosts.
+- Teams: tenant ID, client ID, client secret, team ID, channel ID.
 
 ---
 
@@ -455,4 +487,3 @@ Auto-update note:
 ## License
 
 Private and proprietary.
-

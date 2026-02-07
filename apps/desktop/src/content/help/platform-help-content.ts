@@ -59,11 +59,14 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Messaging Integrations',
         body:
-          'WhatsApp, Slack, and Telegram can create shared-session message workflows and outbound notifications when connected.',
+          'WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), and Microsoft Teams can create shared-session message workflows and outbound notifications when connected.',
         bullets: [
           'WhatsApp includes sender allowlist enforcement and denial messaging.',
           'Slack requires bot token + app token for realtime operation.',
           'Telegram uses a BotFather token for bot connectivity.',
+          'Discord supports bot-token ingress with optional guild/channel scoping.',
+          'iMessage uses a BlueBubbles bridge and is available on macOS hosts.',
+          'Teams uses Azure Graph app credentials for channel messaging.',
         ],
       },
       {
