@@ -30,6 +30,12 @@ export interface CapabilitySnapshot {
     imageBackend: 'google' | 'openai' | 'fal';
     videoBackend: 'google' | 'openai' | 'fal';
   };
+  sandbox: {
+    mode: 'read-only' | 'workspace-write' | 'danger-full-access';
+    osEnforced: boolean;
+    networkAllowed: boolean;
+    effectiveAllowedRoots: string[];
+  };
   keyStatus: {
     providerKeyConfigured: boolean;
     googleKeyConfigured: boolean;
@@ -72,6 +78,15 @@ function toMediaBackend(value: unknown): 'google' | 'openai' | 'fal' {
   return 'google';
 }
 
+function toSandboxMode(
+  value: unknown,
+): 'read-only' | 'workspace-write' | 'danger-full-access' {
+  if (value === 'read-only' || value === 'workspace-write' || value === 'danger-full-access') {
+    return value;
+  }
+  return 'workspace-write';
+}
+
 function asString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
@@ -87,6 +102,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot {
   const root = isRecord(input) ? input : {};
   const mediaRouting = isRecord(root.mediaRouting) ? root.mediaRouting : {};
+  const sandbox = isRecord(root.sandbox) ? root.sandbox : {};
   const keyStatus = isRecord(root.keyStatus) ? root.keyStatus : {};
 
   const toolAccessRaw = Array.isArray(root.toolAccess) ? root.toolAccess : [];
@@ -103,6 +119,16 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
     mediaRouting: {
       imageBackend: toMediaBackend(mediaRouting.imageBackend),
       videoBackend: toMediaBackend(mediaRouting.videoBackend),
+    },
+    sandbox: {
+      mode: toSandboxMode(sandbox.mode),
+      osEnforced: asBoolean(sandbox.osEnforced),
+      networkAllowed: asBoolean(sandbox.networkAllowed),
+      effectiveAllowedRoots: Array.isArray(sandbox.effectiveAllowedRoots)
+        ? sandbox.effectiveAllowedRoots
+            .map((entry) => asString(entry))
+            .filter(Boolean)
+        : [],
     },
     keyStatus: {
       providerKeyConfigured: asBoolean(keyStatus.providerKeyConfigured),

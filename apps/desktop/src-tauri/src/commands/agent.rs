@@ -164,9 +164,43 @@ pub struct RuntimeConfigPayload {
     #[serde(default)]
     pub external_search_provider: Option<String>,
     #[serde(default)]
+    pub sandbox: Option<CommandSandboxSettingsPayload>,
+    #[serde(default)]
     pub media_routing: serde_json::Value,
     #[serde(default)]
     pub specialized_models: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandSandboxSettingsPayload {
+    pub mode: String,
+    #[serde(default)]
+    pub allow_network: bool,
+    #[serde(default = "default_allow_process_spawn")]
+    pub allow_process_spawn: bool,
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+    #[serde(default)]
+    pub denied_paths: Vec<String>,
+    #[serde(default)]
+    pub trusted_commands: Vec<String>,
+    #[serde(default = "default_max_execution_time")]
+    pub max_execution_time_ms: i64,
+    #[serde(default = "default_max_output_bytes")]
+    pub max_output_bytes: i64,
+}
+
+fn default_allow_process_spawn() -> bool {
+    true
+}
+
+fn default_max_execution_time() -> i64 {
+    30000
+}
+
+fn default_max_output_bytes() -> i64 {
+    1024 * 1024
 }
 
 

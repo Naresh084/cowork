@@ -31,6 +31,12 @@ import { createMiddleware } from 'langchain';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { ToolMessage } from '@langchain/core/messages';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import {
+  evaluatePolicy as evaluateSandboxPolicy,
+  isOsSandboxAvailable,
+  isReadOnlySafeCommand,
+  type CommandSandboxSettings,
+} from '@gemini-cowork/sandbox';
 import { z } from 'zod';
 import { mkdir, readFile, writeFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -216,6 +222,7 @@ interface RuntimeConfigState {
   externalSearchProvider: 'google' | 'exa' | 'tavily';
   mediaRouting: MediaRoutingSettingsLocal;
   specializedModels: SpecializedModelsV2Local;
+  sandbox: CommandSandboxSettings;
 }
 
 const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
@@ -239,6 +246,54 @@ const DEFAULT_MEDIA_ROUTING: MediaRoutingSettingsLocal = {
   imageBackend: 'google',
   videoBackend: 'google',
 };
+
+const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
+  mode: 'workspace-write',
+  allowNetwork: false,
+  allowProcessSpawn: true,
+  allowedPaths: [],
+  deniedPaths: ['/etc', '/System', '/usr'],
+  trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
+  maxExecutionTimeMs: 30000,
+  maxOutputBytes: 1024 * 1024,
+};
+
+function normalizeCommandSandboxSettings(
+  value?: Partial<CommandSandboxSettings> | null,
+): CommandSandboxSettings {
+  const mode = value?.mode;
+  return {
+    mode:
+      mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+        ? mode
+        : DEFAULT_COMMAND_SANDBOX.mode,
+    allowNetwork:
+      typeof value?.allowNetwork === 'boolean'
+        ? value.allowNetwork
+        : DEFAULT_COMMAND_SANDBOX.allowNetwork,
+    allowProcessSpawn:
+      typeof value?.allowProcessSpawn === 'boolean'
+        ? value.allowProcessSpawn
+        : DEFAULT_COMMAND_SANDBOX.allowProcessSpawn,
+    allowedPaths: Array.isArray(value?.allowedPaths)
+      ? value.allowedPaths
+      : DEFAULT_COMMAND_SANDBOX.allowedPaths,
+    deniedPaths: Array.isArray(value?.deniedPaths)
+      ? value.deniedPaths
+      : DEFAULT_COMMAND_SANDBOX.deniedPaths,
+    trustedCommands: Array.isArray(value?.trustedCommands)
+      ? value.trustedCommands
+      : DEFAULT_COMMAND_SANDBOX.trustedCommands,
+    maxExecutionTimeMs:
+      typeof value?.maxExecutionTimeMs === 'number' && value.maxExecutionTimeMs > 0
+        ? value.maxExecutionTimeMs
+        : DEFAULT_COMMAND_SANDBOX.maxExecutionTimeMs,
+    maxOutputBytes:
+      typeof value?.maxOutputBytes === 'number' && value.maxOutputBytes > 0
+        ? value.maxOutputBytes
+        : DEFAULT_COMMAND_SANDBOX.maxOutputBytes,
+  };
+}
 
 const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ProviderId, string>> = {
   google: 'https://generativelanguage.googleapis.com',
@@ -341,6 +396,12 @@ interface CapabilitySnapshot {
   provider: ProviderId;
   executionMode: ExecutionMode;
   mediaRouting: MediaRoutingSettingsLocal;
+  sandbox: {
+    mode: CommandSandboxSettings['mode'];
+    osEnforced: boolean;
+    networkAllowed: boolean;
+    effectiveAllowedRoots: string[];
+  };
   keyStatus: {
     providerKeyConfigured: boolean;
     googleKeyConfigured: boolean;
@@ -370,6 +431,7 @@ export class AgentRunner {
     tavilyApiKey: null,
     externalSearchProvider: 'google',
     mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
+    sandbox: { ...DEFAULT_COMMAND_SANDBOX },
     specializedModels: {
       google: { ...DEFAULT_SPECIALIZED_MODELS.google },
       openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
@@ -1346,6 +1408,10 @@ export class AgentRunner {
         ...(config.specializedModels?.fal || {}),
       },
     };
+    const nextSandbox = normalizeCommandSandboxSettings({
+      ...this.runtimeConfig.sandbox,
+      ...(config.sandbox || {}),
+    });
 
     const providerChanged = prevProvider !== nextProvider;
     if (providerChanged) {
@@ -1371,6 +1437,7 @@ export class AgentRunner {
       externalSearchProvider:
         config.externalSearchProvider ?? this.runtimeConfig.externalSearchProvider,
       mediaRouting: nextMediaRouting,
+      sandbox: nextSandbox,
       specializedModels: nextSpecializedModels,
     };
 
@@ -1853,6 +1920,17 @@ export class AgentRunner {
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
     const provider = session?.provider || this.runtimeConfig.activeProvider;
     const executionMode = session?.executionMode || 'execute';
+    const activeSandbox = session
+      ? this.getSessionSandboxSettings(session)
+      : {
+          ...this.runtimeConfig.sandbox,
+          allowedPaths: Array.from(
+            new Set([
+              resolve(process.cwd()),
+              ...this.runtimeConfig.sandbox.allowedPaths.map((path) => resolve(path)),
+            ]),
+          ),
+        };
     const context = this.getToolCapabilityContext(provider);
     const toolAccess: CapabilityToolAccessEntry[] = [];
     const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
@@ -2039,6 +2117,9 @@ export class AgentRunner {
     if (!stitchKeyConfigured) {
       notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
     }
+    if (!isOsSandboxAvailable() && activeSandbox.mode !== 'danger-full-access') {
+      notes.push('OS-level sandbox is unavailable. Validator policy enforcement is active.');
+    }
 
     if (executionMode === 'plan') {
       const allowedPlanTools = new Set([
@@ -2065,6 +2146,12 @@ export class AgentRunner {
       provider,
       executionMode,
       mediaRouting: { ...context.mediaRouting },
+      sandbox: {
+        mode: activeSandbox.mode,
+        osEnforced: activeSandbox.mode !== 'danger-full-access' && isOsSandboxAvailable(),
+        networkAllowed: activeSandbox.allowNetwork,
+        effectiveAllowedRoots: [...activeSandbox.allowedPaths],
+      },
       keyStatus: {
         providerKeyConfigured,
         googleKeyConfigured,
@@ -3498,6 +3585,23 @@ export class AgentRunner {
       );
     }
     const additionalToolsSection = additionalToolLines.join('\n');
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const sandboxEnforcement =
+      sandboxSettings.mode === 'danger-full-access'
+        ? 'Sandbox enforcement is disabled (danger-full-access).'
+        : isOsSandboxAvailable()
+          ? 'OS sandbox + validator enforcement are active.'
+          : 'Validator-only enforcement is active (OS sandbox unavailable).';
+    const sandboxPathsPreview =
+      sandboxSettings.allowedPaths.length > 0
+        ? sandboxSettings.allowedPaths.slice(0, 4).join(', ')
+        : session.workingDirectory;
+    const sandboxConstraintsSection = `### Effective Sandbox Constraints
+- Mode: ${sandboxSettings.mode}
+- Network: ${sandboxSettings.allowNetwork ? 'allowed' : 'blocked'}
+- Process spawn: ${sandboxSettings.allowProcessSpawn ? 'allowed' : 'blocked'}
+- Enforcement: ${sandboxEnforcement}
+- Allowed roots (sample): ${sandboxPathsPreview}`;
 
     let basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
 
@@ -3655,6 +3759,8 @@ grep({ pattern: "function.*export", glob: "**/*.ts" })
 execute({ command: "npm install" })
 execute({ command: "git status" })
 \`\`\`
+
+${sandboxConstraintsSection}
 
 ### Guidelines
 - Explain non-trivial commands before executing
@@ -4270,7 +4376,8 @@ ${stitchGuidance}
         session.workingDirectory,
         session.id,
         () => this.getBackendAllowedScopes(session),
-        skillsDir
+        skillsDir,
+        () => this.getSessionSandboxSettings(session),
       ),
     });
 
@@ -4386,7 +4493,9 @@ ${stitchGuidance}
         const backend = new CoworkBackend(
           session.workingDirectory,
           session.id,
-          () => this.getBackendAllowedScopes(session)
+          () => this.getBackendAllowedScopes(session),
+          undefined,
+          () => this.getSessionSandboxSettings(session),
         );
 
         try {
@@ -5270,6 +5379,32 @@ ${stitchGuidance}
     });
   }
 
+  private getSessionSandboxSettings(session: ActiveSession): CommandSandboxSettings {
+    const base = normalizeCommandSandboxSettings(this.runtimeConfig.sandbox);
+    const allowedRoots = new Set<string>([resolve(session.workingDirectory)]);
+
+    for (const configuredPath of base.allowedPaths) {
+      const normalized = this.normalizePermissionPath(session, configuredPath);
+      if (normalized) {
+        allowedRoots.add(resolve(normalized));
+      }
+    }
+
+    for (const scopes of session.permissionScopes.values()) {
+      for (const scope of scopes) {
+        const normalized = this.normalizePermissionPath(session, scope);
+        if (normalized) {
+          allowedRoots.add(resolve(normalized));
+        }
+      }
+    }
+
+    return {
+      ...base,
+      allowedPaths: Array.from(allowedRoots),
+    };
+  }
+
   private applyApprovalMode(
     session: ActiveSession,
     request: PermissionRequest
@@ -5281,14 +5416,25 @@ ${stitchGuidance}
     const isShell = request.type === 'shell_execute';
     const isNetwork = request.type === 'network_request';
     const touchesOutside = this.requestTouchesOutsideWorkingDirectory(session, request);
-    const isDangerous = isShell && this.isDangerousCommand(request.resource);
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const shellPolicy = isShell
+      ? evaluateSandboxPolicy(request.resource, sandboxSettings, session.workingDirectory)
+      : null;
+    const shellAllowed = shellPolicy?.allowed ?? false;
+    const isTrustedShell = isShell
+      ? this.isTrustedShellCommand(request.resource, sandboxSettings)
+      : false;
+    const isDangerousShell = isShell
+      ? this.isDangerousOperation('execute', { command: request.resource })
+      : false;
+
+    if (isShell && !shellAllowed) {
+      return 'deny';
+    }
 
     if (mode === 'read_only') {
       if (isRead && !touchesOutside) {
         return 'allow';
-      }
-      if (isRead && touchesOutside) {
-        return null;
       }
       return 'deny';
     }
@@ -5297,8 +5443,14 @@ ${stitchGuidance}
       if (isNetwork) {
         return null;
       }
-      if (isDangerous || isDelete) {
+      if (isDelete) {
         return null;
+      }
+      if (isShell) {
+        if (isDangerousShell) {
+          return null;
+        }
+        return 'allow';
       }
       if (touchesOutside) {
         return null;
@@ -5310,7 +5462,7 @@ ${stitchGuidance}
     if (isRead && !touchesOutside) {
       return 'allow';
     }
-    if (isShell && !isDangerous && !touchesOutside && this.isSafeCommand(request.resource)) {
+    if (isShell && !touchesOutside && shellAllowed && isTrustedShell) {
       return 'allow';
     }
     if (isNetwork || isWrite || isDelete || isShell) {
@@ -5319,36 +5471,33 @@ ${stitchGuidance}
     return null;
   }
 
-  private isSafeCommand(command: string): boolean {
-    const normalized = command.trim().replace(/\s+/g, ' ');
-    const safeCommands = ['ls', 'pwd', 'git status', 'git diff'];
-    return safeCommands.some((safe) => normalized === safe || normalized.startsWith(`${safe} `));
-  }
-
-  private isPlanModeSafeShell(command: string): boolean {
+  private isTrustedShellCommand(
+    command: string,
+    sandboxSettings: CommandSandboxSettings,
+  ): boolean {
     const normalized = command.trim().replace(/\s+/g, ' ');
     if (!normalized) return false;
-    if (this.isDangerousCommand(normalized)) return false;
-    if (this.isDangerousOperation('execute', { command: normalized })) return false;
-
-    const safePrefixes = [
-      'ls',
-      'pwd',
-      'find',
-      'head',
-      'tail',
-      'wc',
-      'cat',
-      'git status',
-      'git diff',
-      'git log --oneline',
-      'grep',
-      'rg',
-    ];
-
-    return safePrefixes.some(
-      (safe) => normalized === safe || normalized.startsWith(`${safe} `)
+    return sandboxSettings.trustedCommands.some(
+      (safe) => normalized === safe || normalized.startsWith(`${safe} `),
     );
+  }
+
+  private isPlanModeSafeShell(session: ActiveSession, command: string): boolean {
+    const normalized = command.trim().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const readOnlyPolicy: CommandSandboxSettings = {
+      ...sandboxSettings,
+      mode: 'read-only',
+      allowNetwork: false,
+      allowProcessSpawn: false,
+    };
+    const policy = evaluateSandboxPolicy(
+      normalized,
+      readOnlyPolicy,
+      session.workingDirectory,
+    );
+    return policy.allowed && isReadOnlySafeCommand(normalized);
   }
 
   private isTodoTool(toolName: string): boolean {
@@ -5400,7 +5549,13 @@ ${stitchGuidance}
     }
 
     if (lower === 'execute' || lower === 'bash' || lower === 'run_command' || lower === 'shell') {
-      return this.isPlanModeSafeShell(String(args.command || ''));
+      const command = String(args.command || '').trim();
+      if (!command) {
+        // Registration-time check (no args yet): allow tool registration,
+        // then enforce command-level policy at call time.
+        return true;
+      }
+      return this.isPlanModeSafeShell(session, command);
     }
 
     return false;
@@ -5540,11 +5695,6 @@ ${stitchGuidance}
     );
   }
 
-  private isDangerousCommand(command: string): boolean {
-    const normalized = command.trim();
-    return /(^|\\s)(sudo\\s+)?rm(\\s|$)/.test(normalized);
-  }
-
   private isAbortError(error: unknown): boolean {
     if (!error) return false;
     const anyError = error as { name?: string; message?: string };
@@ -5554,11 +5704,20 @@ ${stitchGuidance}
   }
 
   private getBackendAllowedScopes(session: ActiveSession): string[] {
-    const roots = new Set<string>();
+    const roots = new Set<string>([resolve(session.workingDirectory)]);
+    for (const path of this.runtimeConfig.sandbox.allowedPaths) {
+      const normalized = this.normalizePermissionPath(session, path);
+      if (normalized) {
+        roots.add(resolve(normalized));
+      }
+    }
     for (const [type, scopes] of session.permissionScopes.entries()) {
       if (!type.startsWith('file_')) continue;
       for (const scope of scopes) {
-        roots.add(scope);
+        const normalized = this.normalizePermissionPath(session, scope);
+        if (normalized) {
+          roots.add(resolve(normalized));
+        }
       }
     }
     return Array.from(roots);

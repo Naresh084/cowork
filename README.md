@@ -48,6 +48,7 @@ Current platform scope:
   - Provider
   - Media
   - Integrations
+- Command sandbox controls in Provider settings (mode, network, path scope, trusted commands, runtime/output limits)
 - Session-level Plan Mode (`Plan` -> `<proposed_plan>` -> Accept/Reject -> auto-execute on accept)
 - Runtime config apply pipeline with explicit "start new session" notice when changes cross compatibility boundaries
 
@@ -448,7 +449,10 @@ pnpm test:e2e
 - Provider and capability keys are stored through Rust credential commands (system credential manager integration)
 - Keys are not committed to repo and not expected in plaintext config
 - Tool actions pass through permission and policy gates
-- Sidecar command execution uses risk-aware validation paths
+- Sidecar command execution uses command sandbox policy + approval mode layering
+- Sandbox supports `read-only`, `workspace-write`, `danger-full-access`
+- Shell policy controls include network/process toggles, allowed/denied roots, trusted command prefixes, timeout/output caps
+- Capability snapshot and session header expose effective sandbox mode and enforcement status
 
 ---
 

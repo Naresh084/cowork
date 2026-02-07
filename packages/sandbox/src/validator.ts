@@ -1,7 +1,66 @@
-import { resolve, isAbsolute, normalize } from 'path';
+import { resolve, isAbsolute, normalize, sep } from 'path';
 import { realpathSync, lstatSync, existsSync } from 'fs';
-import type { CommandAnalysis, CommandRisk, SandboxConfig } from './types.js';
+import { spawnSync } from 'child_process';
+import type { CommandAnalysis, CommandPolicyEvaluation, CommandRisk, SandboxConfig } from './types.js';
 import { DEFAULT_SANDBOX_CONFIG, BLOCKED_COMMANDS, DANGEROUS_PATTERNS } from './types.js';
+
+// ============================================================================
+// Read-Only Safe Commands
+// ============================================================================
+
+const READ_ONLY_SAFE_COMMAND_PREFIXES = [
+  'ls',
+  'pwd',
+  'find',
+  'head',
+  'tail',
+  'wc',
+  'cat',
+  'grep',
+  'rg',
+  'git status',
+  'git diff',
+  'git log --oneline',
+] as const;
+
+const NETWORK_COMMANDS = [
+  'curl',
+  'wget',
+  'nc',
+  'netcat',
+  'ssh',
+  'scp',
+  'sftp',
+  'rsync',
+  'ftp',
+  'telnet',
+  'ping',
+  'traceroute',
+  'nslookup',
+  'dig',
+  'host',
+] as const;
+
+let cachedSandboxExecAvailable: boolean | null = null;
+
+function isOsSandboxAvailable(): boolean {
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+  if (cachedSandboxExecAvailable !== null) {
+    return cachedSandboxExecAvailable;
+  }
+  try {
+    const result = spawnSync('sandbox-exec', ['-h'], {
+      stdio: 'ignore',
+    });
+    cachedSandboxExecAvailable = result.status === 0 || result.status === 64;
+    return cachedSandboxExecAvailable;
+  } catch {
+    cachedSandboxExecAvailable = false;
+    return false;
+  }
+}
 
 // ============================================================================
 // Command Validator
@@ -17,9 +76,10 @@ export class CommandValidator {
   /**
    * Analyze a command for potential risks.
    */
-  analyze(command: string): CommandAnalysis {
+  analyze(command: string, context: { cwd?: string } = {}): CommandAnalysis {
     const reasons: string[] = [];
     let risk: CommandRisk = 'safe';
+    const cwd = context.cwd || process.cwd();
 
     // Check for blocked commands
     if (this.isBlockedCommand(command)) {
@@ -42,12 +102,12 @@ export class CommandValidator {
     const modifiedPaths: string[] = [];
 
     for (const path of paths) {
-      const absolutePath = this.resolvePath(path);
+      const absolutePath = this.resolvePath(path, cwd);
 
-      if (this.isDeniedPath(absolutePath)) {
+      if (this.isDeniedPath(absolutePath, cwd)) {
         risk = this.escalateRisk(risk, 'dangerous');
         reasons.push(`Accesses denied path: ${absolutePath}`);
-      } else if (!this.isAllowedPath(absolutePath)) {
+      } else if (!this.isAllowedPath(absolutePath, cwd)) {
         risk = this.escalateRisk(risk, 'moderate');
         reasons.push(`Accesses path outside allowed directories: ${absolutePath}`);
       }
@@ -83,17 +143,78 @@ export class CommandValidator {
       risk,
       reasons,
       modifiedPaths: modifiedPaths.length > 0 ? modifiedPaths : undefined,
+      accessedPaths: paths.length > 0 ? paths.map((p) => this.resolvePath(p, cwd)) : undefined,
       networkAccess,
       processSpawn,
     };
   }
 
   /**
+   * Evaluate command execution policy with deterministic allow/deny output.
+   */
+  evaluatePolicy(command: string, context: { cwd?: string } = {}): CommandPolicyEvaluation {
+    const cwd = resolve(context.cwd || process.cwd());
+    const analysis = this.analyze(command, { cwd });
+    const violations: string[] = [];
+    const segments = this.splitCommandSegments(command);
+    const normalizedAllowed = this.normalizeAllowedPaths(cwd);
+
+    if (analysis.risk === 'blocked') {
+      violations.push('Command is explicitly blocked.');
+    }
+
+    if (analysis.risk === 'dangerous') {
+      violations.push('Command matches dangerous shell patterns.');
+    }
+
+    if (this.config.mode === 'read-only' && !isReadOnlySafeCommand(command)) {
+      violations.push('Sandbox mode is read-only; command is not read-only safe.');
+    }
+
+    if (!this.config.allowNetwork && analysis.networkAccess) {
+      violations.push('Network access is disabled for shell commands.');
+    }
+
+    if (!this.config.allowProcessSpawn && analysis.processSpawn) {
+      violations.push('Process spawning is disabled for shell commands.');
+    }
+
+    const paths = this.extractPaths(command);
+    for (const path of paths) {
+      const absolutePath = this.resolvePath(path, cwd);
+      if (this.isDeniedPath(absolutePath, cwd)) {
+        violations.push(`Path is denied: ${absolutePath}`);
+      } else if (!this.isAllowedPath(absolutePath, cwd)) {
+        violations.push(`Path is outside allowed roots: ${absolutePath}`);
+      }
+    }
+
+    for (const segment of segments) {
+      if (!segment.trim()) continue;
+      if (this.config.mode === 'read-only' && this.isMutatingSegment(segment)) {
+        violations.push(`Read-only mode blocks mutating segment: ${segment.trim()}`);
+      }
+    }
+
+    const osEnforced =
+      this.config.mode !== 'danger-full-access' &&
+      isOsSandboxAvailable();
+
+    return {
+      allowed: violations.length === 0,
+      violations: [...new Set(violations)],
+      analysis,
+      mode: this.config.mode,
+      osEnforced,
+      effectiveAllowedPaths: normalizedAllowed,
+    };
+  }
+
+  /**
    * Check if a command should be allowed to execute.
    */
-  isAllowed(command: string): boolean {
-    const analysis = this.analyze(command);
-    return analysis.risk !== 'blocked';
+  isAllowed(command: string, context: { cwd?: string } = {}): boolean {
+    return this.evaluatePolicy(command, context).allowed;
   }
 
   /**
@@ -136,7 +257,7 @@ export class CommandValidator {
   /**
    * Extract file paths from a command.
    */
-  private extractPaths(command: string): string[] {
+  extractPaths(command: string): string[] {
     const paths: string[] = [];
 
     // Match quoted strings
@@ -175,26 +296,42 @@ export class CommandValidator {
   /**
    * Resolve a path to absolute.
    */
-  private resolvePath(path: string): string {
+  private resolvePath(path: string, cwd: string): string {
     if (path.startsWith('~')) {
       const home = process.env.HOME || '';
       path = path.replace(/^~/, home);
     }
-    return isAbsolute(path) ? path : resolve(process.cwd(), path);
+    return isAbsolute(path) ? resolve(path) : resolve(cwd, path);
+  }
+
+  /**
+   * Normalize configured allowed roots for comparisons.
+   */
+  private normalizeAllowedPaths(cwd: string): string[] {
+    const normalized = new Set<string>();
+    normalized.add(resolve(cwd));
+    for (const allowed of this.config.allowedPaths) {
+      normalized.add(this.resolvePath(allowed, cwd));
+    }
+    return Array.from(normalized);
   }
 
   /**
    * Check if a path is in the allowed list.
    * Also checks for symlink escapes.
    */
-  private isAllowedPath(absolutePath: string): boolean {
+  private isAllowedPath(absolutePath: string, cwd: string): boolean {
     // Check for symlink escape
     const realPath = this.resolveSymlinks(absolutePath);
+    const allowedPaths = this.normalizeAllowedPaths(cwd);
 
-    return this.config.allowedPaths.some((allowed) => {
-      const resolvedAllowed = this.resolvePath(allowed);
-      // Both the requested path and the real path (after symlink resolution) must be within allowed paths
-      return absolutePath.startsWith(resolvedAllowed) && realPath.startsWith(resolvedAllowed);
+    return allowedPaths.some((allowed) => {
+      return (
+        absolutePath === allowed ||
+        absolutePath.startsWith(`${allowed}${sep}`) ||
+        realPath === allowed ||
+        realPath.startsWith(`${allowed}${sep}`)
+      );
     });
   }
 
@@ -202,14 +339,18 @@ export class CommandValidator {
    * Check if a path is in the denied list.
    * Also checks for symlink escapes.
    */
-  private isDeniedPath(absolutePath: string): boolean {
+  private isDeniedPath(absolutePath: string, cwd: string): boolean {
     // Check for symlink escape
     const realPath = this.resolveSymlinks(absolutePath);
 
     return this.config.deniedPaths.some((denied) => {
-      const resolvedDenied = this.resolvePath(denied);
-      // Block if either the requested path or the real path is in denied list
-      return absolutePath.startsWith(resolvedDenied) || realPath.startsWith(resolvedDenied);
+      const resolvedDenied = this.resolvePath(denied, cwd);
+      return (
+        absolutePath === resolvedDenied ||
+        absolutePath.startsWith(`${resolvedDenied}${sep}`) ||
+        realPath === resolvedDenied ||
+        realPath.startsWith(`${resolvedDenied}${sep}`)
+      );
     });
   }
 
@@ -239,32 +380,6 @@ export class CommandValidator {
   }
 
   /**
-   * Check if a path is a symlink that escapes allowed directories.
-   */
-  isSymlinkEscape(path: string): boolean {
-    try {
-      if (!existsSync(path)) {
-        return false;
-      }
-
-      const stats = lstatSync(path);
-      if (!stats.isSymbolicLink()) {
-        return false;
-      }
-
-      const realPath = realpathSync(path);
-
-      // Check if the symlink target is in a different directory tree
-      return !this.config.allowedPaths.some((allowed) => {
-        const resolvedAllowed = this.resolvePath(allowed);
-        return realPath.startsWith(resolvedAllowed);
-      });
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Check if command modifies the specified path.
    */
   private isModifyingCommand(command: string, path: string): boolean {
@@ -284,12 +399,15 @@ export class CommandValidator {
       'tee',
     ];
 
-    const subCommands = command.split(/[;&|]+/).map(c => c.trim());
+    const subCommands = this.splitCommandSegments(command).map((c) => c.trim());
     for (const subCmd of subCommands) {
       const firstToken = subCmd.split(/\s+/)[0]?.toLowerCase();
-      if (modifyingCommands.some(
-        (cmd) => firstToken === cmd || firstToken?.endsWith(`/${cmd}`)
-      ) && subCmd.includes(path)) {
+      if (
+        modifyingCommands.some(
+          (cmd) => firstToken === cmd || firstToken?.endsWith(`/${cmd}`),
+        ) &&
+        subCmd.includes(path)
+      ) {
         return true;
       }
     }
@@ -297,32 +415,59 @@ export class CommandValidator {
   }
 
   /**
+   * Split compound shell command into segments.
+   */
+  splitCommandSegments(command: string): string[] {
+    return command
+      .split(/(?:\|\||&&|[;|])/g)
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+  }
+
+  /**
+   * Check if command segment appears mutating.
+   */
+  private isMutatingSegment(segment: string): boolean {
+    const trimmed = segment.trim();
+    if (!trimmed) return false;
+
+    const mutatingPrefixes = [
+      'rm',
+      'mv',
+      'cp',
+      'touch',
+      'mkdir',
+      'rmdir',
+      'chmod',
+      'chown',
+      'ln',
+      'unlink',
+      'truncate',
+      'dd',
+      'tee',
+      'sed -i',
+      'perl -i',
+      'git add',
+      'git commit',
+      'git reset',
+      'git clean',
+      'npm install',
+      'pnpm install',
+      'yarn add',
+    ];
+
+    return mutatingPrefixes.some(
+      (prefix) => trimmed === prefix || trimmed.startsWith(`${prefix} `),
+    );
+  }
+
+  /**
    * Check if command accesses network.
    */
   private hasNetworkAccess(command: string): boolean {
-    const networkCommands = [
-      'curl',
-      'wget',
-      'nc',
-      'netcat',
-      'ssh',
-      'scp',
-      'sftp',
-      'rsync',
-      'ftp',
-      'telnet',
-      'ping',
-      'traceroute',
-      'nslookup',
-      'dig',
-      'host',
-    ];
-
     const tokens = command.split(/\s+/);
     return tokens.some((token) =>
-      networkCommands.some(
-        (cmd) => token === cmd || token.endsWith(`/${cmd}`)
-      )
+      NETWORK_COMMANDS.some((cmd) => token === cmd || token.endsWith(`/${cmd}`)),
     );
   }
 
@@ -335,7 +480,7 @@ export class CommandValidator {
       command.includes('|') ||
       command.includes('$(') ||
       command.includes('`') ||
-      /;\s*[a-z]/.test(command)
+      /;\s*[a-z]/i.test(command)
     );
   }
 
@@ -379,5 +524,29 @@ export function createValidator(config?: Partial<SandboxConfig>): CommandValidat
 export function isSafeCommand(command: string, config?: Partial<SandboxConfig>): boolean {
   const validator = new CommandValidator(config);
   const analysis = validator.analyze(command);
-  return analysis.risk === 'safe' || analysis.risk === 'moderate';
+  return analysis.risk === 'safe';
+}
+
+/**
+ * Evaluate a command against sandbox policy.
+ */
+export function evaluatePolicy(
+  command: string,
+  config?: Partial<SandboxConfig>,
+  cwd?: string,
+): CommandPolicyEvaluation {
+  const validator = new CommandValidator(config);
+  return validator.evaluatePolicy(command, { cwd });
+}
+
+/**
+ * Read-only helper shared by plan mode and read-only sandbox mode.
+ */
+export function isReadOnlySafeCommand(command: string): boolean {
+  const normalized = command.trim().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+
+  return READ_ONLY_SAFE_COMMAND_PREFIXES.some(
+    (safe) => normalized === safe || normalized.startsWith(`${safe} `),
+  );
 }

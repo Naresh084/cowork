@@ -6,6 +6,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useAppStore } from '../../stores/app-store';
+import { useCapabilityStore } from '../../stores/capability-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,6 +30,7 @@ export function SessionHeader() {
   const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
   const runtimeConfigNotice = useAppStore((state) => state.runtimeConfigNotice);
+  const sandboxSnapshot = useCapabilityStore((state) => state.snapshot?.sandbox);
 
   // Check if computer_use tool is running (V2: derive from chatItems)
   const isComputerUseRunning = useChatStore((state) => {
@@ -403,6 +405,28 @@ export function SessionHeader() {
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             Start new session
+          </div>
+        ) : null}
+
+        {sandboxSnapshot ? (
+          <div
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
+              sandboxSnapshot.mode === 'danger-full-access'
+                ? 'bg-[#FF5449]/15 text-[#FF8A80]'
+                : 'bg-[#1D4ED8]/10 text-[#93C5FD]',
+            )}
+            title={
+              sandboxSnapshot.osEnforced
+                ? 'Command sandbox is OS-enforced'
+                : 'Command sandbox is validator-enforced'
+            }
+          >
+            <Shield className="w-3.5 h-3.5" />
+            Sandbox: {sandboxSnapshot.mode}
+            <span className="text-[10px] opacity-70">
+              {sandboxSnapshot.osEnforced ? 'OS' : 'validator'}
+            </span>
           </div>
         ) : null}
 

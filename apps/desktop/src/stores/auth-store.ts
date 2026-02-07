@@ -38,6 +38,19 @@ export const BASE_URL_EDITABLE_PROVIDERS: ProviderId[] = [
   'lmstudio',
 ];
 
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export interface CommandSandboxSettings {
+  mode: SandboxMode;
+  allowNetwork: boolean;
+  allowProcessSpawn: boolean;
+  allowedPaths: string[];
+  deniedPaths: string[];
+  trustedCommands: string[];
+  maxExecutionTimeMs: number;
+  maxOutputBytes: number;
+}
+
 const DEFAULT_BASE_URLS: Record<ProviderId, string> = {
   google: 'https://generativelanguage.googleapis.com',
   openai: 'https://api.openai.com',
@@ -63,6 +76,7 @@ export interface RuntimeConfigPayload {
     imageBackend: 'google' | 'openai' | 'fal';
     videoBackend: 'google' | 'openai' | 'fal';
   };
+  sandbox?: CommandSandboxSettings;
   specializedModels?: {
     google: {
       imageGeneration: string;
@@ -156,6 +170,7 @@ function buildRuntimeConfig(
     tavilyApiKey: partial?.tavilyApiKey ?? state.tavilyApiKey,
     externalSearchProvider: partial?.externalSearchProvider,
     mediaRouting: partial?.mediaRouting,
+    sandbox: partial?.sandbox,
     specializedModels: partial?.specializedModels,
   };
 }

@@ -248,6 +248,19 @@ export type ProviderId =
   | 'deepseek'
   | 'lmstudio';
 
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export interface CommandSandboxSettings {
+  mode: SandboxMode;
+  allowNetwork: boolean;
+  allowProcessSpawn: boolean;
+  allowedPaths: string[];
+  deniedPaths: string[];
+  trustedCommands: string[];
+  maxExecutionTimeMs: number;
+  maxOutputBytes: number;
+}
+
 export interface MediaRoutingSettings {
   imageBackend: 'google' | 'openai' | 'fal';
   videoBackend: 'google' | 'openai' | 'fal';
@@ -282,6 +295,7 @@ export interface RuntimeConfig {
   externalSearchProvider?: 'google' | 'exa' | 'tavily';
   mediaRouting?: MediaRoutingSettings;
   specializedModels?: SpecializedModelsV2;
+  sandbox?: CommandSandboxSettings;
 }
 
 export interface RuntimeConfigUpdateResult {
