@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { cronService } from '../cron/index.js';
-import type { CronSchedule } from '@gemini-cowork/shared';
+import type { CronSchedule, PlatformType } from '@gemini-cowork/shared';
 
 // ============================================================================
 // Schedule Conversion Utilities
@@ -146,6 +146,16 @@ type UserSchedule =
   | IntervalSchedule
   | CronExprSchedule;
 
+export interface ScheduledTaskDefaultNotificationTarget {
+  platform: PlatformType;
+  chatId?: string;
+  senderName?: string;
+}
+
+export type ResolveScheduledTaskDefaultNotificationTarget = (
+  sessionId: string,
+) => ScheduledTaskDefaultNotificationTarget | null;
+
 /**
  * Convert user-friendly schedule to internal CronSchedule
  */
@@ -234,6 +244,46 @@ function formatNextRun(timestamp: number | undefined): string {
   return `In ${days} day${days !== 1 ? 's' : ''}`;
 }
 
+function hasExplicitNotificationInstruction(prompt: string): boolean {
+  return /\bsend_notification_[a-z0-9_]+\b/i.test(prompt);
+}
+
+function platformDisplayName(platform: PlatformType): string {
+  switch (platform) {
+    case 'whatsapp':
+      return 'WhatsApp';
+    case 'slack':
+      return 'Slack';
+    case 'telegram':
+      return 'Telegram';
+    case 'discord':
+      return 'Discord';
+    case 'imessage':
+      return 'iMessage';
+    case 'teams':
+      return 'Microsoft Teams';
+    default:
+      return platform;
+  }
+}
+
+function buildDefaultNotificationInstruction(
+  target: ScheduledTaskDefaultNotificationTarget,
+): string {
+  const channelName = platformDisplayName(target.platform);
+  const senderHint = target.senderName ? ` from ${target.senderName}` : '';
+  const destinationHint = target.chatId
+    ? ` with chatId ${JSON.stringify(target.chatId)}`
+    : '';
+
+  return [
+    'Delivery requirement for this scheduled task:',
+    `- This request originated from ${channelName}${senderHint}.`,
+    `- After each run, send the final summary via send_notification_${target.platform}${destinationHint}.`,
+    '- Keep the message concise and actionable.',
+  ].join('\n');
+}
+
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -241,7 +291,9 @@ function formatNextRun(timestamp: number | undefined): string {
 /**
  * schedule_task tool - Create a new scheduled task
  */
-export function createScheduleTaskTool(): ToolHandler {
+export function createScheduleTaskTool(
+  resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
+): ToolHandler {
   return {
     name: 'schedule_task',
     description: `Create a scheduled task that runs automatically at specified times.
@@ -311,13 +363,25 @@ Schedule types:
       const { name, prompt, schedule, workingDirectory, maxRuns, maxTurns } = parsed;
 
       try {
+        const resolver = resolveDefaultNotificationTarget;
+        const shouldApplyDefaultDelivery =
+          Boolean(resolver) &&
+          !hasExplicitNotificationInstruction(prompt);
+        const defaultNotificationTarget =
+          shouldApplyDefaultDelivery && context.sessionId && resolver
+            ? resolver(context.sessionId)
+            : null;
+        const effectivePrompt = defaultNotificationTarget
+          ? `${prompt.trim()}\n\n${buildDefaultNotificationInstruction(defaultNotificationTarget)}`
+          : prompt;
+
         // Convert user schedule to internal format
         const cronSchedule = convertSchedule(schedule);
 
         // Create the job
         const job = await cronService.createJob({
           name,
-          prompt,
+          prompt: effectivePrompt,
           schedule: cronSchedule,
           workingDirectory: workingDirectory || context.workingDirectory,
           maxRuns,
@@ -333,7 +397,17 @@ Schedule types:
             maxRuns: job.maxRuns ?? 'unlimited',
             nextRunAt: job.nextRunAt,
             nextRunFormatted: formatNextRun(job.nextRunAt),
-            message: `Scheduled task "${name}" created successfully.${job.maxRuns ? ` Will run ${job.maxRuns} time${job.maxRuns > 1 ? 's' : ''} then auto-stop.` : ''} Next run: ${formatNextRun(job.nextRunAt)}`,
+            defaultNotification: defaultNotificationTarget
+              ? {
+                  platform: defaultNotificationTarget.platform,
+                  chatId: defaultNotificationTarget.chatId ?? null,
+                }
+              : null,
+            message:
+              `Scheduled task "${name}" created successfully.` +
+              `${job.maxRuns ? ` Will run ${job.maxRuns} time${job.maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
+              `${defaultNotificationTarget ? ` Default delivery set to ${platformDisplayName(defaultNotificationTarget.platform)}${defaultNotificationTarget.chatId ? ` (${defaultNotificationTarget.chatId})` : ''}.` : ''}` +
+              ` Next run: ${formatNextRun(job.nextRunAt)}`,
           },
         };
       } catch (error) {
@@ -497,6 +571,11 @@ Actions:
 /**
  * Create all cron-related tools
  */
-export function createCronTools(): ToolHandler[] {
-  return [createScheduleTaskTool(), createManageScheduledTaskTool()];
+export function createCronTools(
+  resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
+): ToolHandler[] {
+  return [
+    createScheduleTaskTool(resolveDefaultNotificationTarget),
+    createManageScheduledTaskTool(),
+  ];
 }

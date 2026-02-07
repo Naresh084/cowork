@@ -4,7 +4,14 @@ import {
   getModelContextWindow,
   setModelContextWindows,
 } from '@gemini-cowork/providers';
-import type { Message, PermissionRequest, PermissionDecision, MessageContentPart, SessionType } from '@gemini-cowork/shared';
+import type {
+  Message,
+  PermissionRequest,
+  PermissionDecision,
+  MessageContentPart,
+  SessionType,
+  PlatformType,
+} from '@gemini-cowork/shared';
 import {
   SUPPORTED_PLATFORM_TYPES,
   generateId,
@@ -110,6 +117,14 @@ interface PendingPlanProposal {
   status: 'pending' | 'resolved' | 'cancelled';
 }
 
+interface IntegrationMessageOrigin {
+  platform: PlatformType;
+  chatId: string;
+  senderName: string;
+  senderId?: string;
+  timestamp: number;
+}
+
 interface ActiveSession {
   id: string;
   type: SessionType;
@@ -176,6 +191,10 @@ interface ActiveSession {
   messageQueue: QueuedMessage[];
   /** Pending plan review generated in plan mode */
   pendingPlanProposal?: PendingPlanProposal;
+  /** Next inbound integration origin to apply for upcoming turn */
+  pendingIntegrationOrigin?: IntegrationMessageOrigin;
+  /** Active origin context for currently executing turn */
+  activeTurnIntegrationOrigin?: IntegrationMessageOrigin;
   /** Per-turn guardrail state for todo enforcement in execute mode */
   hasTodoStateThisTurn: boolean;
   /** Non-todo tool call count since last todo update */
@@ -677,6 +696,8 @@ export class AgentRunner {
       threadId: data.metadata.id,
       messageQueue: [],
       pendingPlanProposal: undefined,
+      pendingIntegrationOrigin: undefined,
+      activeTurnIntegrationOrigin: undefined,
       hasTodoStateThisTurn: false,
       nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: data.metadata.createdAt,
@@ -2263,6 +2284,46 @@ export class AgentRunner {
   }
 
   /**
+   * Set per-turn integration origin context for shared integration sessions.
+   * This context is consumed on the next sendMessage execution for the session.
+   */
+  setIntegrationMessageOrigin(
+    sessionId: string,
+    origin: {
+      platform: PlatformType;
+      chatId: string;
+      senderName: string;
+      senderId?: string;
+      timestamp?: number;
+    },
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+
+    if (session.type !== 'integration') {
+      return;
+    }
+
+    const chatId = origin.chatId?.trim();
+    if (!chatId) {
+      return;
+    }
+
+    session.pendingIntegrationOrigin = {
+      platform: origin.platform,
+      chatId,
+      senderName: origin.senderName?.trim() || 'Unknown Sender',
+      senderId: origin.senderId?.trim() || undefined,
+      timestamp:
+        typeof origin.timestamp === 'number' && Number.isFinite(origin.timestamp)
+          ? origin.timestamp
+          : Date.now(),
+    };
+  }
+
+  /**
    * Create a new session.
    */
   async createSession(
@@ -2323,6 +2384,8 @@ export class AgentRunner {
       threadId: sessionId,
       messageQueue: [],
       pendingPlanProposal: undefined,
+      pendingIntegrationOrigin: undefined,
+      activeTurnIntegrationOrigin: undefined,
       hasTodoStateThisTurn: false,
       nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: now,
@@ -2550,6 +2613,8 @@ export class AgentRunner {
     });
     session.hasTodoStateThisTurn = false;
     session.nonTodoToolCallsSinceTodoUpdate = 0;
+    session.activeTurnIntegrationOrigin = this.getCurrentIntegrationOrigin(session) || undefined;
+    session.pendingIntegrationOrigin = undefined;
 
     // Filter attachments to only include supported types (exclude 'other')
     // Strip base64 data from media attachments — data is only needed for the LLM call
@@ -2872,6 +2937,7 @@ export class AgentRunner {
     } finally {
       session.stopRequested = false;
       session.abortController = undefined;
+      session.activeTurnIntegrationOrigin = undefined;
       eventEmitter.flushSync();
 
       // Finalize turn and persist to disk
@@ -3770,7 +3836,7 @@ You can create automated scheduled tasks that run in the background. Use the \`s
 2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
 3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use web_search to search the web").
 4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
-5. **Notification channel confirmation is required when available**. If at least one messaging integration is connected and the user requests a scheduled task without naming a delivery channel, ask a single clarifying question to pick the channel before creating the task.
+5. **Default delivery channel rule**. If a scheduled task request comes from a shared integration session, default delivery to the same originating platform/channel unless the user explicitly chooses another destination. Ask a clarifying question only when no origin is available and no channel was specified.
 
 ### When to Suggest Scheduling
 Proactively suggest scheduling when the user:
@@ -3791,7 +3857,9 @@ Proactively suggest scheduling when the user:
 - The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
 - The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the cron agent can use matching \`send_notification_<platform>\` tools to deliver results.
 - When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack", "post in Teams"), include that instruction in the prompt using the matching notification tool.
-- If messaging integrations are connected and the user did not choose a delivery channel for the scheduled task, ask which channel to use before creating the task. If no integrations are connected, proceed without asking and keep delivery in-app.
+- If the current request includes integration origin context, use that origin platform/channel as the default scheduled-task delivery target.
+- If no origin context is available and messaging integrations are connected but no delivery channel was chosen, ask which channel to use before creating the task.
+- If no integrations are connected, proceed without asking and keep delivery in-app.
 - Results are also delivered to the user's chat when each run completes.
 - \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
 - The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due job, fires it, then re-arms for the next one. No wasted CPU cycles.
@@ -4066,7 +4134,8 @@ ${toolList}
 - Keep notification messages concise (platform character limits apply)
 - Use plain text formatting (no complex markdown)
 - Don't send notifications for trivial operations
-- Always use the last active chat unless told otherwise`;
+- Always use the last active chat unless told otherwise
+- In shared integration sessions, treat the request origin platform/channel as the default destination for scheduled-task notifications unless the user explicitly overrides it`;
     } catch {
       return '';
     }
@@ -4366,6 +4435,52 @@ ${stitchGuidance}
     return skillService.getManagedSkillsDir();
   }
 
+  private getCurrentIntegrationOrigin(
+    session: ActiveSession,
+  ): IntegrationMessageOrigin | null {
+    if (session.type !== 'integration') {
+      return null;
+    }
+
+    return session.activeTurnIntegrationOrigin ?? session.pendingIntegrationOrigin ?? null;
+  }
+
+  private getDefaultScheduledTaskNotificationTarget(sessionId: string): {
+    platform: PlatformType;
+    chatId?: string;
+    senderName?: string;
+  } | null {
+    const sourceSession = this.sessions.get(sessionId);
+    if (!sourceSession) {
+      return null;
+    }
+
+    const origin = this.getCurrentIntegrationOrigin(sourceSession);
+    if (!origin) {
+      return null;
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { integrationBridge } = require('./integrations/index.js');
+      const status = integrationBridge
+        .getStatuses()
+        .find((entry: { platform: PlatformType; connected: boolean }) => entry.platform === origin.platform);
+      if (!status?.connected) {
+        return null;
+      }
+    } catch {
+      // Integration bridge unavailable - don't set default notification target.
+      return null;
+    }
+
+    return {
+      platform: origin.platform,
+      chatId: origin.chatId || undefined,
+      senderName: origin.senderName || undefined,
+    };
+  }
+
   private buildToolHandlers(session: ActiveSession): ToolHandler[] {
     const capabilityContext = this.getToolCapabilityContext(session.provider);
 
@@ -4540,7 +4655,9 @@ ${stitchGuidance}
     const cronTools =
       session.type === 'isolated' || session.type === 'cron'
         ? []
-        : createCronTools();
+        : createCronTools((sourceSessionId) =>
+            this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
+          );
 
     const handlers = [
       readAnyFileTool,
@@ -4838,6 +4955,22 @@ ${stitchGuidance}
             messages: [...(request.messages || []), injectedMsg],
           };
           session.pendingMultimodalContent = [];
+        }
+
+        if (session.activeTurnIntegrationOrigin) {
+          const origin = session.activeTurnIntegrationOrigin;
+          const originContext = [
+            '[Integration Origin Context]',
+            `platform: ${origin.platform}`,
+            `chatId: ${origin.chatId}`,
+            `senderName: ${origin.senderName}`,
+            'Scheduling rule: when creating schedule_task without explicit notification channel, default delivery to this origin platform/chat using send_notification_<platform>.',
+          ].join('\n');
+          const injectedOriginMsg = new HumanMessage(originContext);
+          request = {
+            ...request,
+            messages: [...(request.messages || []), injectedOriginMsg],
+          };
         }
 
         if (!request.tools || request.tools.length === 0) {

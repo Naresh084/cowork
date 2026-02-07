@@ -799,6 +799,16 @@ export class MessageRouter extends EventEmitter {
     state.requestMarker = taggedContent;
 
     try {
+      if (typeof this.agentRunner.setIntegrationMessageOrigin === 'function') {
+        this.agentRunner.setIntegrationMessageOrigin(sessionId, {
+          platform: msg.platform,
+          chatId: msg.chatId,
+          senderName: msg.senderName,
+          senderId: msg.senderId,
+          timestamp: msg.timestamp,
+        });
+      }
+
       await this.agentRunner.sendMessage(
         sessionId,
         taggedContent,
