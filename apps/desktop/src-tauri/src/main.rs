@@ -59,6 +59,7 @@ fn main() {
             commands::agent::agent_send_message,
             commands::agent::agent_respond_permission,
             commands::agent::agent_set_approval_mode,
+            commands::agent::agent_set_execution_mode,
             commands::agent::agent_set_models,
             commands::agent::agent_respond_question,
             commands::agent::agent_stop_generation,

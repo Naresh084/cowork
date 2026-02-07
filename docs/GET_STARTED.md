@@ -211,7 +211,28 @@ System prompt tool list:
 - Tool instructions in system prompt are generated from currently registered tools only.
 - Missing keys => tool omitted from registration and prompt tool section.
 
-## 6. Provider Defaults With No Extra Google/OpenAI/Fal Keys
+## 6. Plan Mode (Analyze -> Approve -> Execute)
+
+Plan mode is session-scoped and read-only:
+
+1. Switch a session to `Plan` in the chat header.
+2. Agent analyzes only (no writes/side effects) and must return a `<proposed_plan>` block.
+3. You get a `Plan Approval` card:
+   - `Accept and Execute`: switches session to `Execute` and auto-runs the approved plan.
+   - `Reject and Revise`: stays in `Plan` and asks for a revised plan.
+
+Runtime behavior in plan mode:
+
+- Allowed: read tools (`read_any_file`, `read_file`, `ls`, `glob`, `grep`), `web_search`, `web_fetch`, safe read-only shell commands.
+- Blocked: file mutation, scheduling, notification sends, media generation, browser automation, and other side-effect tools.
+- While approval is pending, message queue processing is paused and resumes after decision.
+
+Todo discipline in execute mode:
+
+- Execute mode enforces `write_todos` early for non-trivial implementation turns.
+- Agent must keep todo status updated continuously as steps complete.
+
+## 7. Provider Defaults With No Extra Google/OpenAI/Fal Keys
 
 Assumption:
 

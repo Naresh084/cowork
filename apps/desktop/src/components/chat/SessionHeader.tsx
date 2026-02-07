@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import type { ApprovalMode } from '../../stores/settings-store';
+import type { ExecutionMode } from '../../stores/session-store';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/Dialog';
 
 const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: string }> = [
@@ -18,8 +19,13 @@ const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: stri
   { id: 'full', label: 'Full', description: 'Allow local actions' },
 ];
 
+const EXECUTION_MODES: Array<{ id: ExecutionMode; label: string; description: string }> = [
+  { id: 'execute', label: 'Execute', description: 'Implement changes directly' },
+  { id: 'plan', label: 'Plan', description: 'Analyze only and propose plan' },
+];
+
 export function SessionHeader() {
-  const { activeSessionId, sessions, updateSessionTitle, deleteSession } = useSessionStore();
+  const { activeSessionId, sessions, updateSessionTitle, deleteSession, setSessionExecutionMode } = useSessionStore();
   const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
   const runtimeConfigNotice = useAppStore((state) => state.runtimeConfigNotice);
@@ -32,6 +38,12 @@ export function SessionHeader() {
     return session.chatItems.some(
       (ci) => ci.kind === 'tool_start' && ci.name.toLowerCase() === 'computer_use' && ci.status === 'running'
     );
+  });
+  const isPlanApprovalPending = useChatStore((state) => {
+    if (!activeSessionId) return false;
+    const session = state.sessions[activeSessionId];
+    if (!session) return false;
+    return session.pendingQuestions.some((question) => question.header === 'Plan Approval');
   });
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -75,6 +87,7 @@ export function SessionHeader() {
 
   const sessionTitle = activeSession?.title ||
     (activeSession?.firstMessage ? truncate(activeSession.firstMessage, 40) : 'New conversation');
+  const executionMode = activeSession?.executionMode || 'execute';
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -189,6 +202,17 @@ export function SessionHeader() {
     }
     setPendingMode(mode);
     setModeDialogOpen(true);
+  };
+
+  const handleExecutionModeChange = async (mode: ExecutionMode) => {
+    if (!activeSessionId) return;
+    if (mode === executionMode) return;
+    try {
+      await setSessionExecutionMode(activeSessionId, mode);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      toast.error('Failed to change execution mode', errorMessage);
+    }
   };
 
   const confirmModeChange = () => {
@@ -320,6 +344,25 @@ export function SessionHeader() {
       </div>
 
       <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#111218] p-1">
+          {EXECUTION_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => void handleExecutionModeChange(mode.id)}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                executionMode === mode.id
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'
+              )}
+              title={mode.description}
+              data-tour-id={mode.id === 'plan' ? 'session-execution-mode-plan' : undefined}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+
         {/* Live View Button - shows when computer_use is running */}
         <AnimatePresence>
           {isComputerUseRunning && !liveViewOpen && (
@@ -360,6 +403,18 @@ export function SessionHeader() {
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             Start new session
+          </div>
+        ) : null}
+
+        {executionMode === 'plan' ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD]">
+            Plan mode active
+          </div>
+        ) : null}
+
+        {isPlanApprovalPending ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#F5C400]/15 text-[#F5C400]">
+            Review plan to continue
           </div>
         ) : null}
 

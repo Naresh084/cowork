@@ -34,6 +34,7 @@ export interface CreateSessionParams {
   workingDirectory: string;
   model?: string;
   provider?: ProviderId;
+  executionMode?: ExecutionMode;
   title?: string;
   type?: SessionType;
 }
@@ -51,10 +52,16 @@ export interface RespondPermissionParams {
 }
 
 export type ApprovalMode = 'auto' | 'read_only' | 'full';
+export type ExecutionMode = 'execute' | 'plan';
 
 export interface SetApprovalModeParams {
   sessionId: string;
   mode: ApprovalMode;
+}
+
+export interface SetExecutionModeParams {
+  sessionId: string;
+  mode: ExecutionMode;
 }
 
 export interface SetModelsParams {
@@ -212,6 +219,7 @@ export interface SessionInfo {
   id: string;
   type: SessionType;
   provider: ProviderId;
+  executionMode: ExecutionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -350,12 +358,14 @@ export interface QuestionRequest {
   options?: QuestionOption[];
   multiSelect?: boolean;
   header?: string;
+  allowCustom?: boolean;
   timestamp: number;
 }
 
 export interface QuestionOption {
   label: string;
   description?: string;
+  value?: string;
 }
 
 export interface Task {

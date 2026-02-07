@@ -48,6 +48,7 @@ Current platform scope:
   - Provider
   - Media
   - Integrations
+- Session-level Plan Mode (`Plan` -> `<proposed_plan>` -> Accept/Reject -> auto-execute on accept)
 - Runtime config apply pipeline with explicit "start new session" notice when changes cross compatibility boundaries
 
 ### Developer and Ops
@@ -218,6 +219,25 @@ Optional:
    - Model overrides for image/video generation
 3. **Integrations**
    - External search fallback provider + Exa/Tavily keys
+
+## Plan Mode Workflow
+
+Plan mode is a per-session analyze-only mode:
+
+1. Switch the session header mode from `Execute` to `Plan`.
+2. Agent investigates with read-only tool access and returns `<proposed_plan>...</proposed_plan>`.
+3. Review the in-chat `Plan Approval` card:
+   - `Accept and Execute`: switches to execute mode and auto-runs the approved plan.
+   - `Reject and Revise`: keeps plan mode and requests a revised plan.
+
+Plan mode tool behavior:
+
+- Allowed: read tools, `web_search`, `web_fetch`, and safe read-only shell commands.
+- Blocked: writes, destructive shell, scheduling, notifications, media generation, browser automation, and other side effects.
+
+Execute mode discipline:
+
+- Agent is expected to call `write_todos` early for multi-step work and continuously update todo statuses as execution progresses.
    - Stitch key
    - Specialized model overrides (`computer_use`, `deep_research`)
    - Messaging integration settings (WhatsApp/Slack/Telegram/Discord/iMessage/Teams)

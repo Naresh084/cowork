@@ -215,6 +215,7 @@ interface ChatActions {
 
 export interface SessionDetails {
   id: string;
+  executionMode?: 'execute' | 'plan';
   messages: Message[];
   chatItems: ChatItem[];
   tasks: Task[];

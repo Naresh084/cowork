@@ -204,6 +204,9 @@ function parseTauriEvent(
         sessionId,
         title: (data.title as string | undefined) ?? (data.session as { title?: string })?.title,
         messageCount: (data.messageCount as number | undefined) ?? (data.session as { messageCount?: number })?.messageCount,
+        executionMode:
+          (data.executionMode as 'execute' | 'plan' | undefined) ??
+          (data.session as { executionMode?: 'execute' | 'plan' })?.executionMode,
       };
 
     case 'agent:started':

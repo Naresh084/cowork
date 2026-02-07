@@ -8,6 +8,7 @@ declare global {
 const DEFAULT_MOCK_RESPONSES: Record<string, unknown> = {
   agent_get_initialization_status: { initialized: true, sessionCount: 0 },
   agent_set_skills: { success: true },
+  agent_set_execution_mode: { success: true },
   agent_list_sessions: [],
   agent_get_context_usage: { used: 0, total: 1 },
 };

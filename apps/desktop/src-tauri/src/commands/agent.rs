@@ -12,11 +12,19 @@ pub struct SessionInfo {
     pub r#type: Option<String>,
     #[serde(default = "default_provider")]
     pub provider: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
     pub title: Option<String>,
+    #[serde(default)]
+    pub first_message: Option<String>,
     pub working_directory: String,
     pub model: String,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub last_accessed_at: i64,
+    #[serde(default)]
+    pub message_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +35,8 @@ pub struct SessionSummary {
     pub r#type: Option<String>,
     #[serde(default = "default_provider")]
     pub provider: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
     pub title: Option<String>,
     pub working_directory: Option<String>,
     pub model: Option<String>,
@@ -44,6 +54,8 @@ pub struct SessionDetails {
     pub r#type: Option<String>,
     #[serde(default = "default_provider")]
     pub provider: String,
+    #[serde(default = "default_execution_mode")]
+    pub execution_mode: String,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -70,6 +82,10 @@ pub struct SessionDetails {
 
 fn default_provider() -> String {
     "google".to_string()
+}
+
+fn default_execution_mode() -> String {
+    "execute".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,12 +291,18 @@ pub async fn agent_set_runtime_config(
 pub async fn agent_get_capability_snapshot(
     app: AppHandle,
     state: State<'_, AgentState>,
+    session_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     ensure_sidecar_started(&app, &state).await?;
 
     let manager = &state.manager;
     manager
-        .send_command("get_capability_snapshot", serde_json::json!({}))
+        .send_command(
+            "get_capability_snapshot",
+            serde_json::json!({
+                "sessionId": session_id,
+            }),
+        )
         .await
 }
 
@@ -308,6 +330,7 @@ pub async fn agent_create_session(
     working_directory: String,
     model: Option<String>,
     provider: Option<String>,
+    execution_mode: Option<String>,
 ) -> Result<SessionInfo, String> {
     ensure_sidecar_started(&app, &state).await?;
 
@@ -316,6 +339,7 @@ pub async fn agent_create_session(
         "workingDirectory": working_directory,
         "model": model,
         "provider": provider,
+        "executionMode": execution_mode,
     });
 
     let result = manager.send_command("create_session", params).await?;
@@ -383,6 +407,26 @@ pub async fn agent_set_approval_mode(
     });
 
     manager.send_command("set_approval_mode", params).await?;
+    Ok(())
+}
+
+/// Set execution mode for a session
+#[tauri::command]
+pub async fn agent_set_execution_mode(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "mode": mode,
+    });
+
+    manager.send_command("set_execution_mode", params).await?;
     Ok(())
 }
 

@@ -29,6 +29,7 @@ import type {
   SendMessageParams,
   RespondPermissionParams,
   SetApprovalModeParams,
+  SetExecutionModeParams,
   RespondQuestionParams,
   StopGenerationParams,
   GetSessionParams,
@@ -209,6 +210,7 @@ registerHandler('create_session', async (params) => {
     p.title,
     p.type,
     p.provider,
+    p.executionMode,
   );
   return session;
 });
@@ -218,8 +220,9 @@ registerHandler('set_runtime_config', async (params) => {
   return agentRunner.setRuntimeConfig(config);
 });
 
-registerHandler('get_capability_snapshot', async () => {
-  return agentRunner.getCapabilitySnapshot();
+registerHandler('get_capability_snapshot', async (params) => {
+  const sessionId = typeof params.sessionId === 'string' ? params.sessionId : undefined;
+  return agentRunner.getCapabilitySnapshot(sessionId);
 });
 
 // Send message
@@ -249,6 +252,15 @@ registerHandler('set_approval_mode', async (params) => {
     throw new Error('sessionId and mode are required');
   }
   agentRunner.setApprovalMode(p.sessionId, p.mode);
+  return { success: true };
+});
+
+registerHandler('set_execution_mode', async (params) => {
+  const p = params as unknown as SetExecutionModeParams;
+  if (!p.sessionId || !p.mode) {
+    throw new Error('sessionId and mode are required');
+  }
+  await agentRunner.setExecutionMode(p.sessionId, p.mode);
   return { success: true };
 });
 

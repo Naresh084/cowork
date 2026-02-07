@@ -61,8 +61,10 @@ import type {
   Artifact,
   ExtendedPermissionRequest,
   QuestionRequest,
+  QuestionOption,
   SkillConfig,
   ProviderId,
+  ExecutionMode,
   RuntimeConfig,
   RuntimeConfigUpdateResult,
 } from './types.js';
@@ -94,10 +96,19 @@ interface QueuedMessage {
   queuedAt: number;
 }
 
+interface PendingPlanProposal {
+  id: string;
+  planMarkdown: string;
+  createdAt: number;
+  sourceTurnId?: string;
+  status: 'pending' | 'resolved' | 'cancelled';
+}
+
 interface ActiveSession {
   id: string;
   type: SessionType;
   provider: ProviderId;
+  executionMode: ExecutionMode;
   workingDirectory: string;
   baseUrlSnapshot?: string;
   model: string;
@@ -157,6 +168,12 @@ interface ActiveSession {
   threadId: string;
   /** Message queue for messages sent while agent is busy */
   messageQueue: QueuedMessage[];
+  /** Pending plan review generated in plan mode */
+  pendingPlanProposal?: PendingPlanProposal;
+  /** Per-turn guardrail state for todo enforcement in execute mode */
+  hasTodoStateThisTurn: boolean;
+  /** Non-todo tool call count since last todo update */
+  nonTodoToolCallsSinceTodoUpdate: number;
   createdAt: number;
   updatedAt: number;
   /** Last time the session was accessed/selected by the user */
@@ -314,6 +331,7 @@ interface CapabilityIntegrationAccessEntry {
 
 interface CapabilitySnapshot {
   provider: ProviderId;
+  executionMode: ExecutionMode;
   mediaRouting: MediaRoutingSettingsLocal;
   keyStatus: {
     providerKeyConfigured: boolean;
@@ -566,6 +584,7 @@ export class AgentRunner {
       id: data.metadata.id,
       type: (data.metadata as { type?: SessionType }).type || 'main',
       provider: (data.metadata as { provider?: ProviderId }).provider || 'google',
+      executionMode: (data.metadata as { executionMode?: ExecutionMode }).executionMode || 'execute',
       workingDirectory: data.metadata.workingDirectory,
       baseUrlSnapshot: this.getProviderBaseUrl(
         ((data.metadata as { provider?: ProviderId }).provider || 'google') as ProviderId,
@@ -595,6 +614,9 @@ export class AgentRunner {
       hasAssistantTextThisTurn: false,
       threadId: data.metadata.id,
       messageQueue: [],
+      pendingPlanProposal: undefined,
+      hasTodoStateThisTurn: false,
+      nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
       lastAccessedAt: data.metadata.lastAccessedAt,
@@ -876,6 +898,168 @@ export class AgentRunner {
     session.lastCompletedAssistantSegmentText = normalizedFinal || normalizedLast;
     session.assistantSegmentIndex += 1;
     return true;
+  }
+
+  private resolveAssistantTurnText(
+    session: ActiveSession,
+    assistantMessage: Message | null,
+    streamedText: string,
+  ): string {
+    if (assistantMessage) {
+      return this.getTextFromMessageContent(assistantMessage.content);
+    }
+    const completed = (session.lastCompletedAssistantSegmentText || '').trim();
+    if (completed) return completed;
+    return streamedText;
+  }
+
+  private extractLastProposedPlan(text: string): string | null {
+    const pattern = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
+    let match: RegExpExecArray | null = null;
+    let latest: string | null = null;
+    do {
+      match = pattern.exec(text);
+      if (match?.[1]) {
+        latest = match[1].trim();
+      }
+    } while (match);
+    return latest;
+  }
+
+  private enqueueSessionMessage(
+    session: ActiveSession,
+    content: string,
+    toFront = false,
+  ): void {
+    const queuedMsg: QueuedMessage = {
+      id: generateId('qmsg'),
+      content,
+      queuedAt: Date.now(),
+    };
+    if (toFront) {
+      session.messageQueue.unshift(queuedMsg);
+    } else {
+      session.messageQueue.push(queuedMsg);
+    }
+    eventEmitter.queueUpdate(session.id, session.messageQueue.map((m) => ({
+      id: m.id,
+      content: m.content,
+      queuedAt: m.queuedAt,
+    })));
+  }
+
+  private normalizePlanDecision(answer: string | string[]): {
+    accept: boolean;
+    feedback?: string;
+  } {
+    if (Array.isArray(answer)) {
+      const normalizedEntries = answer.map((entry) => String(entry).trim().toLowerCase());
+      if (normalizedEntries.includes('accept_execute')) {
+        return { accept: true };
+      }
+      if (normalizedEntries.length === 1 && normalizedEntries[0] === 'reject_revise') {
+        return { accept: false };
+      }
+      const joined = answer.join('\n').trim();
+      const accepts = answer.some((entry) =>
+        /accept|execute|approve/i.test(String(entry))
+      );
+      return {
+        accept: accepts,
+        feedback: accepts ? undefined : joined || undefined,
+      };
+    }
+
+    const normalized = String(answer || '').trim();
+    const normalizedLower = normalized.toLowerCase();
+    if (normalizedLower === 'accept_execute') {
+      return { accept: true };
+    }
+    if (normalizedLower === 'reject_revise') {
+      return { accept: false };
+    }
+    const accepts = /accept|execute|approve/i.test(normalized);
+    return {
+      accept: accepts,
+      feedback: accepts ? undefined : normalized || undefined,
+    };
+  }
+
+  private async handlePlanProposalFlow(
+    session: ActiveSession,
+    assistantText: string,
+  ): Promise<void> {
+    const extractedPlan = this.extractLastProposedPlan(assistantText);
+    const planMarkdown = (extractedPlan || assistantText).trim();
+    if (!planMarkdown) return;
+
+    const proposal: PendingPlanProposal = {
+      id: generateId('plan'),
+      planMarkdown,
+      createdAt: Date.now(),
+      sourceTurnId: session.currentTurnId,
+      status: 'pending',
+    };
+    session.pendingPlanProposal = proposal;
+
+    const answer = await this.askQuestion(
+      session.id,
+      'Review the proposed plan. Accept to execute now, or reject to request a revised plan.',
+      [
+        {
+          label: 'Accept and Execute',
+          value: 'accept_execute',
+          description: 'Switches this session to execute mode and starts implementation immediately.',
+        },
+        {
+          label: 'Reject and Revise',
+          value: 'reject_revise',
+          description: 'Keeps plan mode and asks for a revised plan. You can also provide custom feedback.',
+        },
+      ],
+      false,
+      'Plan Approval',
+      true,
+    );
+
+    if (session.pendingPlanProposal?.id !== proposal.id) {
+      return;
+    }
+    if (session.pendingPlanProposal.status !== 'pending') {
+      session.pendingPlanProposal = undefined;
+      return;
+    }
+    if (
+      (typeof answer === 'string' && answer === '__cancelled__') ||
+      (Array.isArray(answer) && answer.includes('__cancelled__'))
+    ) {
+      session.pendingPlanProposal.status = 'cancelled';
+      session.pendingPlanProposal = undefined;
+      return;
+    }
+
+    const decision = this.normalizePlanDecision(answer);
+    session.pendingPlanProposal.status = 'resolved';
+
+    if (decision.accept) {
+      await this.setExecutionMode(session.id, 'execute');
+      this.enqueueSessionMessage(
+        session,
+        `Approved plan:\n\n${planMarkdown}\n\nImplement this plan now. Start by calling write_todos with a detailed step list, then execute and keep todo statuses continuously updated as each step completes.`,
+        true,
+      );
+    } else {
+      const feedback = decision.feedback?.trim();
+      this.enqueueSessionMessage(
+        session,
+        feedback
+          ? `Revise the plan based on this feedback:\n${feedback}\n\nReturn one updated <proposed_plan> block.`
+          : 'Revise the plan for clearer implementation steps, risks, and validation. Return one updated <proposed_plan> block.',
+        true,
+      );
+    }
+
+    session.pendingPlanProposal = undefined;
   }
 
   private extractMediaDescriptorsFromResult(result: unknown): Array<{
@@ -1656,8 +1840,10 @@ export class AgentRunner {
     });
   }
 
-  getCapabilitySnapshot(): CapabilitySnapshot {
-    const provider = this.runtimeConfig.activeProvider;
+  getCapabilitySnapshot(sessionId?: string): CapabilitySnapshot {
+    const session = sessionId ? this.sessions.get(sessionId) : undefined;
+    const provider = session?.provider || this.runtimeConfig.activeProvider;
+    const executionMode = session?.executionMode || 'execute';
     const context = this.getToolCapabilityContext(provider);
     const toolAccess: CapabilityToolAccessEntry[] = [];
     const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
@@ -1834,8 +2020,30 @@ export class AgentRunner {
       notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
     }
 
+    if (executionMode === 'plan') {
+      const allowedPlanTools = new Set([
+        'read_any_file',
+        'read_file',
+        'read',
+        'ls',
+        'glob',
+        'grep',
+        'web_search',
+        'google_grounded_search',
+        'web_fetch',
+      ]);
+      for (const entry of toolAccess) {
+        if (!allowedPlanTools.has(entry.toolName.toLowerCase())) {
+          entry.enabled = false;
+          entry.reason = 'Disabled by Plan mode.';
+        }
+      }
+      notes.push('Plan mode is active: side-effect tools are disabled until you switch back to execute mode.');
+    }
+
     return {
       provider,
+      executionMode,
       mediaRouting: { ...context.mediaRouting },
       keyStatus: {
         providerKeyConfigured,
@@ -1915,6 +2123,59 @@ export class AgentRunner {
   }
 
   /**
+   * Update execution mode for a session.
+   */
+  async setExecutionMode(sessionId: string, mode: ExecutionMode): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.executionMode === mode) {
+      return;
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      session.pendingPlanProposal.status = 'cancelled';
+      for (const [questionId, pending] of session.pendingQuestions.entries()) {
+        pending.resolve('__cancelled__');
+        session.pendingQuestions.delete(questionId);
+        this.updateQuestionStatus(session, questionId, 'answered', '__cancelled__');
+        eventEmitter.questionAnswered(sessionId, questionId, '__cancelled__');
+      }
+    }
+
+    session.executionMode = mode;
+    session.updatedAt = Date.now();
+    session.pendingPlanProposal = undefined;
+    session.hasTodoStateThisTurn = false;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
+
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = await this.createDeepAgent(session, toolHandlers);
+    this.subscribeToAgentEvents(session);
+
+    await this.persistSessionSnapshot(session);
+
+    eventEmitter.sessionUpdated({
+      id: session.id,
+      type: session.type,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage: this.getFirstMessagePreview(session),
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
+      messageCount: session.chatItems.filter(
+        (ci) => ci.kind === 'user_message' || ci.kind === 'assistant_message'
+      ).length,
+    } as SessionInfo);
+  }
+
+  /**
    * Create a new session.
    */
   async createSession(
@@ -1923,6 +2184,7 @@ export class AgentRunner {
     title?: string,
     type: SessionType = 'main',
     provider?: ProviderId | null,
+    executionMode: ExecutionMode = 'execute',
   ): Promise<SessionInfo> {
     const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
     const providerKey = this.getProviderApiKey(selectedProvider);
@@ -1945,6 +2207,7 @@ export class AgentRunner {
       id: sessionId,
       type,
       provider: selectedProvider,
+      executionMode,
       workingDirectory,
       baseUrlSnapshot: this.getProviderBaseUrl(selectedProvider),
       model: actualModel,
@@ -1972,6 +2235,9 @@ export class AgentRunner {
       hasAssistantTextThisTurn: false,
       threadId: sessionId,
       messageQueue: [],
+      pendingPlanProposal: undefined,
+      hasTodoStateThisTurn: false,
+      nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: now,
       updatedAt: now,
       lastAccessedAt: now,
@@ -1989,6 +2255,7 @@ export class AgentRunner {
       id: sessionId,
       type,
       provider: selectedProvider,
+      executionMode: session.executionMode,
       title: session.title,
       firstMessage: null,
       workingDirectory,
@@ -2017,6 +2284,20 @@ export class AgentRunner {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      const queuedMsg: QueuedMessage = {
+        id: generateId('qmsg'),
+        content,
+        attachments,
+        queuedAt: Date.now(),
+      };
+      session.messageQueue.push(queuedMsg);
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      return;
     }
 
     // If agent is currently busy (has active abort controller), queue the message
@@ -2050,6 +2331,9 @@ export class AgentRunner {
     if (!session) return;
 
     while (session.messageQueue.length > 0) {
+      if (session.pendingPlanProposal?.status === 'pending') {
+        break;
+      }
       const next = session.messageQueue.shift()!;
       // Emit queue update (item removed)
       eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
@@ -2177,6 +2461,8 @@ export class AgentRunner {
       turnMessageId: turnId,
       toolIds: [],
     });
+    session.hasTodoStateThisTurn = false;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
 
     // Filter attachments to only include supported types (exclude 'other')
     // Strip base64 data from media attachments — data is only needed for the LLM call
@@ -2410,11 +2696,24 @@ export class AgentRunner {
       if (assistantMessage) {
         this.emitFinalAssistantSegment(session, assistantMessage);
       }
+      const assistantTextForPlan = this.resolveAssistantTurnText(
+        session,
+        assistantMessage,
+        streamedText,
+      );
       if (assistantMessage || session.hasAssistantTextThisTurn) {
         session.updatedAt = Date.now();
       }
       // Signal stream completion (frontend uses this for streaming state)
       eventEmitter.streamDone(sessionId, null);
+
+      if (
+        session.executionMode === 'plan' &&
+        assistantTextForPlan.trim().length > 0 &&
+        !session.stopRequested
+      ) {
+        await this.handlePlanProposalFlow(session, assistantTextForPlan);
+      }
 
       // Update context usage and compact if needed
       this.emitContextUsage(session);
@@ -2552,6 +2851,18 @@ export class AgentRunner {
       eventEmitter.permissionResolved(sessionId, permissionId, 'deny');
     }
 
+    // Resolve pending questions to avoid deadlocks on stop.
+    for (const [questionId, pending] of session.pendingQuestions.entries()) {
+      pending.resolve('__cancelled__');
+      session.pendingQuestions.delete(questionId);
+      this.updateQuestionStatus(session, 'pending', 'answered', '__cancelled__');
+      eventEmitter.questionAnswered(sessionId, questionId, '__cancelled__');
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      session.pendingPlanProposal.status = 'cancelled';
+    }
+
     // Clear in-flight permissions to prevent stale state
     session.inFlightPermissions.clear();
 
@@ -2656,9 +2967,10 @@ export class AgentRunner {
   async askQuestion(
     sessionId: string,
     question: string,
-    options?: { label: string; description?: string }[],
+    options?: QuestionOption[],
     multiSelect?: boolean,
-    header?: string
+    header?: string,
+    allowCustom = true,
   ): Promise<string | string[]> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -2673,6 +2985,7 @@ export class AgentRunner {
       options,
       multiSelect,
       header,
+      allowCustom,
       timestamp: Date.now(),
     };
 
@@ -2685,7 +2998,7 @@ export class AgentRunner {
       questionId: questionId,
       question: question,
       header: header,
-      options: options?.map(o => ({ label: o.label, description: o.description })),
+      options: options?.map(o => ({ label: o.label, description: o.description, value: o.value })),
       multiSelect: multiSelect,
       status: 'pending',
     };
@@ -2724,9 +3037,29 @@ export class AgentRunner {
     // Resolve the promise with the answer
     pending.resolve(answer);
     session.pendingQuestions.delete(questionId);
+    this.updateQuestionStatus(session, questionId, 'answered', answer);
 
     // Emit answered event
     eventEmitter.questionAnswered(sessionId, questionId, answer);
+  }
+
+  private updateQuestionStatus(
+    session: ActiveSession,
+    questionId: string,
+    status: 'pending' | 'answered',
+    answer?: string | string[]
+  ): void {
+    const questionItem = [...session.chatItems]
+      .reverse()
+      .find(
+        (item): item is QuestionItem =>
+          item.kind === 'question' && item.questionId === questionId
+      );
+    if (!questionItem) return;
+    this.updateChatItem(session, questionItem.id, {
+      status,
+      answer,
+    } as Partial<QuestionItem>);
   }
 
   /**
@@ -2741,6 +3074,7 @@ export class AgentRunner {
           id: session.id,
           type: session.type,
           provider: session.provider,
+          executionMode: session.executionMode,
           title: session.title,
           firstMessage,
           workingDirectory: session.workingDirectory,
@@ -2774,6 +3108,7 @@ export class AgentRunner {
       id: session.id,
       type: session.type,
       provider: session.provider,
+      executionMode: session.executionMode,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -2810,6 +3145,13 @@ export class AgentRunner {
     }
     session.pendingPermissions.clear();
 
+    // Clear pending questions
+    for (const pending of session.pendingQuestions.values()) {
+      pending.resolve('__cancelled__');
+    }
+    session.pendingQuestions.clear();
+    session.pendingPlanProposal = undefined;
+
     // Clear in-flight permissions
     session.inFlightPermissions.clear();
 
@@ -2839,6 +3181,46 @@ export class AgentRunner {
     return true;
   }
 
+  private async persistSessionSnapshot(session: ActiveSession): Promise<void> {
+    if (!this.persistence) return;
+    try {
+      const ctxWindow = this.getContextWindow(session.provider, session.model);
+      const usedTokens =
+        session.lastKnownPromptTokens > 0
+          ? session.lastKnownPromptTokens
+          : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+      const percentUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
+
+      await this.persistence.saveSessionV2({
+        metadata: {
+          version: 2,
+          id: session.id,
+          type: session.type,
+          provider: session.provider,
+          executionMode: session.executionMode,
+          title: session.title,
+          workingDirectory: session.workingDirectory,
+          model: session.model,
+          approvalMode: session.approvalMode,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          lastAccessedAt: session.lastAccessedAt,
+        },
+        chatItems: session.chatItems,
+        tasks: session.tasks,
+        artifacts: session.artifacts,
+        contextUsage: {
+          usedTokens,
+          maxTokens: ctxWindow.input,
+          percentUsed,
+          lastUpdated: Date.now(),
+        },
+      });
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
   /**
    * Finalize turn and persist session to disk.
    * Associates tool executions with the user message that initiated them.
@@ -2854,44 +3236,7 @@ export class AgentRunner {
     // Clear current turn ID
     session.currentTurnId = undefined;
 
-    // Persist to disk using V2 format
-    if (this.persistence) {
-      try {
-        // Compute context usage for persistence
-        const ctxWindow = this.getContextWindow(session.provider, session.model);
-        const usedTokens = session.lastKnownPromptTokens > 0
-          ? session.lastKnownPromptTokens
-          : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
-        const pctUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
-
-        await this.persistence.saveSessionV2({
-          metadata: {
-            version: 2,
-            id: session.id,
-            type: session.type,
-            provider: session.provider,
-            title: session.title,
-            workingDirectory: session.workingDirectory,
-            model: session.model,
-            approvalMode: session.approvalMode,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            lastAccessedAt: session.lastAccessedAt,
-          },
-          chatItems: session.chatItems,
-          tasks: session.tasks,
-          artifacts: session.artifacts,
-          contextUsage: {
-            usedTokens,
-            maxTokens: ctxWindow.input,
-            percentUsed: pctUsed,
-            lastUpdated: Date.now(),
-          },
-        });
-      } catch {
-        // Failed to persist session
-      }
-    }
+    await this.persistSessionSnapshot(session);
 
     // Clear turn tracking
     this.currentTurnInfo.delete(session.id);
@@ -2909,31 +3254,7 @@ export class AgentRunner {
     session.title = title;
     session.updatedAt = Date.now();
 
-    // CRITICAL: Persist to disk using V2 format
-    if (this.persistence) {
-      try {
-        await this.persistence.saveSessionV2({
-          metadata: {
-            version: 2,
-            id: session.id,
-            type: session.type,
-            provider: session.provider,
-            title: session.title,
-            workingDirectory: session.workingDirectory,
-            model: session.model,
-            approvalMode: session.approvalMode,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            lastAccessedAt: session.lastAccessedAt,
-          },
-          chatItems: session.chatItems,
-          tasks: session.tasks,
-          artifacts: session.artifacts,
-        });
-      } catch {
-        // Failed to persist session title update
-      }
-    }
+    await this.persistSessionSnapshot(session);
 
     // Emit session updated event
     const firstMessage = this.getFirstMessagePreview(session);
@@ -2942,6 +3263,7 @@ export class AgentRunner {
       id: session.id,
       type: session.type,
       provider: session.provider,
+      executionMode: session.executionMode,
       title: session.title,
       firstMessage,
       workingDirectory: session.workingDirectory,
@@ -2966,31 +3288,7 @@ export class AgentRunner {
     const now = Date.now();
     session.lastAccessedAt = now;
 
-    // Persist to disk using V2 format
-    if (this.persistence) {
-      try {
-        await this.persistence.saveSessionV2({
-          metadata: {
-            version: 2,
-            id: session.id,
-            type: session.type,
-            provider: session.provider,
-            title: session.title,
-            workingDirectory: session.workingDirectory,
-            model: session.model,
-            approvalMode: session.approvalMode,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            lastAccessedAt: session.lastAccessedAt,
-          },
-          chatItems: session.chatItems,
-          tasks: session.tasks,
-          artifacts: session.artifacts,
-        });
-      } catch {
-        // Failed to persist lastAccessedAt update
-      }
-    }
+    await this.persistSessionSnapshot(session);
   }
 
   /**
@@ -3010,35 +3308,16 @@ export class AgentRunner {
     const toolHandlers = this.buildToolHandlers(session);
     session.agent = await this.createDeepAgent(session, toolHandlers);
 
-    // CRITICAL: Persist to disk and update workspace indices using V2 format
+    // Persist to disk and update workspace indices.
     if (this.persistence) {
       try {
         // Remove from old workspace index
         await this.persistence.removeSessionFromWorkspace(sessionId, oldWorkingDirectory);
-
-        // Save session with new working directory (also adds to new workspace index)
-        await this.persistence.saveSessionV2({
-          metadata: {
-            version: 2,
-            id: session.id,
-            type: session.type,
-            provider: session.provider,
-            title: session.title,
-            workingDirectory: session.workingDirectory,
-            model: session.model,
-            approvalMode: session.approvalMode,
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            lastAccessedAt: session.lastAccessedAt,
-          },
-          chatItems: session.chatItems,
-          tasks: session.tasks,
-          artifacts: session.artifacts,
-        });
       } catch {
-        // Failed to persist working directory update
+        // Failed to update old workspace index.
       }
     }
+    await this.persistSessionSnapshot(session);
 
     // Emit session updated event
     const firstMessageWd = this.getFirstMessagePreview(session);
@@ -3047,6 +3326,7 @@ export class AgentRunner {
       id: session.id,
       type: session.type,
       provider: session.provider,
+      executionMode: session.executionMode,
       title: session.title,
       firstMessage: firstMessageWd,
       workingDirectory: session.workingDirectory,
@@ -3569,7 +3849,7 @@ Use \`manage_scheduled_task\` to:
 - \`delete\`: Permanently remove a task
 
 ## Important Reminders
-1. Always mark todos completed when done
+1. In execute mode, call write_todos early and keep statuses updated continuously after each major step (not only at the end)
 2. If a tool fails, explain and try alternatives
 3. Stay focused on the requested task
 4. Remove debug code before completion`;
@@ -3580,6 +3860,18 @@ Use \`manage_scheduled_task\` to:
         '\n## Important Reminders'
       );
     }
+
+    const modePrompt =
+      session.executionMode === 'plan'
+        ? `## Plan Mode (Read-Only)
+You are in plan mode for this session.
+- Analyze and investigate only. Do not perform mutating or side-effect actions.
+- Allowed behavior: read files, inspect code, run safe read-only shell commands, and use web analysis tools if available.
+- Forbidden behavior: writing files, destructive shell commands, scheduling, notifications, media generation, browser automation, and any side-effect operation.
+- Your final answer MUST include exactly one <proposed_plan>...</proposed_plan> block that is decision-complete.
+- If tool access is blocked by plan mode, continue planning with available evidence.`
+        : `## Execute Mode
+Execution is enabled. Use write_todos before non-trivial implementation work and keep todos actively synced with progress throughout the turn.`;
 
     // Build Deep Agents middleware prompts
     const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
@@ -3602,6 +3894,7 @@ Use \`manage_scheduled_task\` to:
     const mcpPrompt = this.buildMcpPrompt();
 
     return buildFullSystemPrompt(basePrompt, [
+      modePrompt,
       agentsMdPrompt,
       memoryPrompt,
       subagentPrompt,
@@ -4140,7 +4433,7 @@ ${stitchGuidance}
         ? []
         : createCronTools();
 
-    return [
+    const handlers = [
       readAnyFileTool,
       ...researchTools,
       ...computerUseTools,
@@ -4151,6 +4444,12 @@ ${stitchGuidance}
       ...notificationTools,
       ...cronTools,
     ];
+
+    if (session.executionMode !== 'plan') {
+      return handlers;
+    }
+
+    return handlers.filter((tool) => this.isPlanModeToolAllowed(session, tool.name, {}));
   }
 
   private wrapTool(tool: ToolHandler, session: ActiveSession): DynamicStructuredTool {
@@ -4189,6 +4488,91 @@ ${stitchGuidance}
         const turnInfo = this.currentTurnInfo.get(session.id);
         if (turnInfo) {
           turnInfo.toolIds.push(toolCallId);
+        }
+
+        if (!this.isPlanModeToolAllowed(session, tool.name, args)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const error = `Plan mode blocks "${tool.name}". Analyze only and return a <proposed_plan> block.`;
+          eventEmitter.toolResult(session.id, toolCall, {
+            toolCallId,
+            success: false,
+            result: null,
+            error,
+            duration,
+            parentToolId,
+          });
+          toolStartItem.status = 'error';
+          this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+          this.appendChatItem(session, {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: 'error',
+            error,
+            duration,
+          } as ToolResultItem);
+          return { error };
+        }
+
+        if (this.shouldEnforceTodoGuard(session, tool.name)) {
+          if (!session.hasTodoStateThisTurn) {
+            const duration = this.consumeToolDuration(session, toolCallId);
+            const error = 'Run write_todos first for this execution turn, then continue with implementation.';
+            eventEmitter.toolResult(session.id, toolCall, {
+              toolCallId,
+              success: false,
+              result: null,
+              error,
+              duration,
+              parentToolId,
+            });
+            toolStartItem.status = 'error';
+            this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+            this.appendChatItem(session, {
+              id: generateChatItemId(),
+              kind: 'tool_result',
+              timestamp: Date.now(),
+              turnId: session.currentTurnId,
+              toolId: toolCallId,
+              name: tool.name,
+              status: 'error',
+              error,
+              duration,
+            } as ToolResultItem);
+            return { error };
+          }
+
+          session.nonTodoToolCallsSinceTodoUpdate += 1;
+          if (session.nonTodoToolCallsSinceTodoUpdate >= 4) {
+            const duration = this.consumeToolDuration(session, toolCallId);
+            const error = 'Update write_todos statuses before continuing with additional implementation steps.';
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+            eventEmitter.toolResult(session.id, toolCall, {
+              toolCallId,
+              success: false,
+              result: null,
+              error,
+              duration,
+              parentToolId,
+            });
+            toolStartItem.status = 'error';
+            this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+            this.appendChatItem(session, {
+              id: generateChatItemId(),
+              kind: 'tool_result',
+              timestamp: Date.now(),
+              turnId: session.currentTurnId,
+              toolId: toolCallId,
+              name: tool.name,
+              status: 'error',
+              error,
+              duration,
+            } as ToolResultItem);
+            return { error };
+          }
         }
 
         if (tool.requiresPermission) {
@@ -4241,6 +4625,10 @@ ${stitchGuidance}
           };
           eventEmitter.toolResult(session.id, toolCall, payload);
           this.recordArtifactForTool(session, tool.name, args, result.data);
+          if (result.success && this.isTodoTool(tool.name)) {
+            session.hasTodoStateThisTurn = true;
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+          }
 
           // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = result.success ? 'completed' : 'error';
@@ -4443,6 +4831,67 @@ ${stitchGuidance}
           }
         };
 
+        if (!this.isPlanModeToolAllowed(session, toolName, args)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const errorMsg = `Plan mode blocks "${toolName}". Analyze only and return a <proposed_plan> block.`;
+          eventEmitter.toolResult(session.id, toolCallPayload, {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          });
+          emitToolResult('error', null, errorMsg, duration);
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
+        if (this.shouldEnforceTodoGuard(session, toolName)) {
+          if (!session.hasTodoStateThisTurn) {
+            const duration = this.consumeToolDuration(session, toolCallId);
+            const errorMsg = 'Run write_todos first for this execution turn, then continue with implementation.';
+            eventEmitter.toolResult(session.id, toolCallPayload, {
+              toolCallId,
+              success: false,
+              result: null,
+              error: errorMsg,
+              duration,
+              parentToolId,
+            });
+            emitToolResult('error', null, errorMsg, duration);
+            return new ToolMessage({
+              content: errorMsg,
+              tool_call_id: toolCallId,
+              name: toolName,
+            });
+          }
+
+          session.nonTodoToolCallsSinceTodoUpdate += 1;
+          if (session.nonTodoToolCallsSinceTodoUpdate >= 4) {
+            const duration = this.consumeToolDuration(session, toolCallId);
+            const errorMsg = 'Update write_todos statuses before continuing with additional implementation steps.';
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+            eventEmitter.toolResult(session.id, toolCallPayload, {
+              toolCallId,
+              success: false,
+              result: null,
+              error: errorMsg,
+              duration,
+              parentToolId,
+            });
+            emitToolResult('error', null, errorMsg, duration);
+            return new ToolMessage({
+              content: errorMsg,
+              tool_call_id: toolCallId,
+              name: toolName,
+            });
+          }
+        }
+
         // Step 1: Evaluate tool call against policy
         const policyContext: ToolCallContext = {
           toolName,
@@ -4526,6 +4975,10 @@ ${stitchGuidance}
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
           this.recordArtifactForTool(session, toolName, args, normalized.output);
+          if (normalized.success && this.isTodoTool(toolName)) {
+            session.hasTodoStateThisTurn = true;
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+          }
 
           // Emit tool result
           emitToolResult(normalized.success ? 'success' : 'error', normalized.output, normalized.error, duration);
@@ -4819,6 +5272,87 @@ ${stitchGuidance}
     const normalized = command.trim().replace(/\s+/g, ' ');
     const safeCommands = ['ls', 'pwd', 'git status', 'git diff'];
     return safeCommands.some((safe) => normalized === safe || normalized.startsWith(`${safe} `));
+  }
+
+  private isPlanModeSafeShell(command: string): boolean {
+    const normalized = command.trim().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+    if (this.isDangerousCommand(normalized)) return false;
+    if (this.isDangerousOperation('execute', { command: normalized })) return false;
+
+    const safePrefixes = [
+      'ls',
+      'pwd',
+      'find',
+      'head',
+      'tail',
+      'wc',
+      'cat',
+      'git status',
+      'git diff',
+      'git log --oneline',
+      'grep',
+      'rg',
+    ];
+
+    return safePrefixes.some(
+      (safe) => normalized === safe || normalized.startsWith(`${safe} `)
+    );
+  }
+
+  private isTodoTool(toolName: string): boolean {
+    const lower = toolName.toLowerCase();
+    return (
+      lower === 'write_todos' ||
+      lower === 'todowrite' ||
+      lower === 'taskcreate' ||
+      lower === 'taskupdate' ||
+      lower === 'tasklist' ||
+      lower === 'taskget'
+    );
+  }
+
+  private shouldEnforceTodoGuard(session: ActiveSession, toolName: string): boolean {
+    if (!toolName) return false;
+    if (session.executionMode !== 'execute') return false;
+    if (session.type === 'isolated' || session.type === 'cron') return false;
+    if (this.isTodoTool(toolName)) return false;
+    const lower = toolName.toLowerCase();
+    if (lower === 'read_any_file' || lower === 'read_file' || lower === 'ls' || lower === 'glob' || lower === 'grep') {
+      return false;
+    }
+    return true;
+  }
+
+  private isPlanModeToolAllowed(
+    session: ActiveSession,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    if (session.executionMode !== 'plan') return true;
+
+    const lower = toolName.toLowerCase();
+    const allowed = new Set([
+      'read_any_file',
+      'read_file',
+      'read',
+      'ls',
+      'glob',
+      'grep',
+      'web_search',
+      'google_grounded_search',
+      'web_fetch',
+    ]);
+
+    if (allowed.has(lower)) {
+      return true;
+    }
+
+    if (lower === 'execute' || lower === 'bash' || lower === 'run_command' || lower === 'shell') {
+      return this.isPlanModeSafeShell(String(args.command || ''));
+    }
+
+    return false;
   }
 
   private getCachedPermissionDecision(
@@ -5132,6 +5666,8 @@ ${stitchGuidance}
 
     session.lastTodosSignature = signature;
     session.tasks = tasks;
+    session.hasTodoStateThisTurn = true;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
     eventEmitter.taskSet(session.id, tasks);
   }
 
