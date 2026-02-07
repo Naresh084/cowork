@@ -31,9 +31,17 @@ export function Onboarding() {
     providerBaseUrls,
     googleApiKey,
     openaiApiKey,
+    falApiKey,
+    exaApiKey,
+    tavilyApiKey,
+    stitchApiKey,
     setProviderApiKey,
     setGoogleApiKey,
     setOpenAIApiKey,
+    setFalApiKey,
+    setExaApiKey,
+    setTavilyApiKey,
+    setStitchApiKey,
     validateProviderConnection,
     applyRuntimeConfig,
     isAuthenticated,
@@ -51,7 +59,10 @@ export function Onboarding() {
     fetchProviderModels,
     setProviderBaseUrl,
     setMediaRouting,
+    setExternalSearchProvider,
+    updateSpecializedModelV2,
     providerBaseUrls: settingsBaseUrls,
+    externalSearchProvider,
   } = useSettingsStore();
 
   const [userName, setUserName] = useState(existingUserName || '');
@@ -62,8 +73,21 @@ export function Onboarding() {
   const [customModel, setCustomModel] = useState('');
   const [googleKeyDraft, setGoogleKeyDraft] = useState(googleApiKey || '');
   const [openaiKeyDraft, setOpenAIKeyDraft] = useState(openaiApiKey || '');
+  const [falKeyDraft, setFalKeyDraft] = useState(falApiKey || '');
+  const [exaKeyDraft, setExaKeyDraft] = useState(exaApiKey || '');
+  const [tavilyKeyDraft, setTavilyKeyDraft] = useState(tavilyApiKey || '');
+  const [stitchKeyDraft, setStitchKeyDraft] = useState(stitchApiKey || '');
+  const [externalSearchDraft, setExternalSearchDraft] = useState(externalSearchProvider);
   const [imageBackend, setImageBackend] = useState(mediaRouting.imageBackend);
   const [videoBackend, setVideoBackend] = useState(mediaRouting.videoBackend);
+  const [googleImageModel, setGoogleImageModel] = useState(specializedModelsV2.google.imageGeneration);
+  const [googleVideoModel, setGoogleVideoModel] = useState(specializedModelsV2.google.videoGeneration);
+  const [openaiImageModel, setOpenAIImageModel] = useState(specializedModelsV2.openai.imageGeneration);
+  const [openaiVideoModel, setOpenAIVideoModel] = useState(specializedModelsV2.openai.videoGeneration);
+  const [falImageModel, setFalImageModel] = useState(specializedModelsV2.fal.imageGeneration);
+  const [falVideoModel, setFalVideoModel] = useState(specializedModelsV2.fal.videoGeneration);
+  const [computerUseModel, setComputerUseModel] = useState(specializedModelsV2.google.computerUse);
+  const [deepResearchModel, setDeepResearchModel] = useState(specializedModelsV2.google.deepResearchAgent);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -161,18 +185,56 @@ export function Onboarding() {
       if (openaiKeyDraft.trim()) {
         await setOpenAIApiKey(openaiKeyDraft.trim());
       }
+      if (falKeyDraft.trim()) {
+        await setFalApiKey(falKeyDraft.trim());
+      }
+      if (exaKeyDraft.trim()) {
+        await setExaApiKey(exaKeyDraft.trim());
+      }
+      if (tavilyKeyDraft.trim()) {
+        await setTavilyApiKey(tavilyKeyDraft.trim());
+      }
+      if (stitchKeyDraft.trim()) {
+        await setStitchApiKey(stitchKeyDraft.trim());
+      }
 
       await setMediaRouting({
         imageBackend,
         videoBackend,
       });
+      await setExternalSearchProvider(externalSearchDraft);
+
+      if (googleImageModel.trim()) {
+        await updateSpecializedModelV2('google', 'imageGeneration', googleImageModel.trim());
+      }
+      if (googleVideoModel.trim()) {
+        await updateSpecializedModelV2('google', 'videoGeneration', googleVideoModel.trim());
+      }
+      if (openaiImageModel.trim()) {
+        await updateSpecializedModelV2('openai', 'imageGeneration', openaiImageModel.trim());
+      }
+      if (openaiVideoModel.trim()) {
+        await updateSpecializedModelV2('openai', 'videoGeneration', openaiVideoModel.trim());
+      }
+      if (falImageModel.trim()) {
+        await updateSpecializedModelV2('fal', 'imageGeneration', falImageModel.trim());
+      }
+      if (falVideoModel.trim()) {
+        await updateSpecializedModelV2('fal', 'videoGeneration', falVideoModel.trim());
+      }
+      if (computerUseModel.trim()) {
+        await updateSpecializedModelV2('google', 'computerUse', computerUseModel.trim());
+      }
+      if (deepResearchModel.trim()) {
+        await updateSpecializedModelV2('google', 'deepResearchAgent', deepResearchModel.trim());
+      }
 
       await applyRuntimeConfig({
         activeProvider: provider,
         providerBaseUrls: useSettingsStore.getState().providerBaseUrls,
         externalSearchProvider: useSettingsStore.getState().externalSearchProvider,
         mediaRouting: useSettingsStore.getState().mediaRouting,
-        specializedModels: specializedModelsV2,
+        specializedModels: useSettingsStore.getState().specializedModelsV2,
       });
 
       updateSetting('userName', userName.trim());
@@ -328,42 +390,153 @@ export function Onboarding() {
                       <label className="mb-2 block text-sm font-medium text-white/75">Image backend</label>
                       <select
                         value={imageBackend}
-                        onChange={(e) => setImageBackend(e.target.value as 'google' | 'openai')}
+                        onChange={(e) => setImageBackend(e.target.value as 'google' | 'openai' | 'fal')}
                         className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
                       >
                         <option value="google">Google</option>
                         <option value="openai">OpenAI</option>
+                        <option value="fal">Fal</option>
                       </select>
                     </div>
                     <div>
                       <label className="mb-2 block text-sm font-medium text-white/75">Video backend</label>
                       <select
                         value={videoBackend}
-                        onChange={(e) => setVideoBackend(e.target.value as 'google' | 'openai')}
+                        onChange={(e) => setVideoBackend(e.target.value as 'google' | 'openai' | 'fal')}
                         className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
                       >
                         <option value="google">Google</option>
                         <option value="openai">OpenAI</option>
+                        <option value="fal">Fal</option>
                       </select>
                     </div>
                   </div>
 
                   <details className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <summary className="cursor-pointer text-sm text-white/80">Optional dedicated media keys</summary>
+                    <summary className="cursor-pointer text-sm text-white/80">
+                      Optional media setup (keys + models)
+                    </summary>
                     <div className="mt-3 space-y-2">
+                      <p className="text-xs text-white/45">
+                        If skipped, default media settings are used and can be changed later in Settings.
+                      </p>
                       <input
                         type="password"
                         value={googleKeyDraft}
                         onChange={(e) => setGoogleKeyDraft(e.target.value)}
-                        placeholder="Google API key (optional)"
+                        placeholder="Google media API key (optional)"
                         className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
                       />
                       <input
                         type="password"
                         value={openaiKeyDraft}
                         onChange={(e) => setOpenAIKeyDraft(e.target.value)}
-                        placeholder="OpenAI API key (optional)"
+                        placeholder="OpenAI media API key (optional)"
                         className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
+                      />
+                      <input
+                        type="password"
+                        value={falKeyDraft}
+                        onChange={(e) => setFalKeyDraft(e.target.value)}
+                        placeholder="Fal media API key (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
+                      />
+                      <input
+                        type="text"
+                        value={googleImageModel}
+                        onChange={(e) => setGoogleImageModel(e.target.value)}
+                        placeholder="Google image model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={googleVideoModel}
+                        onChange={(e) => setGoogleVideoModel(e.target.value)}
+                        placeholder="Google video model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={openaiImageModel}
+                        onChange={(e) => setOpenAIImageModel(e.target.value)}
+                        placeholder="OpenAI image model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={openaiVideoModel}
+                        onChange={(e) => setOpenAIVideoModel(e.target.value)}
+                        placeholder="OpenAI video model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={falImageModel}
+                        onChange={(e) => setFalImageModel(e.target.value)}
+                        placeholder="Fal image model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={falVideoModel}
+                        onChange={(e) => setFalVideoModel(e.target.value)}
+                        placeholder="Fal video model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                    </div>
+                  </details>
+
+                  <details className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                    <summary className="cursor-pointer text-sm text-white/80">
+                      Optional capability setup (search, research, integrations)
+                    </summary>
+                    <div className="mt-3 space-y-2">
+                      <p className="text-xs text-white/45">
+                        Optional settings for web-search fallback, Stitch tools, and Google research/computer models.
+                      </p>
+                      <select
+                        value={externalSearchDraft}
+                        onChange={(e) => setExternalSearchDraft(e.target.value as 'google' | 'exa' | 'tavily')}
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
+                      >
+                        <option value="google">Fallback search: Google</option>
+                        <option value="exa">Fallback search: Exa</option>
+                        <option value="tavily">Fallback search: Tavily</option>
+                      </select>
+                      <input
+                        type="password"
+                        value={exaKeyDraft}
+                        onChange={(e) => setExaKeyDraft(e.target.value)}
+                        placeholder="Exa API key (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
+                      />
+                      <input
+                        type="password"
+                        value={tavilyKeyDraft}
+                        onChange={(e) => setTavilyKeyDraft(e.target.value)}
+                        placeholder="Tavily API key (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
+                      />
+                      <input
+                        type="password"
+                        value={stitchKeyDraft}
+                        onChange={(e) => setStitchKeyDraft(e.target.value)}
+                        placeholder="Stitch MCP API key (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10"
+                      />
+                      <input
+                        type="text"
+                        value={computerUseModel}
+                        onChange={(e) => setComputerUseModel(e.target.value)}
+                        placeholder="Google computer_use model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
+                      />
+                      <input
+                        type="text"
+                        value={deepResearchModel}
+                        onChange={(e) => setDeepResearchModel(e.target.value)}
+                        placeholder="Google deep_research model (optional)"
+                        className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 font-mono"
                       />
                     </div>
                   </details>

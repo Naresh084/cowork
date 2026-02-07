@@ -140,6 +140,8 @@ pub struct RuntimeConfigPayload {
     #[serde(default)]
     pub openai_api_key: Option<String>,
     #[serde(default)]
+    pub fal_api_key: Option<String>,
+    #[serde(default)]
     pub exa_api_key: Option<String>,
     #[serde(default)]
     pub tavily_api_key: Option<String>,

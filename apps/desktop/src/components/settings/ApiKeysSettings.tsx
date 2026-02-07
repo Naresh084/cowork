@@ -21,8 +21,6 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   lmstudio: 'LM Studio',
 };
 
-const EXTERNAL_SEARCH_PROVIDERS: ProviderId[] = ['openrouter', 'deepseek', 'lmstudio'];
-
 function maskKey(value: string | null): string {
   if (!value) return 'Not configured';
   if (value.length <= 10) return '•'.repeat(value.length);
@@ -195,42 +193,17 @@ export function ApiKeysSettings() {
     activeProvider,
     providerApiKeys,
     providerBaseUrls,
-    googleApiKey,
-    openaiApiKey,
-    exaApiKey,
-    tavilyApiKey,
-    stitchApiKey,
     isLoading,
     setProviderApiKey,
     clearProviderApiKey,
-    setGoogleApiKey,
-    clearGoogleApiKey,
-    setOpenAIApiKey,
-    clearOpenAIApiKey,
-    setExaApiKey,
-    clearExaApiKey,
-    setTavilyApiKey,
-    clearTavilyApiKey,
-    setStitchApiKey,
-    clearStitchApiKey,
     validateProviderConnection,
     applyRuntimeConfig,
   } = useAuthStore();
-  const {
-    setActiveProvider: setProviderInSettings,
-    setProviderBaseUrl,
-    fetchProviderModels,
-    mediaRouting,
-    specializedModelsV2,
-    externalSearchProvider,
-    setExternalSearchProvider,
-  } =
-    useSettingsStore();
+  const { setActiveProvider: setProviderInSettings, setProviderBaseUrl, fetchProviderModels } = useSettingsStore();
 
   const activeProviderKey = providerApiKeys[activeProvider] || null;
   const providerBaseUrl = providerBaseUrls[activeProvider] || '';
   const baseUrlEditable = BASE_URL_EDITABLE_PROVIDERS.includes(activeProvider);
-  const showExternalSearchSettings = EXTERNAL_SEARCH_PROVIDERS.includes(activeProvider);
 
   const [baseUrlDraft, setBaseUrlDraft] = useState(providerBaseUrl);
 
@@ -246,12 +219,13 @@ export function ApiKeysSettings() {
     }
     await setProviderApiKey(activeProvider, value);
     await fetchProviderModels(activeProvider);
+    const settingsState = useSettingsStore.getState();
     await applyRuntimeConfig({
       activeProvider,
-      providerBaseUrls: providerBaseUrls,
-      externalSearchProvider,
-      mediaRouting,
-      specializedModels: specializedModelsV2,
+      providerBaseUrls: settingsState.providerBaseUrls,
+      externalSearchProvider: settingsState.externalSearchProvider,
+      mediaRouting: settingsState.mediaRouting,
+      specializedModels: settingsState.specializedModelsV2,
     });
   };
 
@@ -263,9 +237,9 @@ export function ApiKeysSettings() {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-medium text-white/90">Provider & API Credentials</h3>
+        <h3 className="text-sm font-medium text-white/90">Provider Settings</h3>
         <p className="mt-1 text-xs text-white/40">
-          Configure a primary provider key, plus optional Google/OpenAI keys for media/research routing.
+          Choose your active chat provider and configure provider-specific credentials and base URL.
         </p>
       </div>
 
@@ -293,12 +267,13 @@ export function ApiKeysSettings() {
         onSave={handleProviderKeySave}
         onClear={async () => {
           await clearProviderApiKey(activeProvider);
+          const settingsState = useSettingsStore.getState();
           await applyRuntimeConfig({
             activeProvider,
-            providerBaseUrls,
-            externalSearchProvider,
-            mediaRouting,
-            specializedModels: specializedModelsV2,
+            providerBaseUrls: settingsState.providerBaseUrls,
+            externalSearchProvider: settingsState.externalSearchProvider,
+            mediaRouting: settingsState.mediaRouting,
+            specializedModels: settingsState.specializedModelsV2,
           });
         }}
       />
@@ -328,148 +303,10 @@ export function ApiKeysSettings() {
         </div>
       ) : null}
 
-      <KeyCard
-        title="Google API Key"
-        description="Used for Google image/video generation, deep research, and computer use."
-        value={googleApiKey}
-        placeholder="Enter Google API key"
-        isSaving={isLoading}
-        onSave={async (value) => {
-          await setGoogleApiKey(value);
-          await applyRuntimeConfig({
-            mediaRouting,
-            specializedModels: specializedModelsV2,
-            externalSearchProvider,
-          });
-        }}
-        onClear={async () => {
-          await clearGoogleApiKey();
-          await applyRuntimeConfig({
-            mediaRouting,
-            specializedModels: specializedModelsV2,
-            externalSearchProvider,
-          });
-        }}
-      />
-
-      <KeyCard
-        title="OpenAI API Key"
-        description="Used for OpenAI image/video generation backend when selected."
-        value={openaiApiKey}
-        placeholder="Enter OpenAI API key"
-        isSaving={isLoading}
-        onSave={async (value) => {
-          await setOpenAIApiKey(value);
-          await applyRuntimeConfig({
-            mediaRouting,
-            specializedModels: specializedModelsV2,
-            externalSearchProvider,
-          });
-        }}
-        onClear={async () => {
-          await clearOpenAIApiKey();
-          await applyRuntimeConfig({
-            mediaRouting,
-            specializedModels: specializedModelsV2,
-            externalSearchProvider,
-          });
-        }}
-      />
-
-      {showExternalSearchSettings ? (
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
-          <div>
-            <h4 className="text-sm font-medium text-white/90">External Web Search Fallback</h4>
-            <p className="mt-1 text-xs text-white/45">
-              Used for providers without native search support (OpenRouter, DeepSeek, LM Studio).
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-white/55 uppercase tracking-wide">Fallback provider</label>
-            <select
-              value={externalSearchProvider}
-              onChange={(event) => void setExternalSearchProvider(event.target.value as 'google' | 'exa' | 'tavily')}
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            >
-              <option value="google">Google</option>
-              <option value="exa">Exa</option>
-              <option value="tavily">Tavily</option>
-            </select>
-          </div>
-
-          {externalSearchProvider === 'exa' ? (
-            <KeyCard
-              title="Exa API Key"
-              description="Used by web_search fallback when Exa is selected."
-              value={exaApiKey}
-              placeholder="Enter Exa API key"
-              isSaving={isLoading}
-              onSave={async (value) => {
-                await setExaApiKey(value);
-                await applyRuntimeConfig({
-                  exaApiKey: value,
-                  externalSearchProvider,
-                  mediaRouting,
-                  specializedModels: specializedModelsV2,
-                });
-              }}
-              onClear={async () => {
-                await clearExaApiKey();
-                await applyRuntimeConfig({
-                  exaApiKey: null,
-                  externalSearchProvider,
-                  mediaRouting,
-                  specializedModels: specializedModelsV2,
-                });
-              }}
-            />
-          ) : null}
-
-          {externalSearchProvider === 'tavily' ? (
-            <KeyCard
-              title="Tavily API Key"
-              description="Used by web_search fallback when Tavily is selected."
-              value={tavilyApiKey}
-              placeholder="Enter Tavily API key"
-              isSaving={isLoading}
-              onSave={async (value) => {
-                await setTavilyApiKey(value);
-                await applyRuntimeConfig({
-                  tavilyApiKey: value,
-                  externalSearchProvider,
-                  mediaRouting,
-                  specializedModels: specializedModelsV2,
-                });
-              }}
-              onClear={async () => {
-                await clearTavilyApiKey();
-                await applyRuntimeConfig({
-                  tavilyApiKey: null,
-                  externalSearchProvider,
-                  mediaRouting,
-                  specializedModels: specializedModelsV2,
-                });
-              }}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      <KeyCard
-        title="Stitch MCP API Key"
-        description="Used only for Stitch MCP servers/tools."
-        value={stitchApiKey}
-        placeholder="Enter Stitch MCP API key"
-        isSaving={isLoading}
-        onSave={setStitchApiKey}
-        onClear={clearStitchApiKey}
-      />
-
       <div className="p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
         <p className="text-xs text-[#93C5FD]">
-          Runtime changes apply immediately when possible. If provider/base URL/model changes affect existing sessions,
-          start a new session to pick up the new runtime client safely.
+          Provider key changes usually apply immediately. Provider/base URL/model changes can require a new chat
+          session to fully switch active runtime clients.
         </p>
       </div>
     </div>

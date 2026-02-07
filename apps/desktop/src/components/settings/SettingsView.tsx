@@ -1,17 +1,14 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, MessageSquare, Hash, Send, SlidersHorizontal, KeyRound } from 'lucide-react';
+import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { GeneralSettings } from './GeneralSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
-import { WhatsAppSettings } from './WhatsAppSettings';
-import { SlackSettings } from './SlackSettings';
-import { TelegramSettings } from './TelegramSettings';
 
-type SettingsTab = 'general' | 'apiKeys' | 'integrations' | 'whatsapp' | 'slack' | 'telegram';
+type SettingsTab = 'provider' | 'media' | 'integrations';
 
 interface TabConfig {
   id: SettingsTab;
@@ -21,25 +18,19 @@ interface TabConfig {
 }
 
 const tabConfig: TabConfig[] = [
-  { id: 'general', label: 'General', icon: Settings2 },
-  { id: 'apiKeys', label: 'API & Keys', icon: KeyRound },
+  { id: 'provider', label: 'Provider', icon: KeyRound },
+  { id: 'media', label: 'Media', icon: Image },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
-  { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, color: '#25D366' },
-  { id: 'slack', label: 'Slack', icon: Hash, color: '#9B59B6' },
-  { id: 'telegram', label: 'Telegram', icon: Send, color: '#2AABEE' },
 ];
 
 const tabContent: Record<SettingsTab, React.ComponentType> = {
-  general: GeneralSettings,
-  apiKeys: ApiKeysSettings,
+  provider: ApiKeysSettings,
+  media: GeneralSettings,
   integrations: IntegrationSettings,
-  whatsapp: WhatsAppSettings,
-  slack: SlackSettings,
-  telegram: TelegramSettings,
 };
 
 export function SettingsView() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const platforms = useIntegrationStore((s) => s.platforms);
 
@@ -84,10 +75,8 @@ export function SettingsView() {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           const isConnected =
-            tab.id !== 'general' &&
-            tab.id !== 'apiKeys' &&
-            tab.id !== 'integrations' &&
-            platforms[tab.id as 'whatsapp' | 'slack' | 'telegram']?.connected;
+            tab.id === 'integrations' &&
+            (platforms.whatsapp?.connected || platforms.slack?.connected || platforms.telegram?.connected);
 
           return (
             <button
@@ -105,7 +94,7 @@ export function SettingsView() {
                 color={tab.color && isActive ? tab.color : undefined}
               />
               <span>{tab.label}</span>
-              {tab.id !== 'general' && tab.id !== 'apiKeys' && tab.id !== 'integrations' && (
+              {tab.id === 'integrations' && (
                 <div
                   className={cn(
                     'w-2 h-2 rounded-full flex-shrink-0',
@@ -116,8 +105,8 @@ export function SettingsView() {
                   style={
                     isConnected
                       ? {
-                          backgroundColor: tab.color,
-                          boxShadow: `0 0 4px 1px ${tab.color}40`,
+                          backgroundColor: '#22C55E',
+                          boxShadow: '0 0 4px 1px rgba(34, 197, 94, 0.35)',
                         }
                       : undefined
                   }
