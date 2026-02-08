@@ -138,7 +138,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
       initial={{ opacity: 0, y: 5 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        'rounded-xl border overflow-hidden transition-all duration-200 max-w-full',
+        'tool-selectable rounded-xl border overflow-hidden transition-all duration-200 max-w-full',
         isExternalCliTool
           ? 'external-cli-card'
           : execution.status === 'running'

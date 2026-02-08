@@ -335,10 +335,10 @@
     -webkit-user-select: text;
   }
 
-  /* Turn activities container - prevent selection bleeding between turns */
+  /* Turn activities container */
   .turn-activities {
-    user-select: none;
-    -webkit-user-select: none;
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .turn-activities .message-content {
@@ -361,6 +361,18 @@
   /* Ensure buttons and icons never get selected */
   .message-turn-container button,
   .message-turn-container svg {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Tool cards must remain fully copyable/selectable end-to-end */
+  .message-turn-container .tool-selectable,
+  .message-turn-container .tool-selectable * {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .message-turn-container .tool-selectable svg {
     user-select: none;
     -webkit-user-select: none;
   }

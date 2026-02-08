@@ -1169,7 +1169,7 @@ export class AgentRunner {
     this.appendChatItem(session, assistantItem);
     session.lastCompletedAssistantSegmentText = normalizedFinal || normalizedLast;
     session.assistantSegmentIndex += 1;
-    return true;
+    return false;
   }
 
   private resolveAssistantTurnText(
@@ -5695,61 +5695,8 @@ ${stitchGuidance}
         }
 
         if (this.shouldEnforceTodoGuard(session, tool.name)) {
-          if (!session.hasTodoStateThisTurn) {
-            const duration = this.consumeToolDuration(session, toolCallId);
-            const error = 'Run write_todos first for this execution turn, then continue with implementation.';
-            eventEmitter.toolResult(session.id, toolCall, {
-              toolCallId,
-              success: false,
-              result: null,
-              error,
-              duration,
-              parentToolId,
-            });
-            toolStartItem.status = 'error';
-            this.updateChatItem(session, toolStartItem.id, { status: 'error' });
-            this.appendChatItem(session, {
-              id: generateChatItemId(),
-              kind: 'tool_result',
-              timestamp: Date.now(),
-              turnId: session.currentTurnId,
-              toolId: toolCallId,
-              name: tool.name,
-              status: 'error',
-              error,
-              duration,
-            } as ToolResultItem);
-            return { error };
-          }
-
+          // Advisory-only: keep light telemetry, never block execution on todo state.
           session.nonTodoToolCallsSinceTodoUpdate += 1;
-          if (session.nonTodoToolCallsSinceTodoUpdate >= 4) {
-            const duration = this.consumeToolDuration(session, toolCallId);
-            const error = 'Update write_todos statuses before continuing with additional implementation steps.';
-            session.nonTodoToolCallsSinceTodoUpdate = 0;
-            eventEmitter.toolResult(session.id, toolCall, {
-              toolCallId,
-              success: false,
-              result: null,
-              error,
-              duration,
-              parentToolId,
-            });
-            toolStartItem.status = 'error';
-            this.updateChatItem(session, toolStartItem.id, { status: 'error' });
-            this.appendChatItem(session, {
-              id: generateChatItemId(),
-              kind: 'tool_result',
-              timestamp: Date.now(),
-              turnId: session.currentTurnId,
-              toolId: toolCallId,
-              name: tool.name,
-              status: 'error',
-              error,
-              duration,
-            } as ToolResultItem);
-            return { error };
-          }
         }
 
         if (tool.requiresPermission) {
@@ -6044,45 +5991,8 @@ ${stitchGuidance}
         }
 
         if (this.shouldEnforceTodoGuard(session, toolName)) {
-          if (!session.hasTodoStateThisTurn) {
-            const duration = this.consumeToolDuration(session, toolCallId);
-            const errorMsg = 'Run write_todos first for this execution turn, then continue with implementation.';
-            eventEmitter.toolResult(session.id, toolCallPayload, {
-              toolCallId,
-              success: false,
-              result: null,
-              error: errorMsg,
-              duration,
-              parentToolId,
-            });
-            emitToolResult('error', null, errorMsg, duration);
-            return new ToolMessage({
-              content: errorMsg,
-              tool_call_id: toolCallId,
-              name: toolName,
-            });
-          }
-
+          // Advisory-only: keep light telemetry, never block execution on todo state.
           session.nonTodoToolCallsSinceTodoUpdate += 1;
-          if (session.nonTodoToolCallsSinceTodoUpdate >= 4) {
-            const duration = this.consumeToolDuration(session, toolCallId);
-            const errorMsg = 'Update write_todos statuses before continuing with additional implementation steps.';
-            session.nonTodoToolCallsSinceTodoUpdate = 0;
-            eventEmitter.toolResult(session.id, toolCallPayload, {
-              toolCallId,
-              success: false,
-              result: null,
-              error: errorMsg,
-              duration,
-              parentToolId,
-            });
-            emitToolResult('error', null, errorMsg, duration);
-            return new ToolMessage({
-              content: errorMsg,
-              tool_call_id: toolCallId,
-              name: toolName,
-            });
-          }
         }
 
         // Step 1: Evaluate tool call against policy
@@ -6546,15 +6456,11 @@ ${stitchGuidance}
   }
 
   private shouldEnforceTodoGuard(session: ActiveSession, toolName: string): boolean {
-    if (!toolName) return false;
-    if (session.executionMode !== 'execute') return false;
-    if (session.type === 'isolated' || session.type === 'cron') return false;
-    if (this.isTodoTool(toolName)) return false;
-    const lower = toolName.toLowerCase();
-    if (lower === 'read_any_file' || lower === 'read_file' || lower === 'ls' || lower === 'glob' || lower === 'grep') {
-      return false;
-    }
-    return true;
+    // TODO discipline is advisory (system prompt operating practice), not a hard runtime block.
+    // Keep returning false so execution is never blocked with "run write_todos first" errors.
+    void session;
+    void toolName;
+    return false;
   }
 
   private isPlanModeToolAllowed(

@@ -43,7 +43,7 @@ export function TaskToolCard({ execution, isActive }: TaskToolCardProps) {
   return (
     <div
       className={cn(
-        'rounded-xl border overflow-hidden transition-all duration-200',
+        'tool-selectable rounded-xl border overflow-hidden transition-all duration-200',
         execution.status === 'running'
           ? 'bg-gradient-to-b from-[#101421] to-[#0B0C10] border-[#1D4ED8]/30'
           : execution.status === 'error'

@@ -158,13 +158,13 @@ export function MessageList() {
     }
 
     return (
-      <div className="mt-2 flex items-start gap-2 no-select-extend message-block-isolate assistant-turn-block">
+      <div className="mt-2 flex items-start gap-2 assistant-turn-block">
         <motion.div
           initial={{ scale: 0.84, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="assistant-turn-avatar mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center"
+          className="assistant-turn-avatar mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center"
         >
-          <BrandMark className="w-3.5 h-3.5" />
+          <BrandMark className="w-4 h-4" />
         </motion.div>
 
         <div className="assistant-turn-content flex-1 min-w-0 space-y-2 turn-activities">
@@ -276,7 +276,7 @@ export function MessageList() {
         ref={scrollRef}
         className="h-full min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth"
       >
-        <div className="max-w-[720px] mx-auto py-3 px-4 space-y-2">
+        <div className="mx-3 md:mx-10 py-3 px-0 space-y-2">
           <AnimatePresence>
             {messages.map((message, index) => {
               // Only skip assistant messages if they're properly tracked in turn activities
@@ -1414,7 +1414,7 @@ function ToolActivityRow({
   const hasDetails = sections.length > 0;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 tool-selectable">
       <button
         onClick={() => hasDetails && setExpanded((prev) => !prev)}
         className={cn(
@@ -1732,13 +1732,13 @@ function MessageBubble({ message, showCopyAction = true, showAvatar = true }: Me
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           className={cn(
-            'flex-shrink-0 w-6 h-6 flex items-center justify-center select-none',
+            'flex-shrink-0 flex items-center justify-center select-none',
             isUser
-              ? 'rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] border border-[#60A5FA]/35 text-[10px] font-bold text-white shadow-[0_6px_16px_rgba(29,78,216,0.35)]'
-              : 'rounded-lg bg-[#111218] border border-white/[0.08]'
+              ? 'w-6 h-6 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] border border-[#60A5FA]/35 text-[10px] font-bold text-white shadow-[0_6px_16px_rgba(29,78,216,0.35)]'
+              : 'w-7 h-7 rounded-lg bg-[#111218] border border-white/[0.08]'
           )}
         >
-          {isUser ? userInitial : <BrandMark className="w-3.5 h-3.5" />}
+          {isUser ? userInitial : <BrandMark className="w-4 h-4" />}
         </motion.div>
       )}
 
