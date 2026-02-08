@@ -154,5 +154,7 @@ describe('capability-sections', () => {
     expect(externalCli?.content).toContain('`working_directory`');
     expect(externalCli?.content).toContain('`create_if_missing`');
     expect(externalCli?.content).toContain('`bypassPermission`');
+    expect(externalCli?.content).toContain('external_cli_get_progress');
+    expect(externalCli?.content).toContain('low=5s');
   });
 });

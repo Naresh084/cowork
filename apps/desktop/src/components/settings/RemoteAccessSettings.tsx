@@ -5,6 +5,7 @@ import {
   CircleDashed,
   Download,
   Globe2,
+  Info,
   Link2,
   Loader2,
   Lock,
@@ -19,12 +20,40 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
-import { useRemoteAccessStore, type RemoteTunnelMode } from '@/stores/remote-access-store';
+import {
+  useRemoteAccessStore,
+  type RemoteTunnelMode,
+  type RemoteTunnelVisibility,
+} from '@/stores/remote-access-store';
 
-const tunnelModes: Array<{ id: RemoteTunnelMode; label: string; subtitle: string }> = [
-  { id: 'tailscale', label: 'Tailscale', subtitle: 'Mesh overlay with auth + secure routing' },
-  { id: 'cloudflare', label: 'Cloudflare Tunnel', subtitle: 'Managed HTTPS tunnel with quick public URL' },
-  { id: 'custom', label: 'Custom endpoint', subtitle: 'Use your own secure reverse tunnel URL' },
+const tunnelModes: Array<{
+  id: RemoteTunnelMode;
+  label: string;
+  subtitle: string;
+  installLabel: string;
+  authLabel: string;
+}> = [
+  {
+    id: 'tailscale',
+    label: 'Tailscale',
+    subtitle: 'Private mesh networking with optional public funnel.',
+    installLabel: 'tailscale',
+    authLabel: 'Tailscale login',
+  },
+  {
+    id: 'cloudflare',
+    label: 'Cloudflare Tunnel',
+    subtitle: 'Managed HTTPS tunnel with quick URL or your own domain.',
+    installLabel: 'cloudflared',
+    authLabel: 'Cloudflare tunnel login',
+  },
+  {
+    id: 'custom',
+    label: 'Custom endpoint',
+    subtitle: 'Use your own tunnel/reverse proxy URL.',
+    installLabel: 'none',
+    authLabel: 'not required',
+  },
 ];
 
 type WizardState = 'done' | 'active' | 'locked';
@@ -38,6 +67,23 @@ function formatExpiry(epochMs: number): string {
 
 function formatTimestamp(value: number): string {
   return new Date(value).toLocaleString();
+}
+
+function normalizeDomainInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  try {
+    const withScheme = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(withScheme);
+    return parsed.hostname.replace(/\.$/, '').toLowerCase();
+  } catch {
+    return trimmed
+      .replace(/^https?:\/\//i, '')
+      .split('/')[0]
+      ?.replace(/\.$/, '')
+      .toLowerCase();
+  }
 }
 
 function StepStatePill({ state }: { state: WizardState }) {
@@ -134,15 +180,19 @@ export function RemoteAccessSettings() {
     stopTunnel,
     generatePairingQr,
     revokeDevice,
-    setPublicBaseUrl,
     setTunnelMode,
+    setTunnelOptions,
     clearQr,
   } = useRemoteAccessStore();
 
-  const [publicBaseUrl, setPublicBaseUrlDraft] = useState('');
   const [selectedMode, setSelectedMode] = useState<RemoteTunnelMode>('tailscale');
+  const [publicBaseUrlDraft, setPublicBaseUrlDraft] = useState('');
+  const [tunnelNameDraft, setTunnelNameDraft] = useState('');
+  const [tunnelDomainDraft, setTunnelDomainDraft] = useState('');
+  const [tunnelVisibilityDraft, setTunnelVisibilityDraft] = useState<RemoteTunnelVisibility>('public');
   const [expiresCountdown, setExpiresCountdown] = useState<string | null>(null);
-  const [isApplyingStepOne, setIsApplyingStepOne] = useState(false);
+  const [isApplyingProvider, setIsApplyingProvider] = useState(false);
+  const [isApplyingConfig, setIsApplyingConfig] = useState(false);
 
   useEffect(() => {
     void loadStatus();
@@ -150,8 +200,11 @@ export function RemoteAccessSettings() {
 
   useEffect(() => {
     if (!status) return;
-    setPublicBaseUrlDraft(status.publicBaseUrl || '');
     setSelectedMode(status.tunnelMode);
+    setPublicBaseUrlDraft(status.publicBaseUrl || '');
+    setTunnelNameDraft(status.tunnelName || '');
+    setTunnelDomainDraft(status.tunnelDomain || '');
+    setTunnelVisibilityDraft(status.tunnelVisibility || 'public');
   }, [status]);
 
   useEffect(() => {
@@ -171,68 +224,146 @@ export function RemoteAccessSettings() {
     return () => clearInterval(timer);
   }, [pairingQr, clearQr]);
 
+  const selectedProvider = useMemo(
+    () => tunnelModes.find((mode) => mode.id === selectedMode) ?? tunnelModes[0],
+    [selectedMode],
+  );
+
+  const normalizedDomainDraft = normalizeDomainInput(tunnelDomainDraft);
   const endpoint = useMemo(() => {
     if (!status) return null;
     return status.tunnelPublicUrl || status.publicBaseUrl || status.localBaseUrl;
   }, [status]);
 
-  const draftEndpoint = publicBaseUrl.trim();
-  const customEndpointMissing = selectedMode === 'custom' && draftEndpoint.length === 0;
+  const installNeeded = selectedMode !== 'custom';
+  const authNeeded =
+    selectedMode === 'tailscale' || (selectedMode === 'cloudflare' && Boolean((status?.tunnelDomain || normalizedDomainDraft).trim()));
+  const customEndpointMissing = selectedMode === 'custom' && !publicBaseUrlDraft.trim() && !normalizedDomainDraft;
   const tunnelRunning = status?.tunnelState === 'running';
 
-  const stepOneComplete = Boolean(
+  const stepOneComplete = Boolean(status && status.tunnelMode === selectedMode);
+  const stepTwoComplete = Boolean(
     status &&
-      status.enabled &&
-      status.tunnelMode === selectedMode &&
-      (selectedMode !== 'custom' || Boolean(status.publicBaseUrl)),
+      stepOneComplete &&
+      (status.tunnelName || '') === tunnelNameDraft.trim() &&
+      (status.tunnelDomain || '') === normalizedDomainDraft &&
+      status.tunnelVisibility === tunnelVisibilityDraft &&
+      (!customEndpointMissing && (selectedMode !== 'custom' || Boolean(status.publicBaseUrl))),
   );
+  const stepThreeComplete = Boolean(stepTwoComplete && (!installNeeded || status?.tunnelBinaryInstalled));
+  const stepFourComplete = Boolean(stepThreeComplete && (!authNeeded || status?.tunnelAuthStatus === 'authenticated'));
+  const stepFiveComplete = Boolean(stepFourComplete && tunnelRunning && endpoint);
 
-  const installNeeded = Boolean(status && status.tunnelMode !== 'custom');
-  const stepTwoComplete = Boolean(stepOneComplete && (!installNeeded || status?.tunnelBinaryInstalled));
-
-  const authNeeded = Boolean(status && status.tunnelMode === 'tailscale');
-  const stepThreeComplete = Boolean(stepTwoComplete && (!authNeeded || status?.tunnelAuthStatus === 'authenticated'));
-
-  const stepFourComplete = Boolean(stepThreeComplete && tunnelRunning);
-
-  const stepTwoState: WizardState = !stepOneComplete ? 'locked' : stepTwoComplete ? 'done' : 'active';
   const stepThreeState: WizardState = !stepTwoComplete ? 'locked' : stepThreeComplete ? 'done' : 'active';
   const stepFourState: WizardState = !stepThreeComplete ? 'locked' : stepFourComplete ? 'done' : 'active';
-  const stepFiveState: WizardState = !stepFourComplete ? 'locked' : pairingQr ? 'done' : 'active';
+  const stepFiveState: WizardState = !stepFourComplete ? 'locked' : stepFiveComplete ? 'done' : 'active';
+  const stepSixState: WizardState = !stepFiveComplete ? 'locked' : pairingQr ? 'done' : 'active';
 
-  const runStepOne = async () => {
+  const applyProviderStep = async () => {
     if (!status) return;
-
-    if (customEndpointMissing) {
-      toast.error('Public endpoint required', 'Enter a HTTPS endpoint for custom tunnel mode before continuing.');
+    if (status.tunnelMode === selectedMode) {
+      toast.success('Tunnel provider already selected');
       return;
     }
 
-    const nextPublicBaseUrl = draftEndpoint || null;
-    setIsApplyingStepOne(true);
+    setIsApplyingProvider(true);
+    try {
+      await setTunnelMode(selectedMode);
+      await refreshTunnel();
+    } finally {
+      setIsApplyingProvider(false);
+    }
+  };
 
+  const applyConfigurationStep = async () => {
+    if (!status) return;
+
+    if (customEndpointMissing) {
+      toast.error('Endpoint required', 'Custom mode needs a public base URL or custom domain before continuing.');
+      return;
+    }
+
+    const normalizedTunnelName = tunnelNameDraft.trim() || null;
+    const normalizedPublicBaseUrl = publicBaseUrlDraft.trim() || null;
+    const normalizedVisibility: RemoteTunnelVisibility = selectedMode === 'cloudflare' ? 'public' : tunnelVisibilityDraft;
+
+    const approved = window.confirm(
+      [
+        `Apply ${selectedProvider.label} configuration?`,
+        '',
+        `Tunnel name: ${normalizedTunnelName || 'not set'}`,
+        `Domain: ${normalizedDomainDraft || 'not set'}`,
+        `Visibility: ${normalizedVisibility}`,
+        `Endpoint override: ${normalizedPublicBaseUrl || 'none'}`,
+        '',
+        'If tunnel options changed while running, Cowork will restart the managed tunnel safely.',
+      ].join('\n'),
+    );
+
+    if (!approved) return;
+
+    setIsApplyingConfig(true);
     try {
       if (!status.enabled) {
         await enableRemoteAccess({
           tunnelMode: selectedMode,
-          publicBaseUrl: nextPublicBaseUrl,
+          tunnelName: normalizedTunnelName,
+          tunnelDomain: normalizedDomainDraft || null,
+          tunnelVisibility: normalizedVisibility,
+          publicBaseUrl: normalizedPublicBaseUrl,
         });
       } else {
         if (status.tunnelMode !== selectedMode) {
           await setTunnelMode(selectedMode);
         }
 
-        const currentPublic = status.publicBaseUrl || '';
-        const nextPublic = nextPublicBaseUrl || '';
-        if (currentPublic !== nextPublic) {
-          await setPublicBaseUrl(nextPublicBaseUrl);
-        }
-
-        await refreshTunnel();
+        await setTunnelOptions({
+          tunnelName: normalizedTunnelName,
+          tunnelDomain: normalizedDomainDraft || null,
+          tunnelVisibility: normalizedVisibility,
+          publicBaseUrl: normalizedPublicBaseUrl,
+        });
       }
+
+      await refreshTunnel();
     } finally {
-      setIsApplyingStepOne(false);
+      setIsApplyingConfig(false);
     }
+  };
+
+  const installProviderDependency = async () => {
+    if (!installNeeded) return;
+    const approved = window.confirm(
+      `Install ${selectedProvider.installLabel} automatically on this machine? You can still use manual installation if needed.`,
+    );
+    if (!approved) return;
+    await installTunnelBinary();
+  };
+
+  const authenticateProvider = async () => {
+    const approved = window.confirm(
+      [
+        `Run ${selectedProvider.authLabel}?`,
+        '',
+        selectedMode === 'tailscale'
+          ? 'This may trigger OS permission prompts and open a browser flow.'
+          : 'This may open a browser login flow to authorize Cloudflare domain routing.',
+      ].join('\n'),
+    );
+    if (!approved) return;
+    await authenticateTunnel();
+  };
+
+  const startTunnelStep = async () => {
+    const approved = window.confirm(
+      [
+        `Start ${selectedProvider.label} tunnel now?`,
+        '',
+        'Cowork will expose your selected local service through your configured secure endpoint.',
+      ].join('\n'),
+    );
+    if (!approved) return;
+    await startTunnel();
   };
 
   return (
@@ -242,11 +373,12 @@ export function RemoteAccessSettings() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.12em] text-white/70">
               <Shield className="h-3.5 w-3.5" />
-              Remote Setup Wizard
+              Guided Remote Setup
             </div>
-            <h3 className="text-lg font-semibold text-white/95">Set up tunnel access in guided steps</h3>
-            <p className="max-w-2xl text-sm text-white/70">
-              Follow each step in order: choose mode, install dependency, authenticate, start tunnel, then pair your phone.
+            <h3 className="text-lg font-semibold text-white/95">Secure internet access for phone control</h3>
+            <p className="max-w-3xl text-sm text-white/70">
+              Cowork runs locally on your desktop. This wizard sets up a secure tunnel so your iPhone/Android app can reach it from anywhere,
+              not just the same Wi-Fi.
             </p>
           </div>
 
@@ -259,7 +391,6 @@ export function RemoteAccessSettings() {
               {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
               Refresh
             </button>
-
             {status?.enabled ? (
               <button
                 type="button"
@@ -273,164 +404,253 @@ export function RemoteAccessSettings() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-white/40">Status</p>
+            <p className="text-[11px] uppercase tracking-wide text-white/40">Gateway</p>
             <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/90">
               {status?.enabled ? <BadgeCheck className="h-3.5 w-3.5 text-emerald-300" /> : <ShieldOff className="h-3.5 w-3.5 text-white/55" />}
-              {status?.enabled ? 'Remote gateway enabled' : 'Remote gateway disabled'}
+              {status?.enabled ? 'Enabled' : 'Disabled'}
             </p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
-            <p className="text-[11px] uppercase tracking-wide text-white/40">Active endpoint</p>
-            <p className="mt-1 truncate text-sm text-white/90">{endpoint || 'Not available yet'}</p>
+            <p className="text-[11px] uppercase tracking-wide text-white/40">Provider</p>
+            <p className="mt-1 text-sm text-white/90">{selectedProvider.label}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/25 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-white/40">Endpoint</p>
+            <p className="mt-1 truncate text-sm text-white/90">{endpoint || 'Not ready'}</p>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/25 p-3">
             <p className="text-[11px] uppercase tracking-wide text-white/40">Tunnel runtime</p>
             <p className="mt-1 text-sm text-white/90">{status?.tunnelState || 'stopped'}</p>
           </div>
         </div>
+
+        <div className="mt-3 rounded-xl border border-[#3A76FF]/30 bg-[#1D4ED8]/12 p-3 text-xs text-[#C9DAFF]">
+          <p className="font-medium">Setup plan</p>
+          <p className="mt-1">
+            1) Select provider, 2) configure domain/name/access policy, 3) install dependency, 4) authenticate, 5) start tunnel, 6) pair phone.
+          </p>
+        </div>
       </div>
 
       <div className="space-y-3">
         <SetupStepCard
           step={1}
-          title="Choose tunnel mode and save setup"
-          description="Select your tunnel provider and optional endpoint, then apply configuration."
+          title="Choose tunnel provider"
+          description="Pick one provider first. Later steps adapt automatically for this provider."
           state={stepOneComplete ? 'done' : 'active'}
         >
-          <div className="space-y-3">
-            <div className="grid gap-2 md:grid-cols-3">
-              {tunnelModes.map((mode) => (
-                <button
-                  key={mode.id}
-                  type="button"
-                  onClick={() => setSelectedMode(mode.id)}
-                  className={cn(
-                    'rounded-xl border px-3 py-2 text-left transition-colors',
-                    selectedMode === mode.id
-                      ? 'border-[#4B83FF] bg-[#1D4ED8]/15'
-                      : 'border-white/[0.1] bg-black/20 hover:bg-white/[0.04]',
-                  )}
-                >
-                  <p className="text-sm text-white/90">{mode.label}</p>
-                  <p className="text-xs text-white/50">{mode.subtitle}</p>
-                </button>
-              ))}
-            </div>
-
-            <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
-              <label className="mb-1.5 inline-flex items-center gap-1.5 text-xs text-white/60">
-                <Globe2 className="h-3.5 w-3.5" />
-                Public base URL ({selectedMode === 'custom' ? 'required' : 'optional'})
-              </label>
-              <input
-                type="text"
-                value={publicBaseUrl}
-                onChange={(event) => setPublicBaseUrlDraft(event.target.value)}
-                placeholder="https://your-endpoint.example.com"
-                className="w-full rounded-lg border border-white/[0.12] bg-[#0B0C10] px-3 py-2 text-sm text-white/90 placeholder:text-white/35 focus:border-[#3B82F6]/70 focus:outline-none"
-              />
-              {customEndpointMissing ? (
-                <p className="mt-1.5 text-xs text-[#FF9F9A]">Custom mode needs a public HTTPS endpoint URL.</p>
-              ) : (
-                <p className="mt-1.5 text-xs text-white/45">
-                  For managed modes, this can stay empty and Cowork will infer or set it after tunnel start.
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="grid gap-2 md:grid-cols-3">
+            {tunnelModes.map((mode) => (
               <button
+                key={mode.id}
                 type="button"
-                disabled={isApplyingStepOne || isLoading}
-                onClick={() => void runStepOne()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
+                onClick={() => setSelectedMode(mode.id)}
+                className={cn(
+                  'rounded-xl border px-3 py-2 text-left transition-colors',
+                  selectedMode === mode.id
+                    ? 'border-[#4B83FF] bg-[#1D4ED8]/15'
+                    : 'border-white/[0.1] bg-black/20 hover:bg-white/[0.04]',
+                )}
               >
-                {isApplyingStepOne ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shield className="h-3.5 w-3.5" />}
-                Apply step 1
+                <p className="text-sm text-white/90">{mode.label}</p>
+                <p className="text-xs text-white/50">{mode.subtitle}</p>
               </button>
-              <p className="text-xs text-white/55">
-                Current: {status?.tunnelMode || 'unknown'} · endpoint {status?.publicBaseUrl || 'not set'}
-              </p>
-            </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isApplyingProvider || isLoading}
+              onClick={() => void applyProviderStep()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
+            >
+              {isApplyingProvider ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shield className="h-3.5 w-3.5" />}
+              Save provider
+            </button>
+            <p className="text-xs text-white/55">Current saved provider: {status?.tunnelMode || 'unknown'}</p>
           </div>
         </SetupStepCard>
 
         <SetupStepCard
           step={2}
-          title="Install tunnel dependency"
-          description="Install required local binary for selected tunnel mode."
-          state={stepTwoState}
+          title="Configure tunnel options"
+          description="Set tunnel name, domain/private endpoint, and visibility policy from UI."
+          state={!stepOneComplete ? 'locked' : stepTwoComplete ? 'done' : 'active'}
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+              <label className="mb-1.5 block text-xs text-white/60">Tunnel name (optional)</label>
+              <input
+                type="text"
+                value={tunnelNameDraft}
+                onChange={(event) => setTunnelNameDraft(event.target.value)}
+                placeholder="my-cowork-tunnel"
+                className="w-full rounded-lg border border-white/[0.12] bg-[#0B0C10] px-3 py-2 text-sm text-white/90 placeholder:text-white/35 focus:border-[#3B82F6]/70 focus:outline-none"
+              />
+              <p className="mt-1.5 text-xs text-white/45">Friendly name used in Cowork and provider setup context.</p>
+            </div>
+
+            <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+              <label className="mb-1.5 inline-flex items-center gap-1.5 text-xs text-white/60">
+                <Globe2 className="h-3.5 w-3.5" />
+                Domain (optional)
+              </label>
+              <input
+                type="text"
+                value={tunnelDomainDraft}
+                onChange={(event) => setTunnelDomainDraft(event.target.value)}
+                placeholder="chat.example.com"
+                className="w-full rounded-lg border border-white/[0.12] bg-[#0B0C10] px-3 py-2 text-sm text-white/90 placeholder:text-white/35 focus:border-[#3B82F6]/70 focus:outline-none"
+              />
+              <p className="mt-1.5 text-xs text-white/45">
+                For Cloudflare this maps to a stable hostname. For custom mode this can complement your endpoint.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-white/[0.1] bg-black/20 p-3">
+            <label className="mb-1.5 inline-flex items-center gap-1.5 text-xs text-white/60">
+              <Link2 className="h-3.5 w-3.5" />
+              Endpoint URL ({selectedMode === 'custom' ? 'required' : 'optional'})
+            </label>
+            <input
+              type="text"
+              value={publicBaseUrlDraft}
+              onChange={(event) => setPublicBaseUrlDraft(event.target.value)}
+              placeholder="https://your-endpoint.example.com"
+              className="w-full rounded-lg border border-white/[0.12] bg-[#0B0C10] px-3 py-2 text-sm text-white/90 placeholder:text-white/35 focus:border-[#3B82F6]/70 focus:outline-none"
+            />
+            {customEndpointMissing ? (
+              <p className="mt-1.5 text-xs text-[#FF9F9A]">Custom mode needs endpoint URL or domain before continuing.</p>
+            ) : (
+              <p className="mt-1.5 text-xs text-white/45">Leave empty for managed provider defaults (quick URL or inferred endpoint).</p>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.1] bg-black/20 p-3">
+            <p className="text-xs text-white/60">Access scope</p>
+            <button
+              type="button"
+              onClick={() => setTunnelVisibilityDraft('public')}
+              className={cn(
+                'rounded-lg border px-2.5 py-1 text-xs',
+                tunnelVisibilityDraft === 'public'
+                  ? 'border-[#4B83FF]/65 bg-[#1D4ED8]/25 text-[#D7E3FF]'
+                  : 'border-white/[0.12] text-white/65 hover:bg-white/[0.04]',
+              )}
+            >
+              Public
+            </button>
+            <button
+              type="button"
+              onClick={() => setTunnelVisibilityDraft('private')}
+              disabled={selectedMode === 'cloudflare'}
+              className={cn(
+                'rounded-lg border px-2.5 py-1 text-xs',
+                tunnelVisibilityDraft === 'private'
+                  ? 'border-[#4B83FF]/65 bg-[#1D4ED8]/25 text-[#D7E3FF]'
+                  : 'border-white/[0.12] text-white/65 hover:bg-white/[0.04]',
+                selectedMode === 'cloudflare' && 'cursor-not-allowed opacity-45',
+              )}
+            >
+              Private
+            </button>
+            <p className="text-xs text-white/50">
+              Cloudflare mode uses internet-facing HTTPS; private mode is best with Tailscale/custom private routing.
+            </p>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={!stepOneComplete || isApplyingConfig || isLoading}
+              onClick={() => void applyConfigurationStep()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
+            >
+              {isApplyingConfig ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              Apply configuration
+            </button>
+            <p className="text-xs text-white/55">
+              Saved: name {status?.tunnelName || 'none'} · domain {status?.tunnelDomain || 'none'} · {status?.tunnelVisibility || 'public'}
+            </p>
+          </div>
+        </SetupStepCard>
+
+        <SetupStepCard
+          step={3}
+          title={`Install ${selectedProvider.installLabel} dependency`}
+          description="Install the provider binary required for managed tunnel lifecycle in Cowork."
+          state={stepThreeState}
         >
           <div className="grid gap-2 rounded-xl border border-white/[0.1] bg-black/20 p-3 text-xs text-white/65 md:grid-cols-2">
             <div>
-              <p className="text-white/45">Dependency</p>
+              <p className="text-white/45">Dependency state</p>
               <p className="mt-1 text-white/90">{status?.tunnelBinaryInstalled ? status.tunnelBinaryPath || 'Installed' : 'Missing'}</p>
             </div>
             <div>
-              <p className="text-white/45">Mode</p>
-              <p className="mt-1 text-white/90">{status?.tunnelMode || selectedMode}</p>
+              <p className="text-white/45">Provider package</p>
+              <p className="mt-1 text-white/90">{selectedProvider.installLabel}</p>
             </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={stepTwoState !== 'active' || isInstallingTunnel || !installNeeded || Boolean(status?.tunnelBinaryInstalled)}
-              onClick={() => void installTunnelBinary()}
+              disabled={stepThreeState !== 'active' || isInstallingTunnel || !installNeeded || Boolean(status?.tunnelBinaryInstalled)}
+              onClick={() => void installProviderDependency()}
               className="inline-flex items-center gap-1 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
             >
               {isInstallingTunnel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               Install dependency
             </button>
             {!installNeeded ? (
-              <p className="text-xs text-white/50">Custom mode uses your existing endpoint and does not require auto-install.</p>
+              <p className="text-xs text-white/50">Custom mode is externally managed, so no dependency install is required.</p>
             ) : null}
           </div>
         </SetupStepCard>
 
         <SetupStepCard
-          step={3}
-          title="Authenticate tunnel"
-          description="Authenticate provider if the chosen mode requires it."
-          state={stepThreeState}
+          step={4}
+          title={`Authenticate ${selectedProvider.label}`}
+          description="Run provider auth only when required by your selected mode/domain routing."
+          state={stepFourState}
         >
-          <div className="grid gap-2 rounded-xl border border-white/[0.1] bg-black/20 p-3 text-xs text-white/65 md:grid-cols-2">
+          <div className="grid gap-2 rounded-xl border border-white/[0.1] bg-black/20 p-3 text-xs text-white/65 md:grid-cols-3">
             <div>
-              <p className="text-white/45">Authentication status</p>
+              <p className="text-white/45">Auth required</p>
+              <p className="mt-1 text-white/90">{authNeeded ? 'Yes' : 'No'}</p>
+            </div>
+            <div>
+              <p className="text-white/45">Auth status</p>
               <p className="mt-1 text-white/90">{status?.tunnelAuthStatus || 'unknown'}</p>
             </div>
             <div>
-              <p className="text-white/45">Required</p>
-              <p className="mt-1 text-white/90">{authNeeded ? 'Yes' : 'No'}</p>
+              <p className="text-white/45">Flow</p>
+              <p className="mt-1 text-white/90">{selectedProvider.authLabel}</p>
             </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={
-                stepThreeState !== 'active' ||
-                isAuthenticatingTunnel ||
-                !authNeeded ||
-                status?.tunnelAuthStatus === 'authenticated'
-              }
-              onClick={() => void authenticateTunnel()}
+              disabled={stepFourState !== 'active' || isAuthenticatingTunnel || !authNeeded || status?.tunnelAuthStatus === 'authenticated'}
+              onClick={() => void authenticateProvider()}
               className="inline-flex items-center gap-1 rounded-lg border border-white/[0.15] bg-white/[0.04] px-3 py-2 text-sm text-white/85 hover:bg-white/[0.08] disabled:opacity-50"
             >
               {isAuthenticatingTunnel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
               Authenticate
             </button>
-            {!authNeeded ? <p className="text-xs text-white/50">This mode does not require an extra auth step.</p> : null}
+            {!authNeeded ? <p className="text-xs text-white/50">No auth step is needed for this provider setup.</p> : null}
           </div>
         </SetupStepCard>
 
         <SetupStepCard
-          step={4}
-          title="Start tunnel"
-          description="Launch the tunnel process and verify endpoint reachability."
-          state={stepFourState}
+          step={5}
+          title="Start tunnel and verify"
+          description="Start remote tunnel from UI and verify the endpoint before pairing a phone."
+          state={stepFiveState}
         >
           <div className="grid gap-2 rounded-xl border border-white/[0.1] bg-black/20 p-3 text-xs text-white/65 md:grid-cols-3">
             <div>
@@ -450,8 +670,8 @@ export function RemoteAccessSettings() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={stepFourState === 'locked' || isStartingTunnel || tunnelRunning}
-              onClick={() => void startTunnel()}
+              disabled={stepFiveState === 'locked' || isStartingTunnel || tunnelRunning}
+              onClick={() => void startTunnelStep()}
               className="inline-flex items-center gap-1 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
             >
               {isStartingTunnel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlayCircle className="h-3.5 w-3.5" />}
@@ -459,7 +679,7 @@ export function RemoteAccessSettings() {
             </button>
             <button
               type="button"
-              disabled={stepFourState === 'locked' || isStartingTunnel || !tunnelRunning}
+              disabled={stepFiveState === 'locked' || isStartingTunnel || !tunnelRunning}
               onClick={() => void stopTunnel()}
               className="rounded-lg border border-[#FF6A6A]/45 bg-[#FF5449]/12 px-3 py-2 text-sm text-[#FF9F9A] hover:bg-[#FF5449]/20 disabled:opacity-50"
             >
@@ -482,47 +702,53 @@ export function RemoteAccessSettings() {
           )}
         </SetupStepCard>
 
-        <SetupStepCard
-          step={5}
-          title="Pair phone with QR"
-          description="Generate one-time QR after tunnel is running and scan from iPhone/Android app."
-          state={stepFiveState}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-white/55">QR can only be generated after tunnel setup is complete and endpoint is reachable.</p>
-            <button
-              type="button"
-              disabled={!stepFourComplete || !endpoint || isGeneratingQr}
-              onClick={() => void generatePairingQr()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
-            >
-              {isGeneratingQr ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
-              Generate QR
-            </button>
-          </div>
+        {stepFiveComplete ? (
+          <SetupStepCard
+            step={6}
+            title="Pair phone with QR"
+            description="Now that tunnel is live, generate a short-lived QR and scan from iPhone/Android app."
+            state={stepSixState}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-white/55">QR becomes available only after tunnel verification succeeds.</p>
+              <button
+                type="button"
+                disabled={!stepFiveComplete || !endpoint || isGeneratingQr}
+                onClick={() => void generatePairingQr()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#3A76FF]/45 bg-[#1D4ED8]/25 px-3 py-2 text-sm text-[#C9DAFF] hover:bg-[#1D4ED8]/35 disabled:opacity-50"
+              >
+                {isGeneratingQr ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
+                Generate QR
+              </button>
+            </div>
 
-          {pairingQr ? (
-            <div className="mt-3 grid gap-4 md:grid-cols-[auto_1fr]">
-              <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
-                <img src={pairingQr.qrDataUrl} alt="Remote access pairing QR code" className="h-52 w-52 rounded-lg" />
-              </div>
-              <div className="space-y-2">
+            {pairingQr ? (
+              <div className="mt-3 grid gap-4 md:grid-cols-[auto_1fr]">
                 <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-white/40">QR expires in</p>
-                  <p className="mt-1 font-mono text-lg text-white/90">{expiresCountdown || '00:00'}</p>
+                  <img src={pairingQr.qrDataUrl} alt="Remote access pairing QR code" className="h-52 w-52 rounded-lg" />
                 </div>
-                <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-white/40">Pairing link</p>
-                  <p className="mt-1 break-all text-xs text-white/80">{pairingQr.pairingUri}</p>
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/40">QR expires in</p>
+                    <p className="mt-1 font-mono text-lg text-white/90">{expiresCountdown || '00:00'}</p>
+                  </div>
+                  <div className="rounded-xl border border-white/[0.1] bg-black/20 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-white/40">Pairing link</p>
+                    <p className="mt-1 break-all text-xs text-white/80">{pairingQr.pairingUri}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="mt-3 rounded-xl border border-dashed border-white/[0.12] bg-black/15 px-4 py-5 text-sm text-white/45">
-              Complete steps 1-4, then generate a QR code to pair the mobile app.
-            </div>
-          )}
-        </SetupStepCard>
+            ) : null}
+          </SetupStepCard>
+        ) : (
+          <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4 text-sm text-white/55">
+            <p className="inline-flex items-center gap-1.5 text-white/70">
+              <Info className="h-4 w-4" />
+              Mobile pairing is hidden until steps 1-5 complete successfully.
+            </p>
+            <p className="mt-1 text-xs text-white/45">This prevents broken phone pairing before tunnel readiness.</p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
@@ -575,12 +801,8 @@ export function RemoteAccessSettings() {
 
       <div className="rounded-xl border border-white/[0.08] bg-black/20 p-3 text-xs text-white/50">
         <p className="font-medium text-white/70">Important constraints</p>
-        <p className="mt-1">Mobile app can manage schedules (pause/resume/run) but does not expose manual create forms.</p>
-        <p className="mt-1">Schedule creation/editing remains chat-driven for safety and auditability.</p>
-        <p className="mt-1 inline-flex items-center gap-1.5">
-          <Link2 className="h-3.5 w-3.5" />
-          Use a HTTPS tunnel endpoint for internet access outside local Wi-Fi.
-        </p>
+        <p className="mt-1">Mobile app can manage schedules (pause/resume/run) but manual schedule creation remains chat-only.</p>
+        <p className="mt-1">Use HTTPS tunnel endpoints for internet access outside local Wi-Fi.</p>
       </div>
     </div>
   );

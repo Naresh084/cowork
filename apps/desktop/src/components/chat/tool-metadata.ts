@@ -42,6 +42,11 @@ const TOOL_ICONS: Record<string, typeof Terminal> = {
   stitch: Palette,
   schedule_task: Calendar,
   manage_scheduled_task: Calendar,
+  start_codex_cli_run: Terminal,
+  start_claude_cli_run: Sparkles,
+  external_cli_get_progress: Zap,
+  external_cli_respond: Sparkles,
+  external_cli_cancel_run: Wrench,
   create_workflow: Zap,
   update_workflow: Zap,
   publish_workflow: Zap,
@@ -83,6 +88,11 @@ const TOOL_NAMES: Record<string, string> = {
   stitch: 'Stitch Design',
   schedule_task: 'Schedule Task',
   manage_scheduled_task: 'Manage Schedule',
+  start_codex_cli_run: 'Launch Codex CLI',
+  start_claude_cli_run: 'Launch Claude CLI',
+  external_cli_get_progress: 'Monitor CLI Progress',
+  external_cli_respond: 'Respond to CLI Prompt',
+  external_cli_cancel_run: 'Cancel CLI Run',
   create_workflow: 'Create Workflow',
   update_workflow: 'Update Workflow',
   publish_workflow: 'Publish Workflow',
@@ -123,6 +133,11 @@ const TOOL_CATEGORIES: Record<string, string> = {
   stitch: 'Design',
   schedule_task: 'Automation',
   manage_scheduled_task: 'Automation',
+  start_codex_cli_run: 'External CLI',
+  start_claude_cli_run: 'External CLI',
+  external_cli_get_progress: 'External CLI',
+  external_cli_respond: 'External CLI',
+  external_cli_cancel_run: 'External CLI',
   create_workflow: 'Workflow',
   update_workflow: 'Workflow',
   publish_workflow: 'Workflow',
@@ -186,6 +201,22 @@ export function getToolMeta(name: string, args?: Record<string, unknown>) {
 
 export function getPrimaryArg(toolName: string, args: Record<string, unknown>): string | null {
   const lowerName = toolName.toLowerCase();
+
+  if (lowerName === 'start_codex_cli_run' || lowerName === 'start_claude_cli_run') {
+    return (args.working_directory || args.workingDirectory) as string || null;
+  }
+
+  if (lowerName === 'external_cli_get_progress') {
+    return (args.run_id || args.runId || args.provider) as string || null;
+  }
+
+  if (lowerName === 'external_cli_respond') {
+    return (args.response_text || args.responseText || args.run_id || args.runId) as string || null;
+  }
+
+  if (lowerName === 'external_cli_cancel_run') {
+    return (args.run_id || args.runId || args.provider) as string || null;
+  }
 
   // Check for skill reads - show skill name instead of full path
   if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {

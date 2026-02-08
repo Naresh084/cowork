@@ -127,5 +127,7 @@ describe('system-prompt-builder', () => {
     expect(result.prompt).toContain('`working_directory`');
     expect(result.prompt).toContain('`create_if_missing`');
     expect(result.prompt).toContain('`bypassPermission`');
+    expect(result.prompt).toContain('external_cli_get_progress');
+    expect(result.prompt).toContain('low=5s');
   });
 });

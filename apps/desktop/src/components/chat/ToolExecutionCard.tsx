@@ -37,6 +37,8 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const [resultExpanded, setResultExpanded] = useState(false);
 
   const { icon: Icon, title: displayName, category } = getToolMeta(execution.name, execution.args as Record<string, unknown>);
+  const externalCliPresentation = getExternalCliPresentation(execution);
+  const isExternalCliTool = Boolean(externalCliPresentation);
   const { activeSessionId } = useSessionStore();
   const pendingPermission = useChatStore((state) =>
     state.getSessionState(activeSessionId).pendingPermissions.find((permission) => permission.toolCallId === execution.id)
@@ -49,12 +51,16 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const argsText = JSON.stringify(execution.args, null, 2);
   const argsPreview = buildPreview(argsText);
   const argsDisplay = argsExpanded ? argsText : argsPreview.text;
+  const argsToolView = renderToolSpecificArgs(execution, externalCliPresentation);
+  const specializedArgs = argsToolView?.node;
+  const hideRawArgs = argsToolView?.hideRaw ?? false;
   const resultText = formatResult(execution.result);
   const resultPreview = buildPreview(resultText);
   const resultDisplay = resultExpanded ? resultText : resultPreview.text;
+  const externalCliResultNode = renderExternalCliResult(execution, externalCliPresentation);
   const toolView = renderToolSpecificResult(execution);
-  const specializedResult = toolView?.node;
-  const hideRawResult = toolView?.hideRaw ?? false;
+  const specializedResult = externalCliResultNode ?? toolView?.node;
+  const hideRawResult = Boolean(externalCliResultNode) || (toolView?.hideRaw ?? false);
   // Only render mediaPreview if we don't have a specialized media view (to avoid duplicates)
   const isMediaTool = isMediaGenerationTool(execution.name.toLowerCase());
   const mediaPreview = isMediaTool ? null : renderMediaPreview(execution.result);
@@ -99,13 +105,21 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
       animate={{ opacity: 1, y: 0 }}
       className={cn(
         'rounded-xl border overflow-hidden transition-all duration-200 max-w-full',
-        execution.status === 'running'
-          ? 'bg-[#101421] border-[#1D4ED8]/30'
-          : execution.status === 'error'
-            ? 'bg-[#2A1414] border-[#FF5449]/30'
-            : execution.status === 'success'
-              ? 'bg-[#0F1712] border-[#50956A]/30'
-              : 'bg-[#0F1014] border-white/[0.06]',
+        isExternalCliTool
+          ? 'external-cli-card'
+          : execution.status === 'running'
+            ? 'bg-[#101421] border-[#1D4ED8]/30'
+            : execution.status === 'error'
+              ? 'bg-[#2A1414] border-[#FF5449]/30'
+              : execution.status === 'success'
+                ? 'bg-[#0F1712] border-[#50956A]/30'
+                : 'bg-[#0F1014] border-white/[0.06]',
+        isExternalCliTool && externalCliPresentation?.provider === 'codex' && 'external-cli-card--codex',
+        isExternalCliTool && externalCliPresentation?.provider === 'claude' && 'external-cli-card--claude',
+        isExternalCliTool && externalCliPresentation?.provider === 'shared' && 'external-cli-card--shared',
+        isExternalCliTool && execution.status === 'running' && 'external-cli-card--running',
+        isExternalCliTool && execution.status === 'error' && 'external-cli-card--error',
+        isExternalCliTool && execution.status === 'success' && 'external-cli-card--success',
         className
       )}
     >
@@ -114,43 +128,68 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
         onClick={() => setIsExpanded(!isExpanded)}
         className={cn(
           'w-full flex items-center gap-3 px-3 py-2 text-left',
-          isActive && 'codex-shimmer-row'
+          isActive && 'codex-shimmer-row',
+          isExternalCliTool && 'external-cli-card__header'
         )}
       >
         {/* Icon */}
-        <div
-          className={cn(
-            'p-2 rounded-lg flex-shrink-0',
-            execution.status === 'running'
-              ? 'bg-[#1D4ED8]/20'
-              : execution.status === 'error'
-                ? 'bg-[#FF5449]/20'
-                : execution.status === 'success'
-                  ? 'bg-[#50956A]/20'
-                  : 'bg-white/[0.06]'
-          )}
-        >
-          {execution.status === 'running' ? (
-            <Loader2 className={cn('w-4 h-4 animate-spin', statusConfig.color)} />
-          ) : (
-            <Icon className={cn('w-4 h-4', statusConfig.color)} />
-          )}
-        </div>
+        {isExternalCliTool && externalCliPresentation ? (
+          <ExternalCliLogo provider={externalCliPresentation.provider} status={execution.status} />
+        ) : (
+          <div
+            className={cn(
+              'p-2 rounded-lg flex-shrink-0',
+              execution.status === 'running'
+                ? 'bg-[#1D4ED8]/20'
+                : execution.status === 'error'
+                  ? 'bg-[#FF5449]/20'
+                  : execution.status === 'success'
+                    ? 'bg-[#50956A]/20'
+                    : 'bg-white/[0.06]'
+            )}
+          >
+            {execution.status === 'running' ? (
+              <Loader2 className={cn('w-4 h-4 animate-spin', statusConfig.color)} />
+            ) : (
+              <Icon className={cn('w-4 h-4', statusConfig.color)} />
+            )}
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/40">
-            <span className="flex-shrink-0">{category}</span>
-            <span className="text-white/20 flex-shrink-0">•</span>
-            <span className={cn('text-white/70 truncate', !primaryArg && execution.status === 'running' && 'codex-shimmer-text')}>
-              {displayName}
-            </span>
-          </div>
+          {isExternalCliTool && externalCliPresentation ? (
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/45">
+              <span className={cn(
+                'px-1.5 py-0.5 rounded-full border text-[10px] font-semibold tracking-[0.12em]',
+                externalCliPresentation.provider === 'codex'
+                  ? 'bg-[#1D4ED8]/18 text-[#A5C7FF] border-[#3B82F6]/40'
+                  : externalCliPresentation.provider === 'claude'
+                    ? 'bg-[#E85D45]/15 text-[#F8B4A8] border-[#E85D45]/35'
+                    : 'bg-white/[0.08] text-white/70 border-white/[0.18]'
+              )}>
+                {externalCliPresentation.providerLabel}
+              </span>
+              <span className="text-white/25">•</span>
+              <span className={cn('text-white/72 truncate', execution.status === 'running' && 'codex-shimmer-text')}>
+                {externalCliPresentation.actionLabel}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/40">
+              <span className="flex-shrink-0">{category}</span>
+              <span className="text-white/20 flex-shrink-0">•</span>
+              <span className={cn('text-white/70 truncate', !primaryArg && execution.status === 'running' && 'codex-shimmer-text')}>
+                {displayName}
+              </span>
+            </div>
+          )}
           {primaryArg && (
             <p
               className={cn(
                 'text-sm text-white/80 font-mono truncate mt-0.5 max-w-full',
-                execution.status === 'running' && 'codex-shimmer-text'
+                execution.status === 'running' && 'codex-shimmer-text',
+                isExternalCliTool && 'text-white/90'
               )}
               title={primaryArg}
             >
@@ -161,6 +200,18 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
 
         {/* Meta */}
         <div className="flex items-center gap-2 flex-shrink-0">
+          {isExternalCliTool && externalCliPresentation && (
+            <span className={cn(
+              'external-cli-pill',
+              externalCliPresentation.provider === 'codex'
+                ? 'external-cli-pill--codex'
+                : externalCliPresentation.provider === 'claude'
+                  ? 'external-cli-pill--claude'
+                  : 'external-cli-pill--shared'
+            )}>
+              Live
+            </span>
+          )}
           <StatusBadge status={execution.status} />
           {duration && (
             <span className="flex items-center gap-1 text-[11px] text-white/40">
@@ -219,13 +270,16 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
                     )}
                   </button>
                 </div>
-                <CodeBlock
-                  code={argsDisplay}
-                  language="json"
-                  showLineNumbers={false}
-                  maxHeight={180}
-                />
-                {argsPreview.truncated && (
+                {specializedArgs}
+                {!hideRawArgs && (
+                  <CodeBlock
+                    code={argsDisplay}
+                    language="json"
+                    showLineNumbers={false}
+                    maxHeight={180}
+                  />
+                )}
+                {!hideRawArgs && argsPreview.truncated && (
                   <button
                     onClick={() => setArgsExpanded((prev) => !prev)}
                     className="mt-2 text-xs text-white/50 hover:text-white/80 transition-colors"
@@ -319,6 +373,8 @@ interface ToolExecutionInlineProps {
 
 export function ToolExecutionInline({ execution, className }: ToolExecutionInlineProps) {
   const { icon: Icon, title: displayName, category } = getToolMeta(execution.name, execution.args as Record<string, unknown>);
+  const externalCliPresentation = getExternalCliPresentation(execution);
+  const isExternalCliTool = Boolean(externalCliPresentation);
   const statusConfig = getStatusConfig(execution.status);
   const primaryArg = getPrimaryArg(execution.name, execution.args);
 
@@ -330,18 +386,24 @@ export function ToolExecutionInline({ execution, className }: ToolExecutionInlin
         className
       )}
     >
-      <div className={cn('p-1 rounded-lg', statusConfig.bgColor)}>
-        {execution.status === 'running' ? (
-          <Loader2 className={cn('w-3.5 h-3.5 animate-spin', statusConfig.color)} />
-        ) : (
-          <Icon className={cn('w-3.5 h-3.5', statusConfig.color)} />
-        )}
-      </div>
+      {isExternalCliTool && externalCliPresentation ? (
+        <ExternalCliLogo provider={externalCliPresentation.provider} status={execution.status} compact />
+      ) : (
+        <div className={cn('p-1 rounded-lg', statusConfig.bgColor)}>
+          {execution.status === 'running' ? (
+            <Loader2 className={cn('w-3.5 h-3.5 animate-spin', statusConfig.color)} />
+          ) : (
+            <Icon className={cn('w-3.5 h-3.5', statusConfig.color)} />
+          )}
+        </div>
+      )}
       <span className="text-[11px] uppercase tracking-wide text-white/40">
-        {category}
+        {isExternalCliTool && externalCliPresentation ? externalCliPresentation.providerLabel : category}
       </span>
       <span className="text-white/20">•</span>
-      <span className="text-sm text-white/90">{displayName}</span>
+      <span className="text-sm text-white/90">
+        {isExternalCliTool && externalCliPresentation ? externalCliPresentation.actionLabel : displayName}
+      </span>
       {primaryArg && (
         <span className="text-xs text-white/40 font-mono truncate max-w-[200px]">
           {primaryArg}
@@ -555,6 +617,404 @@ function renderToolSpecificResult(execution: ToolExecution): ToolView | null {
   }
 
   return null;
+}
+
+type ExternalCliProvider = 'codex' | 'claude' | 'shared';
+type ExternalCliAction = 'start' | 'progress' | 'respond' | 'cancel';
+
+interface ExternalCliPresentation {
+  provider: ExternalCliProvider;
+  action: ExternalCliAction;
+  providerLabel: string;
+  actionLabel: string;
+}
+
+interface ExternalCliRunSummaryPreview {
+  runId?: string;
+  provider?: 'codex' | 'claude';
+  status?: string;
+  startedAt?: number;
+  updatedAt?: number;
+  finishedAt?: number;
+  latestProgress?: string | null;
+  resultSummary?: string;
+  errorMessage?: string;
+  pendingInteraction?: {
+    type?: string;
+    prompt?: string;
+  };
+}
+
+interface ExternalCliMonitoringHint {
+  required?: boolean;
+  terminal?: boolean;
+  nextPollSeconds?: number | null;
+  shouldRespond?: boolean;
+  recommendation?: string;
+}
+
+function getExternalCliPresentation(execution: ToolExecution): ExternalCliPresentation | null {
+  const name = execution.name.toLowerCase();
+  let action: ExternalCliAction | null = null;
+  if (name === 'start_codex_cli_run' || name === 'start_claude_cli_run') {
+    action = 'start';
+  } else if (name === 'external_cli_get_progress') {
+    action = 'progress';
+  } else if (name === 'external_cli_respond') {
+    action = 'respond';
+  } else if (name === 'external_cli_cancel_run') {
+    action = 'cancel';
+  }
+
+  if (!action) return null;
+
+  const provider = resolveExternalCliProvider(execution);
+  const providerLabel = provider === 'codex'
+    ? 'Codex'
+    : provider === 'claude'
+      ? 'Claude'
+      : 'External';
+  const actionLabel = action === 'start'
+    ? 'CLI Launch'
+    : action === 'progress'
+      ? 'Progress Watch'
+      : action === 'respond'
+        ? 'HITL Response'
+        : 'Run Control';
+
+  return {
+    provider,
+    action,
+    providerLabel,
+    actionLabel,
+  };
+}
+
+function resolveExternalCliProvider(execution: ToolExecution): ExternalCliProvider {
+  const name = execution.name.toLowerCase();
+  if (name === 'start_codex_cli_run') return 'codex';
+  if (name === 'start_claude_cli_run') return 'claude';
+
+  const argsProvider = typeof execution.args.provider === 'string' ? execution.args.provider.toLowerCase() : '';
+  if (argsProvider === 'codex' || argsProvider === 'claude') return argsProvider;
+
+  if (execution.result && typeof execution.result === 'object') {
+    const resultAny = execution.result as {
+      provider?: string;
+      summary?: { provider?: string };
+      run?: { provider?: string };
+    };
+    const provider = (resultAny.provider || resultAny.summary?.provider || resultAny.run?.provider || '').toLowerCase();
+    if (provider === 'codex' || provider === 'claude') return provider;
+  }
+
+  return 'shared';
+}
+
+function ExternalCliLogo({
+  provider,
+  status,
+  compact = false,
+}: {
+  provider: ExternalCliProvider;
+  status: ToolExecution['status'];
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn(
+      'external-cli-logo',
+      provider === 'codex' && 'external-cli-logo--codex',
+      provider === 'claude' && 'external-cli-logo--claude',
+      provider === 'shared' && 'external-cli-logo--shared',
+      status === 'running' && 'external-cli-logo--running',
+      compact && 'external-cli-logo--compact'
+    )}>
+      <div className="external-cli-logo__ring" />
+      <div className="external-cli-logo__core" />
+      <span className="external-cli-logo__glyph">
+        {provider === 'codex' ? '<>' : provider === 'claude' ? 'AI' : 'EX'}
+      </span>
+    </div>
+  );
+}
+
+function renderToolSpecificArgs(
+  execution: ToolExecution,
+  presentation: ExternalCliPresentation | null,
+): ToolView | null {
+  if (!presentation) {
+    return null;
+  }
+
+  const args = execution.args as Record<string, unknown>;
+  const workingDirectory = String(args.working_directory ?? args.workingDirectory ?? '');
+  const prompt = String(args.prompt ?? '').trim();
+  const runId = String(args.run_id ?? args.runId ?? '').trim();
+  const provider = String(args.provider ?? '').trim();
+  const responseText = String(args.response_text ?? args.responseText ?? '').trim();
+  const createIfMissing = args.create_if_missing;
+  const bypassPermission = args.bypassPermission ?? args.bypass_permission;
+
+  return {
+    hideRaw: true,
+    node: (
+      <div className="external-cli-args">
+        {presentation.action === 'start' && (
+          <>
+            <div className="external-cli-args__grid">
+              <ExternalCliField label="Working Dir" value={workingDirectory || 'not provided'} mono />
+              <ExternalCliField
+                label="Create Missing Dir"
+                value={typeof createIfMissing === 'boolean' ? (createIfMissing ? 'true' : 'false') : 'unset'}
+              />
+              <ExternalCliField
+                label="Bypass"
+                value={typeof bypassPermission === 'boolean' ? (bypassPermission ? 'true' : 'false') : 'unset'}
+              />
+            </div>
+            {prompt && (
+              <div className="external-cli-args__prompt">
+                <div className="external-cli-args__label">Prompt</div>
+                <p className="external-cli-args__value">{truncateMiddle(prompt, 220)}</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {presentation.action === 'progress' && (
+          <div className="external-cli-args__grid">
+            <ExternalCliField label="Run ID" value={runId || 'latest run'} mono />
+            <ExternalCliField label="Provider Filter" value={provider || 'auto'} />
+          </div>
+        )}
+
+        {presentation.action === 'respond' && (
+          <>
+            <div className="external-cli-args__grid">
+              <ExternalCliField label="Run ID" value={runId || 'latest waiting run'} mono />
+            </div>
+            {responseText && (
+              <div className="external-cli-args__prompt">
+                <div className="external-cli-args__label">Response Text</div>
+                <p className="external-cli-args__value">{truncateMiddle(responseText, 220)}</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {presentation.action === 'cancel' && (
+          <div className="external-cli-args__grid">
+            <ExternalCliField label="Run ID" value={runId || 'latest active run'} mono />
+            <ExternalCliField label="Provider Filter" value={provider || 'auto'} />
+          </div>
+        )}
+      </div>
+    ),
+  };
+}
+
+function ExternalCliField({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="external-cli-field">
+      <div className="external-cli-field__label">{label}</div>
+      <div className={cn('external-cli-field__value', mono && 'external-cli-field__value--mono')}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function renderExternalCliResult(
+  execution: ToolExecution,
+  presentation: ExternalCliPresentation | null,
+): JSX.Element | null {
+  if (!presentation || execution.error) {
+    return null;
+  }
+
+  const summary = extractExternalCliSummary(execution.result);
+  const progress = extractExternalCliProgressEntries(execution.result);
+  const monitoring = extractExternalCliMonitoringHint(execution.result);
+
+  if (!summary && progress.length === 0 && !monitoring) {
+    return null;
+  }
+
+  return (
+    <div className="external-cli-result">
+      <div className="external-cli-result__header">
+        <span className="external-cli-result__title">External CLI Runtime</span>
+        <span className={cn(
+          'external-cli-result__status',
+          summary?.status === 'completed' && 'external-cli-result__status--completed',
+          summary?.status === 'failed' && 'external-cli-result__status--failed',
+          summary?.status === 'running' && 'external-cli-result__status--running',
+          summary?.status === 'waiting_user' && 'external-cli-result__status--waiting'
+        )}>
+          {summary?.status || execution.status}
+        </span>
+      </div>
+
+      {summary && (
+        <div className="external-cli-result__grid">
+          <ExternalCliField label="Run ID" value={summary.runId || 'unknown'} mono />
+          <ExternalCliField label="Provider" value={summary.provider || presentation.providerLabel} />
+          <ExternalCliField label="Started" value={formatEpoch(summary.startedAt)} />
+          <ExternalCliField label="Updated" value={formatEpoch(summary.updatedAt)} />
+        </div>
+      )}
+
+      {summary?.pendingInteraction?.prompt && (
+        <div className="external-cli-result__interaction">
+          <div className="external-cli-result__interaction-label">Waiting For User</div>
+          <p className="external-cli-result__interaction-text">{summary.pendingInteraction.prompt}</p>
+        </div>
+      )}
+
+      {summary?.latestProgress && (
+        <div className="external-cli-result__summary">
+          <div className="external-cli-result__label">Latest Update</div>
+          <p>{summary.latestProgress}</p>
+        </div>
+      )}
+
+      {summary?.resultSummary && (
+        <div className="external-cli-result__summary">
+          <div className="external-cli-result__label">Result</div>
+          <p>{summary.resultSummary}</p>
+        </div>
+      )}
+
+      {summary?.errorMessage && (
+        <div className="external-cli-result__error">{summary.errorMessage}</div>
+      )}
+
+      {monitoring && (
+        <div className="external-cli-result__monitor">
+          <span className="external-cli-result__monitor-label">Agent Monitoring</span>
+          <span>
+            {monitoring.terminal
+              ? 'Terminal state reached.'
+              : monitoring.nextPollSeconds
+                ? `Next poll in ${monitoring.nextPollSeconds}s`
+                : 'Continue polling.'}
+          </span>
+        </div>
+      )}
+
+      {progress.length > 0 && (
+        <div className="external-cli-result__timeline">
+          <div className="external-cli-result__label">Recent Progress</div>
+          <div className="external-cli-result__events">
+            {progress.slice(-6).map((entry, index) => (
+              <div key={`${entry.timestamp ?? index}-${index}`} className="external-cli-result__event">
+                <span className="external-cli-result__event-dot" />
+                <span className="external-cli-result__event-time">{formatEpoch(entry.timestamp)}</span>
+                <span className="external-cli-result__event-text">{entry.message || 'update'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function extractExternalCliSummary(result: unknown): ExternalCliRunSummaryPreview | null {
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  const resultAny = result as {
+    run?: ExternalCliRunSummaryPreview;
+    summary?: ExternalCliRunSummaryPreview;
+    runId?: string;
+    provider?: 'codex' | 'claude';
+    status?: string;
+    startedAt?: number;
+    updatedAt?: number;
+    finishedAt?: number;
+    latestProgress?: string | null;
+    resultSummary?: string;
+    errorMessage?: string;
+    pendingInteraction?: { type?: string; prompt?: string };
+  };
+
+  const summary = resultAny.run || resultAny.summary;
+  if (summary && typeof summary === 'object') {
+    return summary;
+  }
+
+  if (!resultAny.runId && !resultAny.status && !resultAny.provider) {
+    return null;
+  }
+
+  return {
+    runId: resultAny.runId,
+    provider: resultAny.provider,
+    status: resultAny.status,
+    startedAt: resultAny.startedAt,
+    updatedAt: resultAny.updatedAt,
+    finishedAt: resultAny.finishedAt,
+    latestProgress: resultAny.latestProgress,
+    resultSummary: resultAny.resultSummary,
+    errorMessage: resultAny.errorMessage,
+    pendingInteraction: resultAny.pendingInteraction,
+  };
+}
+
+function extractExternalCliProgressEntries(result: unknown): Array<{ timestamp?: number; message?: string }> {
+  if (!result || typeof result !== 'object') {
+    return [];
+  }
+
+  const resultAny = result as {
+    recentProgress?: Array<{ timestamp?: number; message?: string }>;
+    run?: { recentProgress?: Array<{ timestamp?: number; message?: string }> };
+  };
+
+  const entries = resultAny.recentProgress || resultAny.run?.recentProgress;
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry && typeof entry === 'object')
+    .map((entry) => ({
+      timestamp: typeof entry.timestamp === 'number' ? entry.timestamp : undefined,
+      message: typeof entry.message === 'string' ? entry.message : undefined,
+    }));
+}
+
+function extractExternalCliMonitoringHint(result: unknown): ExternalCliMonitoringHint | null {
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  const resultAny = result as {
+    monitoring?: ExternalCliMonitoringHint;
+    run?: { monitoring?: ExternalCliMonitoringHint };
+  };
+
+  const hint = resultAny.monitoring || resultAny.run?.monitoring;
+  if (!hint || typeof hint !== 'object') {
+    return null;
+  }
+
+  return hint;
+}
+
+function formatEpoch(value?: number): string {
+  if (!value || !Number.isFinite(value)) {
+    return 'n/a';
+  }
+
+  try {
+    const date = new Date(value);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch {
+    return 'n/a';
+  }
 }
 
 function isShellTool(name: string) {

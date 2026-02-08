@@ -61,11 +61,122 @@ function normalizeBypassValue(input: {
   return value;
 }
 
+type ExternalCliComplexity = 'low' | 'medium' | 'high';
+type ExternalCliRunStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_user'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted'
+  | string;
+
+const TERMINAL_STATUSES = new Set<string>(['completed', 'failed', 'cancelled', 'interrupted']);
+const MEDIUM_COMPLEXITY_HINTS = [
+  'build',
+  'feature',
+  'website',
+  'app',
+  'frontend',
+  'backend',
+  'test',
+  'integration',
+  'api',
+  'database',
+];
+const HIGH_COMPLEXITY_HINTS = [
+  'refactor',
+  'migration',
+  'end-to-end',
+  'architecture',
+  'multi-step',
+  'multi file',
+  'deploy',
+  'production',
+  'full stack',
+];
+
+function derivePollingPlan(prompt: string): {
+  complexity: ExternalCliComplexity;
+  intervalSeconds: 5 | 10 | 60;
+  reason: string;
+} {
+  const normalizedPrompt = String(prompt || '').toLowerCase();
+  let score = 0;
+
+  if (prompt.length > 320) score += 1;
+  if (prompt.length > 800) score += 2;
+  if (MEDIUM_COMPLEXITY_HINTS.some((keyword) => normalizedPrompt.includes(keyword))) score += 1;
+  if (HIGH_COMPLEXITY_HINTS.some((keyword) => normalizedPrompt.includes(keyword))) score += 2;
+
+  if (score >= 4) {
+    return {
+      complexity: 'high',
+      intervalSeconds: 60,
+      reason: 'Long-running or high-complexity workflow detected.',
+    };
+  }
+
+  if (score >= 2) {
+    return {
+      complexity: 'medium',
+      intervalSeconds: 10,
+      reason: 'Moderate complexity workflow detected.',
+    };
+  }
+
+  return {
+    complexity: 'low',
+    intervalSeconds: 5,
+    reason: 'Quick iteration workflow detected.',
+  };
+}
+
+function statusPollingHint(
+  status: ExternalCliRunStatus,
+  plan: { intervalSeconds: 5 | 10 | 60; complexity: ExternalCliComplexity },
+): { terminal: boolean; nextPollSeconds: number | null; shouldRespond: boolean } {
+  const normalizedStatus = String(status || '').toLowerCase();
+
+  if (TERMINAL_STATUSES.has(normalizedStatus)) {
+    return {
+      terminal: true,
+      nextPollSeconds: null,
+      shouldRespond: false,
+    };
+  }
+
+  if (normalizedStatus === 'waiting_user') {
+    return {
+      terminal: false,
+      nextPollSeconds: 5,
+      shouldRespond: true,
+    };
+  }
+
+  return {
+    terminal: false,
+    nextPollSeconds: plan.intervalSeconds,
+    shouldRespond: false,
+  };
+}
+
+function buildMonitoringRecommendation(nextPollSeconds: number | null, terminal: boolean): string {
+  if (terminal) {
+    return 'Run reached a terminal state. Report outcome to user.';
+  }
+  if (!nextPollSeconds) {
+    return 'Continue monitoring with external_cli_get_progress until terminal state.';
+  }
+  return `Call external_cli_get_progress again in ${nextPollSeconds}s.`;
+}
+
 export function createExternalCliTools(options: ExternalCliToolFactoryOptions): ToolHandler[] {
   const startCodexCliRun: ToolHandler = {
     name: 'start_codex_cli_run',
     description:
-      'Start a Codex CLI background run after conversationally confirming directory, create-if-missing, and bypass mode.',
+      'Start a Codex CLI background run after conversationally confirming directory, create-if-missing, and bypass mode. Then keep monitoring with external_cli_get_progress until terminal state.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Codex CLI.'),
       working_directory: z
@@ -96,6 +207,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
       try {
         const bypassPermission = normalizeBypassValue(input);
         const resolvedWorkingDirectory = resolveWorkingDirectory(context.workingDirectory, input.working_directory);
+        const pollingPlan = derivePollingPlan(input.prompt);
         const result = await options.runManager.startRun({
           sessionId: context.sessionId,
           provider: 'codex',
@@ -106,8 +218,20 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
           bypassPermission,
           origin: options.getSessionOrigin(context.sessionId),
         });
+        const polling = statusPollingHint(result.status, pollingPlan);
 
-        return ok(result);
+        return ok({
+          run: result,
+          monitoring: {
+            required: !polling.terminal,
+            terminal: polling.terminal,
+            complexity: pollingPlan.complexity,
+            nextPollSeconds: polling.nextPollSeconds,
+            shouldRespond: polling.shouldRespond,
+            reason: pollingPlan.reason,
+            recommendation: buildMonitoringRecommendation(polling.nextPollSeconds, polling.terminal),
+          },
+        });
       } catch (error) {
         return fail(error);
       }
@@ -117,7 +241,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
   const startClaudeCliRun: ToolHandler = {
     name: 'start_claude_cli_run',
     description:
-      'Start a Claude CLI background run after conversationally confirming directory, create-if-missing, and bypass mode.',
+      'Start a Claude CLI background run after conversationally confirming directory, create-if-missing, and bypass mode. Then keep monitoring with external_cli_get_progress until terminal state.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Claude CLI.'),
       working_directory: z
@@ -148,6 +272,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
       try {
         const bypassPermission = normalizeBypassValue(input);
         const resolvedWorkingDirectory = resolveWorkingDirectory(context.workingDirectory, input.working_directory);
+        const pollingPlan = derivePollingPlan(input.prompt);
         const result = await options.runManager.startRun({
           sessionId: context.sessionId,
           provider: 'claude',
@@ -158,8 +283,20 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
           bypassPermission,
           origin: options.getSessionOrigin(context.sessionId),
         });
+        const polling = statusPollingHint(result.status, pollingPlan);
 
-        return ok(result);
+        return ok({
+          run: result,
+          monitoring: {
+            required: !polling.terminal,
+            terminal: polling.terminal,
+            complexity: pollingPlan.complexity,
+            nextPollSeconds: polling.nextPollSeconds,
+            shouldRespond: polling.shouldRespond,
+            reason: pollingPlan.reason,
+            recommendation: buildMonitoringRecommendation(polling.nextPollSeconds, polling.terminal),
+          },
+        });
       } catch (error) {
         return fail(error);
       }
@@ -168,7 +305,8 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
 
   const getProgress: ToolHandler = {
     name: 'external_cli_get_progress',
-    description: 'Get concise progress for the latest or specified external CLI run.',
+    description:
+      'Get concise progress for the latest or specified external CLI run. Use repeatedly on an adaptive cadence until status is terminal.',
     parameters: z.object({
       run_id: z.string().optional().describe('Specific run ID. If omitted, uses latest run in this session.'),
       provider: z.enum(['codex', 'claude']).optional().describe('Optional provider filter when run_id is omitted.'),
@@ -202,6 +340,9 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
 
         const limit = input.include_recent_entries || 10;
 
+        const pollingPlan = derivePollingPlan(run.prompt || '');
+        const polling = statusPollingHint(run.status, pollingPlan);
+
         return ok({
           found: true,
           summary: {
@@ -224,6 +365,15 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
             errorMessage: run.errorMessage || null,
           },
           recentProgress: run.progress.slice(Math.max(0, run.progress.length - limit)),
+          monitoring: {
+            required: !polling.terminal,
+            terminal: polling.terminal,
+            complexity: pollingPlan.complexity,
+            nextPollSeconds: polling.nextPollSeconds,
+            shouldRespond: polling.shouldRespond,
+            reason: pollingPlan.reason,
+            recommendation: buildMonitoringRecommendation(polling.nextPollSeconds, polling.terminal),
+          },
         });
       } catch (error) {
         return fail(error);
@@ -265,9 +415,19 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
         }
 
         const summary = await options.runManager.respond(runId, input.response_text);
+        const terminal = TERMINAL_STATUSES.has(String(summary.status || '').toLowerCase());
         return ok({
           acknowledged: true,
           summary,
+          monitoring: {
+            required: !terminal,
+            terminal,
+            nextPollSeconds: terminal ? null : 5,
+            shouldRespond: false,
+            recommendation: terminal
+              ? 'Run reached terminal state. Report outcome to user.'
+              : 'Call external_cli_get_progress in 5s to confirm post-response state.',
+          },
         });
       } catch (error) {
         return fail(error);
@@ -314,6 +474,13 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
         return ok({
           cancelled: true,
           summary,
+          monitoring: {
+            required: false,
+            terminal: true,
+            nextPollSeconds: null,
+            shouldRespond: false,
+            recommendation: 'Run cancelled. Report cancellation to user.',
+          },
         });
       } catch (error) {
         return fail(error);

@@ -178,6 +178,9 @@ function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): 
       '- If the user omitted directory, ask whether to use the current session working directory.',
       '- If requested directory is missing, default to creating it automatically by setting `create_if_missing=true` unless user explicitly asks not to create directories.',
       '- If user asks for bypass but settings disallow it, explain and ask whether to continue with bypass disabled.',
+      '- After launch, keep monitoring with `external_cli_get_progress` until terminal status (`completed`, `failed`, `cancelled`, `interrupted`).',
+      '- Adaptive polling cadence should be auto-derived from task complexity: low=5s, medium=10s, high=60s.',
+      '- If status is `waiting_user`, ask user/respond and then resume polling.',
       '- After confirmations, call the start tool with explicit structured arguments only.',
     ].join('\n'),
   };

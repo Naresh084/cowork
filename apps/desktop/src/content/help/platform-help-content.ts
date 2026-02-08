@@ -242,7 +242,7 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
         id: 'settings-step-remote-tab',
         title: 'Remote Tab',
         description:
-          'Set tunnel mode, install missing tunnel dependency, authenticate, start/stop tunnel, then generate pairing QR for mobile.',
+          'Follow guided setup: choose provider, set tunnel name/domain/access policy, install dependency, authenticate, start tunnel, then pair mobile with QR.',
         targetId: 'settings-tab-remote',
       },
       {
