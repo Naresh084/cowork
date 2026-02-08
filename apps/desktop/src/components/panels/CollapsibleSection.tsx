@@ -27,15 +27,17 @@ export function CollapsibleSection({
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] mb-2 last:mb-0">
       {/* Header */}
-      <button
-        onClick={() => toggleRightPanelSection(id)}
-        className={cn(
-          'w-full flex items-center justify-between px-3 py-2',
-          'hover:bg-white/[0.04] transition-colors',
-          'focus:outline-none'
-        )}
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => toggleRightPanelSection(id)}
+          aria-expanded={isExpanded}
+          className={cn(
+            'min-w-0 flex-1 flex items-center gap-2 text-left',
+            'hover:text-white/90 transition-colors',
+            'focus:outline-none'
+          )}
+        >
           <ChevronRight
             className={cn(
               'w-4 h-4 text-white/40 transition-transform duration-200',
@@ -43,22 +45,14 @@ export function CollapsibleSection({
             )}
           />
           <Icon className="w-4 h-4 text-white/50" />
-          <span className="text-xs font-semibold text-white/70 uppercase tracking-wide">{title}</span>
+          <span className="text-xs font-semibold text-white/70 uppercase tracking-wide truncate">{title}</span>
           {badge !== undefined && badge !== 0 && (
             <span className="text-[11px] text-white/40 ml-1">{badge}</span>
           )}
-        </div>
+        </button>
 
-        {/* Actions slot - stop propagation to prevent toggle */}
-        {actions && (
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1"
-          >
-            {actions}
-          </div>
-        )}
-      </button>
+        {actions && <div className="flex items-center gap-1 shrink-0">{actions}</div>}
+      </div>
 
       {/* Content */}
       <AnimatePresence initial={false}>

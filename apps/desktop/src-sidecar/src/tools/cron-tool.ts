@@ -11,6 +11,10 @@ import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { cronService } from '../cron/index.js';
 import type { CronSchedule, PlatformType } from '@gemini-cowork/shared';
 import { workflowService } from '../workflow/index.js';
+import { WORKFLOWS_ENABLED } from '../config/feature-flags.js';
+
+const WORKFLOW_ENGINE = WORKFLOWS_ENABLED ? 'workflow' : 'automation';
+const WORKFLOW_LABEL = WORKFLOWS_ENABLED ? 'Workflow' : 'Automation';
 
 // ============================================================================
 // Schedule Conversion Utilities
@@ -446,7 +450,7 @@ Schedule types:
               `Scheduled task "${name}" created successfully.` +
               `${maxRuns ? ` Will run ${maxRuns} time${maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
               `${defaultNotificationTarget ? ` Default delivery set to ${platformDisplayName(defaultNotificationTarget.platform)}${defaultNotificationTarget.chatId ? ` (${defaultNotificationTarget.chatId})` : ''}.` : ''}` +
-              ' Managed by the workflow runtime.',
+              ' Managed by the automation runtime.',
           },
         };
       } catch (error) {
@@ -520,7 +524,7 @@ Actions:
                     const primarySchedule = wf.schedules[0];
                     return {
                       id: wf.workflowId,
-                      engine: 'workflow',
+                      engine: WORKFLOW_ENGINE,
                       name: wf.name,
                       status: wf.enabled ? wf.status : 'paused',
                       schedule: primarySchedule
@@ -546,7 +550,7 @@ Actions:
               return {
                 success: true,
                 data: {
-                  message: `Workflow task ${taskId} paused successfully`,
+                  message: `${WORKFLOW_LABEL} task ${taskId} paused successfully`,
                   pausedTriggers: paused.pausedTriggers,
                 },
               };
@@ -567,7 +571,7 @@ Actions:
               return {
                 success: true,
                 data: {
-                  message: `Workflow task ${taskId} resumed`,
+                  message: `${WORKFLOW_LABEL} task ${taskId} resumed`,
                   resumedTriggers: resumed.resumedTriggers,
                   nextRun: formatNextRun(resumed.nextRunAt ?? undefined),
                 },
@@ -597,7 +601,7 @@ Actions:
               return {
                 success: true,
                 data: {
-                  message: `Workflow task ${taskId} triggered`,
+                  message: `${WORKFLOW_LABEL} task ${taskId} triggered`,
                   runId: run.id,
                   result: run.status,
                 },
@@ -624,7 +628,7 @@ Actions:
               const archived = workflowService.archive(taskId);
               return {
                 success: true,
-                data: { message: `Workflow ${archived.id} archived successfully` },
+                data: { message: `${WORKFLOW_LABEL} ${archived.id} archived successfully` },
               };
             }
             await cronService.deleteJob(taskId);

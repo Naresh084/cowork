@@ -4,6 +4,7 @@ import { Calendar, Loader2, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/app-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import type { CreateWorkflowDraftInput, WorkflowDefinition, WorkflowSchedule } from '@gemini-cowork/shared';
 
 interface ScheduleSuggestionCardProps {
@@ -33,6 +34,10 @@ export function ScheduleSuggestionCard({
   const setCurrentView = useAppStore((state) => state.setCurrentView);
   const [isCreating, setIsCreating] = useState(false);
   const [isCreated, setIsCreated] = useState(false);
+
+  if (!WORKFLOWS_ENABLED) {
+    return null;
+  }
 
   // Convert simple schedule to workflow schedule
   const toWorkflowSchedule = (): WorkflowSchedule => {

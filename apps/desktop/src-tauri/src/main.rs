@@ -214,6 +214,7 @@ fn main() {
             commands::remote_access::remote_access_revoke_device,
             commands::remote_access::remote_access_set_public_base_url,
             commands::remote_access::remote_access_set_tunnel_mode,
+            commands::remote_access::remote_access_set_tunnel_options,
             commands::remote_access::remote_access_refresh_tunnel,
             commands::remote_access::remote_access_install_tunnel_binary,
             commands::remote_access::remote_access_authenticate_tunnel,

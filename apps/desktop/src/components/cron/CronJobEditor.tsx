@@ -12,6 +12,7 @@ import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useWorkflowStore } from '@/stores/workflow-store';
 import { useAppStore } from '@/stores/app-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '@/components/ui/Toast';
@@ -752,7 +753,7 @@ export function CronJobEditor() {
             ? 'Save Changes'
             : 'Create Task'}
         </motion.button>
-        {editorMode !== 'edit' && (
+        {editorMode !== 'edit' && WORKFLOWS_ENABLED && (
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}

@@ -18,6 +18,7 @@ import {
   generateMessageId,
   now,
   generateChatItemId,
+  sanitizeProviderErrorMessage,
 } from '@gemini-cowork/shared';
 import type {
   ChatItem,
@@ -102,6 +103,7 @@ import {
   type ExternalCliPendingInteraction,
   type ExternalCliRunOrigin,
 } from './external-cli/types.js';
+import { WORKFLOWS_ENABLED } from './config/feature-flags.js';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -591,6 +593,7 @@ export class AgentRunner {
   private appDataDir: string | null = null;
   private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
   private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
+  private initializePromise: Promise<{ sessionsRestored: number }> | null = null;
   // Deep Agents services (per-session instances stored in map)
   private memoryServices: Map<string, MemoryService> = new Map();
   private memoryExtractors: Map<string, MemoryExtractor> = new Map();
@@ -606,38 +609,56 @@ export class AgentRunner {
    * Called after sidecar starts with path from Rust backend.
    */
   async initialize(appDataDir: string): Promise<{ sessionsRestored: number }> {
-    this.appDataDir = appDataDir;
-    setCheckpointerDataDir(appDataDir);
-    this.persistence = new SessionPersistence(appDataDir);
-    await this.persistence.initialize();
-    this.externalCliRunManager = new ExternalCliRunManager({
-      appDataDir,
-      discoveryService: this.externalCliDiscoveryService,
-      getRuntimeConfig: () => this.runtimeConfig.externalCli,
+    if (this.isInitialized && this.appDataDir === appDataDir) {
+      return { sessionsRestored: this.sessions.size };
+    }
+
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
+
+    this.initializePromise = (async () => {
+      if (this.isInitialized && this.appDataDir === appDataDir) {
+        return { sessionsRestored: this.sessions.size };
+      }
+
+      this.appDataDir = appDataDir;
+      setCheckpointerDataDir(appDataDir);
+      this.persistence = new SessionPersistence(appDataDir);
+      await this.persistence.initialize();
+      this.externalCliRunManager = new ExternalCliRunManager({
+        appDataDir,
+        discoveryService: this.externalCliDiscoveryService,
+        getRuntimeConfig: () => this.runtimeConfig.externalCli,
+      });
+      this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
+        void this.handleExternalCliInteraction(interaction);
+      });
+      this.externalCliRunManager.on(
+        'interaction_resolved',
+        (payload: { interactionId: string; sessionId: string }) => {
+          this.handleExternalCliInteractionResolved(payload.interactionId, payload.sessionId);
+        },
+      );
+      await this.externalCliRunManager.initialize();
+      void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
+
+      // Initialize tool policy service
+      await toolPolicyService.initialize();
+
+      // Initialize and start cron service
+      cronService.initialize(this);
+      await cronService.start();
+      await workflowService.initialize(appDataDir, this);
+
+      const count = await this.restoreSessionsFromDisk();
+      this.isInitialized = true;
+      return { sessionsRestored: count };
+    })().finally(() => {
+      this.initializePromise = null;
     });
-    this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
-      void this.handleExternalCliInteraction(interaction);
-    });
-    this.externalCliRunManager.on(
-      'interaction_resolved',
-      (payload: { interactionId: string; sessionId: string }) => {
-        this.handleExternalCliInteractionResolved(payload.interactionId, payload.sessionId);
-      },
-    );
-    await this.externalCliRunManager.initialize();
-    void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
 
-    // Initialize tool policy service
-    await toolPolicyService.initialize();
-
-    // Initialize and start cron service
-    cronService.initialize(this);
-    await cronService.start();
-    await workflowService.initialize(appDataDir, this);
-
-    const count = await this.restoreSessionsFromDisk();
-    this.isInitialized = true;
-    return { sessionsRestored: count };
+    return this.initializePromise;
   }
 
   /**
@@ -3413,7 +3434,10 @@ export class AgentRunner {
             }
           }
         } catch (streamError) {
-          console.error('[MULTIMEDIA] Stream error:', streamError instanceof Error ? streamError.message : streamError);
+          console.error(
+            '[MULTIMEDIA] Stream error:',
+            sanitizeProviderErrorMessage(streamError instanceof Error ? streamError.message : String(streamError)),
+          );
           if (this.isAbortError(streamError) || session.stopRequested) {
             if (streamedText) {
               assistantMessage = {
@@ -3523,7 +3547,10 @@ export class AgentRunner {
       this.emitContextUsage(session);
       await this.maybeCompactContext(session);
     } catch (error) {
-      console.error('[MULTIMEDIA] Outer error:', error instanceof Error ? error.message : error);
+      const normalizedErrorMessage = sanitizeProviderErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      console.error('[MULTIMEDIA] Outer error:', normalizedErrorMessage);
       console.error('[MULTIMEDIA] Outer error stack:', error instanceof Error ? error.stack : '');
       if (this.isAbortError(error) || session.stopRequested) {
         this.finalizeAssistantSegment(session);
@@ -3542,7 +3569,7 @@ export class AgentRunner {
         eventEmitter.streamDone(sessionId, null);
         return;
       }
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = normalizedErrorMessage;
 
       // Determine error code based on error message
       let errorCode = 'AGENT_ERROR';
@@ -4425,7 +4452,7 @@ export class AgentRunner {
 - Enforcement: ${sandboxEnforcement}
 - Allowed roots (sample): ${sandboxPathsPreview}`;
 
-    let basePrompt = `You are Cowork, a software development assistant powered by DeepAgents.
+    let basePrompt = `You are Cowork, a personal coworking assistant powered by DeepAgents.
 
 ## Environment
 
@@ -4829,6 +4856,32 @@ Use workflow-specific tools when the request is about workflow definitions or wo
         /\n## Scheduled Tasks with schedule_task[\s\S]*?\n## Important Reminders/,
         '\n## Important Reminders'
       );
+    }
+
+    if (!WORKFLOWS_ENABLED) {
+      basePrompt = basePrompt
+        .replace(
+          /\nWorkflows are first-class automations\. From main chat you can:[\s\S]*?- Inspect run history\/events with `get_workflow_runs`\n\n/,
+          '\n',
+        )
+        .replace(
+          /Use `schedule_task` as the fast path when the user asks for a recurring automation and does not need detailed workflow editing\./g,
+          'Use `schedule_task` as the fast path for recurring automations.',
+        )
+        .replace(
+          /- Creates a workflow-backed automation that runs automatically on the configured schedule\./g,
+          '- Creates an automation that runs automatically on the configured schedule.',
+        )
+        .replace(/- When you detect a likely recurring workflow/g, '- When you detect a likely recurring automation')
+        .replace(/workflow run can use/g, 'automation run can use')
+        .replace(
+          /\n### Workflow Tool Routing Rules[\s\S]*?(?=\n### Schedule Types Reference)/,
+          '',
+        )
+        .replace(
+          /\nUse workflow-specific tools when the request is about workflow definitions or workflow run introspection:[\s\S]*?(?=\n## Important Reminders)/,
+          '\n',
+        );
     }
 
     const modePrompt =
@@ -5529,7 +5582,7 @@ ${stitchGuidance}
           );
 
     const workflowTools =
-      session.type === 'isolated' || session.type === 'cron'
+      !WORKFLOWS_ENABLED || session.type === 'isolated' || session.type === 'cron'
         ? []
         : createWorkflowTools();
 

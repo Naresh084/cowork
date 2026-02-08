@@ -5,6 +5,7 @@ import { checkSkillEligibility } from './eligibility-checker.js';
 import { commandService } from './command-service.js';
 import {
   SUPPORTED_PLATFORM_TYPES,
+  sanitizeProviderErrorMessage,
   type CommandCategory,
   type PlatformType,
   type SecretDefinition,
@@ -173,6 +174,10 @@ type CommandHandler = (params: Record<string, unknown>) => Promise<unknown>;
 
 const handlers: Map<string, CommandHandler> = new Map();
 
+function getErrorMessage(error: unknown): string {
+  return sanitizeProviderErrorMessage(error instanceof Error ? error.message : String(error));
+}
+
 /**
  * Register a command handler.
  */
@@ -205,7 +210,7 @@ export async function handleRequest(request: IPCRequest): Promise<IPCResponse> {
     return {
       id: request.id,
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     };
   }
 }
@@ -580,11 +585,17 @@ registerHandler('remote_access_enable', async (params) => {
   const p = params as {
     publicBaseUrl?: string | null;
     tunnelMode?: RemoteTunnelMode;
+    tunnelName?: string | null;
+    tunnelDomain?: string | null;
+    tunnelVisibility?: 'public' | 'private';
     bindPort?: number;
   };
   return remoteAccessService.enable({
     publicBaseUrl: p.publicBaseUrl ?? null,
     tunnelMode: p.tunnelMode,
+    tunnelName: p.tunnelName ?? null,
+    tunnelDomain: p.tunnelDomain ?? null,
+    tunnelVisibility: p.tunnelVisibility,
     bindPort: p.bindPort,
   });
 });
@@ -627,6 +638,22 @@ registerHandler('remote_access_set_tunnel_mode', async (params) => {
     throw new Error('tunnelMode is required');
   }
   return remoteAccessService.updateTunnelMode(p.tunnelMode);
+});
+
+registerHandler('remote_access_set_tunnel_options', async (params) => {
+  await ensureRemoteAccessInitialized();
+  const p = params as {
+    tunnelName?: string | null;
+    tunnelDomain?: string | null;
+    tunnelVisibility?: 'public' | 'private';
+    publicBaseUrl?: string | null;
+  };
+  return remoteAccessService.updateTunnelOptions({
+    tunnelName: p.tunnelName ?? null,
+    tunnelDomain: p.tunnelDomain ?? null,
+    tunnelVisibility: p.tunnelVisibility,
+    publicBaseUrl: p.publicBaseUrl ?? null,
+  });
 });
 
 registerHandler('remote_access_refresh_tunnel', async () => {
@@ -1880,7 +1907,7 @@ registerHandler('connect_all_connectors', async (params) => {
     } catch (error) {
       results[connectorId] = {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       };
     }
   }

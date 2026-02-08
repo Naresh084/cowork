@@ -18,6 +18,7 @@ import { HelpCenterModal } from '../help/HelpCenterModal';
 import { GuidedTourOverlay } from '../help/GuidedTourOverlay';
 import { useCapabilityStore } from '../../stores/capability-store';
 import { WorkflowBuilder } from '../workflow/WorkflowBuilder';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 
 // Lazy load SettingsView for code splitting
 const SettingsView = React.lazy(() => import('../settings/SettingsView').then(m => ({ default: m.SettingsView })));
@@ -72,7 +73,7 @@ export function MainLayout() {
   const recoveryLabel =
     startupIssue?.target?.view === 'settings'
       ? `Open ${SETTINGS_TAB_LABELS[startupIssue.target.settingsTab || settingsTab]} settings`
-      : startupIssue?.target?.view === 'workflows'
+      : startupIssue?.target?.view === 'workflows' && WORKFLOWS_ENABLED
         ? 'Open Workflows'
         : 'Open Chat';
 
@@ -143,7 +144,7 @@ export function MainLayout() {
                 <Suspense fallback={<div className="h-full flex items-center justify-center"><div className="animate-pulse text-white/40">Loading settings...</div></div>}>
                   <SettingsView />
                 </Suspense>
-              ) : currentView === 'workflows' ? (
+              ) : currentView === 'workflows' && WORKFLOWS_ENABLED ? (
                 <div className="h-full p-4">
                   <WorkflowBuilder />
                 </div>

@@ -73,6 +73,7 @@ export class ExternalCliRunManager extends EventEmitter {
 
   private runs = new Map<string, ExternalCliRunRecord>();
   private adapters = new Map<string, ExternalCliAdapter>();
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(options: ExternalCliRunManagerOptions) {
     super();
@@ -506,6 +507,10 @@ export class ExternalCliRunManager extends EventEmitter {
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 200);
 
-    await this.store.save(records);
+    this.persistQueue = this.persistQueue
+      .catch(() => undefined)
+      .then(() => this.store.save(records));
+
+    await this.persistQueue;
   }
 }

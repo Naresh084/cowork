@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { WORKFLOWS_ENABLED } from '../lib/feature-flags';
 
 export type AppView = 'chat' | 'settings' | 'workflows';
 export type SettingsTab =
@@ -41,6 +42,14 @@ interface AppActions {
   setRuntimeConfigNotice: (notice: AppState['runtimeConfigNotice']) => void;
 }
 
+function sanitizeAppView(view: AppView): AppView {
+  if (!WORKFLOWS_ENABLED && view === 'workflows') {
+    return 'chat';
+  }
+
+  return view;
+}
+
 export const useAppStore = create<AppState & AppActions>((set) => ({
   showApiKeyModal: false,
   apiKeyError: null,
@@ -62,7 +71,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
 
   setCurrentView: (view) =>
     set({
-      currentView: view,
+      currentView: sanitizeAppView(view),
     }),
 
   setSettingsTab: (tab) =>
@@ -78,7 +87,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
 
       const nextState: Partial<AppState> = {
         startupIssue: issue,
-        currentView: issue.target.view,
+        currentView: sanitizeAppView(issue.target.view),
       };
 
       if (issue.target.view === 'settings' && issue.target.settingsTab) {

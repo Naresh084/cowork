@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import type {
@@ -27,6 +27,14 @@ export class ExternalCliRunStateStore {
 
     try {
       const raw = await readFile(this.filePath, 'utf-8');
+      if (!raw.trim()) {
+        const backupPath = await this.backupCorruptFile('empty persisted state file');
+        process.stderr.write(
+          `[external-cli] Persisted state file was empty and was reset${backupPath ? ` (backup: ${backupPath})` : ''}.\n`,
+        );
+        return [];
+      }
+
       const parsed = JSON.parse(raw) as ExternalCliPersistedState;
       if (!parsed || !Array.isArray(parsed.runs)) {
         return [];
@@ -60,7 +68,10 @@ export class ExternalCliRunStateStore {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`[external-cli] Failed to load persisted state: ${message}\n`);
+      const backupPath = await this.backupCorruptFile(message);
+      process.stderr.write(
+        `[external-cli] Failed to load persisted state: ${message}${backupPath ? ` (backup: ${backupPath})` : ''}\n`,
+      );
       return [];
     }
   }
@@ -72,6 +83,27 @@ export class ExternalCliRunStateStore {
     };
 
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    const serialized = JSON.stringify(payload, null, 2);
+    const tempPath = `${this.filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    await writeFile(tempPath, serialized, 'utf-8');
+    await rename(tempPath, this.filePath);
+  }
+
+  private async backupCorruptFile(reason: string): Promise<string | null> {
+    if (!existsSync(this.filePath)) {
+      return null;
+    }
+
+    const backupPath = `${this.filePath}.corrupt-${Date.now()}.json`;
+    try {
+      await rename(this.filePath, backupPath);
+      return backupPath;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(
+        `[external-cli] Failed to backup corrupt state (${reason}): ${message}\n`,
+      );
+      return null;
+    }
   }
 }

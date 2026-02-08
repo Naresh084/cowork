@@ -6,6 +6,7 @@ import { CronJobCard } from './CronJobCard';
 import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useAppStore } from '@/stores/app-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@gemini-cowork/shared';
 
 interface JobSectionProps {
@@ -134,15 +135,22 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
   const setCurrentView = useAppStore((state) => state.setCurrentView);
 
   return (
-    <div className="rounded-lg border border-[#06B6D4]/20 bg-[#06B6D4]/5 p-3">
+    <div
+      className={cn(
+        'rounded-lg border p-3',
+        WORKFLOWS_ENABLED ? 'border-[#06B6D4]/20 bg-[#06B6D4]/5' : 'border-white/[0.08] bg-white/[0.03]',
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <GitBranch className="h-3.5 w-3.5 text-[#67E8F9]" />
+            <GitBranch className={cn('h-3.5 w-3.5', WORKFLOWS_ENABLED ? 'text-[#67E8F9]' : 'text-white/45')} />
             <span className="truncate text-xs font-medium text-white/90">{task.name}</span>
-            <span className="rounded bg-[#06B6D4]/25 px-1.5 py-0.5 text-[10px] text-[#67E8F9]">
-              workflow
-            </span>
+            {WORKFLOWS_ENABLED ? (
+              <span className="rounded bg-[#06B6D4]/25 px-1.5 py-0.5 text-[10px] text-[#67E8F9]">
+                workflow
+              </span>
+            ) : null}
           </div>
           <div className="mt-1 text-[11px] text-white/55">
             {task.schedules[0] ? formatWorkflowSchedule(task.schedules[0]) : 'No schedule'}
@@ -172,13 +180,15 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
           >
             {task.enabled ? <Pause className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
           </button>
-          <button
-            onClick={() => setCurrentView('workflows')}
-            className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#67E8F9]"
-            title="Open workflow builder"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          {WORKFLOWS_ENABLED ? (
+            <button
+              onClick={() => setCurrentView('workflows')}
+              className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#67E8F9]"
+              title="Open workflow builder"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -267,10 +277,22 @@ export function CronJobList() {
   return (
     <div className="space-y-2">
       {workflowTasks.length > 0 && (
-        <div className="mb-5 rounded-lg border border-[#06B6D4]/20 bg-[#06B6D4]/5 p-3">
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#67E8F9]">
+        <div
+          className={cn(
+            'mb-5 rounded-lg border p-3',
+            WORKFLOWS_ENABLED ? 'border-[#06B6D4]/20 bg-[#06B6D4]/5' : 'border-white/[0.08] bg-white/[0.03]',
+          )}
+        >
+          <div
+            className={cn(
+              'mb-2 flex items-center gap-2 text-xs font-medium',
+              WORKFLOWS_ENABLED ? 'text-[#67E8F9]' : 'text-white/70',
+            )}
+          >
             <GitBranch className="h-3.5 w-3.5" />
-            Workflow Schedules ({workflowTasks.length})
+            {WORKFLOWS_ENABLED
+              ? `Workflow Schedules (${workflowTasks.length})`
+              : `Automated Schedules (${workflowTasks.length})`}
           </div>
           <div className="space-y-2">
             {workflowTasks.map((task) => (

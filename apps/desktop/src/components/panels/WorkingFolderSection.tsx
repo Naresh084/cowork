@@ -63,6 +63,7 @@ export function WorkingFolderSection() {
 
   const actions = (
     <button
+      type="button"
       onClick={handleOpenFolder}
       className="p-1 rounded hover:bg-white/[0.06] text-white/40 hover:text-white/70 transition-colors"
       title="Open in file manager"

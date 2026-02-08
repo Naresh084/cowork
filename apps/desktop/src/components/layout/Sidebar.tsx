@@ -35,6 +35,7 @@ import { useSubagentStore } from '../../stores/subagent-store';
 import { ConnectorManager } from '../connectors/ConnectorManager';
 import { useConnectorStore } from '../../stores/connector-store';
 import { useHelpStore } from '../../stores/help-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -499,7 +500,9 @@ function SidebarRail({
           { icon: Terminal, count: commandCount, color: '#9B59B6', onClick: onOpenCommands, title: 'Commands' },
           { icon: Plug, count: connectorCount, color: '#10B981', onClick: onOpenConnectors, title: 'Connectors' },
           { icon: Calendar, count: activeJobCount, color: '#10B981', onClick: onOpenCron, title: 'Automations' },
-          { icon: GitBranch, count: 0, color: '#06B6D4', onClick: onOpenWorkflows, title: 'Workflows' },
+          ...(WORKFLOWS_ENABLED
+            ? [{ icon: GitBranch, count: 0, color: '#06B6D4', onClick: onOpenWorkflows, title: 'Workflows' }]
+            : []),
         ] as const).map(({ icon: Icon, count, color, onClick, title }) => (
           <motion.button
             key={title}
@@ -778,7 +781,9 @@ function SidebarExpanded({
           { icon: Terminal, label: 'Commands', count: commandCount, badgeCls: 'bg-[#9B59B6]/20 text-[#BB8FCE]', onClick: onOpenCommands },
           { icon: Plug, label: 'Connectors', count: connectorCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenConnectors },
           { icon: Calendar, label: 'Automations', count: activeJobCount, badgeCls: 'bg-[#10B981]/20 text-[#34D399]', onClick: onOpenCron },
-          { icon: GitBranch, label: 'Workflows', count: 0, badgeCls: 'bg-[#06B6D4]/20 text-[#67E8F9]', onClick: onOpenWorkflows },
+          ...(WORKFLOWS_ENABLED
+            ? [{ icon: GitBranch, label: 'Workflows', count: 0, badgeCls: 'bg-[#06B6D4]/20 text-[#67E8F9]', onClick: onOpenWorkflows }]
+            : []),
         ] as const).map(({ icon: Icon, label, count, badgeCls, onClick }) => (
           <motion.button
             key={label}

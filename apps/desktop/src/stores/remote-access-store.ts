@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/Toast';
 export type RemoteTunnelMode = 'tailscale' | 'cloudflare' | 'custom';
 export type RemoteTunnelState = 'stopped' | 'starting' | 'running' | 'error';
 export type RemoteTunnelAuthStatus = 'authenticated' | 'unauthenticated' | 'unknown';
+export type RemoteTunnelVisibility = 'public' | 'private';
 
 export interface RemoteAccessDevice {
   id: string;
@@ -24,6 +25,9 @@ export interface RemoteAccessStatus {
   localBaseUrl: string | null;
   publicBaseUrl: string | null;
   tunnelMode: RemoteTunnelMode;
+  tunnelName: string | null;
+  tunnelDomain: string | null;
+  tunnelVisibility: RemoteTunnelVisibility;
   tunnelHints: string[];
   tunnelState: RemoteTunnelState;
   tunnelPublicUrl: string | null;
@@ -60,6 +64,9 @@ interface RemoteAccessActions {
   enableRemoteAccess: (input?: {
     publicBaseUrl?: string | null;
     tunnelMode?: RemoteTunnelMode;
+    tunnelName?: string | null;
+    tunnelDomain?: string | null;
+    tunnelVisibility?: RemoteTunnelVisibility;
     bindPort?: number;
   }) => Promise<void>;
   disableRemoteAccess: () => Promise<void>;
@@ -71,6 +78,12 @@ interface RemoteAccessActions {
   revokeDevice: (deviceId: string) => Promise<void>;
   setPublicBaseUrl: (publicBaseUrl: string | null) => Promise<void>;
   setTunnelMode: (tunnelMode: RemoteTunnelMode) => Promise<void>;
+  setTunnelOptions: (input: {
+    tunnelName?: string | null;
+    tunnelDomain?: string | null;
+    tunnelVisibility?: RemoteTunnelVisibility;
+    publicBaseUrl?: string | null;
+  }) => Promise<void>;
   clearQr: () => void;
   clearError: () => void;
 }
@@ -115,6 +128,9 @@ export const useRemoteAccessStore = create<RemoteAccessState & RemoteAccessActio
       const status = await invoke<RemoteAccessStatus>('remote_access_enable', {
         publicBaseUrl: input?.publicBaseUrl ?? null,
         tunnelMode: input?.tunnelMode,
+        tunnelName: input?.tunnelName ?? null,
+        tunnelDomain: input?.tunnelDomain ?? null,
+        tunnelVisibility: input?.tunnelVisibility,
         bindPort: input?.bindPort,
       });
       set({ status, isLoading: false });
@@ -260,6 +276,25 @@ export const useRemoteAccessStore = create<RemoteAccessState & RemoteAccessActio
       const message = error instanceof Error ? error.message : String(error);
       set({ isLoading: false, error: message });
       toast.error('Failed to update tunnel mode', message);
+      throw error;
+    }
+  },
+
+  setTunnelOptions: async (input) => {
+    set({ isLoading: true, error: null });
+    try {
+      const status = await invoke<RemoteAccessStatus>('remote_access_set_tunnel_options', {
+        tunnelName: input.tunnelName ?? null,
+        tunnelDomain: input.tunnelDomain ?? null,
+        tunnelVisibility: input.tunnelVisibility,
+        publicBaseUrl: input.publicBaseUrl ?? null,
+      });
+      set({ status, isLoading: false });
+      toast.success('Tunnel options updated');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      set({ isLoading: false, error: message });
+      toast.error('Failed to update tunnel options', message);
       throw error;
     }
   },

@@ -7,6 +7,7 @@ import {
   GUIDED_TOURS,
 } from '@/content/help/platform-help-content';
 import { useHelpStore } from '@/stores/help-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import { CapabilityMatrix } from './CapabilityMatrix';
 
 export function HelpCenterModal() {
@@ -19,7 +20,15 @@ export function HelpCenterModal() {
     completedTours,
   } = useHelpStore();
 
-  const article = HELP_ARTICLE_BY_ID[activeArticleId] || HELP_ARTICLE_BY_ID['platform-overview'];
+  const visibleArticles = WORKFLOWS_ENABLED
+    ? HELP_ARTICLES
+    : HELP_ARTICLES.filter((item) => item.id !== 'workflow-automation');
+  const defaultArticle = HELP_ARTICLE_BY_ID['platform-overview'];
+  const requestedArticle = HELP_ARTICLE_BY_ID[activeArticleId];
+  const article =
+    requestedArticle && (WORKFLOWS_ENABLED || requestedArticle.id !== 'workflow-automation')
+      ? requestedArticle
+      : defaultArticle;
 
   return (
     <Dialog open={isHelpOpen} onClose={closeHelp} className="max-w-5xl">
@@ -31,7 +40,7 @@ export function HelpCenterModal() {
               Help Center
             </DialogTitle>
             <p className="mt-1 text-sm text-white/50">
-              Learn how Cowork works, build workflow automations, understand settings, and inspect current tool access.
+              Learn how Cowork works, manage automations, understand settings, and inspect current tool access.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -61,7 +70,7 @@ export function HelpCenterModal() {
         <aside className="overflow-y-auto border-r border-white/[0.06] p-3">
           <p className="px-2 text-[11px] uppercase tracking-wide text-white/45">Articles</p>
           <div className="mt-2 space-y-1">
-            {HELP_ARTICLES.map((item) => {
+            {visibleArticles.map((item) => {
               const isActive = item.id === article.id;
               return (
                 <button
@@ -144,8 +153,8 @@ export function HelpCenterModal() {
               Next Steps
             </div>
             <p className="mt-1 text-xs text-white/55">
-              Use settings-level Help buttons for detailed field explanations. Build flows from the Workflows view,
-              monitor schedules from Automations, and replay tours anytime from here or from Settings and Sidebar.
+              Use settings-level Help buttons for detailed field explanations. Monitor schedules from Automations and
+              replay tours anytime from here or from Settings and Sidebar.
             </p>
           </div>
         </section>

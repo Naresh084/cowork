@@ -35,6 +35,8 @@ export class IntegrationBridgeService {
   private store: IntegrationStore;
   private agentRunner: any = null;
   private initialized = false;
+  private initializePromise: Promise<void> | null = null;
+  private eventHooksInstalled = false;
   private platformOpInFlight: Set<PlatformType> = new Set();
 
   constructor() {
@@ -48,42 +50,54 @@ export class IntegrationBridgeService {
    */
   async initialize(agentRunner: any): Promise<void> {
     if (this.initialized) return;
-
-    this.agentRunner = agentRunner;
-    this.router.setAgentRunner(agentRunner);
-    await this.store.load();
-    this.router.setSharedSessionWorkingDirectory(
-      this.store.getSettings().sharedSessionWorkingDirectory,
-    );
-
-    // Subscribe to stream:done events for response routing
-    this.subscribeToAgentEvents();
-
-    // Auto-reconnect previously enabled platforms
-    const enabled = this.store.getEnabledPlatforms();
-    for (const platformConfig of enabled) {
-      try {
-        process.stderr.write(
-          `[integration] Auto-reconnecting ${platformConfig.platform}...\n`,
-        );
-        await this.connect(platformConfig.platform, platformConfig.config);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        process.stderr.write(
-          `[integration] Auto-reconnect failed for ${platformConfig.platform}: ${msg}\n`,
-        );
-        eventEmitter.error(
-          undefined,
-          `Auto-reconnect failed for ${platformConfig.platform}: ${msg}`,
-          'INTEGRATION_RECONNECT_ERROR',
-        );
-      }
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
     }
 
-    this.initialized = true;
-    process.stderr.write(
-      `[integration] Bridge initialized. ${enabled.length} platform(s) configured.\n`,
-    );
+    this.initializePromise = (async () => {
+      if (this.initialized) return;
+
+      this.agentRunner = agentRunner;
+      this.router.setAgentRunner(agentRunner);
+      await this.store.load();
+      this.router.setSharedSessionWorkingDirectory(
+        this.store.getSettings().sharedSessionWorkingDirectory,
+      );
+
+      // Subscribe to stream:done events for response routing.
+      this.subscribeToAgentEvents();
+
+      // Auto-reconnect previously enabled platforms.
+      const enabled = this.store.getEnabledPlatforms();
+      for (const platformConfig of enabled) {
+        try {
+          process.stderr.write(
+            `[integration] Auto-reconnecting ${platformConfig.platform}...\n`,
+          );
+          await this.connect(platformConfig.platform, platformConfig.config);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(
+            `[integration] Auto-reconnect failed for ${platformConfig.platform}: ${msg}\n`,
+          );
+          eventEmitter.error(
+            undefined,
+            `Auto-reconnect failed for ${platformConfig.platform}: ${msg}`,
+            'INTEGRATION_RECONNECT_ERROR',
+          );
+        }
+      }
+
+      this.initialized = true;
+      process.stderr.write(
+        `[integration] Bridge initialized. ${enabled.length} platform(s) configured.\n`,
+      );
+    })().finally(() => {
+      this.initializePromise = null;
+    });
+
+    await this.initializePromise;
   }
 
   /**
@@ -91,6 +105,11 @@ export class IntegrationBridgeService {
    * Intercepts chat/stream lifecycle events to route responses back to platforms.
    */
   private subscribeToAgentEvents(): void {
+    if (this.eventHooksInstalled) {
+      return;
+    }
+    this.eventHooksInstalled = true;
+
     // Intercept chat:item events for segment/media routing.
     const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
     eventEmitter.chatItem = (sessionId: string, item: import('@gemini-cowork/shared').ChatItem) => {

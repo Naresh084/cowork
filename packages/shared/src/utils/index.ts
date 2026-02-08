@@ -110,6 +110,24 @@ export function hashString(str: string): string {
   );
 }
 
+/**
+ * Normalize provider/API error messages so user-facing text shows model ids
+ * without transport method suffixes (for example ":generateContent").
+ */
+export function sanitizeProviderErrorMessage(message: string): string {
+  if (!message) return message;
+
+  return message
+    .replace(
+      /\b(models\/[A-Za-z0-9._-]+):[A-Za-z][A-Za-z0-9_]*\b/g,
+      '$1',
+    )
+    .replace(
+      /\b([A-Za-z0-9][A-Za-z0-9._-]*):(generateContent|generateContentStream|streamGenerateContent|embedContent|batchEmbedContents)\b/g,
+      '$1',
+    );
+}
+
 // ============================================================================
 // Object Utilities
 // ============================================================================

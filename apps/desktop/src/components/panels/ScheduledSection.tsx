@@ -5,6 +5,7 @@ import { CollapsibleSection } from './CollapsibleSection';
 import { useCronStore } from '../../stores/cron-store';
 import { useAppStore } from '../../stores/app-store';
 import { motion } from 'framer-motion';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@gemini-cowork/shared';
 
 function formatNextRun(timestamp?: number): string {
@@ -119,8 +120,10 @@ function AutomationsJobItem({ item }: { item: AutomationItem }) {
       onClick={() => {
         if (isCron) {
           openModal();
-        } else {
+        } else if (WORKFLOWS_ENABLED) {
           setCurrentView('workflows');
+        } else {
+          openModal();
         }
       }}
     >
@@ -141,7 +144,7 @@ function AutomationsJobItem({ item }: { item: AutomationItem }) {
             <span className="text-xs font-medium text-white/80 truncate">
               {isCron ? cronJob?.name : workflowTask?.name}
             </span>
-            {!isCron && (
+            {!isCron && WORKFLOWS_ENABLED && (
               <span className="rounded bg-[#06B6D4]/20 px-1.5 py-0.5 text-[9px] text-[#67E8F9]">
                 workflow
               </span>
@@ -270,6 +273,7 @@ export function ScheduledSection() {
       badge={activeItems.length > 0 ? activeItems.length : undefined}
       actions={
         <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
             openModal();
@@ -285,7 +289,13 @@ export function ScheduledSection() {
         <div className="py-3 text-center">
           <p className="text-xs text-white/40 mb-2">No scheduled tasks</p>
           <button
-            onClick={() => setCurrentView('workflows')}
+            onClick={() => {
+              if (WORKFLOWS_ENABLED) {
+                setCurrentView('workflows');
+                return;
+              }
+              openModal();
+            }}
             className="text-xs text-[#93C5FD] hover:underline"
           >
             Create one

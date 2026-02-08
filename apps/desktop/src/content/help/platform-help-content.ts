@@ -27,7 +27,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
   {
     id: 'platform-overview',
     title: 'How Cowork Works',
-    summary: 'Understand provider runtime, workflow automations, tools, permissions, sessions, and integrations.',
+    summary: 'Understand provider runtime, automations, tools, permissions, sessions, and integrations.',
     sections: [
       {
         heading: 'Runtime Model',
@@ -35,9 +35,9 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Cowork runs locally through a desktop shell and a sidecar agent runtime. Your active provider, keys, model, and routing settings determine which capabilities are enabled for new tool calls.',
       },
       {
-        heading: 'Workflow-First Automation',
+        heading: 'Automation Runtime',
         body:
-          'Automations are workflow-backed. Runs are durable, inspectable, and policy-guarded with node-level event history. Scheduling, manual runs, chat-triggered runs, and integration-triggered runs share the same workflow runtime.',
+          'Automations run in a durable, inspectable runtime with policy checks and node-level event history. Scheduling, manual runs, chat-triggered runs, and integration-triggered runs share the same execution model.',
       },
       {
         heading: 'Sessions and Scope',
@@ -57,12 +57,12 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Tool Availability',
         body:
-          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. Workflow tools (`create_workflow_from_chat`, `run_workflow`, `manage_workflow`, `get_workflow_runs`) are available in main/integration sessions and disabled in isolated/cron sessions.',
+          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. Session type and policy controls determine which automation and integration tools are exposed.',
       },
       {
         heading: 'Where to Build',
         body:
-          'Use main chat when you want natural-language authoring, quick drafting, or tool-driven edits. Use the Workflows view for visual graph editing, schedule trigger control, publish actions, and run inspection.',
+          'Use main chat for natural-language authoring and quick task execution. Use Automations for schedule setup, controls, and run visibility.',
       },
     ],
   },
@@ -266,9 +266,9 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
       },
       {
         id: 'workspace-step-workflows',
-        title: 'Workflows and Automations',
-        description: 'Use Workflows for visual editing and run inspection. Use Automations for schedule overview and controls.',
-        targetId: 'sidebar-workflows-button',
+        title: 'Automations',
+        description: 'Use Automations for schedule overview, controls, and run visibility.',
+        targetId: 'sidebar-automations-button',
       },
       {
         id: 'workspace-step-session-header',

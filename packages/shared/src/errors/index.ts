@@ -1,3 +1,5 @@
+import { sanitizeProviderErrorMessage } from '../utils/index.js';
+
 // ============================================================================
 // Base Error Class
 // ============================================================================
@@ -119,7 +121,8 @@ export class ProviderError extends GeminiCoworkError {
   }
 
   static requestFailed(provider: string, statusCode: number, message?: string): ProviderError {
-    return new ProviderError(provider, message || `Request failed with status ${statusCode}`, statusCode);
+    const normalized = message ? sanitizeProviderErrorMessage(message) : undefined;
+    return new ProviderError(provider, normalized || `Request failed with status ${statusCode}`, statusCode);
   }
 
   static streamError(provider: string, reason?: string): ProviderError {

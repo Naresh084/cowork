@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { URL } from 'node:url';
 import type { Duplex } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -25,6 +26,8 @@ import type {
   RemoteTunnelAuthStatus,
   RemoteTunnelMode,
   RemoteTunnelState,
+  RemoteTunnelOptionsInput,
+  RemoteTunnelVisibility,
 } from './types.js';
 
 const PAIRING_TTL_MS = 2 * 60 * 1000;
@@ -48,7 +51,17 @@ interface WsClientState {
 interface RemoteEnableSettings {
   publicBaseUrl: string | null;
   tunnelMode: RemoteTunnelMode;
+  tunnelName: string | null;
+  tunnelDomain: string | null;
+  tunnelVisibility: RemoteTunnelVisibility;
   bindPort: number;
+}
+
+interface RemoteTunnelOptionsSettings {
+  publicBaseUrl: string | null;
+  tunnelName: string | null;
+  tunnelDomain: string | null;
+  tunnelVisibility: RemoteTunnelVisibility;
 }
 
 interface InstallCommand {
@@ -80,6 +93,10 @@ function normalizeTunnelMode(value: unknown): RemoteTunnelMode {
   return 'tailscale';
 }
 
+function normalizeTunnelVisibility(value: unknown): RemoteTunnelVisibility {
+  return value === 'private' ? 'private' : 'public';
+}
+
 function normalizePort(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
   const integer = Math.trunc(value);
@@ -103,6 +120,32 @@ function normalizeBaseUrl(value: unknown): string | null {
   }
 }
 
+function normalizeTunnelName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 64);
+}
+
+function normalizeTunnelDomain(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`);
+    const hostname = trimTrailingDot(parsed.hostname.toLowerCase());
+    return hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function deriveUrlFromDomain(domain: string | null): string | null {
+  if (!domain) return null;
+  return `https://${trimTrailingDot(domain.toLowerCase())}`;
+}
+
 function defaultConfig(): RemoteAccessConfig {
   const ts = now();
   return {
@@ -111,6 +154,9 @@ function defaultConfig(): RemoteAccessConfig {
     bindPort: 0,
     publicBaseUrl: null,
     tunnelMode: 'tailscale',
+    tunnelName: null,
+    tunnelDomain: null,
+    tunnelVisibility: 'public',
     devices: [],
     createdAt: ts,
     updatedAt: ts,
@@ -225,6 +271,9 @@ export class RemoteAccessService {
         bindPort: normalizePort(parsed.bindPort),
         publicBaseUrl: normalizeBaseUrl(parsed.publicBaseUrl),
         tunnelMode: normalizeTunnelMode(parsed.tunnelMode),
+        tunnelName: normalizeTunnelName(parsed.tunnelName),
+        tunnelDomain: normalizeTunnelDomain(parsed.tunnelDomain),
+        tunnelVisibility: normalizeTunnelVisibility(parsed.tunnelVisibility),
         devices: Array.isArray(parsed.devices)
           ? parsed.devices
             .filter((device): device is RemoteAccessDevice => {
@@ -285,6 +334,9 @@ export class RemoteAccessService {
     this.config.bindPort = settings.bindPort;
     this.config.publicBaseUrl = settings.publicBaseUrl;
     this.config.tunnelMode = settings.tunnelMode;
+    this.config.tunnelName = settings.tunnelName;
+    this.config.tunnelDomain = settings.tunnelDomain;
+    this.config.tunnelVisibility = settings.tunnelVisibility;
     this.config.updatedAt = now();
 
     await this.persistConfig();
@@ -304,7 +356,11 @@ export class RemoteAccessService {
 
   async updatePublicBaseUrl(publicBaseUrl: string | null): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
-    this.config.publicBaseUrl = normalizeBaseUrl(publicBaseUrl);
+    this.config.publicBaseUrl = this.resolvePublicBaseUrlForMode(
+      this.config.tunnelMode,
+      normalizeBaseUrl(publicBaseUrl),
+      this.config.tunnelDomain,
+    );
     this.config.updatedAt = now();
     await this.persistConfig();
     return this.getStatus();
@@ -317,6 +373,33 @@ export class RemoteAccessService {
       await this.stopTunnel();
     }
     this.config.tunnelMode = nextMode;
+    this.config.publicBaseUrl = this.resolvePublicBaseUrlForMode(
+      this.config.tunnelMode,
+      this.config.publicBaseUrl,
+      this.config.tunnelDomain,
+    );
+    this.config.updatedAt = now();
+    await this.persistConfig();
+    await this.refreshTunnelHealth();
+    return this.getStatus();
+  }
+
+  async updateTunnelOptions(input: RemoteTunnelOptionsInput): Promise<RemoteAccessStatus> {
+    this.ensureInitialized();
+    const next = this.normalizeTunnelOptionsInput(input, this.config.tunnelMode, this.config.publicBaseUrl);
+    const shouldRestartManagedTunnel =
+      this.config.tunnelName !== next.tunnelName ||
+      this.config.tunnelDomain !== next.tunnelDomain ||
+      this.config.tunnelVisibility !== next.tunnelVisibility;
+
+    if (shouldRestartManagedTunnel && this.tunnelState === 'running') {
+      await this.stopTunnel();
+    }
+
+    this.config.tunnelName = next.tunnelName;
+    this.config.tunnelDomain = next.tunnelDomain;
+    this.config.tunnelVisibility = next.tunnelVisibility;
+    this.config.publicBaseUrl = next.publicBaseUrl;
     this.config.updatedAt = now();
     await this.persistConfig();
     await this.refreshTunnelHealth();
@@ -378,13 +461,35 @@ export class RemoteAccessService {
       throw new Error('Tunnel dependency is not installed yet. Install it first.');
     }
 
-    if (this.config.tunnelMode === 'cloudflare') {
-      this.tunnelAuthStatus = 'authenticated';
-      return this.getStatus();
-    }
-
     this.tunnelState = 'starting';
     this.tunnelLastError = null;
+
+    if (this.config.tunnelMode === 'cloudflare') {
+      if (!this.config.tunnelDomain) {
+        this.tunnelAuthStatus = 'authenticated';
+        this.tunnelState = 'stopped';
+        return this.getStatus();
+      }
+
+      try {
+        await this.runCommand(this.tunnelBinaryPath, ['tunnel', 'login'], 2 * 60 * 1000);
+      } catch (error) {
+        this.tunnelState = 'error';
+        this.tunnelLastError = `Authentication failed: ${formatCommandError(error)}`;
+        throw new Error(this.tunnelLastError);
+      }
+
+      await this.refreshTunnelHealth();
+      if (this.tunnelAuthStatus !== 'authenticated') {
+        throw new Error(
+          'Cloudflare authentication did not complete. Retry and approve the browser login flow.',
+        );
+      }
+      if (this.tunnelState === 'starting') {
+        this.tunnelState = 'stopped';
+      }
+      return this.getStatus();
+    }
 
     try {
       await this.runCommand(this.tunnelBinaryPath, ['up'], 2 * 60 * 1000);
@@ -420,13 +525,18 @@ export class RemoteAccessService {
     this.tunnelLastError = null;
 
     if (this.config.tunnelMode === 'custom') {
-      if (!this.config.publicBaseUrl) {
+      const customEndpoint = this.resolvePublicBaseUrlForMode(
+        this.config.tunnelMode,
+        this.config.publicBaseUrl,
+        this.config.tunnelDomain,
+      );
+      if (!customEndpoint) {
         this.tunnelState = 'error';
         this.tunnelLastError = 'Set a public endpoint URL for custom mode before starting the tunnel.';
         throw new Error(this.tunnelLastError);
       }
       this.tunnelState = 'running';
-      this.tunnelPublicUrl = this.config.publicBaseUrl;
+      this.tunnelPublicUrl = customEndpoint;
       this.tunnelStartedAt = now();
       this.tunnelPid = null;
       return this.getStatus();
@@ -446,6 +556,12 @@ export class RemoteAccessService {
       }
       await this.startTailscaleTunnel();
       return this.getStatus();
+    }
+
+    if (this.config.tunnelMode === 'cloudflare' && this.config.tunnelDomain && this.tunnelAuthStatus !== 'authenticated') {
+      this.tunnelState = 'error';
+      this.tunnelLastError = 'Cloudflare domain routing requires authentication. Run authentication first.';
+      throw new Error(this.tunnelLastError);
     }
 
     await this.startCloudflareTunnel();
@@ -480,11 +596,52 @@ export class RemoteAccessService {
   }
 
   private normalizeEnableInput(input: RemoteEnableInput): RemoteEnableSettings {
+    const mode = normalizeTunnelMode(input.tunnelMode);
+    const tunnelDomain = normalizeTunnelDomain(input.tunnelDomain);
+    const explicitPublicBaseUrl = normalizeBaseUrl(input.publicBaseUrl);
     return {
-      publicBaseUrl: normalizeBaseUrl(input.publicBaseUrl),
-      tunnelMode: normalizeTunnelMode(input.tunnelMode),
+      publicBaseUrl: this.resolvePublicBaseUrlForMode(mode, explicitPublicBaseUrl, tunnelDomain),
+      tunnelMode: mode,
+      tunnelName: normalizeTunnelName(input.tunnelName),
+      tunnelDomain,
+      tunnelVisibility: normalizeTunnelVisibility(input.tunnelVisibility),
       bindPort: normalizePort(input.bindPort),
     };
+  }
+
+  private normalizeTunnelOptionsInput(
+    input: RemoteTunnelOptionsInput,
+    mode: RemoteTunnelMode,
+    currentPublicBaseUrl: string | null,
+  ): RemoteTunnelOptionsSettings {
+    const tunnelDomain = normalizeTunnelDomain(input.tunnelDomain);
+    const explicitPublicBaseUrl = normalizeBaseUrl(input.publicBaseUrl);
+    const publicBaseUrl = this.resolvePublicBaseUrlForMode(
+      mode,
+      explicitPublicBaseUrl ?? currentPublicBaseUrl,
+      tunnelDomain,
+    );
+
+    return {
+      publicBaseUrl,
+      tunnelName: normalizeTunnelName(input.tunnelName),
+      tunnelDomain,
+      tunnelVisibility: normalizeTunnelVisibility(input.tunnelVisibility),
+    };
+  }
+
+  private resolvePublicBaseUrlForMode(
+    mode: RemoteTunnelMode,
+    preferredBaseUrl: string | null,
+    tunnelDomain: string | null,
+  ): string | null {
+    if (mode === 'cloudflare' && tunnelDomain) {
+      return deriveUrlFromDomain(tunnelDomain);
+    }
+    if (mode === 'custom' && !preferredBaseUrl && tunnelDomain) {
+      return deriveUrlFromDomain(tunnelDomain);
+    }
+    return preferredBaseUrl;
   }
 
   private getTunnelBinaryName(mode: RemoteTunnelMode): string | null {
@@ -590,6 +747,23 @@ export class RemoteAccessService {
     }
   }
 
+  private async detectCloudflareAuthStatus(): Promise<RemoteTunnelAuthStatus> {
+    try {
+      const certPath = this.resolveCloudflareCertPath();
+      if (!certPath) return 'unauthenticated';
+      await access(certPath);
+      return 'authenticated';
+    } catch {
+      return 'unauthenticated';
+    }
+  }
+
+  private resolveCloudflareCertPath(): string | null {
+    const home = homedir();
+    if (!home) return null;
+    return join(home, '.cloudflared', 'cert.pem');
+  }
+
   private async deriveTailscalePublicUrl(binaryPath: string): Promise<string | null> {
     try {
       const { stdout } = await this.runCommand(binaryPath, ['status', '--json'], COMMAND_TIMEOUT_MS);
@@ -616,8 +790,13 @@ export class RemoteAccessService {
       if (this.tunnelState !== 'running' && this.tunnelState !== 'error') {
         this.tunnelState = 'stopped';
       }
-      if (this.config.publicBaseUrl) {
-        this.tunnelPublicUrl = this.config.publicBaseUrl;
+      const configuredPublicUrl = this.resolvePublicBaseUrlForMode(
+        this.config.tunnelMode,
+        this.config.publicBaseUrl,
+        this.config.tunnelDomain,
+      );
+      if (configuredPublicUrl) {
+        this.tunnelPublicUrl = configuredPublicUrl;
       }
       return;
     }
@@ -637,8 +816,14 @@ export class RemoteAccessService {
 
     if (this.config.tunnelMode === 'tailscale') {
       this.tunnelAuthStatus = await this.detectTailscaleAuthStatus(binaryPath);
+    } else if (this.config.tunnelMode === 'cloudflare') {
+      if (this.config.tunnelDomain) {
+        this.tunnelAuthStatus = await this.detectCloudflareAuthStatus();
+      } else {
+        this.tunnelAuthStatus = 'authenticated';
+      }
     } else {
-      this.tunnelAuthStatus = 'authenticated';
+      this.tunnelAuthStatus = 'unknown';
     }
 
     if (this.config.tunnelMode === 'cloudflare') {
@@ -646,6 +831,9 @@ export class RemoteAccessService {
       if (processAlive) {
         this.tunnelState = 'running';
         this.tunnelPid = this.tunnelProcess?.pid ?? null;
+        if (this.config.tunnelDomain && !this.tunnelPublicUrl) {
+          this.tunnelPublicUrl = deriveUrlFromDomain(this.config.tunnelDomain);
+        }
       } else if (this.tunnelState === 'starting') {
         this.tunnelState = 'stopped';
         this.tunnelPid = null;
@@ -707,7 +895,14 @@ export class RemoteAccessService {
     await this.stopCloudflareProcess();
 
     const targetUrl = `http://127.0.0.1:${this.config.bindPort}`;
-    const child = spawn(this.tunnelBinaryPath, ['tunnel', '--url', targetUrl, '--no-autoupdate'], {
+    const domain = this.config.tunnelDomain;
+    const desiredPublicUrl = this.resolvePublicBaseUrlForMode(this.config.tunnelMode, this.config.publicBaseUrl, domain);
+    const cloudflareArgs = ['tunnel', '--url', targetUrl, '--no-autoupdate'];
+    if (domain) {
+      cloudflareArgs.push('--hostname', domain);
+    }
+
+    const child = spawn(this.tunnelBinaryPath, cloudflareArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
       windowsHide: true,
@@ -717,6 +912,14 @@ export class RemoteAccessService {
     this.tunnelStartedAt = now();
     this.tunnelPid = child.pid ?? null;
     this.tunnelLastError = null;
+    if (desiredPublicUrl) {
+      this.tunnelPublicUrl = desiredPublicUrl;
+      this.config.publicBaseUrl = desiredPublicUrl;
+      this.config.updatedAt = now();
+      void this.persistConfig().catch((error) => {
+        process.stderr.write(`[remote-access] Failed to persist configured public URL: ${formatCommandError(error)}\n`);
+      });
+    }
 
     let settled = false;
     let resolveReady: (() => void) | null = null;
@@ -779,6 +982,12 @@ export class RemoteAccessService {
 
     const timeout = setTimeout(() => {
       if (this.tunnelPublicUrl) {
+        settleSuccess();
+        return;
+      }
+      const stillAlive = this.tunnelProcess && this.tunnelProcess.exitCode === null && !this.tunnelProcess.killed;
+      if (domain && stillAlive) {
+        this.tunnelPublicUrl = deriveUrlFromDomain(domain);
         settleSuccess();
         return;
       }
@@ -942,17 +1151,26 @@ export class RemoteAccessService {
 
   getStatus(): RemoteAccessStatus {
     const activeDevices = this.config.devices.filter((device) => !device.revokedAt && device.expiresAt > now());
+    const configuredPublicUrl = this.resolvePublicBaseUrlForMode(
+      this.config.tunnelMode,
+      this.config.publicBaseUrl,
+      this.config.tunnelDomain,
+    );
     return {
       enabled: this.config.enabled,
       running: this.server !== null,
       bindHost: this.config.bindHost,
       bindPort: this.server ? this.config.bindPort : null,
       localBaseUrl: this.localBaseUrl,
-      publicBaseUrl: this.config.publicBaseUrl,
+      publicBaseUrl: configuredPublicUrl,
       tunnelMode: this.config.tunnelMode,
+      tunnelName: this.config.tunnelName,
+      tunnelDomain: this.config.tunnelDomain,
+      tunnelVisibility: this.config.tunnelVisibility,
       tunnelHints: this.buildTunnelHints(),
       tunnelState: this.tunnelState,
-      tunnelPublicUrl: this.tunnelPublicUrl || (this.config.tunnelMode === 'custom' ? this.config.publicBaseUrl : null),
+      tunnelPublicUrl:
+        this.tunnelPublicUrl || (this.config.tunnelMode === 'custom' || this.config.tunnelMode === 'cloudflare' ? configuredPublicUrl : null),
       tunnelLastError: this.tunnelLastError,
       tunnelBinaryInstalled: this.tunnelBinaryInstalled,
       tunnelBinaryPath: this.tunnelBinaryPath,
@@ -996,14 +1214,27 @@ export class RemoteAccessService {
   private buildTunnelHints(): string[] {
     const hints: string[] = [];
     const port = this.config.bindPort || 0;
+    const nameHint = this.config.tunnelName ? ` (${this.config.tunnelName})` : '';
+    const domainHint = this.config.tunnelDomain ? ` using ${this.config.tunnelDomain}` : '';
 
     if (this.config.tunnelMode === 'tailscale') {
-      hints.push(`tailscale serve https / http://127.0.0.1:${port}`);
-      hints.push(`tailscale funnel ${port}`);
+      hints.push(`tailscale${nameHint}: serve https / http://127.0.0.1:${port}`);
+      hints.push(`tailscale${nameHint}: funnel ${port}`);
+      if (this.config.tunnelVisibility === 'private') {
+        hints.push('Private mode: allow only authenticated tailnet devices to access this endpoint.');
+      } else {
+        hints.push('Public mode: tailscale funnel publishes the endpoint over HTTPS on the internet.');
+      }
     } else if (this.config.tunnelMode === 'cloudflare') {
-      hints.push(`cloudflared tunnel --url http://127.0.0.1:${port}`);
+      if (this.config.tunnelDomain) {
+        hints.push(`cloudflared${nameHint}: tunnel --url http://127.0.0.1:${port} --hostname ${this.config.tunnelDomain}`);
+      } else {
+        hints.push(`cloudflared${nameHint}: tunnel --url http://127.0.0.1:${port}`);
+      }
+      hints.push('Use Cloudflare quick tunnel for temporary public URLs or set a domain for stable routing.');
     } else {
-      hints.push(`Expose http://127.0.0.1:${port} through your preferred secure tunnel`);
+      hints.push(`Expose http://127.0.0.1:${port} through your preferred secure tunnel${domainHint}`);
+      hints.push('Custom mode expects you to manage the tunnel process and endpoint availability externally.');
     }
 
     return hints;
@@ -1015,7 +1246,9 @@ export class RemoteAccessService {
       throw new Error('Remote access must be enabled before generating pairing QR.');
     }
 
-    const endpoint = this.config.publicBaseUrl || this.localBaseUrl;
+    const endpoint =
+      this.resolvePublicBaseUrlForMode(this.config.tunnelMode, this.config.publicBaseUrl, this.config.tunnelDomain) ||
+      this.localBaseUrl;
     if (!endpoint) {
       throw new Error('Remote endpoint is not available yet. Please retry.');
     }
@@ -1301,12 +1534,16 @@ export class RemoteAccessService {
     const platform = typeof payload.platform === 'string' ? payload.platform.trim() : 'mobile';
     const tokenBundle = this.issueDeviceToken(deviceName, platform);
 
+    const endpoint =
+      this.resolvePublicBaseUrlForMode(this.config.tunnelMode, this.config.publicBaseUrl, this.config.tunnelDomain) ||
+      this.localBaseUrl ||
+      'http://127.0.0.1';
     this.sendJson(response, 200, {
       token: tokenBundle.token,
       device: toDeviceSummary(tokenBundle.device),
       expiresAt: tokenBundle.device.expiresAt,
-      endpoint: this.config.publicBaseUrl || this.localBaseUrl,
-      wsEndpoint: deriveWsEndpoint(this.config.publicBaseUrl || this.localBaseUrl || 'http://127.0.0.1'),
+      endpoint,
+      wsEndpoint: deriveWsEndpoint(endpoint),
     });
   }
 

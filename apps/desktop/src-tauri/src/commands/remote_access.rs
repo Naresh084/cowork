@@ -28,6 +28,11 @@ pub struct RemoteAccessStatus {
     pub public_base_url: Option<String>,
     pub tunnel_mode: String,
     #[serde(default)]
+    pub tunnel_name: Option<String>,
+    #[serde(default)]
+    pub tunnel_domain: Option<String>,
+    pub tunnel_visibility: String,
+    #[serde(default)]
     pub tunnel_hints: Vec<String>,
     pub tunnel_state: String,
     #[serde(default)]
@@ -90,6 +95,9 @@ pub async fn remote_access_enable(
     state: State<'_, AgentState>,
     public_base_url: Option<String>,
     tunnel_mode: Option<String>,
+    tunnel_name: Option<String>,
+    tunnel_domain: Option<String>,
+    tunnel_visibility: Option<String>,
     bind_port: Option<u16>,
 ) -> Result<RemoteAccessStatus, String> {
     ensure_sidecar_started_public(&app, &state).await?;
@@ -98,6 +106,9 @@ pub async fn remote_access_enable(
     let params = serde_json::json!({
         "publicBaseUrl": public_base_url,
         "tunnelMode": tunnel_mode,
+        "tunnelName": tunnel_name,
+        "tunnelDomain": tunnel_domain,
+        "tunnelVisibility": tunnel_visibility,
         "bindPort": bind_port,
     });
     let result = manager.send_command("remote_access_enable", params).await?;
@@ -210,6 +221,34 @@ pub async fn remote_access_set_tunnel_mode(
         .send_command(
             "remote_access_set_tunnel_mode",
             serde_json::json!({ "tunnelMode": tunnel_mode }),
+        )
+        .await?;
+
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse remote status: {}", e))
+}
+
+/// Update tunnel naming/domain/visibility options.
+#[tauri::command]
+pub async fn remote_access_set_tunnel_options(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    tunnel_name: Option<String>,
+    tunnel_domain: Option<String>,
+    tunnel_visibility: Option<String>,
+    public_base_url: Option<String>,
+) -> Result<RemoteAccessStatus, String> {
+    ensure_sidecar_started_public(&app, &state).await?;
+
+    let manager = &state.manager;
+    let result = manager
+        .send_command(
+            "remote_access_set_tunnel_options",
+            serde_json::json!({
+                "tunnelName": tunnel_name,
+                "tunnelDomain": tunnel_domain,
+                "tunnelVisibility": tunnel_visibility,
+                "publicBaseUrl": public_base_url,
+            }),
         )
         .await?;
 

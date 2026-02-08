@@ -1,6 +1,7 @@
 export type RemoteTunnelMode = 'tailscale' | 'cloudflare' | 'custom';
 export type RemoteTunnelState = 'stopped' | 'starting' | 'running' | 'error';
 export type RemoteTunnelAuthStatus = 'authenticated' | 'unauthenticated' | 'unknown';
+export type RemoteTunnelVisibility = 'public' | 'private';
 
 export interface RemoteAccessDevice {
   id: string;
@@ -19,6 +20,9 @@ export interface RemoteAccessConfig {
   bindPort: number;
   publicBaseUrl: string | null;
   tunnelMode: RemoteTunnelMode;
+  tunnelName: string | null;
+  tunnelDomain: string | null;
+  tunnelVisibility: RemoteTunnelVisibility;
   devices: RemoteAccessDevice[];
   createdAt: number;
   updatedAt: number;
@@ -32,6 +36,9 @@ export interface RemoteAccessStatus {
   localBaseUrl: string | null;
   publicBaseUrl: string | null;
   tunnelMode: RemoteTunnelMode;
+  tunnelName: string | null;
+  tunnelDomain: string | null;
+  tunnelVisibility: RemoteTunnelVisibility;
   tunnelHints: string[];
   tunnelState: RemoteTunnelState;
   tunnelPublicUrl: string | null;
@@ -58,7 +65,17 @@ export interface RemoteAccessDeviceSummary {
 export interface RemoteEnableInput {
   publicBaseUrl?: string | null;
   tunnelMode?: RemoteTunnelMode;
+  tunnelName?: string | null;
+  tunnelDomain?: string | null;
+  tunnelVisibility?: RemoteTunnelVisibility;
   bindPort?: number;
+}
+
+export interface RemoteTunnelOptionsInput {
+  tunnelName?: string | null;
+  tunnelDomain?: string | null;
+  tunnelVisibility?: RemoteTunnelVisibility;
+  publicBaseUrl?: string | null;
 }
 
 export interface PairingPayload {

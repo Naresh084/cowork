@@ -1,5 +1,6 @@
 import type { AgentEventType } from './types.js';
 import type { ChatItem } from '@gemini-cowork/shared';
+import { sanitizeProviderErrorMessage } from '@gemini-cowork/shared';
 
 /**
  * SidecarEvent format expected by Rust (camelCase due to serde rename_all)
@@ -366,7 +367,11 @@ export class EventEmitter {
    * Emit error event.
    */
   error(sessionId: string | undefined, errorMessage: string, code?: string, details?: unknown): void {
-    this.emit('error', sessionId, { error: errorMessage, code, details });
+    this.emit('error', sessionId, {
+      error: sanitizeProviderErrorMessage(errorMessage),
+      code,
+      details,
+    });
   }
 
   /**

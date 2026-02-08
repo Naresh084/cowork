@@ -117,7 +117,7 @@ export function createRunWorkflowTool(): ToolHandler {
     description: 'Run a workflow manually with optional input payload.',
     parameters: z.object({
       workflowId: z.string(),
-      version: z.number().int().positive().optional(),
+      version: z.number().int().min(1).optional(),
       input: z.record(z.unknown()).optional(),
       correlationId: z.string().optional(),
     }),
@@ -170,7 +170,7 @@ export function createWorkflowFromChatTool(): ToolHandler {
       name: z.string().optional().describe('Optional workflow name override.'),
       workingDirectory: z.string().optional().describe('Optional working directory for generated steps.'),
       publish: z.boolean().optional().describe('Whether to publish immediately after draft creation.'),
-      maxTurnsPerStep: z.number().int().positive().optional().describe('Max agent turns per generated step.'),
+      maxTurnsPerStep: z.number().int().min(1).optional().describe('Max agent turns per generated step.'),
     }),
     execute: async (args: unknown): Promise<ToolResult> => {
       const input = args as CreateWorkflowFromPromptInput;
@@ -218,9 +218,9 @@ export function createManageWorkflowTool(): ToolHandler {
       ]),
       workflowId: z.string().optional(),
       runId: z.string().optional(),
-      version: z.number().int().positive().optional(),
-      limit: z.number().int().positive().optional(),
-      offset: z.number().int().nonnegative().optional(),
+      version: z.number().int().min(1).optional(),
+      limit: z.number().int().min(1).optional(),
+      offset: z.number().int().min(0).optional(),
     }),
     execute: async (args: unknown): Promise<ToolResult> => {
       const parsed = args as {
@@ -351,8 +351,8 @@ export function createGetWorkflowRunsTool(): ToolHandler {
         .enum(['queued', 'running', 'paused', 'completed', 'failed', 'cancelled', 'failed_recoverable'])
         .optional(),
       runId: z.string().optional(),
-      limit: z.number().int().positive().optional(),
-      offset: z.number().int().nonnegative().optional(),
+      limit: z.number().int().min(1).optional(),
+      offset: z.number().int().min(0).optional(),
       sinceTs: z.number().optional(),
     }),
     execute: async (args: unknown): Promise<ToolResult> => {

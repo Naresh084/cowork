@@ -5,6 +5,7 @@ import { X, Plus, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCronStore, useCronModalState } from '@/stores/cron-store';
 import { useAppStore } from '@/stores/app-store';
+import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 import { CronJobList } from './CronJobList';
 import { CronJobEditor } from './CronJobEditor';
 import { CronRunHistory } from './CronRunHistory';
@@ -16,6 +17,7 @@ interface CronModalProps {
 
 export function CronModal({ isOpen, onClose }: CronModalProps) {
   const loadJobs = useCronStore((state) => state.loadJobs);
+  const startCreate = useCronStore((state) => state.startCreate);
   const closeEditor = useCronStore((state) => state.closeEditor);
   const closeHistory = useCronStore((state) => state.closeHistory);
   const setCurrentView = useAppStore((state) => state.setCurrentView);
@@ -23,6 +25,13 @@ export function CronModal({ isOpen, onClose }: CronModalProps) {
   const openWorkflowBuilder = () => {
     setCurrentView('workflows');
     onClose();
+  };
+  const openAutomationCreator = () => {
+    if (WORKFLOWS_ENABLED) {
+      openWorkflowBuilder();
+      return;
+    }
+    startCreate();
   };
 
   // Load jobs when modal opens
@@ -125,7 +134,7 @@ export function CronModal({ isOpen, onClose }: CronModalProps) {
                       <motion.button
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={openWorkflowBuilder}
+                        onClick={openAutomationCreator}
                         className={cn(
                           'flex items-center gap-2 px-4 py-2 rounded-lg',
                           'bg-[#1D4ED8] text-white text-sm font-medium',
@@ -133,7 +142,7 @@ export function CronModal({ isOpen, onClose }: CronModalProps) {
                         )}
                       >
                         <Plus className="w-4 h-4" />
-                        New Workflow
+                        {WORKFLOWS_ENABLED ? 'New Workflow' : 'New Automation'}
                       </motion.button>
                       <button
                         onClick={onClose}
