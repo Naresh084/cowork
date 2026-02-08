@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportTerminalDiagnostic } from '../../lib/terminal-diagnostics';
 
 interface AppErrorBoundaryState {
   hasError: boolean;
@@ -19,6 +20,13 @@ export class AppErrorBoundary extends React.Component<React.PropsWithChildren, A
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[AppErrorBoundary] Uncaught error:', error, info);
+    void reportTerminalDiagnostic(
+      'error',
+      'react.error-boundary',
+      error.message || 'React error boundary caught an error',
+      error.stack,
+      JSON.stringify({ componentStack: info.componentStack ?? null }),
+    );
     this.setState({ componentStack: info.componentStack ?? undefined });
   }
 

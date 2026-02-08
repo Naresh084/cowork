@@ -4,11 +4,13 @@ import type { ChatItem } from '@gemini-cowork/shared';
 /**
  * SidecarEvent format expected by Rust (camelCase due to serde rename_all)
  */
-interface SidecarEvent {
+export interface SidecarEvent {
   type: string;
   sessionId: string | null;
   data: unknown;
 }
+
+type EventListener = (event: SidecarEvent) => void;
 
 /**
  * Emits events to the Rust backend via stdout.
@@ -22,6 +24,7 @@ export class EventEmitter {
   private stdoutQueueOffset = 0;
   private stdoutBackpressured = false;
   private stdoutFlushing = false;
+  private listeners = new Set<EventListener>();
 
   /**
    * Emit an event to the Rust backend.
@@ -32,6 +35,16 @@ export class EventEmitter {
       sessionId: sessionId ?? null,
       data,
     };
+
+    if (this.listeners.size > 0) {
+      for (const listener of this.listeners) {
+        try {
+          listener(event);
+        } catch {
+          // Listener failures should never break main IPC event delivery.
+        }
+      }
+    }
 
     // Coalesce frequent chat:update events within the current flush window.
     if (type === 'chat:update' && event.sessionId) {
@@ -354,6 +367,17 @@ export class EventEmitter {
    */
   error(sessionId: string | undefined, errorMessage: string, code?: string, details?: unknown): void {
     this.emit('error', sessionId, { error: errorMessage, code, details });
+  }
+
+  /**
+   * Subscribe to all sidecar events.
+   * Returns an unsubscribe function.
+   */
+  subscribe(listener: EventListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
 
   /**

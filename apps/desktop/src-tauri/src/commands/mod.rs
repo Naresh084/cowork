@@ -8,6 +8,7 @@ pub mod files;
 pub mod heartbeat;
 pub mod integrations;
 pub mod policy;
+pub mod remote_access;
 pub mod skills;
 pub mod subagent;
 pub mod workflow;

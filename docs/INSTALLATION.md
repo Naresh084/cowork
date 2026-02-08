@@ -89,7 +89,7 @@ sudo rpm -i Gemini-Cowork_X.X.X_x86_64.rpm
 4. Add provider API key (optional for LM Studio).
 5. Set base URL if your provider supports editable base URLs.
 6. Select a chat model (or enter a custom model ID).
-7. Optionally configure media and integration keys (Google, OpenAI, Fal, Exa, Tavily, Stitch).
+7. Optionally configure media and runtime-extension keys (Google, OpenAI, Fal, Exa, Tavily, Stitch), then review capabilities policy controls.
 8. Open **Workflows** in the sidebar and create a draft from prompt or visual builder.
 9. Use **Automations** to review scheduled workflow runs (and any legacy cron tasks).
 10. Start chatting.
@@ -139,7 +139,8 @@ Your API key is stored securely in your system's credential manager:
 To reset keys, use:
 - Settings -> Provider (provider keys + base URL)
 - Settings -> Media (Google/OpenAI/Fal media keys + model routing)
-- Settings -> Integrations (Exa/Tavily/Stitch and related capability settings)
+- Settings -> Runtime (Exa/Tavily/Stitch, external CLI orchestration, specialized runtime models)
+- Settings -> Logout (secure reset: clears local app settings + `~/.cowork`)
 
 ---
 
@@ -162,4 +163,4 @@ sudo dnf remove gemini-cowork
 # AppImage: Simply delete the file
 ```
 
-Data is stored in `~/.geminicowork/` - delete this folder to remove all data.
+Data is stored in `~/.cowork/` - delete this folder to remove all local runtime/session data.

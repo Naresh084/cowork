@@ -10,12 +10,16 @@ import { useSkillStore } from './stores/skill-store';
 import { useCommandStore } from './stores/command-store';
 import { useSubagentStore } from './stores/subagent-store';
 import { useCronStore } from './stores/cron-store';
+import { useAppStore } from './stores/app-store';
+import { createStartupIssue } from './lib/startup-recovery';
+import { reportTerminalDiagnostic } from './lib/terminal-diagnostics';
 import type { ProviderId } from './stores/auth-store';
 
 export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const { isAuthenticated, initialize, apiKey, activeProvider, applyRuntimeConfig } = useAuthStore();
   const { loadSessions, hasLoaded, waitForBackend } = useSessionStore();
+  const setStartupIssue = useAppStore((state) => state.setStartupIssue);
   const { fetchProviderModels, availableModels, modelsLoading, userName, loadSoulProfiles } =
     useSettingsStore();
   const { discoverSkills } = useSkillStore();
@@ -51,6 +55,12 @@ export function App() {
       // Initialize auth (reads API key from file storage)
       await initialize().catch((error) => {
         console.error('[App] Initialization error:', error);
+        void reportTerminalDiagnostic(
+          'error',
+          'app.initialize',
+          'App initialization failed',
+          error instanceof Error ? error.stack : String(error),
+        );
       });
 
       await loadSoulProfiles().catch(() => undefined);
@@ -91,18 +101,41 @@ export function App() {
         await discoverCommands();
         await loadSubagents();
         await loadCronJobs();
-      } catch {
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         // Backend initialization failed - UI will show appropriate error state
+        void reportTerminalDiagnostic(
+          'error',
+          'app.backend-init',
+          `Backend initialization failed: ${message}`,
+          error instanceof Error ? error.stack : undefined,
+          JSON.stringify({
+            isAuthenticated,
+            hasLoaded,
+          }),
+        );
+        setStartupIssue(
+          createStartupIssue(
+            'Desktop services unavailable',
+            `Core services are not connected: ${message}. Open the highlighted recovery screen, then retry.`
+          )
+        );
       }
     };
 
     initBackend();
-  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents, loadCronJobs]);
+  }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents, loadCronJobs, setStartupIssue]);
 
   useEffect(() => {
     if ((!apiKey && activeProvider !== 'lmstudio') || modelsLoading || availableModels.length > 0) return;
     fetchProviderModels(activeProvider).catch((error) => {
       console.warn('[App] Failed to fetch models:', error);
+      void reportTerminalDiagnostic(
+        'warn',
+        'app.fetch-models',
+        `Failed to fetch models for provider ${activeProvider}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     });
   }, [activeProvider, apiKey, availableModels.length, fetchProviderModels, modelsLoading]);
 

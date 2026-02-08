@@ -13,6 +13,8 @@ import { cronService } from './cron/index.js';
 import { workflowService } from './workflow/index.js';
 import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
+import { remoteAccessService } from './remote-access/service.js';
+import type { RemoteTunnelMode } from './remote-access/types.js';
 import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
 import { SubagentService, createSubagentService } from './subagents/index.js';
@@ -156,6 +158,11 @@ async function getSubagentService(): Promise<SubagentService> {
     await subagentService.initialize();
   }
   return subagentService;
+}
+
+async function ensureRemoteAccessInitialized(): Promise<void> {
+  const baseDir = appDataDirectory && appDataDirectory.trim() ? appDataDirectory : join(homedir(), '.cowork');
+  await remoteAccessService.initialize(baseDir);
 }
 
 // ============================================================================
@@ -559,6 +566,94 @@ registerHandler('ping', async () => {
   return { pong: true, timestamp: Date.now() };
 });
 
+// ============================================================================
+// Remote Access (Mobile Gateway)
+// ============================================================================
+
+registerHandler('remote_access_get_status', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.getStatus();
+});
+
+registerHandler('remote_access_enable', async (params) => {
+  await ensureRemoteAccessInitialized();
+  const p = params as {
+    publicBaseUrl?: string | null;
+    tunnelMode?: RemoteTunnelMode;
+    bindPort?: number;
+  };
+  return remoteAccessService.enable({
+    publicBaseUrl: p.publicBaseUrl ?? null,
+    tunnelMode: p.tunnelMode,
+    bindPort: p.bindPort,
+  });
+});
+
+registerHandler('remote_access_disable', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.disable();
+});
+
+registerHandler('remote_access_generate_qr', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.generatePairingQr();
+});
+
+registerHandler('remote_access_list_devices', async () => {
+  await ensureRemoteAccessInitialized();
+  return { devices: remoteAccessService.listDevices() };
+});
+
+registerHandler('remote_access_revoke_device', async (params) => {
+  await ensureRemoteAccessInitialized();
+  const p = params as { deviceId?: string };
+  if (!p.deviceId) {
+    throw new Error('deviceId is required');
+  }
+  const revoked = await remoteAccessService.revokeDevice(p.deviceId);
+  return { revoked };
+});
+
+registerHandler('remote_access_set_public_base_url', async (params) => {
+  await ensureRemoteAccessInitialized();
+  const p = params as { publicBaseUrl?: string | null };
+  return remoteAccessService.updatePublicBaseUrl(p.publicBaseUrl ?? null);
+});
+
+registerHandler('remote_access_set_tunnel_mode', async (params) => {
+  await ensureRemoteAccessInitialized();
+  const p = params as { tunnelMode?: RemoteTunnelMode };
+  if (!p.tunnelMode) {
+    throw new Error('tunnelMode is required');
+  }
+  return remoteAccessService.updateTunnelMode(p.tunnelMode);
+});
+
+registerHandler('remote_access_refresh_tunnel', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.refreshTunnelStatus();
+});
+
+registerHandler('remote_access_install_tunnel_binary', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.installTunnelBinary();
+});
+
+registerHandler('remote_access_authenticate_tunnel', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.authenticateTunnel();
+});
+
+registerHandler('remote_access_start_tunnel', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.startTunnel();
+});
+
+registerHandler('remote_access_stop_tunnel', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.stopTunnel();
+});
+
 // Initialize persistence with app data directory
 registerHandler('initialize', async (params) => {
   const { appDataDir } = params as { appDataDir: string };
@@ -568,6 +663,7 @@ registerHandler('initialize', async (params) => {
   // Store app data directory for service initialization
   appDataDirectory = appDataDir;
   const result = await agentRunner.initialize(appDataDir);
+  await remoteAccessService.initialize(appDataDir);
 
   // Initialize integration bridge (messaging platforms) - non-fatal
   try {

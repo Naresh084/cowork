@@ -1,6 +1,7 @@
 import { createInterface } from 'readline';
 import { handleRequest } from './ipc-handler.js';
 import { eventEmitter } from './event-emitter.js';
+import { remoteAccessService } from './remote-access/service.js';
 import type { IPCRequest } from './types.js';
 import { runClaudePermissionMcpServer } from './external-cli/providers/claude-permission-mcp-server.js';
 
@@ -91,6 +92,11 @@ if (process.argv.includes('--claude-permission-mcp-server')) {
 
     // Close readline
     rl.close();
+
+    // Shutdown remote access gateway (best-effort).
+    void remoteAccessService.shutdown().catch((error) => {
+      process.stderr.write(`[shutdown] Remote access shutdown warning: ${String(error)}\n`);
+    });
 
     // Exit after a short delay to allow cleanup
     setTimeout(() => {

@@ -6,6 +6,8 @@ import { SETTINGS_HELP_BY_ID } from './settings-help-content';
 const SETTINGS_FILES = [
   resolve(process.cwd(), 'src/components/settings/ApiKeysSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/GeneralSettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/CapabilitySettings.tsx'),
+  resolve(process.cwd(), 'src/components/settings/RuntimeSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/IntegrationSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/WhatsAppSettings.tsx'),
   resolve(process.cwd(), 'src/components/settings/SlackSettings.tsx'),

@@ -206,7 +206,7 @@ export function CreateSubagentModal({ isOpen, onClose, onCreated }: CreateSubage
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value as SubagentCategory)}
-                  className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="app-select app-select--compact w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:ring-2 focus:ring-blue-500"
                 >
                   {CATEGORIES.map((cat) => (
                     <option key={cat.value} value={cat.value}>

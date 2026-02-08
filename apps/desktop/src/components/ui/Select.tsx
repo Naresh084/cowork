@@ -111,6 +111,12 @@ export function Select({
     }
   }, [isOpen, calculatePosition, searchable]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const selectedIndex = filteredOptions.findIndex((option) => option.value === value && !option.disabled);
+    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+  }, [filteredOptions, isOpen, value]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!isOpen) {
@@ -170,17 +176,17 @@ export function Select({
           onClick={() => handleSelect(option)}
           onMouseEnter={() => setHighlightedIndex(globalIndex)}
           className={cn(
-            'w-full flex items-center gap-2 px-3 py-2 text-sm',
+            'w-full flex items-start gap-2.5 rounded-md px-3 py-2 text-sm text-left',
             'transition-colors',
             option.disabled
               ? 'text-white/30 cursor-not-allowed'
               : 'text-white/90',
-            globalIndex === highlightedIndex && !option.disabled && 'bg-white/[0.06]',
-            option.value === value && 'bg-[#1D4ED8]/20'
+            globalIndex === highlightedIndex && !option.disabled && 'bg-white/[0.08]',
+            option.value === value && 'bg-[#1D4ED8]/22 text-[#DBEAFE]'
           )}
         >
           {option.icon && (
-            <span className="flex-shrink-0 text-white/50">{option.icon}</span>
+            <span className="mt-0.5 flex-shrink-0 text-white/50">{option.icon}</span>
           )}
           <div className="flex-1 text-left">
             <div>{option.label}</div>
@@ -189,7 +195,7 @@ export function Select({
             )}
           </div>
           {option.value === value && (
-            <Check size={14} className="flex-shrink-0 text-[#93C5FD]" />
+            <Check size={14} className="mt-0.5 flex-shrink-0 text-[#93C5FD]" />
           )}
         </button>
       );
@@ -204,11 +210,12 @@ export function Select({
         onClick={() => !disabled && setIsOpen(!isOpen)}
         onKeyDown={handleKeyDown}
         className={cn(
-          'w-full flex items-center gap-2 px-3 py-2 rounded-lg',
+          'w-full min-h-[2.5rem] flex items-center gap-2 px-3 pr-9 py-2 rounded-lg',
           'bg-[#1A1A1E] border border-white/[0.08]',
           'text-sm text-left',
           'focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/50 focus:border-[#1D4ED8]',
           'transition-colors',
+          isOpen && 'border-[#3B82F6]/60 bg-[#131821]',
           disabled && 'opacity-50 cursor-not-allowed bg-white/[0.04]',
           error && 'border-red-500 focus:ring-red-500/50 focus:border-red-500'
         )}
@@ -242,7 +249,7 @@ export function Select({
             ref={menuRef}
             role="listbox"
             className={cn(
-              'fixed z-50 py-1 max-h-64 overflow-auto',
+              'fixed z-50 p-1.5 max-h-64 overflow-auto',
               'bg-[#0D0D0F] border border-white/[0.08] rounded-lg shadow-xl',
               'animate-in fade-in-0 zoom-in-95 duration-150'
             )}

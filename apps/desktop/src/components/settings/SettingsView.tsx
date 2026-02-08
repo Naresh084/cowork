@@ -1,17 +1,38 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Settings2, SlidersHorizontal, KeyRound, Image, CircleHelp, Sparkles, Bot } from 'lucide-react';
+import {
+  ArrowLeft,
+  Settings2,
+  SlidersHorizontal,
+  KeyRound,
+  Image,
+  CircleHelp,
+  Sparkles,
+  Bot,
+  Smartphone,
+  Wrench,
+  LogOut,
+  Loader2,
+  Cpu,
+} from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { cn } from '@/lib/utils';
-import { useAppStore } from '../../stores/app-store';
+import { useAppStore, type SettingsTab } from '../../stores/app-store';
 import { useIntegrationStore } from '../../stores/integration-store';
 import { useHelpStore } from '../../stores/help-store';
 import { useCapabilityStore } from '../../stores/capability-store';
+import { toast } from '@/components/ui/Toast';
+import { useSettingsStore } from '@/stores/settings-store';
+import { useSessionStore } from '@/stores/session-store';
+import { useChatStore } from '@/stores/chat-store';
+import { useAuthStore } from '@/stores/auth-store';
 import { GeneralSettings } from './GeneralSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
+import { CapabilitySettings } from './CapabilitySettings';
+import { RuntimeSettings } from './RuntimeSettings';
 import { SoulSettings } from './SoulSettings';
-
-type SettingsTab = 'provider' | 'media' | 'integrations' | 'souls';
+import { RemoteAccessSettings } from './RemoteAccessSettings';
 
 interface TabConfig {
   id: SettingsTab;
@@ -23,20 +44,28 @@ interface TabConfig {
 const tabConfig: TabConfig[] = [
   { id: 'provider', label: 'Provider', icon: KeyRound },
   { id: 'media', label: 'Media', icon: Image },
+  { id: 'capabilities', label: 'Capabilities', icon: Wrench },
+  { id: 'runtime', label: 'Runtime', icon: Cpu },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
+  { id: 'remote', label: 'Remote', icon: Smartphone },
   { id: 'souls', label: 'Souls', icon: Bot },
 ];
 
 const tabContent: Record<SettingsTab, React.ComponentType> = {
   provider: ApiKeysSettings,
   media: GeneralSettings,
+  capabilities: CapabilitySettings,
+  runtime: RuntimeSettings,
   integrations: IntegrationSettings,
+  remote: RemoteAccessSettings,
   souls: SoulSettings,
 };
 
 export function SettingsView() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('provider');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const setCurrentView = useAppStore((s) => s.setCurrentView);
+  const activeTab = useAppStore((s) => s.settingsTab);
+  const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const platforms = useIntegrationStore((s) => s.platforms);
   const openHelp = useHelpStore((s) => s.openHelp);
   const startTour = useHelpStore((s) => s.startTour);
@@ -56,6 +85,67 @@ export function SettingsView() {
   }, [refreshCapabilitySnapshot]);
 
   const ActiveContent = tabContent[activeTab];
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    const confirmed = window.confirm(
+      [
+        'Sign out and reset this device?',
+        '',
+        'This will:',
+        '- Delete all saved API keys and provider credentials.',
+        '- Reset provider/model/settings stored in this desktop app.',
+        '- Remove local Cowork data at ~/.cowork (sessions, policies, schedules, pairings).',
+        '',
+        'This cannot be undone. Continue?',
+      ].join('\n'),
+    );
+    if (!confirmed) return;
+
+    setIsLoggingOut(true);
+    try {
+      await invoke('auth_logout_and_cleanup');
+
+      await Promise.all([
+        useSettingsStore.persist.clearStorage(),
+        useSessionStore.persist.clearStorage(),
+        useHelpStore.persist.clearStorage(),
+      ]);
+
+      useChatStore.setState({ sessions: {}, error: null });
+      useSessionStore.setState({
+        sessions: [],
+        activeSessionId: null,
+        isLoading: false,
+        hasLoaded: false,
+        error: null,
+        backendInitialized: false,
+      });
+      useSettingsStore.getState().resetSettings();
+      useAuthStore.setState({
+        isAuthenticated: false,
+        apiKey: null,
+        providerApiKeys: {},
+        providerBaseUrls: {},
+        googleApiKey: null,
+        openaiApiKey: null,
+        falApiKey: null,
+        exaApiKey: null,
+        tavilyApiKey: null,
+        stitchApiKey: null,
+        activeSoul: null,
+        error: null,
+      });
+
+      toast.success('Signed out. Reloading setup…');
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 250);
+    } catch (error) {
+      toast.error('Failed to sign out', error instanceof Error ? error.message : String(error));
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-[#0E0F13]">
@@ -79,6 +169,20 @@ export function SettingsView() {
         <div className="ml-auto flex items-center gap-2" data-tour-id="settings-help-actions">
           <button
             type="button"
+            onClick={() => void handleLogout()}
+            disabled={isLoggingOut}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors',
+              isLoggingOut
+                ? 'border-[#FF5449]/25 text-[#FF5449]/60 cursor-not-allowed bg-[#FF5449]/10'
+                : 'border-[#FF5449]/35 text-[#FF8A80] hover:bg-[#FF5449]/14',
+            )}
+          >
+            {isLoggingOut ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+            {isLoggingOut ? 'Signing out…' : 'Logout'}
+          </button>
+          <button
+            type="button"
             onClick={() => openHelp('platform-overview')}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.05] hover:text-white/90"
           >
@@ -87,7 +191,10 @@ export function SettingsView() {
           </button>
           <button
             type="button"
-            onClick={() => startTour('settings', true)}
+            onClick={() => {
+              setSettingsTab('provider');
+              startTour('settings', true);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.05] hover:text-white/90"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -97,7 +204,7 @@ export function SettingsView() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex items-center gap-1 px-6 py-3 border-b border-white/[0.08]" data-tour-id="settings-tab-nav">
+      <div className="flex items-center gap-1 px-6 py-3 border-b border-white/[0.08] overflow-x-auto" data-tour-id="settings-tab-nav">
         {tabConfig.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -115,9 +222,10 @@ export function SettingsView() {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => setSettingsTab(tab.id)}
+              data-tour-id={`settings-tab-${tab.id}`}
               className={cn(
-                'relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
+                'relative flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors shrink-0 whitespace-nowrap',
                 isActive
                   ? 'bg-white/[0.08] text-white/90'
                   : 'text-white/50 hover:text-white/70 hover:bg-white/[0.04]'
@@ -153,7 +261,7 @@ export function SettingsView() {
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-6">
+        <div className="w-full px-4 py-5 lg:px-6" data-tour-id="settings-content-region">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

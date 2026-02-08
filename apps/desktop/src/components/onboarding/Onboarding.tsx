@@ -398,7 +398,7 @@ export function Onboarding() {
                 <select
                   value={provider}
                   onChange={(e) => void handleProviderChange(e.target.value as ProviderId)}
-                  className="w-full rounded-xl border bg-[#0A1021]/80 py-3.5 px-4 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35"
+                  className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:ring-2 focus:ring-[#1D4ED8]/35"
                 >
                   {PROVIDERS.map((id) => (
                     <option key={id} value={id}>
@@ -443,7 +443,7 @@ export function Onboarding() {
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full rounded-xl border bg-[#0A1021]/80 py-3.5 px-4 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35"
+                  className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:ring-2 focus:ring-[#1D4ED8]/35"
                 >
                   <option value="">Select model</option>
                   {modelsForProvider.map((model) => (
@@ -491,7 +491,7 @@ export function Onboarding() {
               <select
                 value={imageBackend}
                 onChange={(e) => setImageBackend(e.target.value as 'google' | 'openai' | 'fal')}
-                className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
+                className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3 text-sm text-white border-white/10"
               >
                 <option value="google">Google</option>
                 <option value="openai">OpenAI</option>
@@ -503,7 +503,7 @@ export function Onboarding() {
               <select
                 value={videoBackend}
                 onChange={(e) => setVideoBackend(e.target.value as 'google' | 'openai' | 'fal')}
-                className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
+                className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3 text-sm text-white border-white/10"
               >
                 <option value="google">Google</option>
                 <option value="openai">OpenAI</option>
@@ -604,7 +604,7 @@ export function Onboarding() {
             <select
               value={sandboxMode}
               onChange={(e) => setSandboxMode(e.target.value as typeof sandboxMode)}
-              className="w-full rounded-xl border bg-[#0A1021]/80 py-2.5 px-4 text-sm text-white border-white/10"
+              className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-2.5 text-sm text-white border-white/10"
             >
               <option value="read-only">read-only</option>
               <option value="workspace-write">workspace-write</option>
@@ -626,7 +626,7 @@ export function Onboarding() {
             <select
               value={externalSearchDraft}
               onChange={(e) => setExternalSearchDraft(e.target.value as 'google' | 'exa' | 'tavily')}
-              className="w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white border-white/10"
+              className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3 text-sm text-white border-white/10"
             >
               <option value="google">Google</option>
               <option value="exa">Exa</option>

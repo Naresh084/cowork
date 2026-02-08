@@ -52,13 +52,17 @@ Optional onboarding sections:
 
 On submit, onboarding validates provider connection, persists keys/models/settings, and applies runtime config immediately.
 
-## 3. Settings Flow (3 Tabs)
+## 3. Settings Flow (7 Tabs)
 
 Settings tabs:
 
 1. `Provider`
 2. `Media`
-3. `Integrations`
+3. `Capabilities`
+4. `Runtime`
+5. `Integrations`
+6. `Remote`
+7. `Souls`
 
 ### 3.1 Provider Tab
 
@@ -114,7 +118,21 @@ Auto-default behavior:
   - Active provider `openai` defaults media routing to OpenAI.
   - Other providers default media routing to Google.
 
-### 3.3 Integrations Tab
+### 3.3 Capabilities Tab
+
+Contains:
+
+- Unified capability matrix + policy control table (single place to view + change):
+  - capability availability status
+  - reason/status message per capability
+  - permission policy dropdown (`allow`, `ask`, `deny`)
+
+Effect on runtime/tools:
+
+- Policy changes apply immediately to upcoming tool calls.
+- First edit auto-switches policy profile to `custom` so per-tool decisions persist.
+
+### 3.4 Runtime Tab
 
 Contains:
 
@@ -128,6 +146,27 @@ Contains:
 - Google specialized model overrides:
   - `computer_use`
   - `deep_research`
+- External CLI orchestration controls:
+  - Codex CLI enablement
+  - Claude CLI enablement
+  - bypass-permission toggles per CLI
+
+Effect on runtime/tools:
+
+- External search fallback affects `web_search` when provider-native search is unavailable.
+- Stitch tools are only registered when Stitch key exists.
+- Computer-use/deep-research model fields control those tool model IDs.
+- External CLI orchestration controls dynamic registration of:
+  - `start_codex_cli_run`
+  - `start_claude_cli_run`
+  - `external_cli_get_progress`
+  - `external_cli_respond`
+  - `external_cli_cancel_run`
+
+### 3.5 Integrations Tab
+
+Contains:
+
 - Shared integration working directory defaults
 - Messaging integration sections:
   - WhatsApp
@@ -139,9 +178,6 @@ Contains:
 
 Effect on runtime/tools:
 
-- External search fallback affects `web_search` when provider-native search is unavailable.
-- Stitch tools are only registered when Stitch key exists.
-- Computer-use/deep-research model fields control those tool model IDs.
 - Notification tools are dynamically registered only for connected platforms:
   - `send_notification_whatsapp`
   - `send_notification_slack`
@@ -160,6 +196,48 @@ Attachment behavior:
 
 - New integrations (Discord, iMessage, Teams) support attachment ingestion and outbound media send paths.
 - If a provider API cannot return raw bytes, Cowork preserves attachment URL + metadata so workflows still continue.
+
+### 3.6 Remote Tab
+
+Contains:
+
+- Tunnel mode selector (`tailscale`, `cloudflare`, `custom`)
+- Public endpoint URL field
+- Remote gateway enable/disable controls
+- Tunnel lifecycle controls:
+  - refresh health
+  - install dependency
+  - authenticate provider tunnel
+  - start/stop managed tunnel
+- Pairing QR generation
+- Paired mobile device revoke controls
+
+Effect on runtime/tools:
+
+- Remote gateway exposes phone-safe APIs for:
+  - session list/read/send
+  - websocket streaming
+  - schedule list/pause/resume/run
+- Mobile pairing is token-based and short-lived QR initiated.
+- Schedule creation remains chat-driven; mobile does not expose manual creation forms.
+
+Tunnel behavior:
+
+- Managed tunnel setup is UI-driven from this tab.
+- Fallback command hints remain visible only for recovery/troubleshooting.
+- Public endpoint updates are applied to new pairing payloads immediately.
+
+### 3.7 Secure Logout/Reset
+
+Settings header includes a `Logout` action with destructive confirmation.
+
+On confirm, Cowork:
+
+- Deletes stored provider/media/runtime API keys.
+- Clears provider/model/settings persistence on the device.
+- Removes local runtime data at `~/.cowork` (sessions, policies, schedules, pairings).
+
+This is irreversible and intended for secure sign-out/device handoff.
 
 ## 4. Workflow Platform (Chat + Visual + Scheduler)
 

@@ -9,7 +9,7 @@ import type {
 } from '@gemini-cowork/providers';
 
 const noopProvider: AIProvider = {
-  id: 'gemini',
+  id: 'google',
   name: 'noop',
   listModels: async () => [],
   getModel: async () => null,

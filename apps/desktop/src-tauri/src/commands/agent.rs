@@ -229,6 +229,21 @@ impl Default for AgentState {
     }
 }
 
+fn resolve_app_data_dir() -> Result<String, String> {
+    // Use home directory for persistence: ~/.cowork
+    // This provides consistent, user-accessible storage across platforms.
+    let home_dir = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let cowork_dir = home_dir.join(".cowork");
+
+    std::fs::create_dir_all(&cowork_dir)
+        .map_err(|e| format!("Failed to create .cowork directory: {}", e))?;
+
+    cowork_dir
+        .to_str()
+        .ok_or("Invalid path".to_string())
+        .map(|value| value.to_string())
+}
+
 /// Ensure sidecar is started and set up event forwarding (public for use by other command modules)
 pub async fn ensure_sidecar_started_public(
     app: &AppHandle,
@@ -243,30 +258,10 @@ pub async fn ensure_sidecar_started(
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {
     let manager = &state.manager;
+    let app_data_str = resolve_app_data_dir()?;
 
     if !manager.is_running().await {
-        // Use home directory for persistence: ~/.cowork
-        // This provides consistent, user-accessible storage across platforms
-        let home_dir = dirs::home_dir()
-            .ok_or("Failed to get home directory")?;
-        let gemini_dir = home_dir.join(".cowork");
-
-        // Ensure the directory exists
-        std::fs::create_dir_all(&gemini_dir)
-            .map_err(|e| format!("Failed to create .cowork directory: {}", e))?;
-
-        let app_data_str = gemini_dir
-            .to_str()
-            .ok_or("Invalid path")?
-            .to_string();
-
         manager.start(&app_data_str).await?;
-
-        // Initialize persistence in sidecar with app data directory
-        let init_params = serde_json::json!({
-            "appDataDir": app_data_str
-        });
-        let _ = manager.send_command("initialize", init_params).await;
 
         // Set up event forwarding to frontend
         let app_handle = app.clone();
@@ -278,6 +273,16 @@ pub async fn ensure_sidecar_started(
             })
             .await;
     }
+
+    // Always initialize sidecar services. This closes startup races where
+    // sidecar starts but initialization fails once and leaves services unavailable.
+    let init_params = serde_json::json!({
+        "appDataDir": app_data_str
+    });
+    manager
+        .send_command("initialize", init_params)
+        .await
+        .map_err(|e| format!("Failed to initialize sidecar services: {}", e))?;
 
     // Always ensure API key is set on sidecar (handles startup race conditions
     // and cases where the sidecar lost state)
@@ -914,4 +919,78 @@ pub async fn agent_command(
     let manager = &state.manager;
     let result = manager.send_command(&command, params).await?;
     Ok(serde_json::json!({ "result": result }))
+}
+
+fn normalize_log_level(value: &str) -> &str {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "warn" | "warning" => "warn",
+        "error" => "error",
+        _ => "info",
+    }
+}
+
+fn compact_log_text(value: &str) -> String {
+    const MAX_LEN: usize = 12000;
+    let compacted = value.replace('\n', "\\n");
+    if compacted.chars().count() <= MAX_LEN {
+        compacted
+    } else {
+        let truncated: String = compacted.chars().take(MAX_LEN).collect();
+        format!("{}...[truncated]", truncated)
+    }
+}
+
+/// Print frontend diagnostics to the desktop terminal for startup/runtime debugging.
+#[tauri::command]
+pub async fn agent_log_client_diagnostic(
+    level: String,
+    source: Option<String>,
+    message: String,
+    details: Option<String>,
+    context_json: Option<String>,
+    timestamp_ms: Option<i64>,
+) -> Result<(), String> {
+    let ts = timestamp_ms.unwrap_or_else(|| {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0)
+    });
+
+    let normalized_level = normalize_log_level(&level);
+    let source_label = source.unwrap_or_else(|| "frontend".to_string());
+    let message_line = compact_log_text(&message);
+    eprintln!(
+        "[frontend:{}][{}][{}] {}",
+        normalized_level, source_label, ts, message_line
+    );
+
+    if let Some(details_value) = details {
+        let details_line = details_value.trim();
+        if !details_line.is_empty() {
+            eprintln!(
+                "[frontend:{}][{}][{}:details] {}",
+                normalized_level,
+                source_label,
+                ts,
+                compact_log_text(details_line)
+            );
+        }
+    }
+
+    if let Some(context_value) = context_json {
+        let context_line = context_value.trim();
+        if !context_line.is_empty() {
+            eprintln!(
+                "[frontend:{}][{}][{}:context] {}",
+                normalized_level,
+                source_label,
+                ts,
+                compact_log_text(context_line)
+            );
+        }
+    }
+
+    Ok(())
 }

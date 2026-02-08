@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Gemini Cowork Mobile",
+    "slug": "gemini-cowork-mobile",
+    "version": "0.1.0",
+    "scheme": "cowork-mobile",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0C10"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.geminicowork.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera is used to scan Cowork pairing QR codes.",
+        "NSPhotoLibraryUsageDescription": "Photo library access is used to attach images to chat."
+      }
+    },
+    "android": {
+      "package": "dev.geminicowork.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B0C10"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-camera",
+      "expo-image-picker"
+    ],
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}

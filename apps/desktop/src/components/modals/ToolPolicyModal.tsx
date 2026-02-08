@@ -391,7 +391,7 @@ function RulesList({
                   setNewRule({ ...newRule, action: e.target.value as ToolRuleAction })
                 }
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-sm',
+                  'app-select app-select--compact px-3 rounded-lg text-sm',
                   'bg-white/[0.04] border border-white/[0.08]',
                   'text-white/90',
                   'focus:outline-none focus:border-[#1D4ED8]/50'

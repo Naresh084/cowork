@@ -580,7 +580,7 @@ export function CronJobEditor() {
                   <select
                     value={form.weeklyDay}
                     onChange={(e) => updateField('weeklyDay', e.target.value)}
-                    className={inputCls}
+                    className={cn(inputCls, 'app-select')}
                   >
                     {WEEKDAYS.map((day) => (
                       <option key={day.value} value={day.value}>
@@ -623,7 +623,7 @@ export function CronJobEditor() {
                       e.target.value as 'minutes' | 'hours' | 'days'
                     )
                   }
-                  className={cn(inputCls, 'w-auto')}
+                  className={cn(inputCls, 'app-select w-auto min-w-[9.5rem]')}
                 >
                   <option value="minutes">Minute(s)</option>
                   <option value="hours">Hour(s)</option>

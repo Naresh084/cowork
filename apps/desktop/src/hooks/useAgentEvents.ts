@@ -8,6 +8,7 @@ import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
 import { toast } from '../components/ui/Toast';
 import type { PlatformType } from '@gemini-cowork/shared';
+import { createStartupIssue } from '../lib/startup-recovery';
 
 function isRecord(val: unknown): val is Record<string, unknown> {
   return val !== null && typeof val === 'object' && !Array.isArray(val);
@@ -69,6 +70,28 @@ function mapTodosToTasks(sessionId: string, todos: Array<{ content: string; stat
     createdAt: now,
     updatedAt: now,
   }));
+}
+
+function isInfrastructureError(code: string | undefined, message: string): boolean {
+  const normalizedCode = (code || '').toLowerCase();
+  const normalizedMessage = message.toLowerCase();
+  if (
+    normalizedCode.includes('backend') ||
+    normalizedCode.includes('connection') ||
+    normalizedCode.includes('ipc') ||
+    normalizedCode.includes('network')
+  ) {
+    return true;
+  }
+
+  return (
+    normalizedMessage.includes('backend') ||
+    normalizedMessage.includes('sidecar') ||
+    normalizedMessage.includes('connection') ||
+    normalizedMessage.includes('failed to fetch') ||
+    normalizedMessage.includes('network error') ||
+    normalizedMessage.includes('timeout')
+  );
 }
 
 /**
@@ -398,6 +421,14 @@ export function useAgentEvents(sessionId: string | null): void {
           if (isAuthError) {
             // Show API key modal for auth errors
             useAppStore.getState().setShowApiKeyModal(true, errorMsg);
+            useAppStore
+              .getState()
+              .setStartupIssue(
+                createStartupIssue(
+                  'Provider authentication failed',
+                  `${errorMsg}. Update provider credentials and retry.`
+                )
+              );
           } else {
             // Show error toast for other errors
             if (event.code === 'RATE_LIMIT') {
@@ -406,6 +437,16 @@ export function useAgentEvents(sessionId: string | null): void {
               toast.warning('Rate limit exceeded', message, 8000);
             } else {
               toast.error('Agent Error', errorMsg, 8000);
+              if (isInfrastructureError(event.code, errorMsg)) {
+                useAppStore
+                  .getState()
+                  .setStartupIssue(
+                    createStartupIssue(
+                      'Connection issue detected',
+                      `${errorMsg}. Open the highlighted recovery screen and retry.`
+                    )
+                  );
+              }
             }
           }
 

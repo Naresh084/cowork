@@ -1,11 +1,41 @@
-import { randomBytes, createHash } from 'crypto';
+const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+function getRandomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  const cryptoApi = globalThis.crypto;
+
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    cryptoApi.getRandomValues(bytes);
+    return bytes;
+  }
+
+  for (let index = 0; index < length; index += 1) {
+    bytes[index] = Math.floor(Math.random() * 256);
+  }
+  return bytes;
+}
+
+function randomBase64Url(length: number): string {
+  const bytes = getRandomBytes(length);
+  let output = '';
+
+  for (let index = 0; index < length; index += 1) {
+    output += BASE64URL_ALPHABET[bytes[index] & 63];
+  }
+
+  return output;
+}
+
+function toHex32(value: number): string {
+  return (value >>> 0).toString(16).padStart(8, '0');
+}
 
 // ============================================================================
 // ID Generation
 // ============================================================================
 
 export function generateId(prefix?: string): string {
-  const id = randomBytes(12).toString('base64url');
+  const id = randomBase64Url(16);
   return prefix ? `${prefix}_${id}` : id;
 }
 
@@ -54,7 +84,30 @@ export function slugify(str: string): string {
 }
 
 export function hashString(str: string): string {
-  return createHash('sha256').update(str).digest('hex');
+  // Deterministic 64-char hash for cache keys and IDs, safe in browser + Node.
+  let h1 = 0x811c9dc5;
+  let h2 = h1 ^ 0x9e3779b9;
+  let h3 = h1 ^ 0x85ebca6b;
+  let h4 = h1 ^ 0xc2b2ae35;
+
+  for (let index = 0; index < str.length; index += 1) {
+    const code = str.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193);
+    h2 = Math.imul(h2 ^ code, 0x85ebca6b);
+    h3 = Math.imul(h3 ^ code, 0xc2b2ae35);
+    h4 = Math.imul(h4 ^ code, 0x27d4eb2f);
+  }
+
+  return (
+    toHex32(h1) +
+    toHex32(h2) +
+    toHex32(h3) +
+    toHex32(h4) +
+    toHex32(h1 ^ h3) +
+    toHex32(h2 ^ h4) +
+    toHex32(h1 ^ h2) +
+    toHex32(h3 ^ h4)
+  );
 }
 
 // ============================================================================

@@ -6,6 +6,8 @@ import { useChatStore } from './chat-store';
 import { useSettingsStore } from './settings-store';
 import { type ProviderId } from './auth-store';
 import { useAppStore } from './app-store';
+import { createStartupIssue } from '../lib/startup-recovery';
+import { reportTerminalDiagnostic } from '../lib/terminal-diagnostics';
 
 export type SessionKind = 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
 export type ExecutionMode = 'execute' | 'plan';
@@ -86,6 +88,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             const status = await invoke<{ initialized: boolean; sessionCount: number }>('agent_get_initialization_status');
             if (status.initialized) {
               set({ backendInitialized: true });
+              useAppStore.getState().setStartupIssue(null);
               return;
             }
           } catch {
@@ -96,6 +99,31 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           elapsed += POLL_INTERVAL;
         }
 
+        useAppStore
+          .getState()
+          .setStartupIssue(
+            createStartupIssue(
+              'Backend not ready',
+              'Cowork services did not start in time. Open the highlighted recovery screen and retry.'
+            )
+          );
+        const timeoutMessage = `Backend initialization timed out after ${MAX_WAIT}ms`;
+        console.error('[SessionStore] waitForBackend timeout', {
+          maxWaitMs: MAX_WAIT,
+          pollIntervalMs: POLL_INTERVAL,
+          elapsedMs: elapsed,
+        });
+        void reportTerminalDiagnostic(
+          'error',
+          'session-store.waitForBackend',
+          timeoutMessage,
+          undefined,
+          JSON.stringify({
+            maxWaitMs: MAX_WAIT,
+            pollIntervalMs: POLL_INTERVAL,
+            elapsedMs: elapsed,
+          }),
+        );
         throw new Error('Backend initialization timed out');
       },
 
@@ -103,14 +131,13 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         if (get().isLoading) {
           return;
         }
-
-        // Wait for backend to be initialized first
-        if (!get().backendInitialized) {
-          await get().waitForBackend();
-        }
-
         set({ isLoading: true, error: null });
         try {
+          // Wait for backend to be initialized first
+          if (!get().backendInitialized) {
+            await get().waitForBackend();
+          }
+
           const sessionsRaw = await invoke<SessionSummary[]>('agent_list_sessions');
           const sessions = sessionsRaw.map((session) => ({
             ...session,
@@ -123,6 +150,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           if (sessions.length === 0 && cachedSessions.length > 0) {
             // Still mark as loaded to prevent infinite retries
             set({ isLoading: false, hasLoaded: true });
+            useAppStore.getState().setStartupIssue(null);
             return;
           }
 
@@ -154,9 +182,37 @@ export const useSessionStore = create<SessionState & SessionActions>()(
                 ? sessions[0].id
                 : null,
           });
+          useAppStore.getState().setStartupIssue(null);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[SessionStore] Failed to load sessions', {
+            error: errorMessage,
+            backendInitialized: get().backendInitialized,
+            hasLoaded: get().hasLoaded,
+            activeSessionId: get().activeSessionId,
+            cachedSessionCount: get().sessions.length,
+          });
+          void reportTerminalDiagnostic(
+            'error',
+            'session-store.loadSessions',
+            `Failed to load sessions: ${errorMessage}`,
+            error instanceof Error ? error.stack : undefined,
+            JSON.stringify({
+              backendInitialized: get().backendInitialized,
+              hasLoaded: get().hasLoaded,
+              activeSessionId: get().activeSessionId,
+              cachedSessionCount: get().sessions.length,
+            }),
+          );
           toast.error('Failed to load sessions', errorMessage);
+          useAppStore
+            .getState()
+            .setStartupIssue(
+              createStartupIssue(
+                'Could not load workspace',
+                `${errorMessage}. Open the highlighted recovery screen, then retry connection.`
+              )
+            );
           set({
             isLoading: false,
             hasLoaded: true,

@@ -144,9 +144,9 @@ export const HELP_ARTICLES: HelpArticle[] = [
           'Provider keys authorize chat and provider-native capability calls. Without a valid key (except LM Studio), runtime capabilities are reduced or unavailable.',
       },
       {
-        heading: 'Media and Capability Keys',
+        heading: 'Media and Runtime Extension Keys',
         body:
-          'Google/OpenAI/Fal media keys govern media tools. Exa/Tavily keys govern search fallback. Stitch key governs Stitch/MCP Stitch tool registration.',
+          'Google/OpenAI/Fal media keys govern media tools. Exa/Tavily/Stitch keys and external CLI controls are managed under Runtime settings.',
       },
       {
         heading: 'Storage and Rotation',
@@ -191,8 +191,8 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
       },
       {
         id: 'onboarding-step-capability',
-        title: 'Capabilities and Integrations',
-        description: 'Set search fallback, research models, and integration-level keys.',
+        title: 'Capabilities and Runtime Extensions',
+        description: 'Set capability policy defaults, search fallback, research models, and extension keys.',
         targetId: 'onboarding-capability-block',
       },
       {
@@ -206,37 +206,50 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
   {
     id: 'settings',
     title: 'Settings Tour',
-    description: 'Learn provider, media, and integration settings with impact-aware guidance.',
+    description: 'Learn provider, media, capabilities, runtime, integrations, and remote access with impact-aware guidance.',
     steps: [
       {
         id: 'settings-step-tabs',
         title: 'Settings Tabs',
-        description: 'Switch between Provider, Media, and Integrations configuration.',
+        description: 'Use tabs to switch between Provider, Media, Capabilities, Runtime, Integrations, Remote, and Souls.',
         targetId: 'settings-tab-nav',
       },
       {
+        id: 'settings-step-provider-tab',
+        title: 'Provider Tab',
+        description: 'Configure provider, chat model, and command sandbox controls.',
+        targetId: 'settings-tab-provider',
+      },
+      {
+        id: 'settings-step-capabilities-tab',
+        title: 'Capabilities Tab',
+        description: 'Review capability availability and set Allow/Ask/Deny policy in one unified table.',
+        targetId: 'settings-tab-capabilities',
+      },
+      {
+        id: 'settings-step-runtime-tab',
+        title: 'Runtime Tab',
+        description: 'Manage search fallback, Stitch key, external CLI orchestration, and specialized runtime models.',
+        targetId: 'settings-tab-runtime',
+      },
+      {
+        id: 'settings-step-integrations-tab',
+        title: 'Integrations Tab',
+        description: 'Configure messaging channels and shared integration working directory defaults.',
+        targetId: 'settings-tab-integrations',
+      },
+      {
+        id: 'settings-step-remote-tab',
+        title: 'Remote Tab',
+        description:
+          'Set tunnel mode, install missing tunnel dependency, authenticate, start/stop tunnel, then generate pairing QR for mobile.',
+        targetId: 'settings-tab-remote',
+      },
+      {
         id: 'settings-step-help',
-        title: 'Help Controls',
-        description: 'Open Help Center or replay tours anytime.',
+        title: 'Help and Logout Controls',
+        description: 'Open Help Center, replay tours, or run secure logout/reset cleanup from here.',
         targetId: 'settings-help-actions',
-      },
-      {
-        id: 'settings-step-provider',
-        title: 'Provider Configuration',
-        description: 'Manage provider key, endpoint, and active provider selection.',
-        targetId: 'settings-provider-section',
-      },
-      {
-        id: 'settings-step-media',
-        title: 'Media Configuration',
-        description: 'Control image/video backend routing and specialized model overrides.',
-        targetId: 'settings-media-section',
-      },
-      {
-        id: 'settings-step-integrations',
-        title: 'Integrations Configuration',
-        description: 'Manage fallback search, Stitch, shared session defaults, and messaging integrations.',
-        targetId: 'settings-integrations-section',
       },
     ],
   },

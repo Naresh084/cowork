@@ -336,7 +336,7 @@ export function WorkflowBuilder() {
             }
             updateSchedule({ type: 'cron', expression: '0 * * * *' });
           }}
-          className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-2 py-2 text-xs text-white/90"
+          className="app-select app-select--compact w-full rounded-lg border border-white/[0.08] bg-white/[0.04] text-xs text-white/90"
         >
           <option value="every">Every interval</option>
           <option value="cron">Cron expression</option>

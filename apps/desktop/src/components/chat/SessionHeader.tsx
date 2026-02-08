@@ -251,10 +251,10 @@ export function SessionHeader() {
 
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-transparent"
+      className="flex items-center justify-between gap-3 px-4 py-2 border-b border-white/[0.06] bg-transparent min-w-0"
       data-tour-id="session-header-root"
     >
-      <div className="flex items-center gap-4 min-w-0">
+      <div className="flex items-center gap-4 min-w-0 flex-1">
         <div className="relative min-w-0" ref={menuRef}>
           {isEditing ? (
             <div className="flex items-center gap-2">
@@ -285,7 +285,7 @@ export function SessionHeader() {
                   'hover:bg-white/[0.06] transition-colors'
                 )}
               >
-                <span className="text-white/90 font-medium text-sm truncate max-w-[360px]">
+                <span className="text-white/90 font-medium text-sm truncate max-w-[42vw] lg:max-w-[360px]">
                   {sessionTitle}
                 </span>
                 <ChevronDown
@@ -295,12 +295,12 @@ export function SessionHeader() {
                   )}
                 />
               </motion.button>
-              <div className="flex items-center gap-2 text-[11px] text-white/40 px-2 -mt-0.5">
-                <span>{activeSession?.provider || 'google'}</span>
-                <span>•</span>
-                <span>{activeSession?.model || 'Default model'}</span>
-                <span>•</span>
-                <span>{formatRelativeDate(activeSession?.createdAt)}</span>
+              <div className="flex items-center gap-2 text-[11px] text-white/40 px-2 -mt-0.5 min-w-0 overflow-hidden">
+                <span className="shrink-0">{activeSession?.provider || 'google'}</span>
+                <span className="shrink-0">•</span>
+                <span className="truncate">{activeSession?.model || 'Default model'}</span>
+                <span className="shrink-0">•</span>
+                <span className="shrink-0">{formatRelativeDate(activeSession?.createdAt)}</span>
               </div>
             </div>
           )}
@@ -345,8 +345,8 @@ export function SessionHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#111218] p-1">
+      <div className="flex items-center gap-2 max-w-[62%] overflow-x-auto min-w-0 pr-1">
+        <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#111218] p-1 shrink-0">
           {EXECUTION_MODES.map((mode) => (
             <button
               key={mode.id}
@@ -374,7 +374,7 @@ export function SessionHeader() {
               exit={{ opacity: 0, scale: 0.9 }}
               onClick={() => setLiveViewOpen(true)}
               className={cn(
-                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium',
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0',
                 'bg-[#1D4ED8] text-white',
                 'hover:bg-[#3B82F6]',
                 'transition-colors',
@@ -391,7 +391,7 @@ export function SessionHeader() {
 
         {/* Connection status */}
         <div className={cn(
-          'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
+          'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs shrink-0',
           isAuthenticated ? 'bg-[#0F1B33] text-[#93C5FD]' : 'bg-[#1A1A1E] text-white/50'
         )}>
           <Plug className="w-3.5 h-3.5" />
@@ -400,7 +400,7 @@ export function SessionHeader() {
 
         {runtimeConfigNotice?.requiresNewSession ? (
           <div
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#FFB020]/15 text-[#FFB020]"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#FFB020]/15 text-[#FFB020] shrink-0"
             title={`New session required due to: ${runtimeConfigNotice.reasons.join(', ')}`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
@@ -411,7 +411,7 @@ export function SessionHeader() {
         {sandboxSnapshot ? (
           <div
             className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs',
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs shrink-0',
               sandboxSnapshot.mode === 'danger-full-access'
                 ? 'bg-[#FF5449]/15 text-[#FF8A80]'
                 : 'bg-[#1D4ED8]/10 text-[#93C5FD]',
@@ -431,19 +431,19 @@ export function SessionHeader() {
         ) : null}
 
         {executionMode === 'plan' ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD]">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD] shrink-0">
             Plan mode active
           </div>
         ) : null}
 
         {isPlanApprovalPending ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#F5C400]/15 text-[#F5C400]">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#F5C400]/15 text-[#F5C400] shrink-0">
             Review plan to continue
           </div>
         ) : null}
 
         {/* Approval Mode Dropdown */}
-        <div className="relative" ref={modeDropdownRef}>
+        <div className="relative shrink-0" ref={modeDropdownRef}>
           <button
             onClick={() => setIsModeDropdownOpen(!isModeDropdownOpen)}
             className={cn(

@@ -132,7 +132,7 @@ export function Dropdown({
             ref={menuRef}
             role="menu"
             className={cn(
-              'fixed z-50 min-w-[180px] py-1',
+              'fixed z-50 min-w-[190px] p-1.5',
               'bg-[#1A1A1E] border border-white/[0.08] rounded-lg shadow-xl',
               'animate-in fade-in-0 zoom-in-95 duration-150',
               className
@@ -162,19 +162,19 @@ export function Dropdown({
                       disabled={item.disabled}
                       onClick={() => handleItemClick(item)}
                       className={cn(
-                        'w-full flex items-center gap-2 px-3 py-2 text-sm',
+                        'w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-left',
                         'transition-colors',
                         item.disabled
                           ? 'text-white/40 cursor-not-allowed'
                           : item.danger
                           ? 'text-[#FF5449] hover:bg-[#FF5449]/20'
-                          : 'text-white/90 hover:bg-white/[0.06]',
-                        item.checked && 'bg-white/[0.04]'
+                          : 'text-white/90 hover:bg-white/[0.08]',
+                        item.checked && 'bg-[#1D4ED8]/20 text-[#DBEAFE]'
                       )}
                     >
                       {item.checked !== undefined && (
                         <span className="w-4">
-                          {item.checked && <Check size={14} />}
+                          {item.checked && <Check size={14} className="text-[#93C5FD]" />}
                         </span>
                       )}
                       {item.icon && (
@@ -197,7 +197,7 @@ export function Dropdown({
                     {item.items && activeSubmenu === item.id && (
                       <div
                         className={cn(
-                          'absolute top-0 left-full ml-1 min-w-[160px] py-1',
+                          'absolute top-0 left-full ml-1 min-w-[170px] p-1.5',
                           'bg-[#1A1A1E] border border-white/[0.08] rounded-lg shadow-xl',
                           'animate-in fade-in-0 slide-in-from-left-2 duration-150'
                         )}
@@ -209,13 +209,13 @@ export function Dropdown({
                             disabled={subItem.disabled}
                             onClick={() => handleItemClick(subItem)}
                             className={cn(
-                              'w-full flex items-center gap-2 px-3 py-2 text-sm',
+                              'w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-left',
                               'transition-colors',
                               subItem.disabled
                                 ? 'text-white/40 cursor-not-allowed'
                                 : subItem.danger
                                 ? 'text-[#FF5449] hover:bg-[#FF5449]/20'
-                                : 'text-white/90 hover:bg-white/[0.06]'
+                                : 'text-white/90 hover:bg-white/[0.08]'
                             )}
                           >
                             {subItem.icon && (

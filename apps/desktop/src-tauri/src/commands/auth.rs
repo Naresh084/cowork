@@ -1,4 +1,5 @@
 use crate::commands::credentials;
+use std::fs;
 
 const API_KEY_SERVICE: &str = "cowork";
 const LEGACY_API_KEY_ACCOUNT: &str = "api_key";
@@ -8,6 +9,16 @@ const OPENAI_API_KEY_ACCOUNT: &str = "openai_api_key";
 const FAL_API_KEY_ACCOUNT: &str = "fal_api_key";
 const EXA_API_KEY_ACCOUNT: &str = "exa_api_key";
 const TAVILY_API_KEY_ACCOUNT: &str = "tavily_api_key";
+const PROVIDER_IDS: [&str; 8] = [
+    "google",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "moonshot",
+    "glm",
+    "deepseek",
+    "lmstudio",
+];
 
 #[derive(serde::Serialize)]
 pub struct ModelInfo {
@@ -16,6 +27,13 @@ pub struct ModelInfo {
     pub description: String,
     pub input_token_limit: u32,
     pub output_token_limit: u32,
+}
+
+#[derive(serde::Serialize)]
+pub struct LogoutCleanupResult {
+    pub removed_data_dir: bool,
+    pub data_dir_path: String,
+    pub cleared_credential_accounts: usize,
 }
 
 fn normalize_provider_id(provider_id: &str) -> Result<String, String> {
@@ -706,6 +724,44 @@ pub async fn delete_stitch_api_key() -> Result<(), String> {
         STITCH_API_KEY_ACCOUNT.to_string(),
     )
     .await
+}
+
+#[tauri::command]
+pub async fn auth_logout_and_cleanup() -> Result<LogoutCleanupResult, String> {
+    let mut accounts_to_clear = vec![
+        LEGACY_API_KEY_ACCOUNT.to_string(),
+        GOOGLE_API_KEY_ACCOUNT.to_string(),
+        OPENAI_API_KEY_ACCOUNT.to_string(),
+        FAL_API_KEY_ACCOUNT.to_string(),
+        EXA_API_KEY_ACCOUNT.to_string(),
+        TAVILY_API_KEY_ACCOUNT.to_string(),
+        STITCH_API_KEY_ACCOUNT.to_string(),
+    ];
+
+    for provider_id in PROVIDER_IDS {
+        accounts_to_clear.push(provider_api_key_account(provider_id)?);
+    }
+
+    for account in &accounts_to_clear {
+        credentials::credentials_delete(API_KEY_SERVICE.to_string(), account.clone()).await?;
+    }
+
+    let home_dir = dirs::home_dir().ok_or("Could not determine home directory".to_string())?;
+    let data_dir = home_dir.join(".cowork");
+    let data_dir_path = data_dir.to_string_lossy().to_string();
+    let removed_data_dir = if data_dir.exists() {
+        fs::remove_dir_all(&data_dir)
+            .map_err(|error| format!("Failed to remove {}: {}", data_dir_path, error))?;
+        true
+    } else {
+        false
+    };
+
+    Ok(LogoutCleanupResult {
+        removed_data_dir,
+        data_dir_path,
+        cleared_credential_accounts: accounts_to_clear.len(),
+    })
 }
 
 #[tauri::command]

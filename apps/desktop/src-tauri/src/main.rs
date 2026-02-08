@@ -43,6 +43,7 @@ fn main() {
             commands::auth::get_stitch_api_key,
             commands::auth::set_stitch_api_key,
             commands::auth::delete_stitch_api_key,
+            commands::auth::auth_logout_and_cleanup,
             commands::auth::validate_api_key,
             commands::auth::fetch_models,
             // File commands
@@ -85,6 +86,7 @@ fn main() {
             commands::agent::agent_load_gemini_extensions,
             commands::agent::agent_get_initialization_status,
             commands::agent::agent_command,
+            commands::agent::agent_log_client_diagnostic,
             // Skill commands
             commands::skills::agent_discover_skills,
             commands::skills::agent_install_skill,
@@ -203,6 +205,20 @@ fn main() {
             commands::integrations::agent_integration_get_settings,
             commands::integrations::agent_integration_update_settings,
             commands::integrations::agent_integration_send_test,
+            // Remote access commands
+            commands::remote_access::remote_access_get_status,
+            commands::remote_access::remote_access_enable,
+            commands::remote_access::remote_access_disable,
+            commands::remote_access::remote_access_generate_qr,
+            commands::remote_access::remote_access_list_devices,
+            commands::remote_access::remote_access_revoke_device,
+            commands::remote_access::remote_access_set_public_base_url,
+            commands::remote_access::remote_access_set_tunnel_mode,
+            commands::remote_access::remote_access_refresh_tunnel,
+            commands::remote_access::remote_access_install_tunnel_binary,
+            commands::remote_access::remote_access_authenticate_tunnel,
+            commands::remote_access::remote_access_start_tunnel,
+            commands::remote_access::remote_access_stop_tunnel,
         ])
         .setup(|app| {
             // Auto-update disabled until a proper signing key pair is configured

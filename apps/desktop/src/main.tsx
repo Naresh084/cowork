@@ -8,7 +8,10 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import { App } from './App';
 import { AppErrorBoundary } from './components/errors/AppErrorBoundary';
+import { installGlobalTerminalDiagnostics } from './lib/terminal-diagnostics';
 import './styles/globals.css';
+
+installGlobalTerminalDiagnostics();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -320,7 +320,7 @@ export function ApiKeysSettings() {
         <select
           value={activeProvider}
           onChange={(event) => void handleProviderSwitch(event.target.value as ProviderId)}
-          className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
+          className="app-select"
         >
           {PROVIDERS.map((provider) => (
             <option key={provider} value={provider}>
@@ -431,7 +431,7 @@ export function ApiKeysSettings() {
             <select
               value={sandboxModeDraft}
               onChange={(event) => setSandboxModeDraft(event.target.value as typeof sandboxModeDraft)}
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
+              className="app-select"
             >
               <option value="read-only">read-only</option>
               <option value="workspace-write">workspace-write</option>
