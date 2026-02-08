@@ -204,7 +204,7 @@ export class ExternalCliRunManager extends EventEmitter {
     this.emit('run_updated', toSummary(run));
 
     const adapter: ExternalCliAdapter =
-      input.provider === 'codex' ? new CodexAppServerAdapter() : new ClaudeStreamAdapter(input.origin);
+      input.provider === 'codex' ? new CodexAppServerAdapter() : new ClaudeStreamAdapter();
 
     this.adapters.set(runId, adapter);
 

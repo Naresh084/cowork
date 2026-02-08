@@ -156,14 +156,20 @@ export class MessageRouter extends EventEmitter {
 
       const integrationSession = sessions.find((session: unknown) => {
         const sessionAny = session as { type?: string; title?: string };
-        if (sessionAny?.type === 'integration') {
+        const sessionType = typeof sessionAny?.type === 'string' ? sessionAny.type : undefined;
+        if (sessionType === 'integration') {
           return true;
+        }
+        // Legacy fallback: only treat title-matched sessions as integration when
+        // type metadata is missing, never when an explicit non-integration type exists.
+        if (sessionType && sessionType !== 'integration') {
+          return false;
         }
         return (
           sessionAny?.title === INTEGRATION_SESSION_TITLE ||
           sessionAny?.title === LEGACY_INTEGRATION_SESSION_TITLE
         );
-      }) as { id?: string; title?: string; messageCount?: number } | undefined;
+      }) as { id?: string; type?: string; title?: string; messageCount?: number } | undefined;
 
       if (!integrationSession?.id) {
         return null;
@@ -182,6 +188,7 @@ export class MessageRouter extends EventEmitter {
 
       eventEmitter.sessionUpdated({
         id: integrationSession.id,
+        type: integrationSession.type ?? 'integration',
         title: integrationSession.title ?? undefined,
         messageCount:
           typeof integrationSession.messageCount === 'number'
@@ -216,13 +223,7 @@ export class MessageRouter extends EventEmitter {
       throw new Error('Failed to create shared integration session');
     }
 
-    eventEmitter.sessionUpdated({
-      id: sessionId,
-      title:
-        (session as { title?: string | null } | null)?.title ?? initialTitle,
-      messageCount:
-        (session as { messageCount?: number } | null)?.messageCount ?? 0,
-    });
+    eventEmitter.sessionUpdated(session);
 
     this.integrationSessionId = sessionId;
     return sessionId;

@@ -13,6 +13,10 @@ export interface SidecarEvent {
 
 type EventListener = (event: SidecarEvent) => void;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 /**
  * Emits events to the Rust backend via stdout.
  * Events are JSON objects with a specific structure that Tauri can parse.
@@ -49,7 +53,7 @@ export class EventEmitter {
 
     // Coalesce frequent chat:update events within the current flush window.
     if (type === 'chat:update' && event.sessionId) {
-      const incoming = event.data as { itemId?: string } | null;
+      const incoming = event.data as { itemId?: string; updates?: Record<string, unknown> } | null;
       const incomingItemId = incoming?.itemId;
       if (incomingItemId) {
         for (let i = this.eventBuffer.length - 1; i >= 0; i -= 1) {
@@ -57,9 +61,25 @@ export class EventEmitter {
           if (buffered?.type !== 'chat:update' || buffered.sessionId !== event.sessionId) {
             continue;
           }
-          const bufferedData = buffered.data as { itemId?: string } | null;
+          const bufferedData = buffered.data as {
+            itemId?: string;
+            updates?: Record<string, unknown>;
+          } | null;
           if (bufferedData?.itemId === incomingItemId) {
-            this.eventBuffer[i] = event;
+            const mergedUpdates = {
+              ...(isRecord(bufferedData.updates) ? bufferedData.updates : {}),
+              ...(isRecord(incoming.updates) ? incoming.updates : {}),
+            };
+
+            this.eventBuffer[i] = {
+              ...event,
+              data: {
+                ...bufferedData,
+                ...incoming,
+                itemId: incomingItemId,
+                updates: mergedUpdates,
+              },
+            };
             this.scheduleFlush();
             return;
           }

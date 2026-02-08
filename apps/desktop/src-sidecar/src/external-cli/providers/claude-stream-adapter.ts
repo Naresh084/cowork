@@ -5,9 +5,7 @@ import type {
   ExternalCliAdapterCallbacks,
   ExternalCliAdapterStartInput,
   ExternalCliResponsePayload,
-  ExternalCliRunOrigin,
 } from '../types.js';
-import { ClaudePermissionBridge } from './claude-permission-bridge.js';
 
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -40,18 +38,11 @@ function extractAssistantText(content: unknown): string {
 }
 
 export class ClaudeStreamAdapter implements ExternalCliAdapter {
-  private readonly origin: ExternalCliRunOrigin;
-
   private process: ChildProcess | null = null;
   private callbacks: ExternalCliAdapterCallbacks | null = null;
-  private bridge: ClaudePermissionBridge | null = null;
   private stopped = false;
   private stderrLines: string[] = [];
   private stdoutLines: string[] = [];
-
-  constructor(origin: ExternalCliRunOrigin) {
-    this.origin = origin;
-  }
 
   async start(input: ExternalCliAdapterStartInput, callbacks: ExternalCliAdapterCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -69,25 +60,6 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       args.push('--allow-dangerously-skip-permissions');
     }
 
-    if (!input.bypassPermission) {
-      this.bridge = new ClaudePermissionBridge({
-        runId: input.runId,
-        sessionId: input.sessionId,
-        origin: this.origin,
-        onInteraction: (interaction) => {
-          this.callbacks?.onWaitingInteraction(interaction);
-        },
-        onInteractionResolved: (interactionId) => {
-          this.callbacks?.onInteractionResolved(interactionId);
-        },
-      });
-
-      await this.bridge.start();
-      args.push('--mcp-config', this.bridge.getMcpConfigPath());
-      args.push('--strict-mcp-config');
-      args.push('--permission-prompt-tool', this.bridge.getPermissionPromptToolName());
-    }
-
     this.callbacks.onProgress({
       timestamp: Date.now(),
       kind: 'status',
@@ -99,7 +71,9 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    callbacks.onLaunchCommand?.(buildCommandString('claude', args));
+    callbacks.onLaunchCommand?.(
+      buildCommandString('claude', args),
+    );
 
     this.process.stderr?.on('data', (chunk) => {
       const text = String(chunk).trim();
@@ -159,11 +133,8 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
   }
 
   async respond(interactionId: string, response: ExternalCliResponsePayload): Promise<void> {
-    if (!this.bridge) {
-      return;
-    }
-
-    this.bridge.resolveInteraction(interactionId, response);
+    void interactionId;
+    void response;
   }
 
   async cancel(reason?: string): Promise<void> {
@@ -191,11 +162,6 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
           this.process.kill('SIGKILL');
         }
       }, 1000).unref();
-    }
-
-    if (this.bridge) {
-      await this.bridge.stop();
-      this.bridge = null;
     }
 
     this.callbacks = null;

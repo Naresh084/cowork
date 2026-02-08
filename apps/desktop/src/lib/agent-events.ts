@@ -16,7 +16,7 @@ function parseTauriEvent(
   // Extract the event type from the full event name (e.g., 'agent:stream:chunk' -> 'stream:chunk')
   const type = eventName.replace('agent:', '') as AgentEvent['type'];
   const sessionId = payload.sessionId ?? '';
-  const data = payload.data as Record<string, unknown>;
+  const data = (payload.data ?? {}) as Record<string, unknown>;
 
   switch (type) {
     case 'stream:start':
@@ -199,15 +199,41 @@ function parseTauriEvent(
       };
 
     case 'session:updated':
+      {
+        const sessionData = (data.session as {
+          id?: string;
+          title?: string;
+          messageCount?: number;
+          executionMode?: 'execute' | 'plan';
+          type?: 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
+          provider?: string;
+          workingDirectory?: string;
+          model?: string;
+          createdAt?: number;
+          updatedAt?: number;
+          lastAccessedAt?: number;
+        } | undefined) ?? undefined;
       return {
         type: 'session:updated',
-        sessionId: sessionId || (data.session as { id?: string } | undefined)?.id || '',
-        title: (data.title as string | undefined) ?? (data.session as { title?: string })?.title,
-        messageCount: (data.messageCount as number | undefined) ?? (data.session as { messageCount?: number })?.messageCount,
+        sessionId: sessionId || sessionData?.id || '',
+        title: (data.title as string | undefined) ?? sessionData?.title,
+        messageCount: (data.messageCount as number | undefined) ?? sessionData?.messageCount,
         executionMode:
           (data.executionMode as 'execute' | 'plan' | undefined) ??
-          (data.session as { executionMode?: 'execute' | 'plan' })?.executionMode,
+          sessionData?.executionMode,
+        sessionType:
+          (data.type as 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration' | undefined) ??
+          sessionData?.type,
+        provider: (data.provider as string | undefined) ?? sessionData?.provider,
+        workingDirectory:
+          (data.workingDirectory as string | undefined) ?? sessionData?.workingDirectory,
+        model: (data.model as string | undefined) ?? sessionData?.model,
+        createdAt: (data.createdAt as number | undefined) ?? sessionData?.createdAt,
+        updatedAt: (data.updatedAt as number | undefined) ?? sessionData?.updatedAt,
+        lastAccessedAt:
+          (data.lastAccessedAt as number | undefined) ?? sessionData?.lastAccessedAt,
       };
+      }
 
     case 'agent:started':
       return { type: 'agent:started', sessionId };
@@ -456,12 +482,12 @@ export function subscribeToAgentEvents(
 
   // Return cleanup function
   return () => {
-    isActive = false;
-
     if (flushTimeout) {
       clearTimeout(flushTimeout);
-      flushTimeout = null;
+      flushEvents();
     }
+
+    isActive = false;
 
     for (const unlisten of unlisteners) {
       unlisten();

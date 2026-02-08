@@ -140,7 +140,7 @@ export function useAgentEvents(sessionId: string | null): void {
         sessionReloadTimerRef.current = null;
         const sessionStore = sessionStoreRef.current;
         if (sessionStore.isLoading) {
-          if (sessionReloadAttemptRef.current < 12) {
+          if (sessionReloadAttemptRef.current < 120) {
             sessionReloadAttemptRef.current += 1;
             scheduleSessionReload(250);
           } else {
@@ -166,21 +166,62 @@ export function useAgentEvents(sessionId: string | null): void {
         const updatedSessionId = event.sessionId?.trim();
         if (updatedSessionId) {
           let didPatch = false;
+          let didInsert = false;
           useSessionStore.setState((state) => {
             const sessionIndex = state.sessions.findIndex((session) => session.id === updatedSessionId);
             if (sessionIndex < 0) {
-              return state;
+              const now = Date.now();
+              const sessionType =
+                event.sessionType === 'main' ||
+                event.sessionType === 'isolated' ||
+                event.sessionType === 'cron' ||
+                event.sessionType === 'ephemeral' ||
+                event.sessionType === 'integration'
+                  ? event.sessionType
+                  : undefined;
+
+              didInsert = true;
+              return {
+                sessions: [
+                  {
+                    id: updatedSessionId,
+                    type: sessionType,
+                    executionMode: event.executionMode ?? 'execute',
+                    title: event.title ?? (sessionType === 'integration' ? 'Shared Session' : null),
+                    firstMessage: null,
+                    workingDirectory: event.workingDirectory ?? null,
+                    model: event.model ?? null,
+                    messageCount: typeof event.messageCount === 'number' ? event.messageCount : 0,
+                    createdAt: event.createdAt ?? now,
+                    updatedAt: event.updatedAt ?? now,
+                    lastAccessedAt: event.lastAccessedAt ?? now,
+                  },
+                  ...state.sessions,
+                ],
+              };
             }
 
             didPatch = true;
             const current = state.sessions[sessionIndex];
             const patched = {
               ...current,
+              type:
+                event.sessionType === 'main' ||
+                event.sessionType === 'isolated' ||
+                event.sessionType === 'cron' ||
+                event.sessionType === 'ephemeral' ||
+                event.sessionType === 'integration'
+                  ? event.sessionType
+                  : current.type,
               title: event.title ?? current.title,
               messageCount:
                 typeof event.messageCount === 'number' ? event.messageCount : current.messageCount,
               executionMode: event.executionMode ?? current.executionMode,
-              updatedAt: Date.now(),
+              workingDirectory: event.workingDirectory ?? current.workingDirectory,
+              model: event.model ?? current.model,
+              createdAt: event.createdAt ?? current.createdAt,
+              updatedAt: event.updatedAt ?? Date.now(),
+              lastAccessedAt: event.lastAccessedAt ?? current.lastAccessedAt,
             };
             const sessions = [...state.sessions];
             sessions[sessionIndex] = patched;
@@ -189,6 +230,12 @@ export function useAgentEvents(sessionId: string | null): void {
 
           if (didPatch) {
             sessionReloadAttemptRef.current = 0;
+            return;
+          }
+
+          if (didInsert) {
+            sessionReloadAttemptRef.current = 0;
+            scheduleSessionReload();
             return;
           }
         }

@@ -21,7 +21,9 @@ function stripMarkdownForPlain(input: string): string {
 function truncateForPlatform(text: string, platform: PlatformType): string {
   const limit =
     platform === 'whatsapp'
-      ? 4000
+      // WhatsApp supports substantially larger text payloads than 4k.
+      // Keep a high safety ceiling so long replies do not appear to stop "randomly".
+      ? 32000
       : platform === 'telegram'
         ? 4096
         : platform === 'imessage'

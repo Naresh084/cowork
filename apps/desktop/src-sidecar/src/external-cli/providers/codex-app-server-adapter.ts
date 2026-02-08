@@ -123,7 +123,9 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    callbacks.onLaunchCommand?.(buildCommandString('codex', codexArgs));
+    callbacks.onLaunchCommand?.(
+      buildCommandString('codex', codexArgs),
+    );
 
     this.process.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();

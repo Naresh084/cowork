@@ -2956,13 +2956,29 @@ export class AgentRunner {
   ): Promise<SessionInfo> {
     const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
     const providerKey = this.getProviderApiKey(selectedProvider);
-    if (!providerKey && selectedProvider !== 'lmstudio') {
+    const requiresProviderKey = type !== 'integration';
+    if (requiresProviderKey && !providerKey && selectedProvider !== 'lmstudio') {
       throw new Error(`Provider "${selectedProvider}" not initialized. Set API key first.`);
     }
 
+    const providerFallbackModel: Partial<Record<ProviderId, string>> = {
+      google: 'gemini-3-flash-preview',
+      openai: 'gpt-4o-mini',
+      anthropic: 'claude-3-5-haiku-latest',
+      openrouter: 'openai/gpt-4o-mini',
+      moonshot: 'moonshot-v1-8k',
+      glm: 'glm-4.5-flash',
+      deepseek: 'deepseek-chat',
+      lmstudio: 'lm-studio',
+    };
+
     // Use provided model or fall back to default
     // This handles both undefined and null cases (null comes from Rust's Option::None)
-    const actualModel = model || this.modelCatalog[0]?.id;
+    const actualModel =
+      model ||
+      this.modelCatalog[0]?.id ||
+      providerFallbackModel[selectedProvider] ||
+      'gemini-3-flash-preview';
     if (!actualModel) {
       throw new Error('No models available. Configure the API key and fetch models first.');
     }

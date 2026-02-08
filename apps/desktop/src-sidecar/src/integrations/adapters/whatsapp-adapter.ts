@@ -844,6 +844,38 @@ export class WhatsAppAdapter extends BaseAdapter {
     return candidates;
   }
 
+  private async withSendTimeout<T>(
+    candidate: string,
+    operation: Promise<T>,
+  ): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      let finished = false;
+      const timeoutHandle = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        reject(
+          new Error(
+            `Timed out after ${this.sendTimeoutMs}ms while sending to ${candidate}`,
+          ),
+        );
+      }, this.sendTimeoutMs);
+
+      operation
+        .then((result) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeoutHandle);
+          resolve(result);
+        })
+        .catch((error) => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timeoutHandle);
+          reject(error);
+        });
+    });
+  }
+
   private async sendMessageWithFallback(chatId: string, text: string): Promise<unknown> {
     if (!this.client) {
       throw new Error('WhatsApp client is not connected');
@@ -859,9 +891,16 @@ export class WhatsAppAdapter extends BaseAdapter {
             `[whatsapp-send] trying chatId candidate ${candidate} (from ${chatId})\n`,
           );
         }
-        return await this.client.sendMessage(candidate, text);
+        return await this.withSendTimeout(
+          candidate,
+          this.client.sendMessage(candidate, text),
+        );
       } catch (error) {
         lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[whatsapp-send] send failed for candidate ${candidate}: ${message}\n`,
+        );
       }
     }
 
@@ -883,9 +922,16 @@ export class WhatsAppAdapter extends BaseAdapter {
 
     for (const candidate of candidates) {
       try {
-        return await this.client.sendMessage(candidate, media, options);
+        return await this.withSendTimeout(
+          candidate,
+          this.client.sendMessage(candidate, media, options),
+        );
       } catch (error) {
         lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[whatsapp-send] media send failed for candidate ${candidate}: ${message}\n`,
+        );
       }
     }
 

@@ -152,6 +152,13 @@ export type AgentEvent =
       title?: string;
       messageCount?: number;
       executionMode?: 'execute' | 'plan';
+      sessionType?: 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
+      provider?: string;
+      workingDirectory?: string;
+      model?: string;
+      createdAt?: number;
+      updatedAt?: number;
+      lastAccessedAt?: number;
     }
   // Agent state events
   | { type: 'agent:started'; sessionId: string }
