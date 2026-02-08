@@ -13,6 +13,33 @@ function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildCommandString(command: string, args: string[]): string {
+  const pieces = [command, ...args.map((arg) => (/[^\w@%+=:,./-]/.test(arg) ? shellEscape(arg) : arg))];
+  return pieces.join(' ');
+}
+
+function truncateForCommand(value: string, max = 72): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function sanitizePromptArg(args: string[]): string[] {
+  const masked = [...args];
+  for (let i = 0; i < masked.length; i += 1) {
+    if (masked[i] === '-p' && i + 1 < masked.length) {
+      const promptValue = String(masked[i + 1] ?? '');
+      masked[i + 1] = truncateForCommand(promptValue);
+      i += 1;
+    }
+  }
+  return masked;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -86,6 +113,7 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    callbacks.onLaunchCommand?.(buildCommandString('claude', sanitizePromptArg(args)));
 
     this.process.stderr?.on('data', (chunk) => {
       const text = String(chunk).trim();

@@ -162,7 +162,7 @@ describe('external-cli run-manager working directory handling', () => {
     await rm(missingDirectory, { recursive: true, force: true });
   });
 
-  it('enforces bypass settings gate before launch', async () => {
+  it('downgrades bypass when provider bypass setting is disabled', async () => {
     const appDataDir = await mkdtemp(join(tmpdir(), 'ext-cli-run-manager-bypass-'));
     const manager = createManager(appDataDir, {
       codex: { enabled: true, allowBypassPermissions: false },
@@ -171,20 +171,27 @@ describe('external-cli run-manager working directory handling', () => {
 
     await manager.initialize();
 
-    await expect(
-      manager.startRun({
-        sessionId: 'session-bypass',
-        provider: 'codex',
-        prompt: 'test',
-        workingDirectory: resolve(tmpdir()),
-        createIfMissing: false,
-        requestedBypassPermission: true,
-        bypassPermission: true,
-        origin: { source: 'desktop' },
-      }),
-    ).rejects.toMatchObject({
-      code: 'CLI_PERMISSION_BYPASS_BLOCKED',
+    const summary = await manager.startRun({
+      sessionId: 'session-bypass',
+      provider: 'codex',
+      prompt: 'test',
+      workingDirectory: resolve(tmpdir()),
+      createIfMissing: false,
+      requestedBypassPermission: true,
+      bypassPermission: true,
+      origin: { source: 'desktop' },
     });
+
+    expect(summary.status).toBe('running');
+    const run = manager.getRun(summary.runId);
+    expect(run?.requestedBypassPermission).toBe(true);
+    expect(run?.effectiveBypassPermission).toBe(false);
+    expect(run?.bypassPermission).toBe(false);
+    expect(
+      run?.progress.some((entry) =>
+        entry.message.includes('Bypass was requested but is disabled in settings'),
+      ),
+    ).toBe(true);
 
     await manager.shutdown();
     await rm(appDataDir, { recursive: true, force: true });

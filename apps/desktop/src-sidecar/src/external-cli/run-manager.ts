@@ -40,6 +40,7 @@ function toSummary(run: ExternalCliRunRecord): ExternalCliRunSummary {
     sessionId: run.sessionId,
     provider: run.provider,
     status: run.status,
+    launchCommand: run.launchCommand,
     startedAt: run.startedAt,
     updatedAt: run.updatedAt,
     finishedAt: run.finishedAt,
@@ -134,13 +135,6 @@ export class ExternalCliRunManager extends EventEmitter {
       );
     }
 
-    if (input.bypassPermission && !providerConfig.allowBypassPermissions) {
-      throw new ExternalCliError(
-        'CLI_PERMISSION_BYPASS_BLOCKED',
-        `Bypass permission is disabled for ${input.provider} in settings.`,
-      );
-    }
-
     if (availabilityEntry.authStatus === 'unauthenticated') {
       throw new ExternalCliError(
         'CLI_AUTH_REQUIRED',
@@ -158,10 +152,26 @@ export class ExternalCliRunManager extends EventEmitter {
 
     const workingDirectory = await this.prepareWorkingDirectory(input);
     const requestedBypassPermission = input.requestedBypassPermission ?? input.bypassPermission;
-    const effectiveBypassPermission = input.bypassPermission;
+    const bypassDowngraded = Boolean(input.bypassPermission && !providerConfig.allowBypassPermissions);
+    const effectiveBypassPermission = bypassDowngraded ? false : input.bypassPermission;
 
     const now = Date.now();
     const runId = generateId('ext-run');
+
+    const initialProgress: ExternalCliProgressEntry[] = [
+      {
+        timestamp: now,
+        kind: 'status',
+        message: `Queued ${input.provider} run.`,
+      },
+    ];
+    if (bypassDowngraded) {
+      initialProgress.push({
+        timestamp: now,
+        kind: 'status',
+        message: `Bypass was requested but is disabled in settings for ${input.provider}. Continuing with permission prompts enabled.`,
+      });
+    }
 
     const run: ExternalCliRunRecord = {
       runId,
@@ -178,13 +188,7 @@ export class ExternalCliRunManager extends EventEmitter {
       startedAt: now,
       updatedAt: now,
       origin: input.origin,
-      progress: [
-        {
-          timestamp: now,
-          kind: 'status',
-          message: `Queued ${input.provider} run.`,
-        },
-      ],
+      progress: initialProgress,
     };
 
     this.runs.set(runId, run);
@@ -219,6 +223,12 @@ export class ExternalCliRunManager extends EventEmitter {
         {
           onProgress: (entry) => {
             this.appendProgress(run, entry);
+            run.updatedAt = Date.now();
+            void this.persist();
+            this.emit('run_updated', toSummary(run));
+          },
+          onLaunchCommand: (command) => {
+            run.launchCommand = command;
             run.updatedAt = Date.now();
             void this.persist();
             this.emit('run_updated', toSummary(run));

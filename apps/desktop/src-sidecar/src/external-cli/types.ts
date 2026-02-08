@@ -84,6 +84,7 @@ export interface ExternalCliRunRecord {
   sessionId: string;
   provider: ExternalCliProvider;
   prompt: string;
+  launchCommand?: string;
   workingDirectory: string;
   resolvedWorkingDirectory?: string;
   createIfMissing?: boolean;
@@ -107,6 +108,7 @@ export interface ExternalCliRunSummary {
   sessionId: string;
   provider: ExternalCliProvider;
   status: ExternalCliRunStatus;
+  launchCommand?: string;
   startedAt: number;
   updatedAt: number;
   finishedAt?: number;
@@ -157,6 +159,7 @@ export interface ExternalCliAdapterStartInput {
 }
 
 export interface ExternalCliAdapterCallbacks {
+  onLaunchCommand?: (command: string) => void;
   onProgress: (entry: ExternalCliProgressEntry) => void;
   onWaitingInteraction: (interaction: ExternalCliPendingInteraction) => void;
   onInteractionResolved: (interactionId: string) => void;

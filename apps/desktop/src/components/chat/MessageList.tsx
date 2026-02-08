@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { User, Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic } from 'lucide-react';
 import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
@@ -13,6 +13,7 @@ import type { Message, MessageContentPart, ChatItem } from '@gemini-cowork/share
 import { BrandMark } from '../icons/BrandMark';
 import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';
+import { ToolExecutionCard } from './ToolExecutionCard';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import remarkGfm from 'remark-gfm';
 import { fixNestedCodeFences } from '../../lib/fix-markdown';
@@ -148,109 +149,122 @@ export function MessageList() {
 
   const renderTurnActivities = (turnId: string) => {
     const activities = turnActivities?.[turnId] ?? [];
-    if (activities.length === 0 && (!isStreaming || activeTurnId !== turnId)) {
-      return null;
-    }
     const hasRunningTool = [...toolMap.values()].some((t) => t.status === 'running');
     const hasAssistantInTurn = activities.some((activity) => activity.type === 'assistant');
+    const showThinking =
+      isStreaming && activeTurnId === turnId && (thinkingContent || (!hasAssistantInTurn && !hasRunningTool));
+    if (activities.length === 0 && !showThinking) {
+      return null;
+    }
 
     return (
-      <div className="mt-2 space-y-2 turn-activities">
-        {activities.map((activity) => {
-          if (activity.type === 'thinking') {
-            // Don't render thinking from activities - we'll render it dynamically at the end
+      <div className="mt-2 flex items-start gap-2 no-select-extend message-block-isolate assistant-turn-block">
+        <motion.div
+          initial={{ scale: 0.84, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="assistant-turn-avatar mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center"
+        >
+          <BrandMark className="w-3.5 h-3.5" />
+        </motion.div>
+
+        <div className="assistant-turn-content flex-1 min-w-0 space-y-2 turn-activities">
+          {activities.map((activity) => {
+            if (activity.type === 'thinking') {
+              // Don't render thinking from activities - we'll render it dynamically at the end
+              return null;
+            }
+
+            if (activity.type === 'tool') {
+              if (!activity.toolId) return null;
+              const tool = toolMap.get(activity.toolId);
+              if (!tool) return null;
+              return <ToolActivityRow key={activity.id} tool={tool} isActive={tool.status === 'running'} />;
+            }
+
+            if (activity.type === 'media') {
+              if (!activity.mediaItems || activity.mediaItems.length === 0) return null;
+              return (
+                <MediaActivityRow
+                  key={activity.id}
+                  items={activity.mediaItems}
+                  onOpen={(artifact) => setPreviewArtifact(artifact)}
+                />
+              );
+            }
+
+            if (activity.type === 'report') {
+              if (!activity.report) return null;
+              return (
+                <ReportActivityRow
+                  key={activity.id}
+                  report={activity.report}
+                  artifacts={artifacts}
+                  onOpen={(artifact) => setPreviewArtifact(artifact)}
+                />
+              );
+            }
+
+            if (activity.type === 'design') {
+              if (!activity.design) return null;
+              return (
+                <DesignActivityRow
+                  key={activity.id}
+                  design={activity.design}
+                  onOpen={(artifact) => setPreviewArtifact(artifact)}
+                />
+              );
+            }
+
+            if (activity.type === 'permission') {
+              const permission = pendingPermissions.find((p) => p.id === activity.permissionId);
+              if (!permission) return null;
+              return (
+                <PermissionInlineCard
+                  key={activity.id}
+                  request={permission}
+                  onDecision={(decision) => {
+                    respondToPermission(permission.sessionId, permission.id, decision);
+                  }}
+                />
+              );
+            }
+
+            if (activity.type === 'question') {
+              const question = pendingQuestions.find((q) => q.id === activity.questionId);
+              if (!question) return null;
+              return (
+                <AskUserQuestion
+                  key={activity.id}
+                  question={question}
+                  onAnswer={(questionId, answer) => {
+                    respondToQuestion(question.sessionId, questionId, answer);
+                  }}
+                />
+              );
+            }
+
+            if (activity.type === 'assistant') {
+              if (!activity.messageId) return null;
+              const message = messageById.get(activity.messageId);
+              if (!message) return null;
+              return (
+                <MessageBubble
+                  key={activity.id}
+                  message={message}
+                  showAvatar={false}
+                  showCopyAction={finalAssistantMessageIds.has(message.id)}
+                />
+              );
+            }
+
             return null;
-          }
+          })}
 
-          if (activity.type === 'tool') {
-            if (!activity.toolId) return null;
-            const tool = toolMap.get(activity.toolId);
-            if (!tool) return null;
-            return <ToolActivityRow key={activity.id} tool={tool} isActive={tool.status === 'running'} />;
-          }
-
-          if (activity.type === 'media') {
-            if (!activity.mediaItems || activity.mediaItems.length === 0) return null;
-            return (
-              <MediaActivityRow
-                key={activity.id}
-                items={activity.mediaItems}
-                onOpen={(artifact) => setPreviewArtifact(artifact)}
-              />
-            );
-          }
-
-          if (activity.type === 'report') {
-            if (!activity.report) return null;
-            return (
-              <ReportActivityRow
-                key={activity.id}
-                report={activity.report}
-                artifacts={artifacts}
-                onOpen={(artifact) => setPreviewArtifact(artifact)}
-              />
-            );
-          }
-
-          if (activity.type === 'design') {
-            if (!activity.design) return null;
-            return (
-              <DesignActivityRow
-                key={activity.id}
-                design={activity.design}
-                onOpen={(artifact) => setPreviewArtifact(artifact)}
-              />
-            );
-          }
-
-          if (activity.type === 'permission') {
-            const permission = pendingPermissions.find((p) => p.id === activity.permissionId);
-            if (!permission) return null;
-            return (
-              <PermissionInlineCard
-                key={activity.id}
-                request={permission}
-                onDecision={(decision) => {
-                  respondToPermission(permission.sessionId, permission.id, decision);
-                }}
-              />
-            );
-          }
-
-          if (activity.type === 'question') {
-            const question = pendingQuestions.find((q) => q.id === activity.questionId);
-            if (!question) return null;
-            return (
-              <AskUserQuestion
-                key={activity.id}
-                question={question}
-                onAnswer={(questionId, answer) => {
-                  respondToQuestion(question.sessionId, questionId, answer);
-                }}
-              />
-            );
-          }
-
-          if (activity.type === 'assistant') {
-            if (!activity.messageId) return null;
-            const message = messageById.get(activity.messageId);
-            if (!message) return null;
-            return (
-              <MessageBubble
-                key={activity.id}
-                message={message}
-                showCopyAction={finalAssistantMessageIds.has(message.id)}
-              />
-            );
-          }
-
-          return null;
-        })}
-
-        {/* Show thinking block when there's thinking content or when waiting for the first assistant item */}
-        {isStreaming && activeTurnId === turnId && (thinkingContent || (!hasAssistantInTurn && !hasRunningTool)) && (
-          <ThinkingBlock content={thinkingContent} isActive={isThinking || (!hasAssistantInTurn && !hasRunningTool)} />
-        )}
+          {/* Show thinking block when there's thinking content or when waiting for the first assistant item */}
+          {showThinking && (
+            <ThinkingBlock content={thinkingContent} isActive={isThinking || (!hasAssistantInTurn && !hasRunningTool)} />
+          )}
+        </div>
 
       </div>
     );
@@ -386,6 +400,7 @@ function EmptyState() {
 interface MessageBubbleProps {
   message: Message;
   showCopyAction?: boolean;
+  showAvatar?: boolean;
 }
 
 interface PermissionInlineCardProps {
@@ -701,6 +716,48 @@ function getArgValue(args: Record<string, unknown> | undefined, keys: string[]):
       return String(value);
     }
   }
+  return null;
+}
+
+function isExternalCliToolName(toolName: string): boolean {
+  const lower = toolName.toLowerCase();
+  return (
+    lower === 'start_codex_cli_run'
+    || lower === 'start_claude_cli_run'
+    || lower === 'external_cli_get_progress'
+    || lower === 'external_cli_respond'
+    || lower === 'external_cli_cancel_run'
+  );
+}
+
+function extractToolErrorMessage(tool: ToolExecution): string | null {
+  if (tool.error && tool.error.trim().length > 0) {
+    return tool.error.trim();
+  }
+
+  if (!tool.result || typeof tool.result !== 'object') {
+    return null;
+  }
+
+  const resultAny = tool.result as {
+    error?: unknown;
+    message?: unknown;
+    errorMessage?: unknown;
+    run?: { errorMessage?: unknown };
+    summary?: { errorMessage?: unknown };
+  };
+
+  const direct =
+    (typeof resultAny.error === 'string' && resultAny.error)
+    || (typeof resultAny.errorMessage === 'string' && resultAny.errorMessage)
+    || (typeof resultAny.message === 'string' && resultAny.message);
+  if (direct && direct.trim().length > 0) return direct.trim();
+
+  const nested =
+    (typeof resultAny.run?.errorMessage === 'string' && resultAny.run.errorMessage)
+    || (typeof resultAny.summary?.errorMessage === 'string' && resultAny.summary.errorMessage);
+  if (nested && nested.trim().length > 0) return nested.trim();
+
   return null;
 }
 
@@ -1323,9 +1380,21 @@ function ToolActivityRow({
   tool: ToolExecution;
   isActive?: boolean;
 }) {
+  if (isExternalCliToolName(tool.name)) {
+    return (
+      <ToolExecutionCard
+        execution={tool}
+        isActive={isActive}
+        className="tool-activity-card"
+      />
+    );
+  }
+
   const [expanded, setExpanded] = useState(false);
   const meta = getToolMeta(tool.name);
   const kind = getToolKind(tool.name);
+  const ToolIcon = meta?.icon;
+  const errorMessage = extractToolErrorMessage(tool);
 
   // Use TaskToolCard for task/subagent tools
   if (kind === 'task') {
@@ -1355,6 +1424,24 @@ function ToolActivityRow({
           isActive ? 'text-white/90' : 'text-white/70 hover:text-white/85'
         )}
       >
+        <span className="flex-shrink-0 w-5 h-5 rounded-md border border-white/[0.1] bg-white/[0.04] flex items-center justify-center">
+          {tool.status === 'running' ? (
+            <Loader2 className="w-3 h-3 text-[#93C5FD] animate-spin" />
+          ) : ToolIcon ? (
+            <ToolIcon
+              className={cn(
+                'w-3 h-3',
+                tool.status === 'error'
+                  ? 'text-[#FCA5A5]'
+                  : tool.status === 'success'
+                    ? 'text-[#86EFAC]'
+                    : 'text-white/55'
+              )}
+            />
+          ) : (
+            <Code className="w-3 h-3 text-white/55" />
+          )}
+        </span>
         <span className="text-[10px] uppercase tracking-wide text-white/35">
           {meta?.category ?? 'Tool'}
         </span>
@@ -1376,6 +1463,12 @@ function ToolActivityRow({
           />
         )}
       </button>
+
+      {tool.status === 'error' && errorMessage && (
+        <div className="mx-1 rounded-lg border border-[#FF5449]/25 bg-[#FF5449]/10 px-2.5 py-1.5 text-[11px] text-[#FECACA] break-words">
+          {errorMessage}
+        </div>
+      )}
 
       <AnimatePresence initial={false}>
         {expanded && sections.length > 0 && (
@@ -1587,10 +1680,12 @@ function DesignActivityRow({
   );
 }
 
-function MessageBubble({ message, showCopyAction = true }: MessageBubbleProps) {
+function MessageBubble({ message, showCopyAction = true, showAvatar = true }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const userName = useSettingsStore((state) => state.userName);
+  const userInitial = (userName?.trim().charAt(0) || 'U').toUpperCase();
   const metadata = message.metadata as {
     sources?: Array<{ title?: string; url: string }>;
     searchQueries?: string[];
@@ -1632,23 +1727,20 @@ function MessageBubble({ message, showCopyAction = true }: MessageBubbleProps) {
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
-      {/* Avatar */}
-      <motion.div
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className={cn(
-          'flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center select-none',
-          isUser
-            ? 'bg-[#1A1D24] border border-[#1D4ED8]/30'
-            : 'bg-[#111218] border border-white/[0.08]'
-        )}
-      >
-        {isUser ? (
-          <User className="w-3 h-3 text-[#93C5FD]" />
-        ) : (
-          <BrandMark className="w-3.5 h-3.5" />
-        )}
-      </motion.div>
+      {showAvatar && (
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className={cn(
+            'flex-shrink-0 w-6 h-6 flex items-center justify-center select-none',
+            isUser
+              ? 'rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] border border-[#60A5FA]/35 text-[10px] font-bold text-white shadow-[0_6px_16px_rgba(29,78,216,0.35)]'
+              : 'rounded-lg bg-[#111218] border border-white/[0.08]'
+          )}
+        >
+          {isUser ? userInitial : <BrandMark className="w-3.5 h-3.5" />}
+        </motion.div>
+      )}
 
       {/* Content */}
       <div className={cn('flex-1 min-w-0 select-none', isUser && 'flex justify-end')}>
@@ -1658,13 +1750,13 @@ function MessageBubble({ message, showCopyAction = true }: MessageBubbleProps) {
           className={cn(
             'rounded-xl message-content',
             isUser
-              ? 'inline-block max-w-[85%] bg-white/[0.06] border border-white/[0.10] text-white/90'
-              : 'w-fit max-w-full bg-transparent text-white/90'
+              ? 'message-bubble-user inline-block max-w-[85%] bg-gradient-to-br from-[#1D4ED8]/22 via-[#1E40AF]/14 to-[#0B1228]/70 border border-[#60A5FA]/35 shadow-[0_10px_24px_rgba(30,64,175,0.25)] text-white/95'
+              : 'message-bubble-assistant w-fit max-w-full bg-transparent text-white/90'
           )}
         >
           {typeof message.content === 'string' ? (
             isUser ? (
-              <div className="px-3 py-2 whitespace-pre-wrap text-[13px] leading-snug break-words select-text">{message.content}</div>
+              <div className="px-3 py-2 whitespace-pre-wrap text-[13px] leading-snug break-words select-text font-medium">{message.content}</div>
             ) : (
               <MarkdownContent content={message.content} />
             )

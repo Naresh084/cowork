@@ -33,6 +33,15 @@ function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function buildCommandString(command: string, args: string[]): string {
+  const pieces = [command, ...args.map((arg) => (/[^\w@%+=:,./-]/.test(arg) ? shellEscape(arg) : arg))];
+  return pieces.join(' ');
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -106,11 +115,13 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     this.runId = input.runId;
     this.sessionId = input.sessionId;
 
-    this.process = spawn('codex', ['app-server'], {
+    const codexArgs = ['app-server'];
+    this.process = spawn('codex', codexArgs, {
       cwd: input.workingDirectory,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    callbacks.onLaunchCommand?.(buildCommandString('codex', codexArgs));
 
     this.process.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();

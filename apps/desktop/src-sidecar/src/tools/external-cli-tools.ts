@@ -349,6 +349,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
             runId: run.runId,
             provider: run.provider,
             status: run.status,
+            launchCommand: run.launchCommand || null,
             startedAt: run.startedAt,
             updatedAt: run.updatedAt,
             finishedAt: run.finishedAt,

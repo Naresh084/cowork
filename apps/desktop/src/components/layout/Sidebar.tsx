@@ -22,7 +22,6 @@ import { useAppStore } from '../../stores/app-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { BrandMark } from '../icons/BrandMark';
-import { WorkingDirectoryModal } from './WorkingDirectoryModal';
 // ModelSettingsModal moved to SettingsView
 import { SkillsModal } from '../skills/SkillsModal';
 import { useSkillStore } from '../../stores/skill-store';
@@ -48,16 +47,12 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     isLoading,
     hasLoaded,
     loadSessions,
-    createSession,
     selectSession,
     deleteSession,
+    setActiveSession,
   } = useSessionStore();
 
   const {
-    defaultWorkingDirectory,
-    selectedModel,
-    availableModels,
-    modelsLoading,
     sessionListFilters,
     toggleSessionListFilter,
   } = useSettingsStore();
@@ -81,8 +76,6 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [commandsModalOpen, setCommandsModalOpen] = useState(false);
   const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
   const [connectorsModalOpen, setConnectorsModalOpen] = useState(false);
-  const [workingDirModalOpen, setWorkingDirModalOpen] = useState(false);
-  const pendingWorkingDirCallback = useRef<((path: string) => void) | null>(null);
 
   // Cron store - use store state so right panel "Create one" / icon also opens the modal
   const activeJobCount = useCronActiveJobCount();
@@ -185,37 +178,11 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     }
   }, [sessionMenuId]);
 
-  const startSessionWithDir = useCallback(async (workingDir: string) => {
-    try {
-      const selectedIsValid = selectedModel && availableModels.some((m) => m.id === selectedModel);
-      const modelToUse = selectedIsValid ? selectedModel : availableModels[0]?.id;
-
-      if (!modelToUse) {
-        const message = modelsLoading
-          ? 'Models are still loading. Try again in a moment.'
-          : 'No models available. Check your API key and model access.';
-        toast.error('No model available', message);
-        return;
-      }
-
-      await createSession(workingDir, modelToUse);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      toast.error('Failed to create session', errorMessage);
-    }
-  }, [selectedModel, availableModels, modelsLoading, createSession]);
-
-  const handleNewTask = async () => {
-    if (defaultWorkingDirectory) {
-      await startSessionWithDir(defaultWorkingDirectory);
-    } else {
-      // Show centered modal to select working directory
-      pendingWorkingDirCallback.current = (path: string) => {
-        startSessionWithDir(path);
-      };
-      setWorkingDirModalOpen(true);
-    }
-  };
+  const handleNewTask = useCallback(() => {
+    // New task should open a fresh draft view. Session is created only on first user message.
+    setCurrentView('chat');
+    setActiveSession(null);
+  }, [setCurrentView, setActiveSession]);
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
@@ -319,22 +286,6 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
       <ConnectorManager
         isOpen={connectorsModalOpen}
         onClose={() => setConnectorsModalOpen(false)}
-      />
-
-      {/* Working Directory Selection Modal */}
-      <WorkingDirectoryModal
-        isOpen={workingDirModalOpen}
-        onClose={() => {
-          setWorkingDirModalOpen(false);
-          pendingWorkingDirCallback.current = null;
-        }}
-        onSelected={(path) => {
-          setWorkingDirModalOpen(false);
-          if (pendingWorkingDirCallback.current) {
-            pendingWorkingDirCallback.current(path);
-            pendingWorkingDirCallback.current = null;
-          }
-        }}
       />
 
       <AnimatePresence>

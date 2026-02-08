@@ -29,6 +29,38 @@ interface ToolExecutionCardProps {
   isActive?: boolean;
 }
 
+const extractExecutionErrorMessage = (execution: ToolExecution): string | null => {
+  if (execution.error && execution.error.trim().length > 0) {
+    return execution.error.trim();
+  }
+
+  const result = execution.result;
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  const resultAny = result as {
+    error?: unknown;
+    message?: unknown;
+    errorMessage?: unknown;
+    run?: { errorMessage?: unknown };
+    summary?: { errorMessage?: unknown };
+  };
+
+  const direct =
+    (typeof resultAny.error === 'string' && resultAny.error) ||
+    (typeof resultAny.errorMessage === 'string' && resultAny.errorMessage) ||
+    (typeof resultAny.message === 'string' && resultAny.message);
+  if (direct && direct.trim().length > 0) return direct.trim();
+
+  const nested =
+    (typeof resultAny.run?.errorMessage === 'string' && resultAny.run.errorMessage) ||
+    (typeof resultAny.summary?.errorMessage === 'string' && resultAny.summary.errorMessage);
+  if (nested && nested.trim().length > 0) return nested.trim();
+
+  return null;
+};
+
 export function ToolExecutionCard({ execution, className, isActive }: ToolExecutionCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedArgs, setCopiedArgs] = useState(false);
@@ -57,6 +89,8 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const resultText = formatResult(execution.result);
   const resultPreview = buildPreview(resultText);
   const resultDisplay = resultExpanded ? resultText : resultPreview.text;
+  const visibleError = extractExecutionErrorMessage(execution);
+  const hasResultOrError = execution.result !== undefined || Boolean(visibleError);
   const externalCliResultNode = renderExternalCliResult(execution, externalCliPresentation);
   const toolView = renderToolSpecificResult(execution);
   const specializedResult = externalCliResultNode ?? toolView?.node;
@@ -134,7 +168,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
       >
         {/* Icon */}
         {isExternalCliTool && externalCliPresentation ? (
-          <ExternalCliLogo provider={externalCliPresentation.provider} status={execution.status} />
+          <ExternalCliAccent provider={externalCliPresentation.provider} compact={false} />
         ) : (
           <div
             className={cn(
@@ -227,6 +261,21 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
         </div>
       </button>
 
+      {execution.status === 'error' && visibleError && (
+        <div className="px-3 pb-2">
+          <div
+            className={cn(
+              'rounded-lg border px-3 py-2 text-xs break-words',
+              isExternalCliTool
+                ? 'border-[#F87171]/35 bg-[#7F1D1D]/35 text-[#FECACA]'
+                : 'border-[#FF5449]/30 bg-[#FF5449]/12 text-[#FECACA]'
+            )}
+          >
+            {truncateMiddle(visibleError, 280)}
+          </div>
+        </div>
+      )}
+
       {pendingPermission && (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1A1F2B] border border-[#1D4ED8]/25 text-xs text-white/70">
@@ -292,13 +341,13 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
               </div>
 
               {/* Result */}
-              {(execution.result !== undefined || execution.error) && (
+              {hasResultOrError && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-medium text-white/40 uppercase tracking-wide">
-                      {execution.error ? 'Error' : 'Result'}
+                      {visibleError ? 'Error' : 'Result'}
                     </span>
-                    {!execution.error && execution.result !== undefined && (
+                    {!visibleError && execution.result !== undefined && (
                       <button
                         onClick={handleCopyResult}
                         className={cn(
@@ -317,9 +366,9 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
                       </button>
                     )}
                   </div>
-                  {execution.error ? (
+                  {visibleError ? (
                     <div className="px-3 py-2 rounded-lg bg-[#FF5449]/10 border border-[#FF5449]/20 text-sm text-[#FF5449] font-mono whitespace-pre-wrap">
-                      {execution.error}
+                      {visibleError}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -387,7 +436,7 @@ export function ToolExecutionInline({ execution, className }: ToolExecutionInlin
       )}
     >
       {isExternalCliTool && externalCliPresentation ? (
-        <ExternalCliLogo provider={externalCliPresentation.provider} status={execution.status} compact />
+        <ExternalCliAccent provider={externalCliPresentation.provider} compact />
       ) : (
         <div className={cn('p-1 rounded-lg', statusConfig.bgColor)}>
           {execution.status === 'running' ? (
@@ -633,6 +682,7 @@ interface ExternalCliRunSummaryPreview {
   runId?: string;
   provider?: 'codex' | 'claude';
   status?: string;
+  launchCommand?: string;
   startedAt?: number;
   updatedAt?: number;
   finishedAt?: number;
@@ -711,29 +761,16 @@ function resolveExternalCliProvider(execution: ToolExecution): ExternalCliProvid
   return 'shared';
 }
 
-function ExternalCliLogo({
-  provider,
-  status,
-  compact = false,
-}: {
-  provider: ExternalCliProvider;
-  status: ToolExecution['status'];
-  compact?: boolean;
-}) {
+function ExternalCliAccent({ provider, compact = false }: { provider: ExternalCliProvider; compact?: boolean }) {
   return (
     <div className={cn(
-      'external-cli-logo',
-      provider === 'codex' && 'external-cli-logo--codex',
-      provider === 'claude' && 'external-cli-logo--claude',
-      provider === 'shared' && 'external-cli-logo--shared',
-      status === 'running' && 'external-cli-logo--running',
-      compact && 'external-cli-logo--compact'
+      'external-cli-accent',
+      provider === 'codex' && 'external-cli-accent--codex',
+      provider === 'claude' && 'external-cli-accent--claude',
+      provider === 'shared' && 'external-cli-accent--shared',
+      compact && 'external-cli-accent--compact'
     )}>
-      <div className="external-cli-logo__ring" />
-      <div className="external-cli-logo__core" />
-      <span className="external-cli-logo__glyph">
-        {provider === 'codex' ? '<>' : provider === 'claude' ? 'AI' : 'EX'}
-      </span>
+      <span className="external-cli-accent__dot" />
     </div>
   );
 }
@@ -775,7 +812,9 @@ function renderToolSpecificArgs(
             {prompt && (
               <div className="external-cli-args__prompt">
                 <div className="external-cli-args__label">Prompt</div>
-                <p className="external-cli-args__value">{truncateMiddle(prompt, 220)}</p>
+                <div className="external-cli-args__slide" title={prompt}>
+                  <p className="external-cli-args__value external-cli-args__value--slide">{prompt}</p>
+                </div>
               </div>
             )}
           </>
@@ -864,6 +903,15 @@ function renderExternalCliResult(
         </div>
       )}
 
+      {summary?.launchCommand && (
+        <div className="external-cli-result__summary">
+          <div className="external-cli-result__label">Actual Command</div>
+          <div className="external-cli-result__command" title={summary.launchCommand}>
+            <p className="external-cli-result__command-text">{summary.launchCommand}</p>
+          </div>
+        </div>
+      )}
+
       {summary?.pendingInteraction?.prompt && (
         <div className="external-cli-result__interaction">
           <div className="external-cli-result__interaction-label">Waiting For User</div>
@@ -931,6 +979,7 @@ function extractExternalCliSummary(result: unknown): ExternalCliRunSummaryPrevie
     runId?: string;
     provider?: 'codex' | 'claude';
     status?: string;
+    launchCommand?: string;
     startedAt?: number;
     updatedAt?: number;
     finishedAt?: number;
@@ -953,6 +1002,7 @@ function extractExternalCliSummary(result: unknown): ExternalCliRunSummaryPrevie
     runId: resultAny.runId,
     provider: resultAny.provider,
     status: resultAny.status,
+    launchCommand: resultAny.launchCommand,
     startedAt: resultAny.startedAt,
     updatedAt: resultAny.updatedAt,
     finishedAt: resultAny.finishedAt,
