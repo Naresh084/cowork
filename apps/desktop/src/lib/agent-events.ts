@@ -238,6 +238,10 @@ function parseTauriEvent(
         error: data.error as string | undefined,
         connectedAt: data.connectedAt as number | undefined,
         lastMessageAt: data.lastMessageAt as number | undefined,
+        health: data.health as 'healthy' | 'degraded' | 'unhealthy' | undefined,
+        healthMessage: data.healthMessage as string | undefined,
+        requiresReconnect: data.requiresReconnect as boolean | undefined,
+        lastHealthCheckAt: data.lastHealthCheckAt as number | undefined,
       };
 
     case 'integration:qr':

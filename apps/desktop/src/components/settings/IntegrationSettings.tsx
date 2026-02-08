@@ -128,13 +128,36 @@ function SectionCard({
   );
 }
 
-function getPlatformStatusTone(connected: boolean, connecting: boolean) {
+function getPlatformStatusTone(
+  connected: boolean,
+  connecting: boolean,
+  health?: 'healthy' | 'degraded' | 'unhealthy',
+  requiresReconnect?: boolean,
+) {
   if (connecting) {
     return {
       dot: 'bg-[#F59E0B]',
       text: 'text-[#FCD34D]',
       pill: 'border-[#F59E0B]/40 bg-[#F59E0B]/12',
       label: 'Connecting',
+    };
+  }
+
+  if (connected && (requiresReconnect || health === 'unhealthy')) {
+    return {
+      dot: 'bg-[#FF6A6A]',
+      text: 'text-[#FF9F9A]',
+      pill: 'border-[#FF6A6A]/35 bg-[#FF5449]/10',
+      label: 'Reconnect required',
+    };
+  }
+
+  if (connected && health === 'degraded') {
+    return {
+      dot: 'bg-[#F59E0B]',
+      text: 'text-[#FCD34D]',
+      pill: 'border-[#F59E0B]/40 bg-[#F59E0B]/12',
+      label: 'Degraded',
     };
   }
 
@@ -376,7 +399,12 @@ export function IntegrationSettings() {
         <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {platformTabs.map((tab) => {
             const platform = platforms[tab.platform];
-            const tone = getPlatformStatusTone(Boolean(platform?.connected), Boolean(isConnecting[tab.platform]));
+            const tone = getPlatformStatusTone(
+              Boolean(platform?.connected),
+              Boolean(isConnecting[tab.platform]),
+              platform?.health,
+              platform?.requiresReconnect,
+            );
             const Icon = tab.icon;
 
             return (

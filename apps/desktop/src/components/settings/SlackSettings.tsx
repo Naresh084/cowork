@@ -11,6 +11,7 @@ export function SlackSettings() {
   const isConnecting = useIntegrationStore((s) => s.isConnecting.slack);
   const connect = useIntegrationStore((s) => s.connect);
   const disconnect = useIntegrationStore((s) => s.disconnect);
+  const reconnect = useIntegrationStore((s) => s.reconnect);
 
   const [botToken, setBotToken] = useState('');
   const [appToken, setAppToken] = useState('');
@@ -21,6 +22,9 @@ export function SlackSettings() {
   const connected = platform?.connected ?? false;
   const displayName = platform?.displayName;
   const error = platform?.error;
+  const health = platform?.health;
+  const healthMessage = platform?.healthMessage;
+  const requiresReconnect = Boolean(platform?.requiresReconnect || health === 'unhealthy');
 
   const handleConnect = async () => {
     await connect('slack', { botToken, appToken });
@@ -30,6 +34,10 @@ export function SlackSettings() {
     await disconnect('slack');
     setBotToken('');
     setAppToken('');
+  };
+
+  const handleReconnect = async () => {
+    await reconnect('slack');
   };
 
   const canConnect = botToken.trim().length > 0 && appToken.trim().length > 0;
@@ -49,24 +57,45 @@ export function SlackSettings() {
                 platform="slack"
                 connected={connected}
                 displayName={displayName}
+                health={health}
+                requiresReconnect={requiresReconnect}
               />
             </div>
             {error && (
               <p className="mt-2 text-xs text-[#FF5449]">{error}</p>
             )}
+            {connected && healthMessage && (
+              <p className={cn('mt-2 text-xs', requiresReconnect ? 'text-[#FCA5A5]' : 'text-[#FCD34D]')}>
+                {healthMessage}
+              </p>
+            )}
           </div>
           {connected ? (
-            <button
-              onClick={handleDisconnect}
-              disabled={isConnecting}
-              className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
-            >
-              {isConnecting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                'Disconnect'
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReconnect}
+                disabled={isConnecting}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
+                  requiresReconnect
+                    ? 'bg-[#F59E0B]/18 text-[#FCD34D] hover:bg-[#F59E0B]/28'
+                    : 'bg-white/[0.08] text-white/80 hover:bg-white/[0.12]',
+                )}
+              >
+                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reconnect'}
+              </button>
+              <button
+                onClick={handleDisconnect}
+                disabled={isConnecting}
+                className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Disconnect'
+                )}
+              </button>
+            </div>
           ) : (
             <button
               onClick={handleConnect}

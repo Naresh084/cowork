@@ -88,6 +88,17 @@ export interface GetSessionParams {
   sessionId: string;
 }
 
+export interface ListSessionsPageParams {
+  limit?: number;
+  offset?: number;
+  query?: string;
+}
+
+export interface GetSessionChunkParams extends GetSessionParams {
+  chatItemLimit?: number;
+  beforeSequence?: number;
+}
+
 export interface DeleteSessionParams {
   sessionId: string;
 }
@@ -236,6 +247,17 @@ export interface SessionDetails extends SessionInfo {
   tasks: Task[];
   artifacts: Artifact[];
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
+  hasMoreHistory?: boolean;
+  oldestLoadedSequence?: number | null;
+}
+
+export interface SessionListPage {
+  sessions: SessionInfo[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
 }
 
 export type ProviderId =

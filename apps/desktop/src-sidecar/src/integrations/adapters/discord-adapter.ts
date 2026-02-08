@@ -195,6 +195,43 @@ export class DiscordAdapter extends BaseAdapter {
     return response.json();
   }
 
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this.botToken || !this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Discord is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Discord gateway is not open.',
+        requiresReconnect: true,
+      };
+    }
+
+    try {
+      await this.discordRequest('/users/@me', 'GET');
+      return {
+        health: 'healthy',
+        requiresReconnect: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `Discord health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
+  }
+
   private async openGateway(gatewayUrl: string, displayName: string): Promise<void> {
     const finalUrl = `${gatewayUrl}/?v=${DISCORD_GATEWAY_VERSION}&encoding=json`;
 

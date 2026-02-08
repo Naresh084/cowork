@@ -18,6 +18,7 @@ export function DiscordSettings() {
   const isConnecting = useIntegrationStore((s) => s.isConnecting.discord);
   const connect = useIntegrationStore((s) => s.connect);
   const disconnect = useIntegrationStore((s) => s.disconnect);
+  const reconnect = useIntegrationStore((s) => s.reconnect);
 
   const [botToken, setBotToken] = useState('');
   const [allowedGuildIdsText, setAllowedGuildIdsText] = useState('');
@@ -29,6 +30,9 @@ export function DiscordSettings() {
   const connected = platform?.connected ?? false;
   const displayName = platform?.displayName;
   const error = platform?.error;
+  const health = platform?.health;
+  const healthMessage = platform?.healthMessage;
+  const requiresReconnect = Boolean(platform?.requiresReconnect || health === 'unhealthy');
 
   const canConnect = botToken.trim().length > 0;
 
@@ -49,6 +53,10 @@ export function DiscordSettings() {
     setAllowDirectMessages(true);
   };
 
+  const handleReconnect = async () => {
+    await reconnect('discord');
+  };
+
   return (
     <div className="space-y-4">
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
@@ -59,18 +67,43 @@ export function DiscordSettings() {
               <SettingHelpPopover settingId="discord.connection" />
             </div>
             <div className="mt-2">
-              <PlatformStatusBadge platform="discord" connected={connected} displayName={displayName} />
+              <PlatformStatusBadge
+                platform="discord"
+                connected={connected}
+                displayName={displayName}
+                health={health}
+                requiresReconnect={requiresReconnect}
+              />
             </div>
             {error ? <p className="mt-2 text-xs text-[#FF5449]">{error}</p> : null}
+            {connected && healthMessage ? (
+              <p className={cn('mt-2 text-xs', requiresReconnect ? 'text-[#FCA5A5]' : 'text-[#FCD34D]')}>
+                {healthMessage}
+              </p>
+            ) : null}
           </div>
           {connected ? (
-            <button
-              onClick={handleDisconnect}
-              disabled={isConnecting}
-              className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
-            >
-              {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Disconnect'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReconnect}
+                disabled={isConnecting}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
+                  requiresReconnect
+                    ? 'bg-[#F59E0B]/18 text-[#FCD34D] hover:bg-[#F59E0B]/28'
+                    : 'bg-white/[0.08] text-white/80 hover:bg-white/[0.12]',
+                )}
+              >
+                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reconnect'}
+              </button>
+              <button
+                onClick={handleDisconnect}
+                disabled={isConnecting}
+                className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
+              >
+                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Disconnect'}
+              </button>
+            </div>
           ) : (
             <button
               onClick={handleConnect}

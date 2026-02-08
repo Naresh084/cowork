@@ -352,6 +352,35 @@ void slackConfig;
     };
   }
 
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this._connected || !this.webClient) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Slack is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    try {
+      await this.webClient.auth.test();
+      return {
+        health: 'healthy',
+        requiresReconnect: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `Slack health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
+  }
+
   private mapMimeTypeToAttachmentType(
     mimeType: string,
   ): PlatformMessageAttachment['type'] {

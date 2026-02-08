@@ -18,6 +18,7 @@ import { ClaudeStreamAdapter } from './providers/claude-stream-adapter.js';
 import { ExternalCliError } from './errors.js';
 
 const MAX_PROGRESS_ENTRIES = 200;
+const MAX_DIAGNOSTIC_CHARS = 1_000_000;
 
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -58,6 +59,7 @@ function toSummary(run: ExternalCliRunRecord): ExternalCliRunSummary {
     errorCode: run.errorCode,
     errorMessage: run.errorMessage,
     resultSummary: run.resultSummary,
+    diagnostics: run.diagnostics,
   };
 }
 
@@ -189,6 +191,12 @@ export class ExternalCliRunManager extends EventEmitter {
       updatedAt: now,
       origin: input.origin,
       progress: initialProgress,
+      diagnostics: {
+        stdout: '',
+        stderr: '',
+        notes: [],
+        truncated: false,
+      },
     };
 
     this.runs.set(runId, run);
@@ -229,6 +237,23 @@ export class ExternalCliRunManager extends EventEmitter {
           },
           onLaunchCommand: (command) => {
             run.launchCommand = command;
+            this.appendDiagnostic(run, 'note', `Launch command: ${command}`);
+            run.updatedAt = Date.now();
+            void this.persist();
+            this.emit('run_updated', toSummary(run));
+          },
+          onDiagnosticLog: (entry) => {
+            this.appendDiagnostic(run, entry.stream, entry.text);
+            run.updatedAt = Date.now();
+            void this.persist();
+            this.emit('run_updated', toSummary(run));
+          },
+          onProcessExit: (info) => {
+            if (!run.diagnostics) {
+              run.diagnostics = { stdout: '', stderr: '', notes: [], truncated: false };
+            }
+            run.diagnostics.exitCode = info.code ?? null;
+            run.diagnostics.exitSignal = info.signal ?? null;
             run.updatedAt = Date.now();
             void this.persist();
             this.emit('run_updated', toSummary(run));
@@ -278,6 +303,9 @@ export class ExternalCliRunManager extends EventEmitter {
             void adapter.dispose();
             void this.persist();
             this.emit('run_updated', toSummary(run));
+            process.stderr.write(
+              `[external-cli][${run.provider}][${run.runId}] completed: ${summary}\n`,
+            );
           },
           onFailed: (code, message) => {
             run.status = 'failed';
@@ -295,6 +323,19 @@ export class ExternalCliRunManager extends EventEmitter {
             void adapter.dispose();
             void this.persist();
             this.emit('run_updated', toSummary(run));
+            process.stderr.write(
+              `[external-cli][${run.provider}][${run.runId}] failed (${code}): ${message}\n`,
+            );
+            if (run.diagnostics?.stderr) {
+              process.stderr.write(
+                `[external-cli][${run.provider}][${run.runId}] stderr log:\n${run.diagnostics.stderr}\n`,
+              );
+            }
+            if (run.diagnostics?.stdout) {
+              process.stderr.write(
+                `[external-cli][${run.provider}][${run.runId}] stdout log:\n${run.diagnostics.stdout}\n`,
+              );
+            }
           },
           onCancelled: (message) => {
             run.status = 'cancelled';
@@ -310,6 +351,9 @@ export class ExternalCliRunManager extends EventEmitter {
             void adapter.dispose();
             void this.persist();
             this.emit('run_updated', toSummary(run));
+            process.stderr.write(
+              `[external-cli][${run.provider}][${run.runId}] cancelled: ${message || 'Run cancelled.'}\n`,
+            );
           },
         },
       );
@@ -330,6 +374,9 @@ export class ExternalCliRunManager extends EventEmitter {
       await adapter.dispose();
       await this.persist();
       this.emit('run_updated', toSummary(run));
+      process.stderr.write(
+        `[external-cli][${run.provider}][${run.runId}] start flow failed: ${errorMessage}\n`,
+      );
     }
 
     return toSummary(run);
@@ -495,6 +542,42 @@ export class ExternalCliRunManager extends EventEmitter {
     run.progress.push(entry);
     if (run.progress.length > MAX_PROGRESS_ENTRIES) {
       run.progress = run.progress.slice(run.progress.length - MAX_PROGRESS_ENTRIES);
+    }
+  }
+
+  private appendDiagnostic(
+    run: ExternalCliRunRecord,
+    stream: 'stdout' | 'stderr' | 'note',
+    text: string,
+  ): void {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) {
+      return;
+    }
+
+    if (!run.diagnostics) {
+      run.diagnostics = {
+        stdout: '',
+        stderr: '',
+        notes: [],
+        truncated: false,
+      };
+    }
+
+    if (stream === 'note') {
+      run.diagnostics.notes = [...(run.diagnostics.notes || []), trimmed].slice(-120);
+      return;
+    }
+
+    const key = stream === 'stderr' ? 'stderr' : 'stdout';
+    const existing = run.diagnostics[key] || '';
+    const next = existing ? `${existing}\n${trimmed}` : trimmed;
+
+    if (next.length > MAX_DIAGNOSTIC_CHARS) {
+      run.diagnostics[key] = next.slice(next.length - MAX_DIAGNOSTIC_CHARS);
+      run.diagnostics.truncated = true;
+    } else {
+      run.diagnostics[key] = next;
     }
   }
 

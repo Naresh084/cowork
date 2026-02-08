@@ -78,6 +78,7 @@ import type {
 import type {
   SessionInfo,
   SessionDetails,
+  SessionListPage,
   Attachment,
   Task,
   Artifact,
@@ -3898,7 +3899,7 @@ export class AgentRunner {
   }
 
   /**
-   * Get all sessions, sorted by lastAccessedAt (most recent first).
+   * Get all sessions, sorted by updatedAt (most recent first).
    */
   listSessions(): SessionInfo[] {
     return Array.from(this.sessions.values())
@@ -3920,19 +3921,85 @@ export class AgentRunner {
           messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
         };
       })
-      .sort((a, b) => b.lastAccessedAt - a.lastAccessedAt);
+      .sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+        return b.lastAccessedAt - a.lastAccessedAt;
+      });
   }
 
-  /**
-   * Get a session by ID.
-   */
-  getSession(sessionId: string): SessionDetails | null {
+  listSessionsPage(options?: {
+    limit?: number;
+    offset?: number;
+    query?: string;
+  }): SessionListPage {
+    const allSessions = this.listSessions();
+    const query = (options?.query || '').trim().toLowerCase();
+    const filteredSessions =
+      query.length > 0
+        ? allSessions.filter((session) => {
+            const haystack = [
+              session.title || '',
+              session.firstMessage || '',
+              session.workingDirectory || '',
+              session.model || '',
+            ]
+              .join(' ')
+              .toLowerCase();
+            return haystack.includes(query);
+          })
+        : allSessions;
+
+    const limit = Math.max(1, Math.floor(options?.limit ?? 20));
+    const requestedOffset = Math.max(0, Math.floor(options?.offset ?? 0));
+    const offset = Math.min(requestedOffset, Math.max(0, filteredSessions.length));
+    const sessions = filteredSessions.slice(offset, offset + limit);
+    const total = filteredSessions.length;
+    const hasMore = offset + sessions.length < total;
+
+    return {
+      sessions,
+      total,
+      hasMore,
+      offset,
+      limit,
+      nextOffset: hasMore ? offset + sessions.length : null,
+    };
+  }
+
+  private compareChatItemsForTimeline(a: ChatItem, b: ChatItem): number {
+    const aSeq = typeof a.sequence === 'number' ? a.sequence : Number.POSITIVE_INFINITY;
+    const bSeq = typeof b.sequence === 'number' ? b.sequence : Number.POSITIVE_INFINITY;
+    if (aSeq !== bSeq) return aSeq - bSeq;
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+    return a.id.localeCompare(b.id);
+  }
+
+  getSessionChunk(
+    sessionId: string,
+    options?: { chatItemLimit?: number; beforeSequence?: number }
+  ): SessionDetails | null {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
 
-    const firstMessage = this.getFirstMessagePreview(session);
+    const orderedItems = [...session.chatItems].sort((a, b) =>
+      this.compareChatItemsForTimeline(a, b)
+    );
+    const indexedItems = orderedItems.map((item, index) => ({
+      item,
+      sequence: typeof item.sequence === 'number' ? item.sequence : index + 1,
+    }));
 
-    // Build context usage from in-memory state
+    const chatItemLimit = Math.max(1, Math.floor(options?.chatItemLimit ?? 200));
+    const beforeSequence = typeof options?.beforeSequence === 'number' ? options.beforeSequence : undefined;
+    const scopedItems = beforeSequence !== undefined
+      ? indexedItems.filter((entry) => entry.sequence < beforeSequence)
+      : indexedItems;
+    const pageItems = scopedItems.slice(Math.max(0, scopedItems.length - chatItemLimit));
+    const chatItems = pageItems.map((entry) => entry.item);
+    const hasMoreHistory = scopedItems.length > pageItems.length;
+    const oldestLoadedSequence = pageItems.length > 0 ? pageItems[0].sequence : null;
+
+    const firstMessage = this.getFirstMessagePreview(session);
     const ctxWindow = this.getContextWindow(session.provider, session.model);
     const usedTokens = session.lastKnownPromptTokens > 0
       ? session.lastKnownPromptTokens
@@ -3952,8 +4019,8 @@ export class AgentRunner {
       updatedAt: session.updatedAt,
       lastAccessedAt: session.lastAccessedAt,
       messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
-      messages: this.deriveMessagesFromChatItems(session.chatItems),
-      chatItems: session.chatItems,
+      messages: this.deriveMessagesFromChatItems(chatItems),
+      chatItems,
       tasks: session.tasks,
       artifacts: session.artifacts,
       contextUsage: {
@@ -3961,7 +4028,18 @@ export class AgentRunner {
         maxTokens: ctxWindow.input,
         percentUsed,
       },
+      hasMoreHistory,
+      oldestLoadedSequence,
     };
+  }
+
+  /**
+   * Get a session by ID.
+   */
+  getSession(sessionId: string): SessionDetails | null {
+    return this.getSessionChunk(sessionId, {
+      chatItemLimit: Number.MAX_SAFE_INTEGER,
+    });
   }
 
   /**

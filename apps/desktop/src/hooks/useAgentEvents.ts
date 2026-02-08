@@ -195,6 +195,10 @@ export function useAgentEvents(sessionId: string | null): void {
           error?: string;
           connectedAt?: number;
           lastMessageAt?: number;
+          health?: 'healthy' | 'degraded' | 'unhealthy';
+          healthMessage?: string;
+          requiresReconnect?: boolean;
+          lastHealthCheckAt?: number;
         };
         useIntegrationStore.getState().updatePlatformStatus({
           platform: statusEvent.platform as PlatformType,
@@ -205,6 +209,10 @@ export function useAgentEvents(sessionId: string | null): void {
           error: statusEvent.error,
           connectedAt: statusEvent.connectedAt,
           lastMessageAt: statusEvent.lastMessageAt,
+          health: statusEvent.health,
+          healthMessage: statusEvent.healthMessage,
+          requiresReconnect: statusEvent.requiresReconnect,
+          lastHealthCheckAt: statusEvent.lastHealthCheckAt,
         });
         return;
       }

@@ -41,6 +41,15 @@ export interface SessionInfo {
   lastAccessedAt: number;
 }
 
+interface SessionListPageResult {
+  sessions: SessionSummary[];
+  total: number;
+  hasMore: boolean;
+  offset: number;
+  limit: number;
+  nextOffset: number | null;
+}
+
 interface SessionState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -48,10 +57,16 @@ interface SessionState {
   hasLoaded: boolean;
   error: string | null;
   backendInitialized: boolean;
+  sessionsTotal: number;
+  sessionsHasMore: boolean;
+  sessionsOffset: number;
+  sessionsQuery: string;
 }
 
 interface SessionActions {
-  loadSessions: () => Promise<void>;
+  loadSessions: (options?: { reset?: boolean; query?: string }) => Promise<void>;
+  loadMoreSessions: () => Promise<void>;
+  setSessionSearchQuery: (query: string) => Promise<void>;
   createSession: (
     workingDirectory: string,
     model?: string,
@@ -71,6 +86,10 @@ interface SessionActions {
 export const useSessionStore = create<SessionState & SessionActions>()(
   persist(
     (set, get) => ({
+      sessionsTotal: 0,
+      sessionsHasMore: false,
+      sessionsOffset: 0,
+      sessionsQuery: '',
       sessions: [],
       activeSessionId: null,
       isLoading: false,
@@ -127,10 +146,16 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         throw new Error('Backend initialization timed out');
       },
 
-      loadSessions: async () => {
+      loadSessions: async (options) => {
         if (get().isLoading) {
           return;
         }
+        const reset = options?.reset ?? true;
+        const query = options?.query ?? get().sessionsQuery;
+        const requestQuery = query;
+        const offset = reset ? 0 : get().sessionsOffset;
+        const limit = 20;
+
         set({ isLoading: true, error: null });
         try {
           // Wait for backend to be initialized first
@@ -138,18 +163,37 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             await get().waitForBackend();
           }
 
-          const sessionsRaw = await invoke<SessionSummary[]>('agent_list_sessions');
-          const sessions = sessionsRaw.map((session) => ({
+          const page = await invoke<SessionListPageResult>('agent_list_sessions_page', {
+            limit,
+            offset,
+            query,
+          });
+          const incomingSessions = page.sessions.map((session) => ({
             ...session,
             executionMode: session.executionMode || 'execute',
           }));
+          const sessions = reset
+            ? incomingSessions
+            : [
+                ...get().sessions,
+                ...incomingSessions.filter(
+                  (incoming) => !get().sessions.some((existing) => existing.id === incoming.id)
+                ),
+              ];
 
           // SAFETY: If backend returns 0 sessions but we have cached sessions,
           // this might indicate a timing issue - keep cached sessions
           const cachedSessions = get().sessions;
-          if (sessions.length === 0 && cachedSessions.length > 0) {
+          if (reset && query.trim().length === 0 && sessions.length === 0 && cachedSessions.length > 0) {
             // Still mark as loaded to prevent infinite retries
-            set({ isLoading: false, hasLoaded: true });
+            set({
+              isLoading: false,
+              hasLoaded: true,
+              sessionsQuery: query,
+              sessionsHasMore: false,
+              sessionsOffset: 0,
+              sessionsTotal: cachedSessions.length,
+            });
             useAppStore.getState().setStartupIssue(null);
             return;
           }
@@ -160,28 +204,55 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             ? sessions.some((s) => s.id === currentActiveId)
             : false;
 
-          // If not found in list, double-check with get_session before clearing
-          // This handles race conditions where the session exists but wasn't in the list yet
-          if (!activeSessionExists && currentActiveId) {
+          let nextSessions = sessions;
+
+          // Keep currently active session discoverable even when pagination doesn't include it yet.
+          if (!activeSessionExists && currentActiveId && query.trim().length === 0) {
             try {
-              await invoke('agent_get_session', { sessionId: currentActiveId });
-              activeSessionExists = true; // Session exists, just not in list yet
+              const activeSession = await invoke<SessionInfo & {
+                messageCount?: number;
+                firstMessage?: string | null;
+              }>('agent_get_session', { sessionId: currentActiveId });
+              const activeSummary: SessionSummary = {
+                id: activeSession.id,
+                type: activeSession.type,
+                provider: activeSession.provider,
+                executionMode: activeSession.executionMode || 'execute',
+                title: activeSession.title,
+                firstMessage: activeSession.firstMessage || null,
+                workingDirectory: activeSession.workingDirectory,
+                model: activeSession.model,
+                messageCount: activeSession.messageCount ?? 0,
+                createdAt: activeSession.createdAt,
+                updatedAt: activeSession.updatedAt,
+                lastAccessedAt: activeSession.lastAccessedAt,
+              };
+              nextSessions = [activeSummary, ...sessions.filter((session) => session.id !== currentActiveId)];
+              activeSessionExists = true;
             } catch {
               // Session truly doesn't exist
             }
           }
 
           set({
-            sessions,
+            sessions: nextSessions,
             isLoading: false,
             hasLoaded: true,
+            sessionsQuery: query,
+            sessionsTotal: page.total,
+            sessionsHasMore: page.hasMore,
+            sessionsOffset: page.nextOffset ?? offset + incomingSessions.length,
             // Keep current selection when valid; otherwise select most recent session if available.
             activeSessionId: activeSessionExists
               ? currentActiveId
-              : sessions.length > 0
-                ? sessions[0].id
+              : nextSessions.length > 0
+                ? nextSessions[0].id
                 : null,
           });
+          if (get().sessionsQuery !== requestQuery) {
+            void get().loadSessions({ reset: true, query: get().sessionsQuery });
+            return;
+          }
           useAppStore.getState().setStartupIssue(null);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -218,7 +289,27 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             hasLoaded: true,
             error: errorMessage,
           });
+          if (get().sessionsQuery !== requestQuery) {
+            void get().loadSessions({ reset: true, query: get().sessionsQuery });
+          }
         }
+      },
+
+      loadMoreSessions: async () => {
+        const state = get();
+        if (state.isLoading || !state.sessionsHasMore) {
+          return;
+        }
+        await state.loadSessions({ reset: false });
+      },
+
+      setSessionSearchQuery: async (query: string) => {
+        const normalized = query.trim();
+        if (normalized === get().sessionsQuery && get().hasLoaded) {
+          return;
+        }
+        set({ sessionsQuery: normalized });
+        await get().loadSessions({ reset: true, query: normalized });
       },
 
       createSession: async (
@@ -260,6 +351,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             sessions: [newSummary, ...state.sessions],
             activeSessionId: session.id,
             isLoading: false,
+            sessionsTotal: state.sessionsTotal + 1,
           }));
           useAppStore.getState().setRuntimeConfigNotice(null);
 
@@ -298,7 +390,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           activeSessionId: sessionId,
           sessions: state.sessions
             .map((s) => s.id === sessionId ? { ...s, lastAccessedAt: now } : s)
-            .sort((a, b) => b.lastAccessedAt - a.lastAccessedAt),
+            .sort((a, b) => {
+              if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+              return b.lastAccessedAt - a.lastAccessedAt;
+            }),
         }));
       },
 
@@ -314,6 +409,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           sessions: state.sessions.filter((s) => s.id !== sessionId),
           activeSessionId:
             state.activeSessionId === sessionId ? null : state.activeSessionId,
+          sessionsTotal: Math.max(0, state.sessionsTotal - 1),
         }));
 
         try {

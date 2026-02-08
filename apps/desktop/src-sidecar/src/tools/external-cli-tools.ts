@@ -364,6 +364,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
             resultSummary: run.resultSummary || null,
             errorCode: run.errorCode || null,
             errorMessage: run.errorMessage || null,
+            diagnostics: run.diagnostics || null,
           },
           recentProgress: run.progress.slice(Math.max(0, run.progress.length - limit)),
           monitoring: {

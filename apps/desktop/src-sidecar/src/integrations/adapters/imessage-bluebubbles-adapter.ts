@@ -168,6 +168,52 @@ export class IMessageBlueBubblesAdapter extends BaseAdapter {
     return response.json();
   }
 
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this.config || !this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'iMessage bridge is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    const websocketOpen =
+      !!this.websocket && this.websocket.readyState === WebSocket.OPEN;
+    const pollingActive = !!this.pollingTimer;
+
+    if (!websocketOpen && !pollingActive) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'BlueBubbles realtime stream is offline.',
+        requiresReconnect: true,
+      };
+    }
+
+    try {
+      await this.blueBubblesRequest('/api/v1/ping', 'GET').catch(async () => {
+        await this.blueBubblesRequest('/api/v1/chats?limit=1', 'GET');
+      });
+      return {
+        health: websocketOpen ? 'healthy' : 'degraded',
+        healthMessage: websocketOpen
+          ? undefined
+          : 'Realtime stream unavailable; polling fallback is active.',
+        requiresReconnect: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `BlueBubbles health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
+  }
+
   private parseConfig(config: Record<string, unknown>): IMessageBlueBubblesConfig {
     const serverUrl = String(config.serverUrl || '').trim().replace(/\/$/, '');
     const accessToken = String(config.accessToken || '').trim();

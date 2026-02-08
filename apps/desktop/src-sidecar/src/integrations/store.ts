@@ -11,6 +11,7 @@ import { DEFAULT_WHATSAPP_DENIAL_MESSAGE } from './types.js';
 
 const CONFIG_DIR = join(homedir(), '.cowork', 'integrations');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const WILDCARD_ALLOW_ALL = '*';
 
 export interface IntegrationGeneralSettings {
   sharedSessionWorkingDirectory?: string;
@@ -297,6 +298,14 @@ export class IntegrationStore {
       : [];
     const allowFromSet = new Set<string>();
     for (const value of allowFromRaw) {
+      const entry = String(value ?? '').trim();
+      if (!entry) {
+        continue;
+      }
+      if (entry === WILDCARD_ALLOW_ALL || entry.toLowerCase() === 'all') {
+        allowFromSet.add(WILDCARD_ALLOW_ALL);
+        continue;
+      }
       const normalized = normalizeE164Like(value);
       if (normalized) {
         allowFromSet.add(normalized);

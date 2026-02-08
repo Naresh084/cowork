@@ -24,6 +24,7 @@ export interface IntegrationGeneralSettings {
 
 export const DEFAULT_WHATSAPP_DENIAL_MESSAGE =
   'This Cowork bot is private. You are not authorized to chat with it.';
+export const ALLOW_ALL_SENDERS_WILDCARD = '*';
 
 interface IntegrationState {
   platforms: Record<PlatformType, PlatformStatus>;
@@ -41,6 +42,7 @@ interface IntegrationState {
 
 interface IntegrationActions {
   connect: (platform: PlatformType, config?: Record<string, unknown>) => Promise<void>;
+  reconnect: (platform: PlatformType) => Promise<void>;
   disconnect: (platform: PlatformType) => Promise<void>;
   refreshStatuses: () => Promise<void>;
   updatePlatformStatus: (status: PlatformStatus) => void;
@@ -119,7 +121,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function normalizePhoneToE164Like(input: string): string | null {
-  const digits = input.replace(/\D+/g, '');
+  const trimmed = input.trim();
+  if (trimmed === ALLOW_ALL_SENDERS_WILDCARD || trimmed.toLowerCase() === 'all') {
+    return ALLOW_ALL_SENDERS_WILDCARD;
+  }
+  const digits = trimmed.replace(/\D+/g, '');
   if (!digits) return null;
   return `+${digits}`;
 }
@@ -140,6 +146,14 @@ function normalizeAndValidateAllowFrom(values: unknown): {
     const normalized = normalizePhoneToE164Like(str);
     if (!normalized) {
       invalid.push(str);
+      continue;
+    }
+    if (normalized === ALLOW_ALL_SENDERS_WILDCARD) {
+      normalizedSet.clear();
+      normalizedSet.add(ALLOW_ALL_SENDERS_WILDCARD);
+      continue;
+    }
+    if (normalizedSet.has(ALLOW_ALL_SENDERS_WILDCARD)) {
       continue;
     }
     normalizedSet.add(normalized);
@@ -270,6 +284,10 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
           }));
         }
       }
+    },
+
+    reconnect: async (platform) => {
+      await get().connect(platform, {});
     },
 
     disconnect: async (platform) => {

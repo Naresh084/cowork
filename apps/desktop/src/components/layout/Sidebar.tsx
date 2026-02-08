@@ -13,6 +13,7 @@ import {
   Plug,
   CircleHelp,
   GitBranch,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionStore, type SessionSummary } from '../../stores/session-store';
@@ -43,10 +44,15 @@ interface SidebarProps {
 export function Sidebar({ isCollapsed }: SidebarProps) {
   const {
     sessions,
+    sessionsHasMore,
+    sessionsTotal,
+    sessionsQuery,
     activeSessionId,
     isLoading,
     hasLoaded,
     loadSessions,
+    loadMoreSessions,
+    setSessionSearchQuery,
     selectSession,
     deleteSession,
     setActiveSession,
@@ -84,6 +90,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isHovering, setIsHovering] = useState(false);
+  const [sessionSearchInput, setSessionSearchInput] = useState(sessionsQuery);
   const [skillsModalOpen, setSkillsModalOpen] = useState(false);
   const [commandsModalOpen, setCommandsModalOpen] = useState(false);
   const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
@@ -209,6 +216,19 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
 
   const showExpandedOverlay = isCollapsed && isHovering;
 
+  useEffect(() => {
+    setSessionSearchInput(sessionsQuery);
+  }, [sessionsQuery]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      if (sessionSearchInput.trim() !== sessionsQuery) {
+        void setSessionSearchQuery(sessionSearchInput);
+      }
+    }, 220);
+    return () => window.clearTimeout(handle);
+  }, [sessionSearchInput, sessionsQuery, setSessionSearchQuery]);
+
   return (
     <div
       className="relative h-full"
@@ -265,6 +285,13 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
           connectorCount={connectedConnectorCount}
           onOpenWorkflows={handleOpenWorkflows}
           sessionListFilters={sessionListFilters}
+          sessionsHasMore={sessionsHasMore}
+          sessionsTotal={sessionsTotal}
+          sessionSearchInput={sessionSearchInput}
+          onSessionSearchInputChange={setSessionSearchInput}
+          onLoadMoreSessions={() => {
+            void loadMoreSessions();
+          }}
           onToggleSessionListFilter={toggleSessionListFilter}
           onOpenHelp={handleOpenHelp}
         />
@@ -334,6 +361,13 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
               connectorCount={connectedConnectorCount}
               onOpenWorkflows={handleOpenWorkflows}
               sessionListFilters={sessionListFilters}
+              sessionsHasMore={sessionsHasMore}
+              sessionsTotal={sessionsTotal}
+              sessionSearchInput={sessionSearchInput}
+              onSessionSearchInputChange={setSessionSearchInput}
+              onLoadMoreSessions={() => {
+                void loadMoreSessions();
+              }}
               onToggleSessionListFilter={toggleSessionListFilter}
               onOpenHelp={handleOpenHelp}
             />
@@ -534,6 +568,9 @@ interface SidebarExpandedProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   isLoading: boolean;
+  sessionsHasMore: boolean;
+  sessionsTotal: number;
+  sessionSearchInput: string;
   sessionMenuId: string | null;
   sessionMenuPosition: { top: number; left: number } | null;
   sessionMenuRef: RefObject<HTMLDivElement>;
@@ -556,6 +593,8 @@ interface SidebarExpandedProps {
   connectorCount: number;
   onOpenWorkflows: () => void;
   sessionListFilters: { chat: boolean; shared: boolean; cron: boolean };
+  onSessionSearchInputChange: (value: string) => void;
+  onLoadMoreSessions: () => void;
   onToggleSessionListFilter: (filter: 'chat' | 'shared' | 'cron') => void;
   onOpenHelp: () => void;
 }
@@ -564,6 +603,9 @@ function SidebarExpanded({
   sessions,
   activeSessionId,
   isLoading,
+  sessionsHasMore,
+  sessionsTotal,
+  sessionSearchInput,
   sessionMenuId,
   sessionMenuPosition,
   sessionMenuRef,
@@ -586,6 +628,8 @@ function SidebarExpanded({
   connectorCount,
   onOpenWorkflows,
   sessionListFilters,
+  onSessionSearchInputChange,
+  onLoadMoreSessions,
   onToggleSessionListFilter,
   onOpenHelp,
 }: SidebarExpandedProps) {
@@ -672,6 +716,26 @@ function SidebarExpanded({
           })}
         </div>
 
+        <div className="px-1 pb-2">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/35" />
+            <input
+              type="text"
+              value={sessionSearchInput}
+              onChange={(event) => onSessionSearchInputChange(event.target.value)}
+              placeholder="Search sessions..."
+              className={cn(
+                'w-full h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] pl-8 pr-2 text-xs text-white/85',
+                'placeholder:text-white/35',
+                'focus:outline-none focus:border-white/[0.18] focus:bg-white/[0.05]'
+              )}
+            />
+          </label>
+          <div className="mt-1.5 text-[10px] text-white/35 px-0.5">
+            Showing {filteredSessions.length} of {sessionsTotal}
+          </div>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-pulse text-white/40 text-sm">Loading...</div>
@@ -728,6 +792,23 @@ function SidebarExpanded({
                 />
               ))}
             </AnimatePresence>
+
+            {sessionsHasMore && (
+              <div className="px-1 pt-2">
+                <button
+                  type="button"
+                  onClick={onLoadMoreSessions}
+                  disabled={isLoading}
+                  className={cn(
+                    'w-full h-8 rounded-lg border border-white/[0.10] text-xs font-medium transition-colors',
+                    'text-white/75 bg-white/[0.03] hover:bg-white/[0.08]',
+                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                  )}
+                >
+                  Load more sessions
+                </button>
+              </div>
+            )}
           </div>
         )}
 

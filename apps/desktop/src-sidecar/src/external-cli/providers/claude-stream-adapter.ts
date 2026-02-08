@@ -46,6 +46,8 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
   private callbacks: ExternalCliAdapterCallbacks | null = null;
   private bridge: ClaudePermissionBridge | null = null;
   private stopped = false;
+  private stderrLines: string[] = [];
+  private stdoutLines: string[] = [];
 
   constructor(origin: ExternalCliRunOrigin) {
     this.origin = origin;
@@ -102,15 +104,29 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
     this.process.stderr?.on('data', (chunk) => {
       const text = String(chunk).trim();
       if (text) {
+        this.captureStream('stderr', text);
+        this.callbacks?.onDiagnosticLog?.({ stream: 'stderr', text });
         process.stderr.write(`[external-cli][claude] ${text}\n`);
       }
     });
 
     this.process.on('error', (error) => {
-      this.callbacks?.onFailed('CLI_PROTOCOL_ERROR', `Failed to start claude: ${stringifyError(error)}`);
+      this.callbacks?.onDiagnosticLog?.({
+        stream: 'note',
+        text: `Process spawn error: ${stringifyError(error)}`,
+      });
+      this.callbacks?.onFailed('CLI_PROTOCOL_ERROR', this.buildFailureMessage(`Failed to start claude: ${stringifyError(error)}`));
     });
 
-    this.process.on('close', (code) => {
+    this.process.on('close', (code, signal) => {
+      this.callbacks?.onProcessExit?.({
+        code: typeof code === 'number' ? code : null,
+        signal: signal || null,
+      });
+      this.callbacks?.onDiagnosticLog?.({
+        stream: 'note',
+        text: `Process closed (code=${code ?? 'null'} signal=${signal || 'null'})`,
+      });
       if (this.stopped) {
         return;
       }
@@ -119,7 +135,10 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
         return;
       }
 
-      this.callbacks?.onFailed('CLI_PROTOCOL_ERROR', `Claude process exited unexpectedly with code ${code ?? 1}.`);
+      this.callbacks?.onFailed(
+        'CLI_PROTOCOL_ERROR',
+        this.buildFailureMessage(`Claude process exited unexpectedly with code ${code ?? 1}.`),
+      );
     });
 
     if (this.process.stdout) {
@@ -129,6 +148,11 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
       });
 
       rl.on('line', (line) => {
+        const raw = line.trim();
+        if (raw) {
+          this.captureStream('stdout', raw);
+          this.callbacks?.onDiagnosticLog?.({ stream: 'stdout', text: raw });
+        }
         this.handleStreamLine(line);
       });
     }
@@ -187,6 +211,10 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
+      this.callbacks?.onDiagnosticLog?.({
+        stream: 'note',
+        text: 'Received non-JSON stdout line from Claude CLI.',
+      });
       return;
     }
 
@@ -247,19 +275,40 @@ export class ClaudeStreamAdapter implements ExternalCliAdapter {
         if (lower.includes('authentication_failed') || lower.includes('not logged in')) {
           this.callbacks.onFailed(
             'CLI_AUTH_REQUIRED',
-            'Claude is installed but not authenticated. Run `claude /login` and retry.',
+            this.buildFailureMessage('Claude is installed but not authenticated. Run `claude /login` and retry.'),
           );
           return;
         }
 
         this.callbacks.onFailed(
           'CLI_PROTOCOL_ERROR',
-          resultText || 'Claude run failed.',
+          this.buildFailureMessage(resultText || 'Claude run failed.'),
         );
         return;
       }
 
       this.callbacks.onCompleted(resultText || 'Claude run completed successfully.');
     }
+  }
+
+  private captureStream(stream: 'stdout' | 'stderr', text: string): void {
+    const target = stream === 'stderr' ? this.stderrLines : this.stdoutLines;
+    target.push(text);
+    if (target.length > 120) {
+      target.shift();
+    }
+  }
+
+  private buildFailureMessage(base: string): string {
+    const stderrTail = this.stderrLines.slice(-8).join('\n').trim();
+    const stdoutTail = this.stdoutLines.slice(-8).join('\n').trim();
+    const details: string[] = [base];
+    if (stderrTail) {
+      details.push(`stderr tail:\n${stderrTail}`);
+    }
+    if (stdoutTail) {
+      details.push(`stdout tail:\n${stdoutTail}`);
+    }
+    return details.join('\n\n');
   }
 }

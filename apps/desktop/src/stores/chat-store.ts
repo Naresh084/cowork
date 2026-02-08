@@ -144,6 +144,8 @@ export interface SessionChatState {
   isLoadingMessages: boolean;
   lastUpdatedAt: number;
   hasLoaded: boolean;
+  hasMoreHistory: boolean;
+  oldestLoadedSequence: number | null;
   lastUserMessage?: {
     content: string;
     attachments?: Attachment[];
@@ -158,6 +160,7 @@ interface ChatState {
 
 interface ChatActions {
   loadMessages: (sessionId: string, forceReload?: boolean) => Promise<SessionDetails | null>;
+  loadOlderMessages: (sessionId: string, limit?: number) => Promise<SessionDetails | null>;
   sendMessage: (
     sessionId: string,
     content: string,
@@ -221,6 +224,8 @@ export interface SessionDetails {
   tasks: Task[];
   artifacts: Artifact[];
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
+  hasMoreHistory?: boolean;
+  oldestLoadedSequence?: number | null;
 }
 
 const createSessionState = (): SessionChatState => ({
@@ -249,6 +254,8 @@ const createSessionState = (): SessionChatState => ({
   isLoadingMessages: false,
   lastUpdatedAt: Date.now(),
   hasLoaded: false,
+  hasMoreHistory: false,
+  oldestLoadedSequence: null,
   lastUserMessage: undefined,
   browserViewScreenshot: null,
 });
@@ -700,7 +707,16 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
     const attemptLoad = async (retry = 0): Promise<SessionDetails | null> => {
       try {
-        const session = await invoke<SessionDetails>('agent_get_session', { sessionId });
+        let session: SessionDetails;
+        try {
+          session = await invoke<SessionDetails>('agent_get_session_chunk', {
+            sessionId,
+            chatItemLimit: 200,
+          });
+        } catch {
+          // Backward compatibility fallback for older sidecar versions.
+          session = await invoke<SessionDetails>('agent_get_session', { sessionId });
+        }
         const agentStore = useAgentStore.getState();
 
         set((state) => updateSession(state, sessionId, (existing) => {
@@ -726,6 +742,17 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
             chatItems: orderedItems,
             isLoadingMessages: false,
             hasLoaded: true,
+            hasMoreHistory: Boolean(session.hasMoreHistory),
+            oldestLoadedSequence:
+              typeof session.oldestLoadedSequence === 'number'
+                ? session.oldestLoadedSequence
+                : orderedItems.length > 0
+                  ? Math.min(
+                      ...orderedItems.map((item, index) =>
+                        typeof item.sequence === 'number' ? item.sequence : index + 1
+                      )
+                    )
+                  : null,
           };
         }));
 
@@ -781,6 +808,8 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
             isLoadingMessages: false,
             error: null,
             hasLoaded: true,
+            hasMoreHistory: false,
+            oldestLoadedSequence: null,
           })));
           return null;
         }
@@ -798,6 +827,68 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
     };
 
     return attemptLoad();
+  },
+
+  loadOlderMessages: async (sessionId: string, limit = 200) => {
+    if (!sessionId) return null;
+    const sessionState = get().sessions[sessionId];
+    if (!sessionState || sessionState.isLoadingMessages || !sessionState.hasLoaded) {
+      return null;
+    }
+    if (!sessionState.hasMoreHistory) {
+      return null;
+    }
+    if (typeof sessionState.oldestLoadedSequence !== 'number') {
+      return null;
+    }
+
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      isLoadingMessages: true,
+      error: null,
+    })));
+
+    try {
+      const session = await invoke<SessionDetails>('agent_get_session_chunk', {
+        sessionId,
+        chatItemLimit: limit,
+        beforeSequence: sessionState.oldestLoadedSequence,
+      });
+
+      set((state) => updateSession(state, sessionId, (existing) => {
+        const existingChatItems = existing.chatItems || [];
+        const incomingChatItems = session.chatItems || [];
+        const mergedChatItems = [...existingChatItems];
+        for (const item of incomingChatItems) {
+          if (!mergedChatItems.some((ci) => ci.id === item.id)) {
+            mergedChatItems.push(item);
+          }
+        }
+        const orderedItems = sortChatItems(mergedChatItems);
+
+        return {
+          ...existing,
+          chatItems: orderedItems,
+          isLoadingMessages: false,
+          hasLoaded: true,
+          hasMoreHistory: Boolean(session.hasMoreHistory),
+          oldestLoadedSequence:
+            typeof session.oldestLoadedSequence === 'number'
+              ? session.oldestLoadedSequence
+              : existing.oldestLoadedSequence,
+        };
+      }));
+
+      return session;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      set((state) => updateSession(state, sessionId, (existing) => ({
+        ...existing,
+        isLoadingMessages: false,
+        error: errorMessage,
+      })));
+      return null;
+    }
   },
 
   sendMessage: async (

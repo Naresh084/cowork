@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic, ArrowDown } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic, ArrowDown, Search } from 'lucide-react';
 import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
@@ -45,6 +45,8 @@ const EMPTY_SESSION_STATE = {
   pendingPermissions: [] as ExtendedPermissionRequest[],
   activeTurnId: undefined as string | undefined,
   hasLoaded: false,
+  hasMoreHistory: false,
+  oldestLoadedSequence: null,
   error: null as string | null,
   lastUpdatedAt: 0,
 };
@@ -56,6 +58,43 @@ interface OptimisticFirstMessage {
 
 interface MessageListProps {
   optimisticFirstMessage?: OptimisticFirstMessage | null;
+}
+
+function messageContentToSearchText(content: Message['content']): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      if (part.type === 'text' && typeof (part as { text?: unknown }).text === 'string') {
+        return (part as { text: string }).text;
+      }
+      if (part.type === 'tool_result') {
+        const resultPart = part as { result?: unknown; toolName?: string };
+        const rendered =
+          typeof resultPart.result === 'string'
+            ? resultPart.result
+            : resultPart.result !== undefined
+              ? JSON.stringify(resultPart.result)
+              : '';
+        return `${resultPart.toolName || 'tool_result'} ${rendered}`.trim();
+      }
+      if (part.type === 'tool_call') {
+        const callPart = part as { toolName?: string; args?: unknown };
+        const args =
+          callPart.args !== undefined
+            ? (typeof callPart.args === 'string' ? callPart.args : JSON.stringify(callPart.args))
+            : '';
+        return `${callPart.toolName || 'tool_call'} ${args}`.trim();
+      }
+      return '';
+    })
+    .join('\n')
+    .trim();
 }
 
 export function MessageList({ optimisticFirstMessage = null }: MessageListProps) {
@@ -77,6 +116,7 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     pendingPermissions,
     activeTurnId,
     hasLoaded,
+    hasMoreHistory,
     error: sessionError,
   } = sessionState;
 
@@ -108,12 +148,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     return new Set(Array.from(latestAssistantByTurn.values(), (item) => item.id));
   }, [chatItems]);
   const artifacts = agentState.artifacts;
-  const { respondToQuestion, respondToPermission } = useChatStore();
+  const { respondToQuestion, respondToPermission, loadOlderMessages } = useChatStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasManualScroll, setHasManualScroll] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -148,6 +191,48 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     sessionState.lastUpdatedAt,
     isNearBottom,
   ]);
+
+  useEffect(() => {
+    setMessageSearchQuery('');
+    setActiveSearchResultIndex(0);
+  }, [activeSessionId]);
+
+  const registerMessageRef = useCallback((messageId: string, node: HTMLDivElement | null) => {
+    if (node) {
+      messageRefMap.current.set(messageId, node);
+      return;
+    }
+    messageRefMap.current.delete(messageId);
+  }, []);
+
+  const normalizedSearchQuery = messageSearchQuery.trim().toLowerCase();
+  const matchingMessageIds = useMemo(() => {
+    if (!normalizedSearchQuery) return [] as string[];
+    return messages
+      .filter((message) => messageContentToSearchText(message.content).toLowerCase().includes(normalizedSearchQuery))
+      .map((message) => message.id);
+  }, [messages, normalizedSearchQuery]);
+  const matchingMessageIdSet = useMemo(() => new Set(matchingMessageIds), [matchingMessageIds]);
+  const activeSearchMessageId =
+    matchingMessageIds.length > 0
+      ? matchingMessageIds[
+          Math.min(
+            Math.max(activeSearchResultIndex, 0),
+            Math.max(0, matchingMessageIds.length - 1)
+          )
+        ]
+      : null;
+
+  useEffect(() => {
+    setActiveSearchResultIndex(0);
+  }, [normalizedSearchQuery, matchingMessageIds.length]);
+
+  useEffect(() => {
+    if (!activeSearchMessageId) return;
+    const node = messageRefMap.current.get(activeSearchMessageId);
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [activeSearchMessageId]);
 
   // Show loading while persistence is in-flight or session bootstrap has not completed yet.
   const isInitialSessionLoad =
@@ -311,12 +396,21 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
               const message = messageById.get(activity.messageId);
               if (!message) return null;
               return (
-                <MessageBubble
+                <div
                   key={activity.id}
-                  message={message}
-                  showAvatar={false}
-                  showCopyAction={finalAssistantMessageIds.has(message.id)}
-                />
+                  ref={(node) => registerMessageRef(message.id, node)}
+                  className={cn(
+                    'rounded-xl transition-colors',
+                    matchingMessageIdSet.has(message.id) && 'ring-1 ring-[#1D4ED8]/40 bg-[#1D4ED8]/[0.04]',
+                    activeSearchMessageId === message.id && 'ring-2 ring-[#1D4ED8]/70 bg-[#1D4ED8]/[0.09]'
+                  )}
+                >
+                  <MessageBubble
+                    message={message}
+                    showAvatar={false}
+                    showCopyAction={finalAssistantMessageIds.has(message.id)}
+                  />
+                </div>
               );
             }
 
@@ -340,6 +434,81 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
         className="h-full min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth"
       >
         <div className="mx-3 md:mx-8 lg:mx-10 py-3 px-0 space-y-2">
+          <div className="sticky top-0 z-20 pb-1">
+            <div className="rounded-xl border border-white/[0.08] bg-[#0E1017]/85 backdrop-blur-sm px-2.5 py-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/35 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={messageSearchQuery}
+                    onChange={(event) => setMessageSearchQuery(event.target.value)}
+                    placeholder="Search loaded messages..."
+                    className={cn(
+                      'w-full h-8 rounded-lg border border-white/[0.08] bg-white/[0.03] pl-8 pr-2 text-xs text-white/85',
+                      'placeholder:text-white/35',
+                      'focus:outline-none focus:border-white/[0.18] focus:bg-white/[0.05]'
+                    )}
+                  />
+                </div>
+                {normalizedSearchQuery && (
+                  <>
+                    <span className="text-[11px] text-white/55 tabular-nums min-w-[60px] text-right">
+                      {matchingMessageIds.length === 0
+                        ? '0 matches'
+                        : `${Math.min(activeSearchResultIndex + 1, matchingMessageIds.length)}/${matchingMessageIds.length}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveSearchResultIndex((current) =>
+                          matchingMessageIds.length === 0
+                            ? 0
+                            : (current - 1 + matchingMessageIds.length) % matchingMessageIds.length
+                        )
+                      }
+                      disabled={matchingMessageIds.length === 0}
+                      className="h-8 px-2 rounded-lg border border-white/[0.10] text-xs text-white/70 hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveSearchResultIndex((current) =>
+                          matchingMessageIds.length === 0 ? 0 : (current + 1) % matchingMessageIds.length
+                        )
+                      }
+                      disabled={matchingMessageIds.length === 0}
+                      className="h-8 px-2 rounded-lg border border-white/[0.10] text-xs text-white/70 hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {hasMoreHistory && (
+            <div className="flex items-center justify-center">
+              <button
+                type="button"
+                disabled={isLoadingMessages || !activeSessionId}
+                onClick={() => {
+                  if (!activeSessionId) return;
+                  void loadOlderMessages(activeSessionId, 200);
+                }}
+                className={cn(
+                  'h-8 px-3 rounded-full border border-white/[0.12] bg-white/[0.03] text-xs text-white/75 transition-colors',
+                  'hover:bg-white/[0.08] disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                {isLoadingMessages ? 'Loading older messages…' : 'Load older messages'}
+              </button>
+            </div>
+          )}
+
           {messages.map((message, index) => {
             // Assistant messages with turn activities are rendered inside the activity block.
             if (message.role === 'assistant' && assistantMessageIds.has(message.id)) {
@@ -351,7 +520,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
               : message.id;
 
             return (
-              <div key={messageKey} className="message-turn-container">
+              <div
+                key={messageKey}
+                ref={(node) => registerMessageRef(message.id, node)}
+                className={cn(
+                  'message-turn-container rounded-xl transition-colors',
+                  matchingMessageIdSet.has(message.id) && 'ring-1 ring-[#1D4ED8]/40 bg-[#1D4ED8]/[0.04]',
+                  activeSearchMessageId === message.id && 'ring-2 ring-[#1D4ED8]/70 bg-[#1D4ED8]/[0.09]'
+                )}
+              >
                 <MessageBubble
                   message={message}
                   showCopyAction={

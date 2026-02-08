@@ -689,6 +689,14 @@ interface ExternalCliRunSummaryPreview {
   latestProgress?: string | null;
   resultSummary?: string;
   errorMessage?: string;
+  diagnostics?: {
+    stdout?: string;
+    stderr?: string;
+    notes?: string[];
+    exitCode?: number | null;
+    exitSignal?: string | null;
+    truncated?: boolean;
+  };
   pendingInteraction?: {
     type?: string;
     prompt?: string;
@@ -937,6 +945,37 @@ function renderExternalCliResult(
         <div className="external-cli-result__error">{summary.errorMessage}</div>
       )}
 
+      {summary?.diagnostics && (
+        <div className="external-cli-result__summary">
+          <div className="external-cli-result__label flex items-center justify-between gap-2">
+            <span>Diagnostics</span>
+            {summary.diagnostics.truncated ? (
+              <span className="text-[10px] uppercase tracking-wide text-[#F59E0B]">truncated</span>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-2 py-1.5 text-white/65">
+              Exit code: <span className="text-white/90">{formatExitCode(summary.diagnostics.exitCode)}</span>
+            </div>
+            <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-2 py-1.5 text-white/65">
+              Exit signal: <span className="text-white/90">{summary.diagnostics.exitSignal || 'none'}</span>
+            </div>
+          </div>
+          {Array.isArray(summary.diagnostics.notes) && summary.diagnostics.notes.length > 0 && (
+            <DiagnosticsLogBlock
+              title="Notes"
+              value={summary.diagnostics.notes.join('\n')}
+            />
+          )}
+          {summary.diagnostics.stderr && summary.diagnostics.stderr.trim().length > 0 && (
+            <DiagnosticsLogBlock title="stderr" value={summary.diagnostics.stderr} />
+          )}
+          {summary.diagnostics.stdout && summary.diagnostics.stdout.trim().length > 0 && (
+            <DiagnosticsLogBlock title="stdout" value={summary.diagnostics.stdout} />
+          )}
+        </div>
+      )}
+
       {monitoring && (
         <div className="external-cli-result__monitor">
           <span className="external-cli-result__monitor-label">Agent Monitoring</span>
@@ -986,6 +1025,7 @@ function extractExternalCliSummary(result: unknown): ExternalCliRunSummaryPrevie
     latestProgress?: string | null;
     resultSummary?: string;
     errorMessage?: string;
+    diagnostics?: ExternalCliRunSummaryPreview['diagnostics'];
     pendingInteraction?: { type?: string; prompt?: string };
   };
 
@@ -1009,8 +1049,46 @@ function extractExternalCliSummary(result: unknown): ExternalCliRunSummaryPrevie
     latestProgress: resultAny.latestProgress,
     resultSummary: resultAny.resultSummary,
     errorMessage: resultAny.errorMessage,
+    diagnostics: resultAny.diagnostics,
     pendingInteraction: resultAny.pendingInteraction,
   };
+}
+
+function DiagnosticsLogBlock({ title, value }: { title: string; value: string }) {
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success('Copied', `${title} copied to clipboard`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error('Copy failed', message);
+    }
+  };
+
+  return (
+    <div className="mt-2 rounded-lg border border-white/[0.08] bg-[#0B0C10]">
+      <div className="px-2 py-1.5 border-b border-white/[0.06] flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-wide text-white/55">{title}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1 text-[11px] text-white/65 hover:text-white"
+        >
+          <Copy className="w-3 h-3" />
+          Copy
+        </button>
+      </div>
+      <pre className="max-h-52 overflow-auto p-2 text-xs leading-relaxed whitespace-pre-wrap text-white/78 select-text">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
+function formatExitCode(code?: number | null): string {
+  if (typeof code === 'number') return String(code);
+  if (code === null) return 'null';
+  return 'n/a';
 }
 
 function extractExternalCliProgressEntries(result: unknown): Array<{ timestamp?: number; message?: string }> {

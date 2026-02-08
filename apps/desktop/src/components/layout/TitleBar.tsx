@@ -4,8 +4,8 @@ export function TitleBar() {
   return (
     <div
       className={cn(
-        'h-8 flex items-center',
-        'bg-[#0D0D0F]',
+        'absolute inset-x-0 top-0 z-40 h-8 flex items-center',
+        'bg-transparent',
         'window-drag'
       )}
     >

@@ -94,6 +94,29 @@ export abstract class BaseAdapter extends EventEmitter {
     return null;
   }
 
+  /**
+   * Live health probe for the active connection.
+   * Adapters can override for transport-specific checks.
+   */
+  async checkHealth(): Promise<{
+    health: NonNullable<PlatformStatus['health']>;
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Disconnected',
+        requiresReconnect: false,
+      };
+    }
+
+    return {
+      health: 'healthy',
+      requiresReconnect: false,
+    };
+  }
+
   /** Get the current connection status. */
   getStatus(): PlatformStatus {
     return {

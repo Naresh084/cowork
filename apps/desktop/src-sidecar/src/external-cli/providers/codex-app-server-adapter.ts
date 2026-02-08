@@ -108,6 +108,8 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
   private stopped = false;
   private runId = '';
   private sessionId = '';
+  private stderrLines: string[] = [];
+  private stdoutLines: string[] = [];
 
   async start(input: ExternalCliAdapterStartInput, callbacks: ExternalCliAdapterCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -126,15 +128,32 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     this.process.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();
       if (text) {
+        this.captureStream('stderr', text);
+        this.callbacks?.onDiagnosticLog?.({ stream: 'stderr', text });
         process.stderr.write(`[external-cli][codex] ${text}\n`);
       }
     });
 
     this.process.on('error', (error) => {
-      callbacks.onFailed('CLI_PROTOCOL_ERROR', `Failed to start codex app-server: ${stringifyError(error)}`);
+      callbacks.onDiagnosticLog?.({
+        stream: 'note',
+        text: `Process spawn error: ${stringifyError(error)}`,
+      });
+      callbacks.onFailed(
+        'CLI_PROTOCOL_ERROR',
+        this.buildFailureMessage(`Failed to start codex app-server: ${stringifyError(error)}`),
+      );
     });
 
-    this.process.on('close', (code) => {
+    this.process.on('close', (code, signal) => {
+      callbacks.onProcessExit?.({
+        code: typeof code === 'number' ? code : null,
+        signal: signal || null,
+      });
+      callbacks.onDiagnosticLog?.({
+        stream: 'note',
+        text: `Process closed (code=${code ?? 'null'} signal=${signal || 'null'})`,
+      });
       if (this.stopped) {
         return;
       }
@@ -143,7 +162,10 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
         return;
       }
 
-      callbacks.onFailed('CLI_PROTOCOL_ERROR', `Codex process exited unexpectedly with code ${code ?? 1}.`);
+      callbacks.onFailed(
+        'CLI_PROTOCOL_ERROR',
+        this.buildFailureMessage(`Codex process exited unexpectedly with code ${code ?? 1}.`),
+      );
     });
 
     const rl = createInterface({
@@ -152,11 +174,19 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     });
 
     rl.on('line', (line) => {
+      const raw = line.trim();
+      if (raw) {
+        this.captureStream('stdout', raw);
+        this.callbacks?.onDiagnosticLog?.({ stream: 'stdout', text: raw });
+      }
       void this.handleLine(line);
     });
 
     void this.bootstrap(input).catch((error) => {
-      callbacks.onFailed('CLI_PROTOCOL_ERROR', `Codex initialization failed: ${stringifyError(error)}`);
+      callbacks.onFailed(
+        'CLI_PROTOCOL_ERROR',
+        this.buildFailureMessage(`Codex initialization failed: ${stringifyError(error)}`),
+      );
     });
   }
 
@@ -332,6 +362,10 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     try {
       parsed = JSON.parse(trimmed);
     } catch {
+      this.callbacks?.onDiagnosticLog?.({
+        stream: 'note',
+        text: 'Received non-JSON stdout line from Codex app-server.',
+      });
       return;
     }
 
@@ -576,5 +610,26 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
     }
 
     this.process.stdin.write(`${JSON.stringify(payload)}\n`);
+  }
+
+  private captureStream(stream: 'stdout' | 'stderr', text: string): void {
+    const target = stream === 'stderr' ? this.stderrLines : this.stdoutLines;
+    target.push(text);
+    if (target.length > 180) {
+      target.shift();
+    }
+  }
+
+  private buildFailureMessage(base: string): string {
+    const stderrTail = this.stderrLines.slice(-10).join('\n').trim();
+    const stdoutTail = this.stdoutLines.slice(-10).join('\n').trim();
+    const parts: string[] = [base];
+    if (stderrTail) {
+      parts.push(`stderr tail:\n${stderrTail}`);
+    }
+    if (stdoutTail) {
+      parts.push(`stdout tail:\n${stdoutTail}`);
+    }
+    return parts.join('\n\n');
   }
 }

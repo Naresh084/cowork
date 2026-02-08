@@ -670,11 +670,16 @@ export class MessageRouter extends EventEmitter {
 
     try {
       if (!state.hasDeliveredContent && adapter) {
-        await adapter.replaceProcessingPlaceholder(
-          chatId,
-          thinkingHandle,
-          this.getFallbackResponseText(),
-        );
+        const fallbackText = this.getFallbackResponseText();
+        try {
+          await adapter.replaceProcessingPlaceholder(
+            chatId,
+            thinkingHandle,
+            fallbackText,
+          );
+        } catch {
+          await adapter.sendMessage(chatId, fallbackText);
+        }
         eventEmitter.integrationMessageOut(platform, chatId);
       }
     } catch (err) {
@@ -707,7 +712,11 @@ export class MessageRouter extends EventEmitter {
           platform,
           errorText?.trim() || 'Sorry, there was an error while processing your message.',
         );
-        await adapter.replaceProcessingPlaceholder(chatId, thinkingHandle, message);
+        try {
+          await adapter.replaceProcessingPlaceholder(chatId, thinkingHandle, message);
+        } catch {
+          await adapter.sendMessage(chatId, message);
+        }
         eventEmitter.integrationMessageOut(platform, chatId);
       }
     } catch {
@@ -933,11 +942,16 @@ export class MessageRouter extends EventEmitter {
     } catch (err) {
       if (adapter && state.pendingOrigin) {
         try {
-          await adapter.replaceProcessingPlaceholder(
-            msg.chatId,
-            state.pendingOrigin.thinkingHandle,
-            'Sorry, there was an error while processing your message.',
-          );
+          const failureText = 'Sorry, there was an error while processing your message.';
+          try {
+            await adapter.replaceProcessingPlaceholder(
+              msg.chatId,
+              state.pendingOrigin.thinkingHandle,
+              failureText,
+            );
+          } catch {
+            await adapter.sendMessage(msg.chatId, failureText);
+          }
           eventEmitter.integrationMessageOut(msg.platform, msg.chatId);
         } catch {
           // Best-effort error reply.

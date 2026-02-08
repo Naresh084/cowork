@@ -55,6 +55,8 @@ import type {
   RespondQuestionParams,
   StopGenerationParams,
   GetSessionParams,
+  GetSessionChunkParams,
+  ListSessionsPageParams,
   DeleteSessionParams,
   LoadMemoryParams,
   SaveMemoryParams,
@@ -458,11 +460,33 @@ registerHandler('list_sessions', async () => {
   return agentRunner.listSessions();
 });
 
+registerHandler('list_sessions_page', async (params) => {
+  const p = params as unknown as ListSessionsPageParams;
+  return agentRunner.listSessionsPage({
+    limit: typeof p.limit === 'number' ? p.limit : undefined,
+    offset: typeof p.offset === 'number' ? p.offset : undefined,
+    query: typeof p.query === 'string' ? p.query : undefined,
+  });
+});
+
 // Get session
 registerHandler('get_session', async (params) => {
   const p = params as unknown as GetSessionParams;
   if (!p.sessionId) throw new Error('sessionId is required');
   const session = agentRunner.getSession(p.sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${p.sessionId}`);
+  }
+  return session;
+});
+
+registerHandler('get_session_chunk', async (params) => {
+  const p = params as unknown as GetSessionChunkParams;
+  if (!p.sessionId) throw new Error('sessionId is required');
+  const session = agentRunner.getSessionChunk(p.sessionId, {
+    chatItemLimit: typeof p.chatItemLimit === 'number' ? p.chatItemLimit : undefined,
+    beforeSequence: typeof p.beforeSequence === 'number' ? p.beforeSequence : undefined,
+  });
   if (!session) {
     throw new Error(`Session not found: ${p.sessionId}`);
   }
@@ -2064,7 +2088,7 @@ registerHandler('call_connector_app_tool', async (params) => {
 
 registerHandler('integration_list_statuses', async () => {
   const { integrationBridge } = await import('./integrations/index.js');
-  return integrationBridge.getStatuses();
+  return integrationBridge.getStatusesWithHealth();
 });
 
 registerHandler('integration_connect', async (params) => {
@@ -2074,64 +2098,13 @@ registerHandler('integration_connect', async (params) => {
       `Invalid platform: ${platform}. Must be one of: ${SUPPORTED_PLATFORM_TYPES.join(', ')}`,
     );
   }
-  // Platform-specific config validation
   const safeConfig = config || {};
-  if (
-    platform === 'slack' &&
-    (
-      typeof safeConfig.botToken !== 'string' ||
-      typeof safeConfig.appToken !== 'string' ||
-      !safeConfig.botToken ||
-      !safeConfig.appToken
-    )
-  ) {
-    throw new Error('Slack requires both botToken (xoxb-) and appToken (xapp-)');
-  }
-  if (
-    platform === 'telegram' &&
-    (typeof safeConfig.botToken !== 'string' || !safeConfig.botToken)
-  ) {
-    throw new Error('Telegram requires a botToken from @BotFather');
-  }
-  if (
-    platform === 'discord' &&
-    (typeof safeConfig.botToken !== 'string' || !safeConfig.botToken)
-  ) {
-    throw new Error('Discord requires a botToken from Discord Developer Portal');
-  }
-  if (platform === 'imessage') {
-    if (process.platform !== 'darwin') {
-      throw new Error('iMessage integration is only supported on macOS');
-    }
-    if (
-      typeof safeConfig.serverUrl !== 'string' ||
-      !safeConfig.serverUrl ||
-      typeof safeConfig.accessToken !== 'string' ||
-      !safeConfig.accessToken
-    ) {
-      throw new Error('iMessage requires serverUrl and accessToken');
-    }
-  }
-  if (
-    platform === 'teams' &&
-    (
-      typeof safeConfig.tenantId !== 'string' ||
-      !safeConfig.tenantId ||
-      typeof safeConfig.clientId !== 'string' ||
-      !safeConfig.clientId ||
-      typeof safeConfig.clientSecret !== 'string' ||
-      !safeConfig.clientSecret ||
-      typeof safeConfig.teamId !== 'string' ||
-      !safeConfig.teamId ||
-      typeof safeConfig.channelId !== 'string' ||
-      !safeConfig.channelId
-    )
-  ) {
-    throw new Error('Teams requires tenantId, clientId, clientSecret, teamId, and channelId');
+  if (platform === 'imessage' && process.platform !== 'darwin') {
+    throw new Error('iMessage integration is only supported on macOS');
   }
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.connect(platform, safeConfig);
-  return integrationBridge.getStatuses().find(s => s.platform === platform);
+  return integrationBridge.getStatusWithHealth(platform);
 });
 
 registerHandler('integration_disconnect', async (params) => {
@@ -2147,8 +2120,10 @@ registerHandler('integration_disconnect', async (params) => {
 registerHandler('integration_get_status', async (params) => {
   const { platform } = params as { platform: string };
   const { integrationBridge } = await import('./integrations/index.js');
-  const statuses = integrationBridge.getStatuses();
-  return statuses.find(s => s.platform === platform) || { platform, connected: false };
+  if (!platform || !isValidIntegrationPlatform(platform)) {
+    throw new Error(`Invalid platform: ${platform}`);
+  }
+  return integrationBridge.getStatusWithHealth(platform);
 });
 
 registerHandler('integration_get_qr', async () => {

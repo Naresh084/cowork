@@ -72,6 +72,10 @@ export interface PlatformStatus {
   error?: string;
   connectedAt?: number;
   lastMessageAt?: number;
+  health?: 'healthy' | 'degraded' | 'unhealthy';
+  healthMessage?: string;
+  requiresReconnect?: boolean;
+  lastHealthCheckAt?: number;
 }
 
 export interface IncomingMessage {

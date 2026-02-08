@@ -59,6 +59,15 @@ export interface ExternalCliProgressEntry {
   message: string;
 }
 
+export interface ExternalCliDiagnostics {
+  stdout: string;
+  stderr: string;
+  notes: string[];
+  exitCode?: number | null;
+  exitSignal?: string | null;
+  truncated?: boolean;
+}
+
 export interface ExternalCliRunOrigin {
   source: 'desktop' | 'integration';
   platform?: PlatformType;
@@ -101,6 +110,7 @@ export interface ExternalCliRunRecord {
   errorCode?: string;
   errorMessage?: string;
   resultSummary?: string;
+  diagnostics?: ExternalCliDiagnostics;
 }
 
 export interface ExternalCliRunSummary {
@@ -124,6 +134,7 @@ export interface ExternalCliRunSummary {
   errorCode?: string;
   errorMessage?: string;
   resultSummary?: string;
+  diagnostics?: ExternalCliDiagnostics;
 }
 
 export interface ExternalCliStartRunInput {
@@ -161,6 +172,12 @@ export interface ExternalCliAdapterStartInput {
 export interface ExternalCliAdapterCallbacks {
   onLaunchCommand?: (command: string) => void;
   onProgress: (entry: ExternalCliProgressEntry) => void;
+  onDiagnosticLog?: (entry: {
+    stream: 'stdout' | 'stderr' | 'note';
+    text: string;
+    timestamp?: number;
+  }) => void;
+  onProcessExit?: (info: { code?: number | null; signal?: string | null }) => void;
   onWaitingInteraction: (interaction: ExternalCliPendingInteraction) => void;
   onInteractionResolved: (interactionId: string) => void;
   onCompleted: (summary: string) => void;

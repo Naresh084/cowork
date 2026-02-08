@@ -318,6 +318,10 @@ export class EventEmitter {
     error?: string;
     connectedAt?: number;
     lastMessageAt?: number;
+    health?: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+    lastHealthCheckAt?: number;
   }): void {
     this.emit('integration:status', undefined, status);
   }

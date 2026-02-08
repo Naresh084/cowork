@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, Loader2, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
+  ALLOW_ALL_SENDERS_WILDCARD,
   DEFAULT_WHATSAPP_DENIAL_MESSAGE,
   normalizePhoneToE164Like,
   useIntegrationStore,
@@ -16,6 +17,7 @@ export function WhatsAppSettings() {
   const isConnecting = useIntegrationStore((s) => s.isConnecting.whatsapp);
   const connect = useIntegrationStore((s) => s.connect);
   const disconnect = useIntegrationStore((s) => s.disconnect);
+  const reconnect = useIntegrationStore((s) => s.reconnect);
   const whatsappConfig = useIntegrationStore((s) => s.whatsappConfig);
   const isConfigLoading = useIntegrationStore((s) => s.isConfigLoading);
   const isConfigSaving = useIntegrationStore((s) => s.isConfigSaving);
@@ -37,6 +39,9 @@ export function WhatsAppSettings() {
   const identityPhone = platform?.identityPhone;
   const identityName = platform?.identityName;
   const error = platform?.error;
+  const health = platform?.health;
+  const healthMessage = platform?.healthMessage;
+  const requiresReconnect = Boolean(platform?.requiresReconnect || health === 'unhealthy');
 
   useEffect(() => {
     void loadConfig('whatsapp');
@@ -71,6 +76,10 @@ export function WhatsAppSettings() {
     await disconnect('whatsapp');
   };
 
+  const handleReconnect = async () => {
+    await reconnect('whatsapp');
+  };
+
   const addAllowFromNumber = () => {
     setFormError(null);
     setSaveNotice(null);
@@ -83,7 +92,15 @@ export function WhatsAppSettings() {
       return;
     }
 
-    setAllowFromDraft((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
+    setAllowFromDraft((prev) => {
+      if (normalized === ALLOW_ALL_SENDERS_WILDCARD) {
+        return [ALLOW_ALL_SENDERS_WILDCARD];
+      }
+      const withoutWildcard = prev.filter((entry) => entry !== ALLOW_ALL_SENDERS_WILDCARD);
+      return withoutWildcard.includes(normalized)
+        ? withoutWildcard
+        : [...withoutWildcard, normalized];
+    });
     setAllowFromInput('');
   };
 
@@ -104,8 +121,15 @@ export function WhatsAppSettings() {
         setFormError('Enter a valid phone number.');
         return;
       }
-      if (!nextAllowFrom.includes(normalized)) {
-        nextAllowFrom = [...nextAllowFrom, normalized];
+      if (normalized === ALLOW_ALL_SENDERS_WILDCARD) {
+        nextAllowFrom = [ALLOW_ALL_SENDERS_WILDCARD];
+      } else {
+        nextAllowFrom = nextAllowFrom.filter(
+          (entry) => entry !== ALLOW_ALL_SENDERS_WILDCARD,
+        );
+        if (!nextAllowFrom.includes(normalized)) {
+          nextAllowFrom = [...nextAllowFrom, normalized];
+        }
       }
     }
 
@@ -140,10 +164,17 @@ export function WhatsAppSettings() {
                 platform="whatsapp"
                 connected={connected}
                 displayName={displayName}
+                health={health}
+                requiresReconnect={requiresReconnect}
               />
             </div>
             {error && (
               <p className="mt-2 text-xs text-[#FF5449]">{error}</p>
+            )}
+            {connected && healthMessage && (
+              <p className={cn('mt-2 text-xs', requiresReconnect ? 'text-[#FCA5A5]' : 'text-[#FCD34D]')}>
+                {healthMessage}
+              </p>
             )}
             {(identityName || identityPhone) && (
               <div className="mt-3 space-y-1 text-xs text-white/50">
@@ -157,17 +188,31 @@ export function WhatsAppSettings() {
             )}
           </div>
           {connected ? (
-            <button
-              onClick={handleDisconnect}
-              disabled={isConnecting}
-              className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
-            >
-              {isConnecting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                'Disconnect'
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleReconnect}
+                disabled={isConnecting}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
+                  requiresReconnect
+                    ? 'bg-[#F59E0B]/18 text-[#FCD34D] hover:bg-[#F59E0B]/28'
+                    : 'bg-white/[0.08] text-white/80 hover:bg-white/[0.12]',
+                )}
+              >
+                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reconnect'}
+              </button>
+              <button
+                onClick={handleDisconnect}
+                disabled={isConnecting}
+                className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Disconnect'
+                )}
+              </button>
+            </div>
           ) : (
             <button
               onClick={handleConnect}
@@ -196,7 +241,7 @@ export function WhatsAppSettings() {
         <div>
           <h3 className="text-sm font-medium text-white/90">Sender Control</h3>
           <p className="mt-1 text-xs text-white/40">
-            Only numbers in this allowlist can trigger the agent.
+            Only allowlisted numbers can trigger the agent. Add `*` to allow all senders.
           </p>
         </div>
 
@@ -241,7 +286,7 @@ export function WhatsAppSettings() {
                   key={number}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.06] text-xs text-white/75 font-mono"
                 >
-                  {number}
+                  {number === ALLOW_ALL_SENDERS_WILDCARD ? '* (all senders)' : number}
                   <button
                     onClick={() => removeAllowFromNumber(number)}
                     className="text-white/40 hover:text-white/80 transition-colors"
@@ -349,7 +394,7 @@ export function WhatsAppSettings() {
             >
               <div className="px-4 pb-4 space-y-3">
                 <Step number={1} text="Link a dedicated WhatsApp number for Cowork using the QR code." />
-                <Step number={2} text="Add allowed sender numbers in E.164 format (+countrycode...)." />
+                <Step number={2} text="Add allowed sender numbers in E.164 format (+countrycode...) or use * for all senders." />
                 <Step number={3} text="Save sender rules. Only allowed numbers will reach the agent." />
                 <Step number={4} text="Unauthorized senders will receive the denial message above." />
               </div>

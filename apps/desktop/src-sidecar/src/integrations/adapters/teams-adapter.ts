@@ -154,6 +154,46 @@ export class TeamsAdapter extends BaseAdapter {
     );
   }
 
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this.config || !this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Teams integration is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    if (!this.pollingTimer) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Teams message polling is not active.',
+        requiresReconnect: true,
+      };
+    }
+
+    try {
+      await this.graphRequest(
+        `/teams/${this.config.teamId}/channels/${this.config.channelId}`,
+        'GET',
+      );
+      return {
+        health: 'healthy',
+        requiresReconnect: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `Teams health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
+  }
+
   private parseConfig(raw: Record<string, unknown>): TeamsConfig {
     const tenantId = String(raw.tenantId || '').trim();
     const clientId = String(raw.clientId || '').trim();

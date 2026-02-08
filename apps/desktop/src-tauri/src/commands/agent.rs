@@ -38,6 +38,8 @@ pub struct SessionSummary {
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
     pub title: Option<String>,
+    #[serde(default)]
+    pub first_message: Option<String>,
     pub working_directory: Option<String>,
     pub model: Option<String>,
     pub message_count: u32,
@@ -59,9 +61,15 @@ pub struct SessionDetails {
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
+    pub first_message: Option<String>,
+    #[serde(default)]
     pub working_directory: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub message_count: u32,
+    #[serde(default)]
+    pub last_accessed_at: i64,
     #[serde(default)]
     pub messages: Vec<serde_json::Value>,
     #[serde(default)]
@@ -75,9 +83,24 @@ pub struct SessionDetails {
     #[serde(default)]
     pub context_usage: Option<ContextUsage>,
     #[serde(default)]
+    pub has_more_history: Option<bool>,
+    #[serde(default)]
+    pub oldest_loaded_sequence: Option<i64>,
+    #[serde(default)]
     pub created_at: i64,
     #[serde(default)]
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionListPage {
+    pub sessions: Vec<SessionSummary>,
+    pub total: usize,
+    pub has_more: bool,
+    pub offset: usize,
+    pub limit: usize,
+    pub next_offset: Option<usize>,
 }
 
 fn default_provider() -> String {
@@ -640,6 +663,30 @@ pub async fn agent_list_sessions(
     serde_json::from_value(result).map_err(|e| format!("Failed to parse sessions: {}", e))
 }
 
+#[tauri::command]
+pub async fn agent_list_sessions_page(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+    query: Option<String>,
+) -> Result<SessionListPage, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let result = manager
+        .send_command(
+            "list_sessions_page",
+            serde_json::json!({
+                "limit": limit,
+                "offset": offset,
+                "query": query,
+            }),
+        )
+        .await?;
+
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse sessions page: {}", e))
+}
+
 /// Get a specific session with messages
 #[tauri::command]
 pub async fn agent_get_session(
@@ -656,6 +703,27 @@ pub async fn agent_get_session(
 
     let result = manager.send_command("get_session", params).await?;
     serde_json::from_value(result).map_err(|e| format!("Failed to parse session: {}", e))
+}
+
+#[tauri::command]
+pub async fn agent_get_session_chunk(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    chat_item_limit: Option<usize>,
+    before_sequence: Option<i64>,
+) -> Result<SessionDetails, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "chatItemLimit": chat_item_limit,
+        "beforeSequence": before_sequence,
+    });
+
+    let result = manager.send_command("get_session_chunk", params).await?;
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse session chunk: {}", e))
 }
 
 /// Delete a session

@@ -14,6 +14,7 @@ import {
   type PlatformStatus,
 } from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
+const WILDCARD_ALLOW_ALL = '*';
 
 // ============================================================================
 // Integration Bridge Service
@@ -38,6 +39,16 @@ export class IntegrationBridgeService {
   private initializePromise: Promise<void> | null = null;
   private eventHooksInstalled = false;
   private platformOpInFlight: Set<PlatformType> = new Set();
+  private healthCache: Map<
+    PlatformType,
+    {
+      health?: PlatformStatus['health'];
+      healthMessage?: string;
+      requiresReconnect?: boolean;
+      lastHealthCheckAt?: number;
+      connected: boolean;
+    }
+  > = new Map();
 
   constructor() {
     this.router = new MessageRouter();
@@ -194,6 +205,7 @@ export class IntegrationBridgeService {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
     try {
     // Ensure previous adapter/browser for this platform is fully torn down before reconnecting.
     // This prevents profile lock conflicts (e.g. WhatsApp LocalAuth userDataDir in use).
@@ -258,6 +270,13 @@ export class IntegrationBridgeService {
       enabled: true,
       config: normalizedConfig,
     });
+
+    try {
+      const statusWithHealth = await this.getStatusWithHealth(platform);
+      eventEmitter.integrationStatus(statusWithHealth);
+    } catch {
+      // Best effort only; status events continue via adapter hooks.
+    }
     } finally {
       this.platformOpInFlight.delete(platform);
     }
@@ -272,6 +291,7 @@ export class IntegrationBridgeService {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
     try {
       const existingConfig = this.store.getConfig(platform)?.config || {};
       const normalizedConfig = this.normalizePlatformConfig(platform, {
@@ -301,10 +321,21 @@ export class IntegrationBridgeService {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
     try {
     const adapter = this.adapters.get(platform);
     if (adapter) {
-      await adapter.disconnect();
+      const forgettableAdapter = adapter as BaseAdapter & {
+        disconnectAndForget?: () => Promise<void>;
+      };
+      if (
+        platform === 'whatsapp' &&
+        typeof forgettableAdapter.disconnectAndForget === 'function'
+      ) {
+        await forgettableAdapter.disconnectAndForget();
+      } else {
+        await adapter.disconnect();
+      }
       this.router.unregisterAdapter(platform);
       this.adapters.delete(platform);
     }
@@ -322,6 +353,99 @@ export class IntegrationBridgeService {
         ? adapter.getStatus()
         : { platform: p, connected: false };
     });
+  }
+
+  /** Get statuses with live health probes */
+  async getStatusesWithHealth(): Promise<PlatformStatus[]> {
+    return Promise.all(
+      SUPPORTED_INTEGRATION_PLATFORMS.map((platform) =>
+        this.getStatusWithHealth(platform),
+      ),
+    );
+  }
+
+  /** Get one platform status with live health probe */
+  async getStatusWithHealth(platform: PlatformType): Promise<PlatformStatus> {
+    const adapter = this.adapters.get(platform);
+    const baseStatus = adapter
+      ? adapter.getStatus()
+      : ({ platform, connected: false } as PlatformStatus);
+
+    const checkedAt = Date.now();
+    const cached = this.healthCache.get(platform);
+    if (
+      cached &&
+      cached.connected === baseStatus.connected &&
+      typeof cached.lastHealthCheckAt === 'number' &&
+      checkedAt - cached.lastHealthCheckAt < 15000
+    ) {
+      return {
+        ...baseStatus,
+        health: cached.health,
+        healthMessage: cached.healthMessage,
+        requiresReconnect: cached.requiresReconnect,
+        lastHealthCheckAt: cached.lastHealthCheckAt,
+      };
+    }
+
+    if (!adapter) {
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: 'unhealthy',
+        healthMessage: baseStatus.error || 'Disconnected',
+        requiresReconnect: false,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    }
+
+    try {
+      const probe = await adapter.checkHealth();
+      const requiresReconnect =
+        typeof probe.requiresReconnect === 'boolean'
+          ? probe.requiresReconnect
+          : baseStatus.connected && probe.health === 'unhealthy';
+
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: probe.health,
+        healthMessage: probe.healthMessage || baseStatus.error,
+        requiresReconnect,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: 'unhealthy',
+        healthMessage: message || baseStatus.error || 'Health check failed',
+        requiresReconnect: baseStatus.connected,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    }
   }
 
   /** Get WhatsApp QR code (if available during connection) */
@@ -443,6 +567,14 @@ export class IntegrationBridgeService {
       const allowFromRaw = Array.isArray(config.allowFrom) ? config.allowFrom : [];
       const allowFromSet = new Set<string>();
       for (const value of allowFromRaw) {
+        const entry = String(value ?? '').trim();
+        if (!entry) {
+          continue;
+        }
+        if (entry === WILDCARD_ALLOW_ALL || entry.toLowerCase() === 'all') {
+          allowFromSet.add(WILDCARD_ALLOW_ALL);
+          continue;
+        }
         const normalized = this.normalizeE164Like(value);
         if (normalized) {
           allowFromSet.add(normalized);

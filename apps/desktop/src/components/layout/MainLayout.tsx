@@ -86,8 +86,8 @@ export function MainLayout() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#0B0C10] overflow-hidden">
-      {/* Title Bar - minimal drag area for macOS */}
+    <div className="relative h-screen w-screen bg-[#0B0C10] overflow-hidden">
+      {/* Overlay drag strip (does not consume layout height) */}
       <TitleBar />
 
       {/* Main Content - Switches between normal and split view layouts */}
@@ -101,7 +101,7 @@ export function MainLayout() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="flex-1 flex overflow-hidden"
+            className="h-full flex overflow-hidden"
           >
             {/* Sidebar */}
             <Sidebar isCollapsed={sidebarCollapsed} />

@@ -76,7 +76,7 @@ export interface WhatsAppConfig {
   sessionDataDir?: string;
   /** Sender policy (currently allowlist-only mode) */
   senderPolicy?: 'allowlist';
-  /** E.164-like allowlist of authorized sender numbers */
+  /** E.164-like allowlist of authorized sender numbers (`*` allows all senders) */
   allowFrom?: string[];
   /** Message sent to unauthorized senders */
   denialMessage?: string;

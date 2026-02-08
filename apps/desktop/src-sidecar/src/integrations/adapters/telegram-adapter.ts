@@ -229,6 +229,51 @@ export class TelegramAdapter extends BaseAdapter {
     return this.bot.sendMessage(chatId, fallback);
   }
 
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this.bot || !this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'Telegram is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    try {
+      const botWithPolling = this.bot as TelegramBot & {
+        isPolling?: () => boolean;
+      };
+      const pollingActive =
+        typeof botWithPolling.isPolling === 'function'
+          ? botWithPolling.isPolling()
+          : true;
+
+      if (!pollingActive) {
+        return {
+          health: 'unhealthy',
+          healthMessage: 'Telegram polling is not active.',
+          requiresReconnect: true,
+        };
+      }
+
+      await this.bot.getMe();
+      return {
+        health: 'healthy',
+        requiresReconnect: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `Telegram health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
+  }
+
   private async extractIncomingPayload(
     msg: TelegramBot.Message,
   ): Promise<{ content: string; attachments: PlatformMessageAttachment[] }> {

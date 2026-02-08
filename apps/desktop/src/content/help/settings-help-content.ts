@@ -371,7 +371,8 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     id: 'whatsapp.connection',
     title: 'WhatsApp Connection',
     description: 'Connects a WhatsApp identity to receive/send integration messages.',
-    what_it_controls: 'Enables WhatsApp-based shared session messaging and notifications.',
+    what_it_controls:
+      'Enables WhatsApp-based shared session messaging, live health checks, and reconnect recovery.',
     when_to_use: 'Enable for chat-based remote control or notifications through WhatsApp.',
     tool_impact: ['send_notification_whatsapp', 'shared-session ingress'],
     security_notes: 'Use a dedicated account/number for operational safety.',
@@ -381,8 +382,10 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     id: 'whatsapp.allowlist',
     title: 'WhatsApp Sender Allowlist',
     description: 'Restricts which phone numbers can trigger the agent.',
-    what_it_controls: 'Blocks unauthorized senders before they reach agent execution.',
-    when_to_use: 'Always keep allowlist tight in production-like setups.',
+    what_it_controls:
+      'Blocks unauthorized senders before they reach agent execution. Supports `*` wildcard for allow-all mode.',
+    when_to_use:
+      'Keep tight allowlists in production. Use `*` only for trusted/personal test setups.',
     tool_impact: ['shared-session ingress policy'],
     security_notes: 'Primary safety boundary for WhatsApp ingress.',
     requires_new_session: false,

@@ -5,6 +5,8 @@ interface PlatformStatusBadgeProps {
   platform: PlatformType;
   connected: boolean;
   displayName?: string;
+  health?: 'healthy' | 'degraded' | 'unhealthy';
+  requiresReconnect?: boolean;
 }
 
 const platformColors: Record<PlatformType, string> = {
@@ -20,26 +22,48 @@ export function PlatformStatusBadge({
   platform,
   connected,
   displayName,
+  health,
+  requiresReconnect,
 }: PlatformStatusBadgeProps) {
   const color = platformColors[platform];
+  const effectiveHealth = connected ? health ?? 'healthy' : 'unhealthy';
+  const dotClass =
+    effectiveHealth === 'healthy'
+      ? 'shadow-[0_0_6px_1px]'
+      : effectiveHealth === 'degraded'
+        ? 'bg-[#F59E0B]'
+        : 'bg-[#FF6A6A]';
+  const dotStyle =
+    effectiveHealth === 'healthy'
+      ? { backgroundColor: color, boxShadow: `0 0 6px 1px ${color}40` }
+      : undefined;
+
+  const statusText = (() => {
+    if (!connected) {
+      return 'Disconnected';
+    }
+    if (requiresReconnect || effectiveHealth === 'unhealthy') {
+      return 'Connected (reconnect required)';
+    }
+    if (effectiveHealth === 'degraded') {
+      return 'Connected (degraded)';
+    }
+    return 'Connected';
+  })();
 
   return (
     <div className="flex items-center gap-2">
       <div
         className={cn(
           'w-2.5 h-2.5 rounded-full flex-shrink-0',
-          connected ? 'shadow-[0_0_6px_1px]' : 'border border-white/20'
+          connected ? dotClass : 'border border-white/20'
         )}
-        style={
-          connected
-            ? { backgroundColor: color, boxShadow: `0 0 6px 1px ${color}40` }
-            : undefined
-        }
+        style={connected ? dotStyle : undefined}
       />
       <span className="text-sm text-white/70">
         {connected ? (
           <>
-            Connected
+            {statusText}
             {displayName && (
               <span className="text-white/50"> as {displayName}</span>
             )}

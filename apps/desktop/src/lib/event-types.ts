@@ -201,6 +201,10 @@ export type AgentEvent =
       error?: string;
       connectedAt?: number;
       lastMessageAt?: number;
+      health?: 'healthy' | 'degraded' | 'unhealthy';
+      healthMessage?: string;
+      requiresReconnect?: boolean;
+      lastHealthCheckAt?: number;
     }
   | {
       type: 'integration:qr';

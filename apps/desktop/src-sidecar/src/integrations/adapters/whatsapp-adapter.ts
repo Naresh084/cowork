@@ -17,6 +17,7 @@ const DEFAULT_SESSION_DIR = join(homedir(), '.cowork', 'integrations', 'whatsapp
 const DEBUG_WHATSAPP_AUTH =
   process.env.COWORK_DEBUG_WHATSAPP_AUTH === '1' ||
   process.env.COWORK_DEBUG_WHATSAPP_AUTH === 'true';
+const WILDCARD_ALLOW_ALL = '*';
 
 function normalizeE164Like(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -67,6 +68,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   private sessionDataDir: string;
   private senderPolicy: 'allowlist' = 'allowlist';
   private allowFrom: Set<string> = new Set();
+  private allowAllSenders = false;
   private denialMessage: string = DEFAULT_WHATSAPP_DENIAL_MESSAGE;
   private senderAliasToPhone: Map<string, string> = new Map();
 
@@ -132,7 +134,30 @@ export class WhatsAppAdapter extends BaseAdapter {
     } finally {
       this.client = null;
       this.qrCode = null;
+      this.senderAliasToPhone.clear();
       this.setConnected(false);
+    }
+  }
+
+  async disconnectAndForget(): Promise<void> {
+    const currentClient = this.client;
+    if (currentClient) {
+      try {
+        await currentClient.logout();
+      } catch {
+        // Best effort only.
+      }
+    }
+
+    await this.disconnect();
+
+    this.allowAllSenders = false;
+    this.allowFrom.clear();
+
+    try {
+      await rm(this.sessionDataDir, { recursive: true, force: true });
+    } catch {
+      // Best effort only.
     }
   }
 
@@ -140,24 +165,20 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!this.client || !this._connected) {
       throw new Error('WhatsApp client is not connected');
     }
-    const resolvedChatId = this.resolveOutboundChatId(chatId);
-    if (resolvedChatId !== chatId) {
-      process.stderr.write(
-        `[whatsapp-send] remapped chatId ${chatId} -> ${resolvedChatId}\n`
-      );
-    }
-    await this.client.sendMessage(resolvedChatId, text);
+    await this.sendMessageWithFallback(chatId, text);
   }
 
   async sendTypingIndicator(chatId: string): Promise<void> {
     if (!this.client || !this._connected) return;
 
-    try {
-      const resolvedChatId = this.resolveOutboundChatId(chatId);
-      const chat = await this.client.getChatById(resolvedChatId);
-      await chat.sendStateTyping();
-    } catch {
-      // Typing indicator is best-effort, don't throw
+    for (const candidate of this.getOutboundChatCandidates(chatId)) {
+      try {
+        const chat = await this.client.getChatById(candidate);
+        await chat.sendStateTyping();
+        return;
+      } catch {
+        // Try next candidate.
+      }
     }
   }
 
@@ -168,8 +189,7 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (!this.client || !this._connected) {
       throw new Error('WhatsApp client is not connected');
     }
-    const resolvedChatId = this.resolveOutboundChatId(chatId);
-    return this.client.sendMessage(resolvedChatId, text);
+    return this.sendMessageWithFallback(chatId, text);
   }
 
   override async replaceProcessingPlaceholder(
@@ -199,8 +219,7 @@ export class WhatsAppAdapter extends BaseAdapter {
       }
     }
 
-    const resolvedChatId = this.resolveOutboundChatId(chatId);
-    await this.client.sendMessage(resolvedChatId, text);
+    await this.sendMessageWithFallback(chatId, text);
   }
 
   override async updateStreamingMessage(
@@ -227,8 +246,7 @@ export class WhatsAppAdapter extends BaseAdapter {
       }
     }
 
-    const resolvedChatId = this.resolveOutboundChatId(chatId);
-    return this.client.sendMessage(resolvedChatId, text);
+    return this.sendMessageWithFallback(chatId, text);
   }
 
   override async sendMedia(chatId: string, media: IntegrationMediaPayload): Promise<unknown> {
@@ -236,14 +254,13 @@ export class WhatsAppAdapter extends BaseAdapter {
       throw new Error('WhatsApp client is not connected');
     }
 
-    const resolvedChatId = this.resolveOutboundChatId(chatId);
     const caption = media.caption?.trim();
 
     if (media.path) {
       try {
         const messageMedia = MessageMedia.fromFilePath(media.path);
-        return this.client.sendMessage(
-          resolvedChatId,
+        return this.sendMediaWithFallback(
+          chatId,
           messageMedia,
           caption ? ({ caption } as WAWebJS.MessageSendOptions) : undefined,
         );
@@ -258,8 +275,8 @@ export class WhatsAppAdapter extends BaseAdapter {
         `${media.mediaType}-${Date.now()}`;
       try {
         const messageMedia = new MessageMedia(media.mimeType, media.data, filename);
-        return this.client.sendMessage(
-          resolvedChatId,
+        return this.sendMediaWithFallback(
+          chatId,
           messageMedia,
           caption ? ({ caption } as WAWebJS.MessageSendOptions) : undefined,
         );
@@ -269,7 +286,54 @@ export class WhatsAppAdapter extends BaseAdapter {
     }
 
     const fallbackText = `${caption || `Sent ${media.mediaType}`}${media.url ? `\n${media.url}` : ''}`;
-    return this.client.sendMessage(resolvedChatId, fallbackText);
+    return this.sendMessageWithFallback(chatId, fallbackText);
+  }
+
+  override async checkHealth(): Promise<{
+    health: 'healthy' | 'degraded' | 'unhealthy';
+    healthMessage?: string;
+    requiresReconnect?: boolean;
+  }> {
+    if (!this.client || !this._connected) {
+      return {
+        health: 'unhealthy',
+        healthMessage: 'WhatsApp is disconnected.',
+        requiresReconnect: false,
+      };
+    }
+
+    try {
+      const stateRaw = await this.client.getState();
+      const state = String(stateRaw || '').toUpperCase();
+
+      if (!state || state === 'CONNECTED') {
+        return {
+          health: 'healthy',
+          requiresReconnect: false,
+        };
+      }
+
+      if (state === 'OPENING' || state === 'PAIRING') {
+        return {
+          health: 'degraded',
+          healthMessage: `WhatsApp state: ${state}.`,
+          requiresReconnect: false,
+        };
+      }
+
+      return {
+        health: 'unhealthy',
+        healthMessage: `WhatsApp state: ${state}.`,
+        requiresReconnect: true,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        health: 'unhealthy',
+        healthMessage: `Health check failed: ${message}`,
+        requiresReconnect: true,
+      };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -282,12 +346,22 @@ export class WhatsAppAdapter extends BaseAdapter {
 
     const allowFromRaw = Array.isArray(waConfig.allowFrom) ? waConfig.allowFrom : [];
     const normalizedAllowFrom = new Set<string>();
+    let allowAllSenders = false;
     for (const value of allowFromRaw) {
-      const normalized = normalizeE164Like(value);
+      const entry = String(value ?? '').trim();
+      if (!entry) {
+        continue;
+      }
+      if (entry === WILDCARD_ALLOW_ALL || entry.toLowerCase() === 'all') {
+        allowAllSenders = true;
+        continue;
+      }
+      const normalized = normalizeE164Like(entry);
       if (normalized) {
         normalizedAllowFrom.add(normalized);
       }
     }
+    this.allowAllSenders = allowAllSenders;
     this.allowFrom = normalizedAllowFrom;
 
     const denial =
@@ -301,7 +375,7 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (DEBUG_WHATSAPP_AUTH) {
       const allowlist = Array.from(this.allowFrom).join(', ') || '(empty)';
       process.stderr.write(
-        `[whatsapp-auth] config updated policy=${this.senderPolicy} allowFrom=${allowlist}\n`
+        `[whatsapp-auth] config updated policy=${this.senderPolicy} allowAll=${this.allowAllSenders} allowFrom=${allowlist}\n`
       );
     }
   }
@@ -326,6 +400,41 @@ export class WhatsAppAdapter extends BaseAdapter {
       const identityName = info?.pushname ?? displayName;
       const identityPhone = normalizeE164Like(info?.wid?.user);
       this.setConnected(true, displayName, identityName, identityPhone ?? undefined);
+    });
+
+    client.on('change_state', (stateRaw: unknown) => {
+      const state = String(stateRaw || '').toUpperCase();
+      const degradedStates = new Set(['OPENING', 'PAIRING']);
+      const reconnectStates = new Set([
+        'CONFLICT',
+        'TIMEOUT',
+        'UNPAIRED',
+        'UNPAIRED_IDLE',
+        'PROXYBLOCK',
+        'TOS_BLOCK',
+        'SMB_TOS_BLOCK',
+        'DEPRECATED_VERSION',
+      ]);
+
+      if (state === 'CONNECTED') {
+        return;
+      }
+
+      if (reconnectStates.has(state)) {
+        this.setConnected(false);
+        this.emit(
+          'error',
+          new Error(`WhatsApp state changed to ${state}. Reconnect required.`),
+        );
+        return;
+      }
+
+      if (degradedStates.has(state)) {
+        this.emit(
+          'error',
+          new Error(`WhatsApp state is ${state}. Waiting for recovery.`),
+        );
+      }
     });
 
     client.on('message', async (message: WAWebJS.Message) => {
@@ -609,10 +718,27 @@ export class WhatsAppAdapter extends BaseAdapter {
     message: WAWebJS.Message,
     contact: WAWebJS.Contact | null
   ): string {
+    const contactNumber = normalizeE164Like(contact?.number) ?? normalizeE164Like(contact?.id?.user);
+    if (contactNumber) {
+      const digits = contactNumber.replace(/\D+/g, '');
+      if (digits) {
+        return `${digits}@c.us`;
+      }
+    }
+
+    const fromNumber = this.extractSenderPhoneFromJid(message.from);
+    if (fromNumber) {
+      const digits = fromNumber.replace(/\D+/g, '');
+      if (digits) {
+        return `${digits}@c.us`;
+      }
+    }
+
     const contactId = contact?.id?._serialized;
     if (contactId && typeof contactId === 'string') {
       return contactId;
     }
+
     return message.from;
   }
 
@@ -668,6 +794,91 @@ export class WhatsAppAdapter extends BaseAdapter {
     return digits ? `${digits}@c.us` : chatId;
   }
 
+  private getOutboundChatCandidates(chatId: string): string[] {
+    const candidates: string[] = [];
+    const pushCandidate = (value: string | null | undefined) => {
+      const v = String(value || '').trim();
+      if (!v) return;
+      if (!candidates.includes(v)) {
+        candidates.push(v);
+      }
+    };
+
+    const resolved = this.resolveOutboundChatId(chatId);
+    pushCandidate(resolved);
+    pushCandidate(chatId);
+
+    const alias = this.extractJidAlias(chatId);
+    if (alias) {
+      const mapped = this.senderAliasToPhone.get(alias);
+      if (mapped) {
+        const digits = mapped.replace(/\D+/g, '');
+        if (digits) {
+          pushCandidate(`${digits}@c.us`);
+        }
+      }
+    }
+
+    const fromJid = this.extractSenderPhoneFromJid(chatId);
+    if (fromJid) {
+      const digits = fromJid.replace(/\D+/g, '');
+      if (digits) {
+        pushCandidate(`${digits}@c.us`);
+      }
+    }
+
+    return candidates;
+  }
+
+  private async sendMessageWithFallback(chatId: string, text: string): Promise<unknown> {
+    if (!this.client) {
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    const candidates = this.getOutboundChatCandidates(chatId);
+    let lastError: unknown = null;
+
+    for (const candidate of candidates) {
+      try {
+        if (candidate !== chatId) {
+          process.stderr.write(
+            `[whatsapp-send] trying chatId candidate ${candidate} (from ${chatId})\n`,
+          );
+        }
+        return await this.client.sendMessage(candidate, text);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    const errMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`WhatsApp send failed for ${chatId}: ${errMsg}`);
+  }
+
+  private async sendMediaWithFallback(
+    chatId: string,
+    media: WAWebJS.MessageMedia,
+    options?: WAWebJS.MessageSendOptions,
+  ): Promise<unknown> {
+    if (!this.client) {
+      throw new Error('WhatsApp client is not connected');
+    }
+
+    const candidates = this.getOutboundChatCandidates(chatId);
+    let lastError: unknown = null;
+
+    for (const candidate of candidates) {
+      try {
+        return await this.client.sendMessage(candidate, media, options);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    const errMsg = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`WhatsApp media send failed for ${chatId}: ${errMsg}`);
+  }
+
   private addSenderCandidate(
     candidates: Set<string>,
     candidate: string | null
@@ -680,10 +891,46 @@ export class WhatsAppAdapter extends BaseAdapter {
     if (this.senderPolicy !== 'allowlist') {
       return true;
     }
+    if (this.allowAllSenders) {
+      return true;
+    }
     if (senderPhones.length === 0) {
       return false;
     }
-    return senderPhones.some((senderPhone) => this.allowFrom.has(senderPhone));
+
+    if (senderPhones.some((senderPhone) => this.allowFrom.has(senderPhone))) {
+      return true;
+    }
+
+    const allowedDigits = Array.from(this.allowFrom)
+      .map((entry) => entry.replace(/\D+/g, ''))
+      .filter(Boolean);
+    if (allowedDigits.length === 0) {
+      return false;
+    }
+
+    for (const senderPhone of senderPhones) {
+      const senderDigits = senderPhone.replace(/\D+/g, '');
+      if (!senderDigits) continue;
+
+      if (allowedDigits.includes(senderDigits)) {
+        return true;
+      }
+
+      // Accept local-format variants by matching the last 10 digits.
+      if (senderDigits.length >= 10) {
+        const senderTail = senderDigits.slice(-10);
+        if (
+          allowedDigits.some(
+            (allowed) => allowed.length >= 10 && allowed.slice(-10) === senderTail,
+          )
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private async sendUnauthorizedReply(chatId: string): Promise<void> {
