@@ -111,8 +111,16 @@ export class MessageRouter extends EventEmitter {
     if (this.integrationSessionId) {
       // Verify session still exists
       try {
-        await Promise.resolve(this.agentRunner.getSession(this.integrationSessionId));
-        return this.integrationSessionId;
+        const existing = await Promise.resolve(
+          this.agentRunner.getSession(this.integrationSessionId),
+        );
+        if (existing) {
+          return this.integrationSessionId;
+        }
+        process.stderr.write(
+          `[message-router] Stale shared session reference detected: ${this.integrationSessionId}. Recreating shared session.\n`,
+        );
+        this.integrationSessionId = null;
       } catch {
         this.integrationSessionId = null;
       }
@@ -161,7 +169,15 @@ export class MessageRouter extends EventEmitter {
         return null;
       }
 
-      await Promise.resolve(this.agentRunner.getSession(integrationSession.id));
+      const existing = await Promise.resolve(
+        this.agentRunner.getSession(integrationSession.id),
+      );
+      if (!existing) {
+        process.stderr.write(
+          `[message-router] Ignoring stale integration session from list: ${integrationSession.id}\n`,
+        );
+        return null;
+      }
       this.integrationSessionId = integrationSession.id;
 
       eventEmitter.sessionUpdated({

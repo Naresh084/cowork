@@ -104,6 +104,7 @@ export function useAgentEvents(sessionId: string | null): void {
   const sessionStoreRef = useRef(useSessionStore.getState());
   const activeSessionRef = useRef<string | null>(sessionId);
   const sessionReloadTimerRef = useRef<number | null>(null);
+  const sessionReloadAttemptRef = useRef(0);
 
   // Keep refs up to date
   useEffect(() => {
@@ -133,6 +134,26 @@ export function useAgentEvents(sessionId: string | null): void {
   }, [sessionId]);
 
   useEffect(() => {
+    const scheduleSessionReload = (delayMs = 250) => {
+      if (sessionReloadTimerRef.current !== null) return;
+      sessionReloadTimerRef.current = window.setTimeout(() => {
+        sessionReloadTimerRef.current = null;
+        const sessionStore = sessionStoreRef.current;
+        if (sessionStore.isLoading) {
+          if (sessionReloadAttemptRef.current < 12) {
+            sessionReloadAttemptRef.current += 1;
+            scheduleSessionReload(250);
+          } else {
+            sessionReloadAttemptRef.current = 0;
+          }
+          return;
+        }
+
+        sessionReloadAttemptRef.current = 0;
+        void sessionStore.loadSessions({ reset: true });
+      }, delayMs);
+    };
+
     const handleEvent = (event: AgentEvent) => {
       try {
       const chat = chatStoreRef.current;
@@ -167,19 +188,13 @@ export function useAgentEvents(sessionId: string | null): void {
           });
 
           if (didPatch) {
+            sessionReloadAttemptRef.current = 0;
             return;
           }
         }
 
         // Fallback for unknown/new sessions: debounced refresh.
-        if (sessionReloadTimerRef.current !== null) return;
-        sessionReloadTimerRef.current = window.setTimeout(() => {
-          sessionReloadTimerRef.current = null;
-          const sessionStore = sessionStoreRef.current;
-          if (!sessionStore.isLoading) {
-            void sessionStore.loadSessions();
-          }
-        }, 600);
+        scheduleSessionReload();
         return;
       }
 
@@ -582,6 +597,7 @@ export function useAgentEvents(sessionId: string | null): void {
         window.clearTimeout(sessionReloadTimerRef.current);
         sessionReloadTimerRef.current = null;
       }
+      sessionReloadAttemptRef.current = 0;
       unsubscribe();
     };
   }, []);

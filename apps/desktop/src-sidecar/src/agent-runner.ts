@@ -3455,9 +3455,10 @@ export class AgentRunner {
               abortSignal: abortController.signal,
               configurable: { thread_id: session.threadId },
             };
-            const result = await session.agent.invoke(
-              { messages: lcMessages },
-              invokeOptions
+            const result = await this.invokeWithSubagentFallback(
+              session,
+              lcMessages as Array<HumanMessage | SystemMessage>,
+              invokeOptions,
             );
             assistantMessage = this.extractAssistantMessage(result);
             this.syncTasksFromState(session, result);
@@ -3480,9 +3481,10 @@ export class AgentRunner {
           abortSignal: abortController.signal,
           configurable: { thread_id: session.threadId },
         };
-        const result = await session.agent.invoke(
-          { messages: lcMessages },
-          invokeOptions
+        const result = await this.invokeWithSubagentFallback(
+          session,
+          lcMessages as Array<HumanMessage | SystemMessage>,
+          invokeOptions,
         );
         assistantMessage = this.extractAssistantMessage(result);
         this.syncTasksFromState(session, result);
@@ -6292,6 +6294,68 @@ ${stitchGuidance}
     }
 
     return null;
+  }
+
+  private parseSubagentTypeError(message: string): { requestedType: string; allowedTypes: string[] } | null {
+    const normalized = message.trim();
+    const match = normalized.match(
+      /invoked agent of type\s+([^,]+),\s+the only allowed types are\s+(.+)$/i,
+    );
+    if (!match) {
+      return null;
+    }
+
+    const requestedType = match[1]?.trim().replace(/^["'`]|["'`]$/g, '');
+    const allowedRaw = match[2]?.trim() || '';
+    const allowedTypes = allowedRaw
+      .split(',')
+      .map((value) => value.trim().replace(/^["'`]|["'`]$/g, ''))
+      .filter(Boolean);
+
+    if (!requestedType || allowedTypes.length === 0) {
+      return null;
+    }
+
+    return { requestedType, allowedTypes };
+  }
+
+  private async invokeWithSubagentFallback(
+    session: ActiveSession,
+    lcMessages: Array<HumanMessage | SystemMessage>,
+    invokeOptions: {
+      recursionLimit: number;
+      signal: AbortSignal;
+      abortSignal: AbortSignal;
+      configurable: { thread_id: string };
+    },
+  ): Promise<unknown> {
+    try {
+      return await session.agent.invoke({ messages: lcMessages }, invokeOptions);
+    } catch (error) {
+      const errorMessage = sanitizeProviderErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      const parsed = this.parseSubagentTypeError(errorMessage);
+      if (!parsed) {
+        throw error;
+      }
+
+      const fallbackType = parsed.allowedTypes.includes('general-purpose')
+        ? 'general-purpose'
+        : parsed.allowedTypes[0];
+      process.stderr.write(
+        `[agent-runner] Subagent compatibility fallback for session ${session.id}: "${parsed.requestedType}" -> "${fallbackType}"\n`,
+      );
+
+      const retryMessages = [
+        ...lcMessages,
+        new SystemMessage(
+          `Task tool compatibility rule: when calling "task", set subagent_type to "${fallbackType}". Never use "${parsed.requestedType}".`,
+        ),
+      ];
+
+      return session.agent.invoke({ messages: retryMessages }, invokeOptions);
+    }
   }
 
   private buildToolContext(session: ActiveSession): ToolContext {

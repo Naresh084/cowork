@@ -18,6 +18,15 @@ const DEBUG_WHATSAPP_AUTH =
   process.env.COWORK_DEBUG_WHATSAPP_AUTH === '1' ||
   process.env.COWORK_DEBUG_WHATSAPP_AUTH === 'true';
 const WILDCARD_ALLOW_ALL = '*';
+const DEFAULT_SEND_TIMEOUT_MS = 12_000;
+
+function resolveSendTimeoutMs(): number {
+  const raw = Number(process.env.COWORK_WHATSAPP_SEND_TIMEOUT_MS ?? DEFAULT_SEND_TIMEOUT_MS);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_SEND_TIMEOUT_MS;
+  }
+  return Math.floor(raw);
+}
 
 function normalizeE164Like(input: string | null | undefined): string | null {
   if (!input) return null;
@@ -71,6 +80,7 @@ export class WhatsAppAdapter extends BaseAdapter {
   private allowAllSenders = false;
   private denialMessage: string = DEFAULT_WHATSAPP_DENIAL_MESSAGE;
   private senderAliasToPhone: Map<string, string> = new Map();
+  private readonly sendTimeoutMs = resolveSendTimeoutMs();
 
   constructor() {
     super('whatsapp');
@@ -718,6 +728,15 @@ export class WhatsAppAdapter extends BaseAdapter {
     message: WAWebJS.Message,
     contact: WAWebJS.Contact | null
   ): string {
+    if (message.from && typeof message.from === 'string') {
+      return message.from;
+    }
+
+    const contactId = contact?.id?._serialized;
+    if (contactId && typeof contactId === 'string') {
+      return contactId;
+    }
+
     const contactNumber = normalizeE164Like(contact?.number) ?? normalizeE164Like(contact?.id?.user);
     if (contactNumber) {
       const digits = contactNumber.replace(/\D+/g, '');
@@ -732,11 +751,6 @@ export class WhatsAppAdapter extends BaseAdapter {
       if (digits) {
         return `${digits}@c.us`;
       }
-    }
-
-    const contactId = contact?.id?._serialized;
-    if (contactId && typeof contactId === 'string') {
-      return contactId;
     }
 
     return message.from;
