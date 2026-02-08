@@ -171,7 +171,8 @@ function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): 
     content: [
       '## External CLI Operating Practice',
       `- Available launch tools: ${availableStarts.join(', ')}.`,
-      '- Before launching, run a short conversational checklist and confirm all values in natural language:',
+      '- If launch values are already explicit in the user request, do not ask redundant confirmation. Launch directly with explicit arguments.',
+      '- Ask follow-up questions only when required launch values are missing or ambiguous:',
       '  - `working_directory`',
       '  - `create_if_missing` (default recommendation: `true`)',
       '  - `bypassPermission` (default recommendation: `false`)',

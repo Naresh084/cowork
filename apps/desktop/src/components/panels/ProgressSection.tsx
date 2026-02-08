@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import {
   ListChecks,
   CheckCircle2,
@@ -105,9 +106,10 @@ interface TaskItemProps {
   task: Task;
 }
 
-function TaskItem({ task }: TaskItemProps) {
+const TaskItem = forwardRef<HTMLDivElement, TaskItemProps>(function TaskItem({ task }, ref) {
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
@@ -160,4 +162,4 @@ function TaskItem({ task }: TaskItemProps) {
       </div>
     </motion.div>
   );
-}
+});

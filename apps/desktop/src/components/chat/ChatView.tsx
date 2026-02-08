@@ -11,15 +11,21 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { toast } from '../ui/Toast';
 import { WorkingDirectoryModal } from '../layout/WorkingDirectoryModal';
 
+interface OptimisticFirstMessage {
+  content: string;
+  createdAt: number;
+}
+
 export function ChatView() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [initialMessage, setInitialMessage] = useState<string | undefined>(undefined);
   const [workingDirModalOpen, setWorkingDirModalOpen] = useState(false);
+  const [optimisticFirstMessage, setOptimisticFirstMessage] = useState<OptimisticFirstMessage | null>(null);
   const pendingMessageRef = useRef<{ message: string; attachments?: Attachment[] } | null>(null);
 
   // Store state
-  const { sendMessage, stopGeneration, ensureSession } = useChatStore();
+  const { sendMessage, stopGeneration, ensureSession, setChatItems, getSessionState } = useChatStore();
   const { activeSessionId, createSession, updateSessionTitle } = useSessionStore();
   const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
   // Use direct selector to ensure Zustand properly tracks state changes
@@ -86,7 +92,7 @@ export function ChatView() {
   const hasActiveSession = Boolean(activeSessionId);
   const isSessionBootstrapping =
     hasActiveSession && (!sessionState || !sessionState.hasLoaded || isLoadingMessages);
-  const showMessageList = hasMessages || isSessionBootstrapping;
+  const showMessageList = hasMessages || isSessionBootstrapping || Boolean(optimisticFirstMessage);
 
   const deriveTitle = (text: string) => {
     const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -133,6 +139,13 @@ export function ChatView() {
 
       ensureSession(sessionId);
 
+      // New sessions are locally created and already current; mark as loaded to avoid
+      // a transient bootstrap flicker before the optimistic first message appears.
+      if (createdNew) {
+        const snapshot = getSessionState(sessionId);
+        setChatItems(sessionId, snapshot.chatItems);
+      }
+
       // Set session title immediately from user message (before AI processes it)
       if (createdNew) {
         const derivedTitle = deriveTitle(message) ?? `New conversation — ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
@@ -151,6 +164,7 @@ export function ChatView() {
       toast.error('Failed to send message', errorMessage);
     } finally {
       isSendingRef.current = false;
+      setOptimisticFirstMessage(null);
     }
   }, [
     activeSessionId,
@@ -161,6 +175,8 @@ export function ChatView() {
     createSession,
     sendMessage,
     ensureSession,
+    setChatItems,
+    getSessionState,
     updateSessionTitle,
   ]);
 
@@ -173,6 +189,18 @@ export function ChatView() {
       pendingMessageRef.current = { message, attachments: messageAttachments };
       setWorkingDirModalOpen(true);
       return;
+    }
+
+    if (!activeSessionId) {
+      const trimmed = message.trim();
+      const attachmentCount = messageAttachments?.length ?? 0;
+      const fallbackContent = attachmentCount > 0
+        ? `[${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}]`
+        : '';
+      setOptimisticFirstMessage({
+        content: trimmed || fallbackContent,
+        createdAt: Date.now(),
+      });
     }
 
     await executeSend(message, messageAttachments);
@@ -341,7 +369,7 @@ export function ChatView() {
       {/* Messages, Loading, or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">
         {showMessageList ? (
-          <MessageList />
+          <MessageList optimisticFirstMessage={optimisticFirstMessage} />
         ) : (
           <WelcomeScreen onQuickAction={handleQuickAction} />
         )}

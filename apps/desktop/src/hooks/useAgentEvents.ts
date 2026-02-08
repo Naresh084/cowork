@@ -142,17 +142,44 @@ export function useAgentEvents(sessionId: string | null): void {
 
       // Handle events that don't require a sessionId first
       if (event.type === 'session:updated') {
-        // Debounce reloads to avoid repeated sidebar refreshes during startup bursts.
-        if (sessionReloadTimerRef.current !== null) {
-          return;
+        const updatedSessionId = event.sessionId?.trim();
+        if (updatedSessionId) {
+          let didPatch = false;
+          useSessionStore.setState((state) => {
+            const sessionIndex = state.sessions.findIndex((session) => session.id === updatedSessionId);
+            if (sessionIndex < 0) {
+              return state;
+            }
+
+            didPatch = true;
+            const current = state.sessions[sessionIndex];
+            const patched = {
+              ...current,
+              title: event.title ?? current.title,
+              messageCount:
+                typeof event.messageCount === 'number' ? event.messageCount : current.messageCount,
+              executionMode: event.executionMode ?? current.executionMode,
+              updatedAt: Date.now(),
+            };
+            const sessions = [...state.sessions];
+            sessions[sessionIndex] = patched;
+            return { sessions };
+          });
+
+          if (didPatch) {
+            return;
+          }
         }
+
+        // Fallback for unknown/new sessions: debounced refresh.
+        if (sessionReloadTimerRef.current !== null) return;
         sessionReloadTimerRef.current = window.setTimeout(() => {
           sessionReloadTimerRef.current = null;
           const sessionStore = sessionStoreRef.current;
           if (!sessionStore.isLoading) {
-            sessionStore.loadSessions();
+            void sessionStore.loadSessions();
           }
-        }, 150);
+        }, 600);
         return;
       }
 

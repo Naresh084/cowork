@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -135,7 +136,10 @@ interface ArtifactItemProps {
   onSelect: () => void;
 }
 
-function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
+const ArtifactItem = forwardRef<HTMLButtonElement, ArtifactItemProps>(function ArtifactItem(
+  { artifact, onSelect },
+  ref
+) {
   const filename = getFilename(artifact.path);
   const extension = getExtension(artifact.path);
   const Icon = getFileIcon(extension);
@@ -143,6 +147,7 @@ function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
 
   return (
     <motion.button
+      ref={ref}
       layout
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
@@ -185,7 +190,7 @@ function ArtifactItem({ artifact, onSelect }: ArtifactItemProps) {
       />
     </motion.button>
   );
-}
+});
 
 function getFilename(path: string): string {
   return path.split('/').pop() || path;

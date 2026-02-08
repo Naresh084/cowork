@@ -908,7 +908,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           try {
             await invoke('agent_set_models', { models: mergedModels.map((m) => ({ ...m, provider })) });
           } catch (error) {
-            console.warn('[SettingsStore] Failed to sync models to sidecar:', error);
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.includes('WorkflowService is not initialized')) {
+              console.warn('[SettingsStore] Failed to sync models to sidecar:', error);
+            }
           }
         } catch (error) {
           set({
@@ -1407,7 +1410,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         try {
           await invoke('agent_set_skills', { skills });
         } catch (error) {
-          console.warn('Failed to sync installed skills:', error);
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.includes('WorkflowService is not initialized')) {
+            console.warn('Failed to sync installed skills:', error);
+          }
         }
       },
 

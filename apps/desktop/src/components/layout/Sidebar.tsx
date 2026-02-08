@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type RefObject } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
@@ -58,16 +58,28 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   } = useSettingsStore();
   const setCurrentView = useAppStore((state) => state.setCurrentView);
   const openHelp = useHelpStore((state) => state.openHelp);
-  const chatSessions = useChatStore((state) => state.sessions);
+  const liveSessionSignature = useChatStore((state) => {
+    const liveIds: string[] = [];
+    for (const [sessionId, session] of Object.entries(state.sessions)) {
+      const hasRunningTool = session.chatItems.some(
+        (ci) => ci.kind === 'tool_start' && ci.status === 'running'
+      );
+      if (session.isStreaming || session.pendingPermissions.length > 0 || hasRunningTool) {
+        liveIds.push(sessionId);
+      }
+    }
+    liveIds.sort();
+    return liveIds.join('|');
+  });
+  const liveSessionSet = useMemo(() => {
+    if (!liveSessionSignature) return new Set<string>();
+    return new Set(liveSessionSignature.split('|').filter(Boolean));
+  }, [liveSessionSignature]);
 
-  const isLiveSession = (sessionId: string) => {
-    const session = chatSessions[sessionId];
-    if (!session) return false;
-    const hasRunningTool = session.chatItems.some(
-      (ci) => ci.kind === 'tool_start' && ci.status === 'running'
-    );
-    return session.isStreaming || session.pendingPermissions.length > 0 || hasRunningTool;
-  };
+  const isLiveSession = useCallback(
+    (sessionId: string) => liveSessionSet.has(sessionId),
+    [liveSessionSet]
+  );
 
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null);
   const [sessionMenuPosition, setSessionMenuPosition] = useState<{ top: number; left: number } | null>(null);

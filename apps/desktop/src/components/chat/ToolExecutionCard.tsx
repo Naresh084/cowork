@@ -265,13 +265,13 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
         <div className="px-3 pb-2">
           <div
             className={cn(
-              'rounded-lg border px-3 py-2 text-xs break-words',
+              'rounded-lg border px-3 py-2 text-xs whitespace-pre-wrap break-words max-h-28 overflow-y-auto',
               isExternalCliTool
                 ? 'border-[#F87171]/35 bg-[#7F1D1D]/35 text-[#FECACA]'
                 : 'border-[#FF5449]/30 bg-[#FF5449]/12 text-[#FECACA]'
             )}
           >
-            {truncateMiddle(visibleError, 280)}
+            {visibleError}
           </div>
         </div>
       )}

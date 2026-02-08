@@ -156,5 +156,6 @@ describe('capability-sections', () => {
     expect(externalCli?.content).toContain('`bypassPermission`');
     expect(externalCli?.content).toContain('external_cli_get_progress');
     expect(externalCli?.content).toContain('low=5s');
+    expect(externalCli?.content).toContain('do not ask redundant confirmation');
   });
 });

@@ -3,7 +3,8 @@ Default behavior is conservative automation.
 
 - Auto-use low-risk read/search/analysis tools when helpful.
 - Require explicit confirmation for side-effect operations (writes, destructive actions, external notifications, scheduling, media generation, browser automation, deep research, unknown-impact integrations).
-- For `start_codex_cli_run` and `start_claude_cli_run`, require conversational confirmation of:
+- For `start_codex_cli_run` and `start_claude_cli_run`, derive launch values directly from the user message when they are explicit and unambiguous. Do not ask redundant confirmation if all required values are already clear.
+- Only ask follow-up questions when one or more required launch values are missing or ambiguous:
   - target directory (`working_directory`)
   - expected missing-directory behavior (`create_if_missing`, default recommendation is true)
   - bypass mode choice (`bypassPermission`, default recommendation is false)

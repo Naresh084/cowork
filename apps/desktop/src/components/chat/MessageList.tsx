@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic, ArrowDown } from 'lucide-react';
 import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
@@ -49,7 +49,16 @@ const EMPTY_SESSION_STATE = {
   lastUpdatedAt: 0,
 };
 
-export function MessageList() {
+interface OptimisticFirstMessage {
+  content: string;
+  createdAt: number;
+}
+
+interface MessageListProps {
+  optimisticFirstMessage?: OptimisticFirstMessage | null;
+}
+
+export function MessageList({ optimisticFirstMessage = null }: MessageListProps) {
   const { activeSessionId } = useSessionStore();
   // Use direct selector to ensure Zustand properly tracks state changes
   const sessionState = useChatStore((state) => {
@@ -103,10 +112,33 @@ export function MessageList() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [hasManualScroll, setHasManualScroll] = useState(false);
 
-  // Auto-scroll when new messages arrive or streaming
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
+  };
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const onScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      const nearBottom = distanceFromBottom <= 96;
+      setIsNearBottom(nearBottom);
+      setHasManualScroll((prev) => (nearBottom ? false : prev || true));
+    };
+
+    onScroll();
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => container.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Auto-scroll only when user is near the bottom to avoid jumpy/flickery scroll behavior.
+  useEffect(() => {
+    if (!isNearBottom) return;
+    scrollToBottom('auto');
   }, [
     chatItems.length,
     messages.length,
@@ -114,11 +146,42 @@ export function MessageList() {
     pendingPermissions.length,
     pendingQuestions.length,
     sessionState.lastUpdatedAt,
+    isNearBottom,
   ]);
 
   // Show loading while persistence is in-flight or session bootstrap has not completed yet.
   const isInitialSessionLoad =
-    Boolean(activeSessionId) && !hasLoaded && !sessionError;
+    Boolean(activeSessionId) &&
+    !hasLoaded &&
+    !sessionError &&
+    !isStreaming &&
+    !activeTurnId;
+
+  if (messages.length === 0 && optimisticFirstMessage) {
+    const optimisticMessage: Message = {
+      id: `optimistic-first-${optimisticFirstMessage.createdAt}`,
+      role: 'user',
+      content: optimisticFirstMessage.content || 'Working on your request...',
+      createdAt: optimisticFirstMessage.createdAt,
+    };
+
+    return (
+      <div className="relative h-full min-h-0">
+        <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
+          <div className="mx-3 md:mx-8 lg:mx-10 py-3 px-0 space-y-2">
+            <div className="message-turn-container">
+              <MessageBubble message={optimisticMessage} showCopyAction={false} />
+              <div className="mt-2 flex items-center justify-end gap-1.5 pr-8 text-[11px] text-white/55">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#93C5FD]" />
+                <span>Starting session…</span>
+              </div>
+            </div>
+            <div ref={bottomRef} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if ((isLoadingMessages || isInitialSessionLoad) && messages.length === 0) {
     return (
@@ -162,9 +225,9 @@ export function MessageList() {
         <motion.div
           initial={{ scale: 0.84, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="assistant-turn-avatar mt-0.5 flex-shrink-0 w-7 h-7 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center"
+          className="assistant-turn-avatar mt-0.5 flex-shrink-0 w-8 h-8 rounded-lg bg-[#111218] border border-white/[0.08] flex items-center justify-center"
         >
-          <BrandMark className="w-4 h-4" />
+          <BrandMark className="w-[18px] h-[18px]" />
         </motion.div>
 
         <div className="assistant-turn-content flex-1 min-w-0 space-y-2 turn-activities">
@@ -276,31 +339,19 @@ export function MessageList() {
         ref={scrollRef}
         className="h-full min-h-0 overflow-y-auto overflow-x-hidden scroll-smooth"
       >
-        <div className="mx-3 md:mx-10 py-3 px-0 space-y-2">
-          <AnimatePresence>
-            {messages.map((message, index) => {
-              // Only skip assistant messages if they're properly tracked in turn activities
-              if (message.role === 'assistant') {
-                const hasActivity = assistantMessageIds.has(message.id);
-                // Verify the activity actually exists and will render
-                const activityExists = Object.values(turnActivities || {}).some(
-                  acts => acts.some(a => a.type === 'assistant' && a.messageId === message.id)
-                );
-                // Only hide if both conditions are true - prevents message loss
-                if (hasActivity && activityExists) {
-                  return null; // Will be rendered in turn activities
-                }
-                // Otherwise, render normally to prevent message disappearance
-              }
-              return (
-              <motion.div
-                key={message.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
-                className="message-turn-container"
-              >
+        <div className="mx-3 md:mx-8 lg:mx-10 py-3 px-0 space-y-2">
+          {messages.map((message, index) => {
+            // Assistant messages with turn activities are rendered inside the activity block.
+            if (message.role === 'assistant' && assistantMessageIds.has(message.id)) {
+              return null;
+            }
+
+            const messageKey = message.role === 'user'
+              ? `user-turn-${message.createdAt}-${index}`
+              : message.id;
+
+            return (
+              <div key={messageKey} className="message-turn-container">
                 <MessageBubble
                   message={message}
                   showCopyAction={
@@ -310,10 +361,9 @@ export function MessageList() {
                   }
                 />
                 {message.role === 'user' && renderTurnActivities(message.id)}
-              </motion.div>
-              );
-            })}
-          </AnimatePresence>
+              </div>
+            );
+          })}
           {/* Scroll anchor */}
           <div ref={bottomRef} />
         </div>
@@ -323,6 +373,25 @@ export function MessageList() {
       <div className="pointer-events-none absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-[#0B0C10] to-transparent z-10" />
       <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0B0C10] to-transparent z-10" />
 
+      <AnimatePresence initial={false}>
+        {hasManualScroll && (
+          <motion.button
+            initial={{ opacity: 0, y: 8, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.92 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => {
+              scrollToBottom('smooth');
+              setHasManualScroll(false);
+            }}
+            className="scroll-to-bottom-fab absolute left-1/2 -translate-x-1/2 bottom-5 z-20 h-10 w-10 rounded-full flex items-center justify-center text-white/90"
+            aria-label="Scroll to latest message"
+            title="Scroll to latest message"
+          >
+            <ArrowDown className="w-4 h-4" />
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1723,35 +1792,31 @@ function MessageBubble({ message, showCopyAction = true, showAvatar = true }: Me
   return (
     <div
       className={cn(
-        'flex gap-2 no-select-extend message-block-isolate',
+        'flex gap-2',
         isUser ? 'flex-row-reverse' : 'flex-row'
       )}
     >
       {showAvatar && (
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
+        <div
           className={cn(
             'flex-shrink-0 flex items-center justify-center select-none',
             isUser
               ? 'w-6 h-6 rounded-full bg-gradient-to-br from-[#1D4ED8] to-[#1E3A8A] border border-[#60A5FA]/35 text-[10px] font-bold text-white shadow-[0_6px_16px_rgba(29,78,216,0.35)]'
-              : 'w-7 h-7 rounded-lg bg-[#111218] border border-white/[0.08]'
+              : 'w-8 h-8 rounded-lg bg-[#111218] border border-white/[0.08]'
           )}
         >
-          {isUser ? userInitial : <BrandMark className="w-4 h-4" />}
-        </motion.div>
+          {isUser ? userInitial : <BrandMark className="w-[18px] h-[18px]" />}
+        </div>
       )}
 
       {/* Content */}
-      <div className={cn('flex-1 min-w-0 select-none', isUser && 'flex justify-end')}>
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
+      <div className={cn('flex-1 min-w-0', isUser && 'flex justify-end')}>
+        <div
           className={cn(
             'rounded-xl message-content',
             isUser
-              ? 'message-bubble-user inline-block max-w-[85%] bg-gradient-to-br from-[#1D4ED8]/22 via-[#1E40AF]/14 to-[#0B1228]/70 border border-[#60A5FA]/35 shadow-[0_10px_24px_rgba(30,64,175,0.25)] text-white/95'
-              : 'message-bubble-assistant w-fit max-w-full bg-transparent text-white/90'
+              ? 'message-bubble-user inline-block max-w-[92%] bg-gradient-to-br from-[#1D4ED8]/22 via-[#1E40AF]/14 to-[#0B1228]/70 border border-[#60A5FA]/35 shadow-[0_10px_24px_rgba(30,64,175,0.25)] text-white/95'
+              : 'message-bubble-assistant w-full max-w-full bg-transparent text-white/90'
           )}
         >
           {typeof message.content === 'string' ? (
@@ -1767,7 +1832,7 @@ function MessageBubble({ message, showCopyAction = true, showAvatar = true }: Me
               ))}
             </div>
           )}
-        </motion.div>
+        </div>
 
         {!isUser && metadata?.sources?.length ? (
           <SourcesCitation
@@ -1778,14 +1843,8 @@ function MessageBubble({ message, showCopyAction = true, showAvatar = true }: Me
 
         {/* Actions */}
         {!isUser && showCopyAction && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex items-center gap-2 mt-2 pl-1 select-none"
-          >
-            <motion.button
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
+          <div className="flex items-center gap-2 mt-2 pl-1 select-none">
+            <button
               onClick={handleCopy}
               className="p-1.5 rounded-lg hover:bg-white/[0.06] transition-colors"
               title="Copy message"
@@ -1795,8 +1854,8 @@ function MessageBubble({ message, showCopyAction = true, showAvatar = true }: Me
               ) : (
                 <Copy className="w-3.5 h-3.5 text-white/30" />
               )}
-            </motion.button>
-          </motion.div>
+            </button>
+          </div>
         )}
       </div>
     </div>

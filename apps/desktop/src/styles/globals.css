@@ -348,9 +348,8 @@
 
   /* Message turn container - isolate selection within each turn */
   .message-turn-container {
-    user-select: none;
-    -webkit-user-select: none;
-    contain: layout;
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .message-turn-container .message-content {
@@ -366,12 +365,12 @@
   }
 
   /* Tool cards must remain fully copyable/selectable end-to-end */
-  .message-turn-container .tool-selectable,
-  .message-turn-container .tool-selectable * {
+  .message-turn-container .tool-selectable {
     user-select: text;
     -webkit-user-select: text;
   }
 
+  .message-turn-container .tool-selectable button,
   .message-turn-container .tool-selectable svg {
     user-select: none;
     -webkit-user-select: none;
@@ -726,6 +725,30 @@
 
   .message-bubble-assistant {
     padding-right: 2px;
+  }
+
+  .scroll-to-bottom-fab {
+    border: 1px solid rgba(191, 219, 254, 0.42);
+    background:
+      radial-gradient(circle at 30% 20%, rgba(147, 197, 253, 0.28), rgba(30, 41, 59, 0.92) 68%),
+      rgba(15, 23, 42, 0.92);
+    box-shadow:
+      0 12px 28px rgba(2, 6, 23, 0.44),
+      0 0 0 1px rgba(29, 78, 216, 0.22);
+    backdrop-filter: blur(8px);
+    transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  }
+
+  .scroll-to-bottom-fab:hover {
+    transform: translateY(-1px);
+    border-color: rgba(147, 197, 253, 0.62);
+    box-shadow:
+      0 16px 30px rgba(2, 6, 23, 0.52),
+      0 0 0 1px rgba(59, 130, 246, 0.34);
+  }
+
+  .scroll-to-bottom-fab:active {
+    transform: translateY(0);
   }
 
   .tool-activity-card {

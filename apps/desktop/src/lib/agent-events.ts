@@ -201,7 +201,7 @@ function parseTauriEvent(
     case 'session:updated':
       return {
         type: 'session:updated',
-        sessionId,
+        sessionId: sessionId || (data.session as { id?: string } | undefined)?.id || '',
         title: (data.title as string | undefined) ?? (data.session as { title?: string })?.title,
         messageCount: (data.messageCount as number | undefined) ?? (data.session as { messageCount?: number })?.messageCount,
         executionMode:

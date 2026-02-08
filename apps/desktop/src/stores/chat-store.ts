@@ -1106,7 +1106,12 @@ ${attachment.data}`,
           const updated = [...session.chatItems];
           // Carry over objectUrl from optimistic content parts to the real item
           // objectUrl = blob URL for current session display; filePath = for reload/persistence
-          const mergedItem = { ...item };
+          const mergedItem = {
+            ...item,
+            // Preserve optimistic timestamp to avoid visual flicker/re-ordering when
+            // the persisted user item replaces the temp item.
+            timestamp: oldItem.timestamp,
+          };
           if (Array.isArray(item.content) && oldItem.kind === 'user_message' && Array.isArray(oldItem.content)) {
             const oldContent = oldItem.content as any[];
             mergedItem.content = (item.content as any[]).map((part: any, i: number) => {
