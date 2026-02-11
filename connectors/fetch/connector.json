@@ -10,7 +10,7 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    "args": ["-y", "mcp-fetch-server"]
   },
   "auth": {
     "type": "none"
@@ -20,7 +20,6 @@
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "homepage": "https://www.npmjs.com/package/mcp-fetch-server"
   }
 }

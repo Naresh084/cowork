@@ -52,6 +52,7 @@ import { basename, extname, join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
 import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools, createExternalCliTools, createWorkflowTools } from './tools/index.js';
+import { createNotificationTools } from './tools/notification-tools.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
@@ -79,6 +80,9 @@ import type {
   SessionInfo,
   SessionDetails,
   SessionListPage,
+  SessionRuntimeState,
+  RuntimeBootstrapState,
+  RuntimeToolSnapshot,
   Attachment,
   Task,
   Artifact,
@@ -105,6 +109,7 @@ import {
   type ExternalCliRunOrigin,
 } from './external-cli/types.js';
 import { WORKFLOWS_ENABLED } from './config/feature-flags.js';
+import { integrationBridge } from './integrations/index.js';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -169,6 +174,7 @@ interface ActiveSession {
   permissionCache: Map<string, PermissionDecision>;
   permissionScopes: Map<string, Set<string>>;
   toolStartTimes: Map<string, number>;
+  activeTools: Map<string, RuntimeToolSnapshot>;
   pendingPermissions: Map<string, {
     request: ExtendedPermissionRequest;
     resolve: (decision: PermissionDecision) => void;
@@ -200,12 +206,22 @@ interface ActiveSession {
   activeAssistantSegmentItemId?: string;
   /** Active assistant streaming segment content buffer */
   activeAssistantSegmentText: string;
+  /** Last raw chunk observed from stream extraction (for delta normalization). */
+  lastRawAssistantChunkText: string;
   /** Current assistant segment index in this turn */
   assistantSegmentIndex: number;
   /** Last completed assistant segment text (for final dedupe) */
   lastCompletedAssistantSegmentText?: string;
   /** Whether any assistant text has been emitted in this turn */
   hasAssistantTextThisTurn: boolean;
+  /** Live runtime flags used for reconnect hydration */
+  isStreaming: boolean;
+  isThinking: boolean;
+  lastError: {
+    message: string;
+    code?: string;
+    timestamp: number;
+  } | null;
   /** Thread ID for checkpointer (same as session ID) */
   threadId: string;
   /** Message queue for messages sent while agent is busy */
@@ -872,6 +888,7 @@ export class AgentRunner {
       permissionCache: new Map(),
       permissionScopes: new Map(),
       toolStartTimes: new Map(),
+      activeTools: new Map(),
       pendingPermissions: new Map(),
       pendingQuestions: new Map(),
       activeParentToolId: undefined,
@@ -880,9 +897,13 @@ export class AgentRunner {
       nextSequence: maxSequence + 1,
       activeAssistantSegmentItemId: undefined,
       activeAssistantSegmentText: '',
+      lastRawAssistantChunkText: '',
       assistantSegmentIndex: 0,
       lastCompletedAssistantSegmentText: undefined,
       hasAssistantTextThisTurn: false,
+      isStreaming: false,
+      isThinking: false,
+      lastError: data.runtime?.lastError || null,
       threadId: data.metadata.id,
       messageQueue: [],
       pendingPlanProposal: undefined,
@@ -894,6 +915,34 @@ export class AgentRunner {
       updatedAt: data.metadata.updatedAt,
       lastAccessedAt: data.metadata.lastAccessedAt,
     };
+
+    if (data.runtime) {
+      session.isStreaming = Boolean(data.runtime.isStreaming);
+      session.isThinking = Boolean(data.runtime.isThinking);
+      session.currentTurnId = data.runtime.activeTurnId;
+      session.messageQueue = [...data.runtime.messageQueue];
+      if (Array.isArray(data.runtime.activeTools)) {
+        for (const tool of data.runtime.activeTools) {
+          session.activeTools.set(tool.id, { ...tool });
+        }
+      } else {
+        for (const toolId of data.runtime.activeToolIds || []) {
+          session.activeTools.set(toolId, { id: toolId, name: 'tool' });
+        }
+      }
+      for (const pending of data.runtime.pendingPermissions || []) {
+        session.pendingPermissions.set(pending.id, {
+          request: pending,
+          resolve: () => {},
+        });
+      }
+      for (const question of data.runtime.pendingQuestions || []) {
+        session.pendingQuestions.set(question.id, {
+          request: question,
+          resolve: () => {},
+        });
+      }
+    }
 
     return session;
   }
@@ -974,6 +1023,7 @@ export class AgentRunner {
   private resetAssistantStreamingState(session: ActiveSession): void {
     session.activeAssistantSegmentItemId = undefined;
     session.activeAssistantSegmentText = '';
+    session.lastRawAssistantChunkText = '';
     session.assistantSegmentIndex = 0;
     session.lastCompletedAssistantSegmentText = undefined;
     session.hasAssistantTextThisTurn = false;
@@ -1219,6 +1269,7 @@ export class AgentRunner {
       content: m.content,
       queuedAt: m.queuedAt,
     })));
+    this.persistRuntimeSnapshot(session);
   }
 
   private normalizePlanDecision(answer: string | string[]): {
@@ -2064,6 +2115,35 @@ export class AgentRunner {
     }
   }
 
+  /**
+   * Refresh tool availability for active sessions after integration topology changes.
+   */
+  async refreshIntegrationCapabilities(reason = 'integration-state-change'): Promise<void> {
+    if (!this.isReady()) return;
+
+    for (const session of this.sessions.values()) {
+      // Avoid rebuilding model/tool graph mid-stream.
+      if (session.isStreaming) {
+        continue;
+      }
+      // Restored sessions keep a placeholder agent until first use.
+      if (typeof session.agent?.invoke !== 'function') {
+        continue;
+      }
+      try {
+        const toolHandlers = this.buildToolHandlers(session);
+        session.agent = await this.createDeepAgent(session, toolHandlers);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[agent-runner] integration capability refresh skipped for session=${session.id}: ${message}\n`,
+        );
+      }
+    }
+
+    process.stderr.write(`[agent-runner] integration capability refresh complete (${reason})\n`);
+  }
+
   async setMcpServers(servers: MCPServerConfigInput[]): Promise<void> {
     this.mcpServerConfigs = Array.isArray(servers) ? [...servers] : [];
 
@@ -2389,24 +2469,18 @@ export class AgentRunner {
     };
   }
 
-  private getIntegrationStatusesForSnapshot(): Array<{ platform: string; connected: boolean; displayName?: string }> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { integrationBridge } = require('./integrations/index.js');
-      const statuses = integrationBridge?.getStatuses?.();
-      if (!Array.isArray(statuses)) return [];
-      return statuses
-        .filter((status): status is { platform: string; connected: boolean; displayName?: string } => {
-          return Boolean(status && typeof status.platform === 'string');
-        })
-        .map((status) => ({
-          platform: status.platform,
-          connected: Boolean(status.connected),
-          displayName: typeof status.displayName === 'string' ? status.displayName : undefined,
-        }));
-    } catch {
-      return [];
-    }
+  private getIntegrationStatusesForSnapshot(): Array<{
+    platform: PlatformType;
+    connected: boolean;
+    displayName?: string;
+  }> {
+    const statuses = integrationBridge.getStatuses();
+    if (!Array.isArray(statuses)) return [];
+    return statuses.map((status) => ({
+      platform: status.platform,
+      connected: Boolean(status.connected),
+      displayName: typeof status.displayName === 'string' ? status.displayName : undefined,
+    }));
   }
 
   private evaluatePolicyForSnapshot(
@@ -3007,6 +3081,7 @@ export class AgentRunner {
       permissionCache: new Map(),
       permissionScopes: new Map(),
       toolStartTimes: new Map(),
+      activeTools: new Map(),
       pendingPermissions: new Map(),
       pendingQuestions: new Map(),
       activeParentToolId: undefined,
@@ -3015,9 +3090,13 @@ export class AgentRunner {
       nextSequence: 0,
       activeAssistantSegmentItemId: undefined,
       activeAssistantSegmentText: '',
+      lastRawAssistantChunkText: '',
       assistantSegmentIndex: 0,
       lastCompletedAssistantSegmentText: undefined,
       hasAssistantTextThisTurn: false,
+      isStreaming: false,
+      isThinking: false,
+      lastError: null,
       threadId: sessionId,
       messageQueue: [],
       pendingPlanProposal: undefined,
@@ -3034,6 +3113,7 @@ export class AgentRunner {
     session.agent = await this.createDeepAgent(session, toolHandlers);
 
     this.sessions.set(sessionId, session);
+    this.persistRuntimeSnapshot(session);
 
     // Subscribe to agent events
     this.subscribeToAgentEvents(session);
@@ -3084,6 +3164,7 @@ export class AgentRunner {
       eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
         id: m.id, content: m.content, queuedAt: m.queuedAt,
       })));
+      this.persistRuntimeSnapshot(session);
       return;
     }
 
@@ -3100,6 +3181,7 @@ export class AgentRunner {
       eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
         id: m.id, content: m.content, queuedAt: m.queuedAt,
       })));
+      this.persistRuntimeSnapshot(session);
       return;
     }
 
@@ -3126,6 +3208,7 @@ export class AgentRunner {
       eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
         id: m.id, content: m.content, queuedAt: m.queuedAt,
       })));
+      this.persistRuntimeSnapshot(session);
       await this.executeMessage(sessionId, next.content, next.attachments);
     }
   }
@@ -3152,6 +3235,10 @@ export class AgentRunner {
     const abortController = new AbortController();
     session.abortController = abortController;
     session.stopRequested = false;
+    session.isStreaming = true;
+    session.isThinking = true;
+    session.lastError = null;
+    this.persistRuntimeSnapshot(session);
 
     // Build message content
     let messageContent: string | Message['content'] = content;
@@ -3364,6 +3451,8 @@ export class AgentRunner {
               if (!thinkingStarted) {
                 eventEmitter.thinkingStart(sessionId);
                 thinkingStarted = true;
+                session.isThinking = true;
+                this.persistRuntimeSnapshot(session);
 
                 // V2: Create ThinkingItem
                 thinkingItemId = generateChatItemId();
@@ -3384,22 +3473,27 @@ export class AgentRunner {
             // Extract regular stream content
             const chunkText = this.extractStreamChunkText(event);
             if (chunkText) {
-              // If we were thinking, mark thinking as done when regular content starts
-              if (thinkingStarted && !streamingStarted) {
-                eventEmitter.thinkingDone(sessionId);
-                streamingStarted = true;
+              const normalizedChunkText = this.normalizeAssistantStreamChunk(session, chunkText);
+              if (normalizedChunkText) {
+                // If we were thinking, mark thinking as done when regular content starts
+                if (thinkingStarted && !streamingStarted) {
+                  eventEmitter.thinkingDone(sessionId);
+                  streamingStarted = true;
+                  session.isThinking = false;
+                  this.persistRuntimeSnapshot(session);
 
-                // V2: Update ThinkingItem to done with full content
-                if (thinkingItemId) {
-                  this.updateChatItem(session, thinkingItemId, {
-                    content: accumulatedThinking,
-                    status: 'done',
-                  });
+                  // V2: Update ThinkingItem to done with full content
+                  if (thinkingItemId) {
+                    this.updateChatItem(session, thinkingItemId, {
+                      content: accumulatedThinking,
+                      status: 'done',
+                    });
+                  }
                 }
+                streamedText += normalizedChunkText;
+                this.appendAssistantSegmentChunk(session, normalizedChunkText);
+                eventEmitter.streamChunk(sessionId, normalizedChunkText);
               }
-              streamedText += chunkText;
-              this.appendAssistantSegmentChunk(session, chunkText);
-              eventEmitter.streamChunk(sessionId, chunkText);
             }
 
             const output = this.extractStateFromStreamEvent(event);
@@ -3416,6 +3510,8 @@ export class AgentRunner {
           // Ensure thinking is marked done if it was started
           if (thinkingStarted && !streamingStarted) {
             eventEmitter.thinkingDone(sessionId);
+            session.isThinking = false;
+            this.persistRuntimeSnapshot(session);
 
             // V2: Update ThinkingItem to done
             if (thinkingItemId) {
@@ -3552,6 +3648,9 @@ export class AgentRunner {
       }
 
       // Signal stream completion (frontend uses this for streaming state)
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
       eventEmitter.streamDone(sessionId, null);
 
       if (
@@ -3572,6 +3671,9 @@ export class AgentRunner {
       console.error('[MULTIMEDIA] Outer error:', normalizedErrorMessage);
       console.error('[MULTIMEDIA] Outer error stack:', error instanceof Error ? error.stack : '');
       if (this.isAbortError(error) || session.stopRequested) {
+        session.isStreaming = false;
+        session.isThinking = false;
+        this.persistRuntimeSnapshot(session);
         this.finalizeAssistantSegment(session);
         if (streamedText && !session.hasAssistantTextThisTurn) {
           this.emitFinalAssistantSegment(session, {
@@ -3627,6 +3729,14 @@ export class AgentRunner {
         details: rateLimitDetails ? { ...rateLimitDetails } : undefined,
       };
       this.appendChatItem(session, errorItem);
+      session.lastError = {
+        message: errorMessage,
+        code: errorCode,
+        timestamp: Date.now(),
+      };
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
 
       eventEmitter.error(sessionId, errorMessage, errorCode, rateLimitDetails ?? undefined);
       // Always emit streamDone so frontend exits streaming state
@@ -3636,6 +3746,9 @@ export class AgentRunner {
       session.stopRequested = false;
       session.abortController = undefined;
       session.activeTurnIntegrationOrigin = undefined;
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
       eventEmitter.flushSync();
 
       // Finalize turn and persist to disk
@@ -3681,6 +3794,7 @@ export class AgentRunner {
 
     // Emit resolved event
     eventEmitter.permissionResolved(sessionId, permissionId, decision);
+    this.persistRuntimeSnapshot(session);
   }
 
   /**
@@ -3692,6 +3806,8 @@ export class AgentRunner {
       throw new Error(`Session not found: ${sessionId}`);
     }
     session.stopRequested = true;
+    session.isStreaming = false;
+    session.isThinking = false;
     if (session.abortController && !session.abortController.signal.aborted) {
       session.abortController.abort();
     }
@@ -3725,6 +3841,7 @@ export class AgentRunner {
     } else if (agentAny.stop) {
       agentAny.stop();
     }
+    this.persistRuntimeSnapshot(session);
   }
 
   // ============================================================================
@@ -3752,6 +3869,7 @@ export class AgentRunner {
     eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
       id: m.id, content: m.content, queuedAt: m.queuedAt,
     })));
+    this.persistRuntimeSnapshot(session);
     return true;
   }
 
@@ -3770,6 +3888,7 @@ export class AgentRunner {
     eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
       id: m.id, content: m.content, queuedAt: m.queuedAt,
     })));
+    this.persistRuntimeSnapshot(session);
     return true;
   }
 
@@ -3790,6 +3909,7 @@ export class AgentRunner {
     eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
       id: m.id, content: m.content, queuedAt: m.queuedAt,
     })));
+    this.persistRuntimeSnapshot(session);
 
     // Stop current generation — processMessageQueue will pick up queued message
     this.stopGeneration(sessionId);
@@ -3808,6 +3928,7 @@ export class AgentRunner {
     eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
       id: m.id, content: m.content, queuedAt: m.queuedAt,
     })));
+    this.persistRuntimeSnapshot(session);
     return true;
   }
 
@@ -3867,6 +3988,7 @@ export class AgentRunner {
 
       // Emit question event
       eventEmitter.questionAsk(sessionId, questionRequest);
+      this.persistRuntimeSnapshot(session);
     });
   }
 
@@ -3895,6 +4017,7 @@ export class AgentRunner {
 
     // Emit answered event
     eventEmitter.questionAnswered(sessionId, questionId, answer);
+    this.persistRuntimeSnapshot(session);
   }
 
   private updateQuestionStatus(
@@ -3914,6 +4037,77 @@ export class AgentRunner {
       status,
       answer,
     } as Partial<QuestionItem>);
+  }
+
+  private getSessionRunState(session: ActiveSession): SessionRuntimeState['runState'] {
+    if (session.stopRequested) {
+      return 'stopping';
+    }
+
+    if (session.lastError && !session.isStreaming && !session.isThinking) {
+      return 'errored';
+    }
+
+    const hasBlockingInteraction =
+      session.pendingPermissions.size > 0 || session.pendingQuestions.size > 0;
+    const hasActiveTools = session.activeTools.size > 0;
+    const hasAbortController = Boolean(
+      session.abortController && !session.abortController.signal.aborted,
+    );
+
+    if (session.isStreaming || session.isThinking || hasActiveTools || hasAbortController || hasBlockingInteraction) {
+      return 'running';
+    }
+
+    return 'idle';
+  }
+
+  private buildRuntimeState(session: ActiveSession): SessionRuntimeState {
+    return {
+      version: 1,
+      runState: this.getSessionRunState(session),
+      isStreaming: session.isStreaming,
+      isThinking: session.isThinking,
+      activeTurnId: session.currentTurnId,
+      activeToolIds: Array.from(session.activeTools.keys()),
+      activeTools: Array.from(session.activeTools.values()).map((tool) => ({ ...tool })),
+      pendingPermissions: Array.from(session.pendingPermissions.values()).map((pending) => pending.request),
+      pendingQuestions: Array.from(session.pendingQuestions.values()).map((pending) => pending.request),
+      messageQueue: session.messageQueue.map((message) => ({
+        id: message.id,
+        content: message.content,
+        queuedAt: message.queuedAt,
+      })),
+      lastError: session.lastError ? { ...session.lastError } : null,
+      updatedAt: Date.now(),
+    };
+  }
+
+  private persistRuntimeSnapshot(session: ActiveSession): void {
+    if (!this.persistence) return;
+    const runtime = this.buildRuntimeState(session);
+    void this.persistence.saveRuntimeState(session.id, runtime).catch(() => {});
+  }
+
+  getSessionRuntimeState(sessionId: string): SessionRuntimeState | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return this.buildRuntimeState(session);
+  }
+
+  getBootstrapState(eventCursor: number): RuntimeBootstrapState {
+    const sessions = this.listSessions();
+    const runtime: Record<string, SessionRuntimeState> = {};
+    for (const session of this.sessions.values()) {
+      runtime[session.id] = this.buildRuntimeState(session);
+    }
+
+    return {
+      sessions,
+      runtime,
+      eventCursor,
+      timestamp: Date.now(),
+    };
   }
 
   /**
@@ -4048,6 +4242,7 @@ export class AgentRunner {
       },
       hasMoreHistory,
       oldestLoadedSequence,
+      runtime: this.buildRuntimeState(session),
     };
   }
 
@@ -4147,6 +4342,7 @@ export class AgentRunner {
           percentUsed,
           lastUpdated: Date.now(),
         },
+        runtime: this.buildRuntimeState(session),
       });
     } catch {
       // Best-effort persistence.
@@ -5028,38 +5224,34 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
    * Returns empty string if no platforms connected.
    */
   private buildIntegrationPrompt(): string {
-    try {
-      // Dynamic import check - if integrations module not available, return empty
-      const { integrationBridge } = require('./integrations/index.js');
-      const statuses = integrationBridge.getStatuses();
-      const connected = statuses.filter((s: any) => s.connected);
+    const statuses = this.getIntegrationStatusesForSnapshot();
+    const connected = statuses.filter((status) => status.connected);
+    if (connected.length === 0) return '';
 
-      if (connected.length === 0) return '';
+    const displayNames: Record<string, string> = {
+      whatsapp: 'WhatsApp',
+      slack: 'Slack',
+      telegram: 'Telegram',
+      discord: 'Discord',
+      imessage: 'iMessage',
+      teams: 'Microsoft Teams',
+    };
 
-      const displayNames: Record<string, string> = {
-        whatsapp: 'WhatsApp',
-        slack: 'Slack',
-        telegram: 'Telegram',
-        discord: 'Discord',
-        imessage: 'iMessage',
-        teams: 'Microsoft Teams',
-      };
+    const platformList = connected
+      .map((status) => {
+        const name = displayNames[status.platform] || status.platform;
+        return `- ${name}: Connected${status.displayName ? ` as ${status.displayName}` : ''}`;
+      })
+      .join('\n');
 
-      const platformList = connected
-        .map((s: any) => {
-          const name = displayNames[s.platform] || s.platform;
-          return `- ${name}: Connected${s.displayName ? ` as ${s.displayName}` : ''}`;
-        })
-        .join('\n');
+    const toolList = connected
+      .map((status) => {
+        const name = displayNames[status.platform] || status.platform;
+        return `- \`send_notification_${status.platform}\`: Send a message to the user via ${name}`;
+      })
+      .join('\n');
 
-      const toolList = connected
-        .map((s: any) => {
-          const name = displayNames[s.platform] || s.platform;
-          return `- \`send_notification_${s.platform}\`: Send a message to the user via ${name}`;
-        })
-        .join('\n');
-
-      return `## Messaging Integrations
+    return `## Messaging Integrations
 
 The user has connected the following messaging platforms. You can proactively send notifications through these platforms.
 
@@ -5079,11 +5271,9 @@ ${toolList}
 - Keep notification messages concise (platform character limits apply)
 - Use plain text formatting (no complex markdown)
 - Don't send notifications for trivial operations
+- For live integration-origin conversations, do not call send_notification_<same platform> for the same turn response; the normal assistant reply is already routed there.
 - Always use the last active chat unless told otherwise
 - In shared integration sessions, treat the request origin platform/channel as the default destination for scheduled-task notifications unless the user explicitly overrides it`;
-    } catch {
-      return '';
-    }
   }
 
   private buildMcpPrompt(): string {
@@ -5478,17 +5668,10 @@ ${stitchGuidance}
       return null;
     }
 
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { integrationBridge } = require('./integrations/index.js');
-      const status = integrationBridge
-        .getStatuses()
-        .find((entry: { platform: PlatformType; connected: boolean }) => entry.platform === origin.platform);
-      if (!status?.connected) {
-        return null;
-      }
-    } catch {
-      // Integration bridge unavailable - don't set default notification target.
+    const status = integrationBridge
+      .getStatuses()
+      .find((entry: { platform: PlatformType; connected: boolean }) => entry.platform === origin.platform);
+    if (!status?.connected) {
       return null;
     }
 
@@ -5658,17 +5841,18 @@ ${stitchGuidance}
     };
 
     // Notification tools (conditional - only for connected messaging platforms)
-    let notificationTools: ToolHandler[] = [];
-    try {
-      // Use require() since buildToolHandlers is synchronous
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { createNotificationTools } = require('./tools/notification-tools.js');
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { integrationBridge } = require('./integrations/index.js');
-      notificationTools = createNotificationTools(() => integrationBridge);
-    } catch {
-      // Integration module not available - skip notification tools
-    }
+    const notificationTools: ToolHandler[] = createNotificationTools(
+      () => integrationBridge,
+      {
+        shouldSkip: ({ platform, chatId }) => {
+          const origin = this.getCurrentIntegrationOrigin(session);
+          if (!origin) return null;
+          if (origin.platform !== platform) return null;
+          if (chatId && chatId.trim() && chatId.trim() !== origin.chatId) return null;
+          return 'Current turn already originates from this platform/chat; the direct assistant reply is sent there automatically.';
+        },
+      },
+    );
 
     const cronTools =
       session.type === 'isolated' || session.type === 'cron'
@@ -5740,6 +5924,14 @@ ${stitchGuidance}
         const toolCall = { id: toolCallId, name: tool.name, args, parentToolId };
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
+        session.activeTools.set(toolCallId, {
+          id: toolCallId,
+          name: tool.name,
+          args,
+          parentToolId,
+          startedAt,
+        });
+        this.persistRuntimeSnapshot(session);
         this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCall);
 
@@ -5765,6 +5957,8 @@ ${stitchGuidance}
 
         if (!this.isPlanModeToolAllowed(session, tool.name, args)) {
           const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
           const error = `Plan mode blocks "${tool.name}". Analyze only and return a <proposed_plan> block.`;
           eventEmitter.toolResult(session.id, toolCall, {
             toolCallId,
@@ -5801,6 +5995,8 @@ ${stitchGuidance}
             const decision = await this.requestPermission(session, request);
             if (decision === 'deny') {
               const duration = this.consumeToolDuration(session, toolCallId);
+              session.activeTools.delete(toolCallId);
+              this.persistRuntimeSnapshot(session);
               const payload = {
                 toolCallId,
                 success: false,
@@ -5835,6 +6031,8 @@ ${stitchGuidance}
         try {
           const result = await tool.execute(args, this.buildToolContext(session));
           const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
           const payload = {
             toolCallId,
             success: result.success,
@@ -5874,6 +6072,8 @@ ${stitchGuidance}
           return result.data ?? result;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
           const payload = {
             toolCallId,
             success: false,
@@ -6021,6 +6221,14 @@ ${stitchGuidance}
 
         const startedAt = Date.now();
         session.toolStartTimes.set(toolCallId, startedAt);
+        session.activeTools.set(toolCallId, {
+          id: toolCallId,
+          name: toolName,
+          args,
+          parentToolId,
+          startedAt,
+        });
+        this.persistRuntimeSnapshot(session);
         this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCallPayload);
 
@@ -6067,6 +6275,11 @@ ${stitchGuidance}
           }
         };
 
+        const finishRuntimeTool = () => {
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
+        };
+
         if (!this.isPlanModeToolAllowed(session, toolName, args)) {
           const duration = this.consumeToolDuration(session, toolCallId);
           const errorMsg = `Plan mode blocks "${toolName}". Analyze only and return a <proposed_plan> block.`;
@@ -6079,6 +6292,7 @@ ${stitchGuidance}
             parentToolId,
           });
           emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
           return new ToolMessage({
             content: errorMsg,
             tool_call_id: toolCallId,
@@ -6115,6 +6329,7 @@ ${stitchGuidance}
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
           // Emit tool result
           emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
 
           return new ToolMessage({
             content: errorMsg,
@@ -6145,6 +6360,7 @@ ${stitchGuidance}
               eventEmitter.toolResult(session.id, toolCallPayload, payload);
               // Emit tool result
               emitToolResult('error', null, 'Permission denied by user', duration);
+              finishRuntimeTool();
 
               return new ToolMessage({
                 content: 'Permission denied by user',
@@ -6200,6 +6416,7 @@ ${stitchGuidance}
 
           throw error;
         } finally {
+          finishRuntimeTool();
           // Clear activeParentToolId when task tool completes
           if (isTask && session.activeParentToolId === toolCallId) {
             session.activeParentToolId = undefined;
@@ -6453,6 +6670,7 @@ ${stitchGuidance}
             // Fallback: just resolve this one
             resolve(decision);
           }
+          this.persistRuntimeSnapshot(session);
         },
       });
 
@@ -6477,6 +6695,7 @@ ${stitchGuidance}
       this.appendChatItem(session, permissionItem);
 
       eventEmitter.permissionRequest(session.id, extendedRequest);
+      this.persistRuntimeSnapshot(session);
     });
   }
 
@@ -7083,6 +7302,44 @@ ${stitchGuidance}
     if (textParts.length === 0) return null;
 
     return textParts.map(part => (part as { text: string }).text).join('');
+  }
+
+  private getStreamSuffixPrefixOverlap(left: string, right: string): number {
+    const maxOverlap = Math.min(left.length, right.length);
+    for (let size = maxOverlap; size > 0; size -= 1) {
+      if (left.slice(left.length - size) === right.slice(0, size)) {
+        return size;
+      }
+    }
+    return 0;
+  }
+
+  private normalizeAssistantStreamChunk(session: ActiveSession, rawChunkText: string): string {
+    if (!rawChunkText) return '';
+
+    const previousRaw = session.lastRawAssistantChunkText;
+    if (rawChunkText === previousRaw) {
+      return '';
+    }
+
+    const currentText = session.activeAssistantSegmentText;
+    let delta = rawChunkText;
+
+    if (currentText.length > 0) {
+      if (rawChunkText.startsWith(currentText)) {
+        delta = rawChunkText.slice(currentText.length);
+      } else if (currentText.endsWith(rawChunkText)) {
+        delta = '';
+      } else {
+        const overlap = this.getStreamSuffixPrefixOverlap(currentText, rawChunkText);
+        if (overlap > 0) {
+          delta = rawChunkText.slice(overlap);
+        }
+      }
+    }
+
+    session.lastRawAssistantChunkText = rawChunkText;
+    return delta;
   }
 
   private extractStreamChunkText(event: unknown): string | null {

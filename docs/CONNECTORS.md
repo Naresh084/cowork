@@ -9,19 +9,16 @@ This document covers how to set up and configure every connector available in Ge
 1. [Quick Start](#quick-start)
 2. [How Connectors Work](#how-connectors-work)
 3. [OAuth Connectors](#oauth-connectors)
+   - [MCP-Native OAuth (No Manual Secrets)](#mcp-native-oauth-no-manual-secrets)
    - [Google Workspace](#google-workspace)
    - [Microsoft 365](#microsoft-365)
    - [Microsoft Teams](#microsoft-teams)
 4. [API Key Connectors](#api-key-connectors)
-   - [GitHub](#github)
    - [GitLab](#gitlab)
    - [Slack](#slack)
    - [Discord](#discord)
-   - [Notion](#notion)
    - [Linear](#linear)
    - [Todoist](#todoist)
-   - [Jira](#jira)
-   - [Sentry](#sentry)
    - [Brave Search](#brave-search)
    - [Exa](#exa)
 5. [Database Connectors](#database-connectors)
@@ -41,10 +38,10 @@ This document covers how to set up and configure every connector available in Ge
 1. Open GeminiCowork and go to the **Connectors** panel (puzzle icon in sidebar)
 2. Browse the **Available** tab to see all connectors
 3. Click **Install** on any connector you want
-4. Click **Configure** to enter credentials (API key/token)
+4. If prompted, click **Configure** to enter credentials (API key/token/database fields)
 5. Click **Connect** to start using the connector
 
-For OAuth connectors (Google Workspace, Microsoft 365), you also need to set up OAuth client credentials in the `.env` file before the login flow will work. See [OAuth Connectors](#oauth-connectors) below.
+For MCP-native OAuth connectors (Notion, GitHub, Jira, Sentry), no manual secrets are required. Install and connect, then complete browser auth handled by the remote MCP server.
 
 ---
 
@@ -64,23 +61,48 @@ Connected connector tools are also available to workflow executions, including s
 
 | Type | How it works | Examples |
 |------|-------------|----------|
-| **OAuth** | Browser-based login flow. Client credentials go in `.env` | Google Workspace, Microsoft 365 |
-| **API Key / Token** | You paste a token into the connector UI | GitHub, Slack, Notion, Linear |
-| **Connection String** | Database URL entered via the connector UI | PostgreSQL, MySQL, MongoDB |
-| **None** | No credentials needed | Fetch, Memory, Puppeteer |
+| **OAuth (App-managed)** | Browser/device-code flow managed by GeminiCowork. Client credentials come from `.env`. | Google Workspace, Microsoft 365, Microsoft Teams |
+| **OAuth (MCP-native via `mcp-remote`)** | Browser auth handled by the remote MCP endpoint (no connector secrets in app). | Notion, GitHub, Jira, Sentry |
+| **API Key / Token** | You paste a token into the connector UI. | GitLab, Slack, Discord, Linear, Todoist, Brave Search, Exa |
+| **Database Credentials** | You enter connection fields in the connector UI. | PostgreSQL, MySQL, MongoDB, SQLite, Redis |
+| **None** | No credentials needed. | Fetch, Memory, Puppeteer, Sequential Thinking |
 
 ### Credential Storage
 
-- **API keys and tokens** entered via the Connectors UI are stored in the **macOS Keychain**
-- **OAuth access/refresh tokens** obtained after login are also stored in the Keychain
-- **OAuth client credentials** (`GOOGLE_CLIENT_ID`, `MICROSOFT_CLIENT_ID`, etc.) go in the `.env` file - these are only used by the OAuth service to initiate login flows, not passed to MCP servers
+- **Connector secrets** entered via the Connectors UI are stored in a local file with user-only permissions (`0600`)
+- **App-managed OAuth access/refresh tokens** are stored in the same local file
+- **MCP-native OAuth connectors** (Notion/GitHub/Jira/Sentry) do not require manual token entry in GeminiCowork
+- **OAuth client credentials** (`GOOGLE_CLIENT_ID`, `MICROSOFT_CLIENT_ID`, etc.) go in `.env` only for app-managed OAuth connectors
 - The `.env` file is gitignored and never committed
 
 ---
 
 ## OAuth Connectors
 
-OAuth connectors require a one-time setup: you register an "OAuth application" with the provider, then put the client credentials in your `.env` file. After that, users authenticate via a browser-based login flow.
+OAuth connectors in GeminiCowork now use two models:
+
+1. **MCP-native OAuth via remote MCP endpoints** (no manual connector secrets)
+2. **App-managed OAuth** (requires provider client credentials in `.env`)
+
+### MCP-Native OAuth (No Manual Secrets)
+
+These connectors run through `mcp-remote`, which opens the provider login flow in your browser.
+
+| Connector | Remote MCP Endpoint |
+|-----------|---------------------|
+| Notion | `https://mcp.notion.com/mcp` |
+| GitHub | `https://api.githubcopilot.com/mcp/` |
+| Jira | `https://mcp.atlassian.com/v1/sse` |
+| Sentry | `https://mcp.sentry.dev/mcp` |
+
+#### Connect Steps (Notion/GitHub/Jira/Sentry)
+
+1. Connectors > select connector > **Install**
+2. Click **Connect**
+3. Complete the browser OAuth flow
+4. Return to GeminiCowork and wait for connected status
+
+If a provider session expires, use **Reconnect** to restart OAuth.
 
 ### Google Workspace
 
@@ -228,31 +250,7 @@ Same setup as Microsoft 365 above - they share the same Azure AD application and
 
 ## API Key Connectors
 
-These connectors use API keys or personal access tokens. Configure them via the **Connectors UI**: Install the connector, click **Configure**, and paste your token. Credentials are stored securely in the macOS Keychain.
-
-### GitHub
-
-**Tools:** Create/manage issues, PRs, repos, read code, search, branch management
-
-#### Get a Token
-
-1. Go to [GitHub Settings > Tokens](https://github.com/settings/tokens)
-2. Click **Generate new token** > **Fine-grained token** (recommended)
-3. Set:
-   - **Token name**: `GeminiCowork`
-   - **Expiration**: your choice (90 days is a good default)
-   - **Repository access**: select the repos you want the agent to access
-   - **Permissions**: Read & Write for Contents, Issues, Pull Requests, etc.
-4. Click **Generate token**
-5. Copy the token (starts with `github_pat_` for fine-grained, or `ghp_` for classic)
-
-#### Configure
-
-1. Connectors > GitHub > **Install** > **Configure**
-2. Paste your token in the `GITHUB_PERSONAL_ACCESS_TOKEN` field
-3. Click **Save**
-
----
+These connectors use API keys or personal access tokens. Configure them via the **Connectors UI**: Install the connector, click **Configure**, and paste your token.
 
 ### GitLab
 
@@ -271,8 +269,8 @@ These connectors use API keys or personal access tokens. Configure them via the 
 #### Configure
 
 1. Connectors > GitLab > **Install** > **Configure**
-2. Paste your token in the `GITLAB_TOKEN` field
-3. For self-hosted GitLab, also fill in `GITLAB_URL` (e.g., `https://gitlab.your-company.com`)
+2. Paste your token in `GITLAB_PERSONAL_ACCESS_TOKEN`
+3. For custom/self-hosted GitLab, also set `GITLAB_API_URL` (e.g., `https://gitlab.example.com/api/v4`)
 4. Click **Save**
 
 ---
@@ -332,32 +330,8 @@ These connectors use API keys or personal access tokens. Configure them via the 
 
 1. Connectors > Discord > **Install** > **Configure**
 2. Paste your bot token in `DISCORD_BOT_TOKEN`
-3. Click **Save**
-
----
-
-### Notion
-
-**Tools:** Create/read/update pages, databases, blocks
-
-#### Get an Integration Token
-
-1. Go to [Notion Integrations](https://www.notion.so/my-integrations)
-2. Click **+ New integration**
-3. Name: `GeminiCowork`, select your workspace
-4. Capabilities: **Read content**, **Update content**, **Insert content**
-5. Click **Submit**
-6. Copy the **Internal Integration Secret** (starts with `secret_`)
-
-**Important:** You must also share specific Notion pages/databases with the integration:
-1. Open a Notion page
-2. Click **...** (more) > **Connections** > **Connect to** > `GeminiCowork`
-
-#### Configure
-
-1. Connectors > Notion > **Install** > **Configure**
-2. Paste your token in `NOTION_API_KEY`
-3. Click **Save**
+3. The app maps it to `DISCORD_TOKEN` for the MCP server
+4. Click **Save**
 
 ---
 
@@ -394,48 +368,7 @@ These connectors use API keys or personal access tokens. Configure them via the 
 
 1. Connectors > Todoist > **Install** > **Configure**
 2. Paste your token in `TODOIST_API_TOKEN`
-3. Click **Save**
-
----
-
-### Jira
-
-**Tools:** View/manage issues, boards, sprints, projects
-
-#### Get an API Token
-
-1. Go to [Atlassian API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-2. Click **Create API token**
-3. Label: `GeminiCowork`
-4. Copy the token
-
-#### Configure
-
-1. Connectors > Jira > **Install** > **Configure**
-2. Fill in:
-   - `JIRA_URL`: your Jira instance (e.g., `https://your-org.atlassian.net`)
-   - `JIRA_EMAIL`: your Atlassian account email
-   - `JIRA_API_TOKEN`: the token you created
-3. Click **Save**
-
----
-
-### Sentry
-
-**Tools:** View errors, issues, performance data
-
-#### Get an Auth Token
-
-1. Go to [Sentry Auth Tokens](https://sentry.io/settings/account/api/auth-tokens/)
-2. Click **Create New Token**
-3. Scopes: `event:read`, `project:read`, `org:read`
-4. Copy the token (starts with `sntrys_`)
-
-#### Configure
-
-1. Connectors > Sentry > **Install** > **Configure**
-2. Paste your token in `SENTRY_AUTH_TOKEN`
-3. Optionally fill in `SENTRY_ORG` with your organization slug
+3. The app maps it to `API_KEY` for the MCP server
 4. Click **Save**
 
 ---
@@ -479,7 +412,7 @@ These connectors use API keys or personal access tokens. Configure them via the 
 
 ## Database Connectors
 
-Database connectors use connection strings. Configure them the same way as API key connectors: Install, click **Configure**, and enter the connection URL.
+Database connectors use connector-specific fields in the **Configure** modal.
 
 ### PostgreSQL
 
@@ -490,16 +423,23 @@ Database connectors use connection strings. Configure them the same way as API k
 ### MySQL
 
 1. Connectors > MySQL > **Install** > **Configure**
-2. Enter your connection URL in `MYSQL_URL`
-   - Format: `mysql://username:password@host:3306/database`
+2. Fill in:
+   - `MYSQL_HOST` (example: `localhost`)
+   - `MYSQL_PORT` (example: `3306`)
+   - `MYSQL_DATABASE` (example: `my_database`)
+   - `MYSQL_USER`
+   - `MYSQL_PASSWORD`
 
 ### MongoDB
 
 1. Connectors > MongoDB > **Install** > **Configure**
 2. Enter your connection URI in `MONGODB_URI`
    - Format: `mongodb://username:password@host:27017/database`
+3. The app maps this to `MDB_MCP_CONNECTION_STRING` for the MCP server
 
 ### SQLite
+
+Uses community fallback package `mcp-sqlite` (official package currently unavailable).
 
 1. Connectors > SQLite > **Install** > **Configure**
 2. Enter the absolute file path in `SQLITE_DB_PATH`
@@ -508,8 +448,9 @@ Database connectors use connection strings. Configure them the same way as API k
 ### Redis
 
 1. Connectors > Redis > **Install** > **Configure**
-2. Enter your connection URL in `REDIS_URL`
-   - Format: `redis://localhost:6379` or `redis://username:password@host:6379`
+2. Enter:
+   - `REDIS_HOST` (example: `localhost`)
+   - `REDIS_PORT` (example: `6379`)
 
 > **Security note:** Database connectors give the agent read/write access. Use a read-only user or a dedicated database for safety.
 
@@ -521,7 +462,7 @@ These connectors work out of the box with no credentials:
 
 | Connector | Description |
 |-----------|-------------|
-| **Fetch** | Make HTTP requests to any URL |
+| **Fetch** | Make HTTP requests to any URL (community fallback package `mcp-fetch-server`) |
 | **Memory** | Knowledge graph-based persistent memory |
 | **Puppeteer** | Browser automation and web scraping |
 | **Sequential Thinking** | Step-by-step reasoning and problem decomposition |
@@ -559,9 +500,9 @@ The connector appears in the **Installed** tab and works like any built-in conne
 
 ### OAuth flow not starting
 
-- Verify `GOOGLE_CLIENT_ID` / `MICROSOFT_CLIENT_ID` is set in `.env`
-- Restart the app after editing `.env`
-- For Google: make sure your email is added as a test user in the consent screen
+- For Google/Microsoft connectors: verify `GOOGLE_CLIENT_ID` / `MICROSOFT_CLIENT_ID` is set in `.env` and restart the app
+- For Notion/GitHub/Jira/Sentry: click **Reconnect** to re-open the MCP-native browser auth flow
+- Make sure your browser can open external auth windows/popups
 
 ### "Invalid client" error during OAuth
 
@@ -571,8 +512,9 @@ The connector appears in the **Installed** tab and works like any built-in conne
 
 ### Token expired
 
-- OAuth tokens auto-refresh when a refresh token is available
+- App-managed OAuth tokens auto-refresh when a refresh token is available
 - If refresh fails, click **Configure** again to re-authorize
+- MCP-native OAuth connectors are re-authorized via **Reconnect**
 - For API keys, check if the token was revoked on the provider's website
 
 ### Connector shows "error" status
@@ -584,5 +526,5 @@ The connector appears in the **Installed** tab and works like any built-in conne
 ### Database connection refused
 
 - Verify the database is running and accepting connections
-- Check the connection string format
+- Verify host/port/database/user/password fields are correct for the connector
 - For remote databases, make sure your IP is allowed in firewall rules

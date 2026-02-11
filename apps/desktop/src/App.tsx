@@ -97,10 +97,29 @@ export function App() {
       try {
         await waitForBackend();
         await loadSessions();
-        await discoverSkills();
-        await discoverCommands();
-        await loadSubagents();
-        await loadCronJobs();
+        void Promise.allSettled([
+          discoverSkills(),
+          discoverCommands(),
+          loadSubagents(),
+          loadCronJobs(),
+        ]).then((results) => {
+          const failures = results.filter(
+            (result): result is PromiseRejectedResult => result.status === 'rejected'
+          );
+          if (failures.length === 0) {
+            return;
+          }
+          const reason = failures
+            .map((failure) =>
+              failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
+            )
+            .join('; ');
+          void reportTerminalDiagnostic(
+            'warn',
+            'app.background-discovery',
+            `Background discovery completed with ${failures.length} failure(s): ${reason}`,
+          );
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // Backend initialization failed - UI will show appropriate error state

@@ -15,6 +15,8 @@ import type {
 interface SkillStoreState {
   // Available skills from all sources
   availableSkills: SkillManifest[];
+  lastDiscoveredAt: number | null;
+  lastWorkingDirectory: string | null;
 
   // Eligibility status for each skill
   eligibilityMap: Map<string, SkillEligibility>;
@@ -54,7 +56,10 @@ interface CreateSkillParams {
 
 interface SkillStoreActions {
   // Discovery
-  discoverSkills: (workingDirectory?: string) => Promise<void>;
+  discoverSkills: (
+    workingDirectory?: string,
+    options?: { force?: boolean }
+  ) => Promise<void>;
 
   // Installation
   installSkill: (skillId: string) => Promise<void>;
@@ -97,6 +102,8 @@ interface SkillStoreActions {
 
 const initialState: SkillStoreState = {
   availableSkills: [],
+  lastDiscoveredAt: null,
+  lastWorkingDirectory: null,
   eligibilityMap: new Map(),
   isDiscovering: false,
   isInstalling: new Set(),
@@ -107,6 +114,8 @@ const initialState: SkillStoreState = {
   selectedSkillId: null,
   error: null,
 };
+
+const DISCOVERY_CACHE_TTL_MS = 30_000;
 
 // ============================================================================
 // Store
@@ -120,7 +129,19 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
     // Discovery
     // ========================================================================
 
-    discoverSkills: async (workingDirectory) => {
+    discoverSkills: async (workingDirectory, options) => {
+      const force = options?.force === true;
+      const normalizedWorkingDirectory = workingDirectory?.trim() || null;
+      const cacheState = get();
+      if (
+        !force &&
+        cacheState.lastDiscoveredAt !== null &&
+        cacheState.lastWorkingDirectory === normalizedWorkingDirectory &&
+        Date.now() - cacheState.lastDiscoveredAt < DISCOVERY_CACHE_TTL_MS
+      ) {
+        return;
+      }
+
       set({ isDiscovering: true, error: null });
 
       try {
@@ -128,7 +149,12 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
           workingDirectory,
         });
 
-        set({ availableSkills: skills, isDiscovering: false });
+        set({
+          availableSkills: skills,
+          isDiscovering: false,
+          lastDiscoveredAt: Date.now(),
+          lastWorkingDirectory: normalizedWorkingDirectory,
+        });
 
         // Sync installed configs with actual managed skills
         // Remove stale configs that don't have corresponding managed skills
@@ -203,7 +229,8 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         }
 
         // Re-discover to update skill list
-        await get().discoverSkills();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverSkills(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
@@ -251,7 +278,8 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         set({ selectedSkillId: null });
 
         // Re-discover to update skill list
-        await get().discoverSkills();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverSkills(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         // Even if backend fails, try to clean up the config
         const settingsStore = useSettingsStore.getState();
@@ -263,7 +291,8 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         });
 
         // Re-discover to sync state
-        await get().discoverSkills();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverSkills(rediscoverWorkingDirectory, { force: true });
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);
@@ -301,7 +330,8 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         useSettingsStore.getState().addInstalledSkillConfig(config);
 
         // Refresh skill list to include the new skill
-        await get().discoverSkills();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverSkills(rediscoverWorkingDirectory, { force: true });
 
         return skillId;
       } catch (error) {

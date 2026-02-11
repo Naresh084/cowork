@@ -38,6 +38,8 @@ interface ConnectorStoreState {
 
   // Runtime state for each connector
   connectorStates: Map<string, ConnectorRuntimeState>;
+  lastDiscoveredAt: number | null;
+  lastWorkingDirectory: string | null;
 
   // UI State
   isDiscovering: boolean;
@@ -84,7 +86,10 @@ interface CreateCustomConnectorParams {
 
 interface ConnectorStoreActions {
   // Discovery
-  discoverConnectors: (workingDirectory?: string) => Promise<void>;
+  discoverConnectors: (
+    workingDirectory?: string,
+    options?: { force?: boolean }
+  ) => Promise<void>;
 
   // Installation
   installConnector: (connectorId: string) => Promise<void>;
@@ -140,6 +145,8 @@ interface ConnectorStoreActions {
 const initialState: ConnectorStoreState = {
   availableConnectors: [],
   connectorStates: new Map(),
+  lastDiscoveredAt: null,
+  lastWorkingDirectory: null,
   isDiscovering: false,
   isInstalling: new Set(),
   isConnecting: new Set(),
@@ -149,6 +156,8 @@ const initialState: ConnectorStoreState = {
   selectedConnectorId: null,
   error: null,
 };
+
+const DISCOVERY_CACHE_TTL_MS = 30_000;
 
 // ============================================================================
 // Store
@@ -162,7 +171,19 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
     // Discovery
     // ========================================================================
 
-    discoverConnectors: async (workingDirectory) => {
+    discoverConnectors: async (workingDirectory, options) => {
+      const force = options?.force === true;
+      const normalizedWorkingDirectory = workingDirectory?.trim() || null;
+      const cacheState = get();
+      if (
+        !force &&
+        cacheState.lastDiscoveredAt !== null &&
+        cacheState.lastWorkingDirectory === normalizedWorkingDirectory &&
+        Date.now() - cacheState.lastDiscoveredAt < DISCOVERY_CACHE_TTL_MS
+      ) {
+        return;
+      }
+
       set({ isDiscovering: true, error: null });
 
       try {
@@ -176,17 +197,37 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         const states = new Map<string, ConnectorRuntimeState>();
         for (const connector of connectors) {
           const existingState = get().connectorStates.get(connector.id);
-          states.set(connector.id, existingState || {
+          if (existingState) {
+            const normalizedExistingState =
+              existingState.status === 'installed' && connector.auth.type === 'none'
+                ? { ...existingState, status: 'configured' as const }
+                : existingState;
+            states.set(connector.id, normalizedExistingState);
+            continue;
+          }
+
+          states.set(connector.id, {
             id: connector.id,
             manifest: connector,
-            status: connector.source.type === 'managed' ? 'installed' : 'available',
+            status:
+              connector.source.type === 'managed'
+                ? connector.auth.type === 'none'
+                  ? 'configured'
+                  : 'installed'
+                : 'available',
             tools: [],
             resources: [],
             prompts: [],
           });
         }
 
-        set({ availableConnectors: connectors, connectorStates: states, isDiscovering: false });
+        set({
+          availableConnectors: connectors,
+          connectorStates: states,
+          isDiscovering: false,
+          lastDiscoveredAt: Date.now(),
+          lastWorkingDirectory: normalizedWorkingDirectory,
+        });
 
         // Prune stale connector states that no longer match any discovered connector
         const validIds = new Set(connectors.map(c => c.id));
@@ -246,7 +287,8 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         }
 
         // Re-discover to update connector list
-        await get().discoverConnectors();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverConnectors(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
@@ -294,7 +336,8 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         set({ selectedConnectorId: null });
 
         // Re-discover to update connector list
-        await get().discoverConnectors();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverConnectors(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         // Even if backend fails, try to clean up the config
         const settingsStore = useSettingsStore.getState();
@@ -306,7 +349,8 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         });
 
         // Re-discover to sync state
-        await get().discoverConnectors();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverConnectors(rediscoverWorkingDirectory, { force: true });
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);
@@ -528,7 +572,8 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         useSettingsStore.getState().addInstalledConnectorConfig(config);
 
         // Refresh connector list to include the new connector
-        await get().discoverConnectors();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverConnectors(rediscoverWorkingDirectory, { force: true });
 
         return result.connectorId;
       } catch (error) {

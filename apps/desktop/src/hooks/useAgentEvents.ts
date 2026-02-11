@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { subscribeToAgentEvents } from '../lib/agent-events';
+import { invoke } from '@tauri-apps/api/core';
+import { parseSidecarEventEnvelope, subscribeToAgentEvents } from '../lib/agent-events';
 import type { AgentEvent } from '../lib/event-types';
 import { useChatStore } from '../stores/chat-store';
 import { useAgentStore, type Task } from '../stores/agent-store';
@@ -94,6 +95,23 @@ function isInfrastructureError(code: string | undefined, message: string): boole
   );
 }
 
+interface ReplayEnvelope {
+  seq: number;
+  timestamp: number;
+  type: string;
+  sessionId: string | null;
+  data: unknown;
+}
+
+interface ReplayResponse {
+  events: ReplayEnvelope[];
+  eventCursor: number;
+  replayStart: number;
+  hasGap: boolean;
+}
+
+const SESSION_RELOAD_COOLDOWN_MS = 5_000;
+
 /**
  * Hook to subscribe to agent events for the current session
  * and automatically update the relevant stores
@@ -105,6 +123,7 @@ export function useAgentEvents(sessionId: string | null): void {
   const activeSessionRef = useRef<string | null>(sessionId);
   const sessionReloadTimerRef = useRef<number | null>(null);
   const sessionReloadAttemptRef = useRef(0);
+  const lastSessionReloadAtRef = useRef(0);
 
   // Keep refs up to date
   useEffect(() => {
@@ -134,7 +153,7 @@ export function useAgentEvents(sessionId: string | null): void {
   }, [sessionId]);
 
   useEffect(() => {
-    const scheduleSessionReload = (delayMs = 250) => {
+    const scheduleSessionReload = (delayMs = 250, force = false) => {
       if (sessionReloadTimerRef.current !== null) return;
       sessionReloadTimerRef.current = window.setTimeout(() => {
         sessionReloadTimerRef.current = null;
@@ -150,6 +169,11 @@ export function useAgentEvents(sessionId: string | null): void {
         }
 
         sessionReloadAttemptRef.current = 0;
+        const nowTs = Date.now();
+        if (!force && nowTs - lastSessionReloadAtRef.current < SESSION_RELOAD_COOLDOWN_MS) {
+          return;
+        }
+        lastSessionReloadAtRef.current = nowTs;
         void sessionStore.loadSessions({ reset: true });
       }, delayMs);
     };
@@ -637,14 +661,60 @@ export function useAgentEvents(sessionId: string | null): void {
       }
     };
 
-    const unsubscribe = subscribeToAgentEvents(null, handleEvent);
+    let unsubscribe = () => {};
+    let disposed = false;
+
+    const start = async () => {
+      try {
+        // Best-effort command to ensure backend subscription state exists.
+        await invoke('agent_subscribe_events');
+      } catch {
+        // Ignore and continue with passive event listening.
+      }
+
+      const cursor = useSessionStore.getState().bootstrapEventCursor;
+      if (cursor > 0) {
+        try {
+          const replay = await invoke<ReplayResponse>('agent_get_events_since', {
+            afterSeq: cursor,
+            limit: 4000,
+          });
+
+          if (replay.hasGap) {
+            // Replay window has moved forward; do a full refresh.
+            lastSessionReloadAtRef.current = Date.now();
+            void useSessionStore.getState().loadSessions({ reset: true });
+          } else {
+            for (const envelope of replay.events || []) {
+              const parsed = parseSidecarEventEnvelope(envelope);
+              if (parsed) {
+                handleEvent(parsed);
+              }
+            }
+          }
+
+          useSessionStore.setState({ bootstrapEventCursor: replay.eventCursor || cursor });
+        } catch {
+          // Non-fatal; live stream subscription will still recover current state.
+        }
+      }
+
+      if (disposed) return;
+      unsubscribe = subscribeToAgentEvents(null, (event) => {
+        handleEvent(event);
+      });
+    };
+
+    void start();
 
     return () => {
+      disposed = true;
       if (sessionReloadTimerRef.current !== null) {
         window.clearTimeout(sessionReloadTimerRef.current);
         sessionReloadTimerRef.current = null;
       }
       sessionReloadAttemptRef.current = 0;
+      lastSessionReloadAtRef.current = 0;
       unsubscribe();
     };
   }, []);

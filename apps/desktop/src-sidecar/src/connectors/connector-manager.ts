@@ -117,13 +117,24 @@ export class ConnectorManager {
         const interpolatedArgs = manifest.transport.args.map((arg) =>
           arg.replace(/\$\{(\w+)\}/g, (_, key) => env[key] || '')
         );
+        const commandName = manifest.transport.command.trim().split(/[\\/]/).pop() || '';
+        let transportEnv = env;
+        if (commandName === 'npx') {
+          transportEnv = { ...env };
+          delete transportEnv['npm_config_node_linker'];
+          delete transportEnv['npm_config_shamefully_hoist'];
+          delete transportEnv['NPM_CONFIG_NODE_LINKER'];
+          delete transportEnv['NPM_CONFIG_SHAMEFULLY_HOIST'];
+          transportEnv['NPM_CONFIG_LOGLEVEL'] = 'error';
+          transportEnv['NPM_CONFIG_UPDATE_NOTIFIER'] = 'false';
+        }
 
         serverConfig = {
           name: manifest.displayName,
           transport: 'stdio',
           command: manifest.transport.command,
           args: interpolatedArgs,
-          env,
+          env: transportEnv,
           enabled: true,
         };
       } else if (manifest.transport.type === 'http') {

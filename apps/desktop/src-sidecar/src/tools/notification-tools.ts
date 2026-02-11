@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import type { IntegrationBridgeService } from '../integrations/index.js';
+import type { PlatformType } from '../integrations/types.js';
 
 const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   whatsapp: 'WhatsApp',
@@ -18,6 +19,13 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   teams: 'Microsoft Teams',
 };
 
+type NotificationSkipEvaluator = (input: {
+  platform: PlatformType;
+  message: string;
+  chatId?: string;
+  context: ToolContext;
+}) => string | null;
+
 /**
  * Create notification tools for all currently connected platforms.
  * Returns empty array if no platforms connected.
@@ -26,6 +34,9 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
  */
 export function createNotificationTools(
   getBridge: () => IntegrationBridgeService | null,
+  options?: {
+    shouldSkip?: NotificationSkipEvaluator;
+  },
 ): ToolHandler[] {
   const bridge = getBridge();
   if (!bridge) return [];
@@ -64,12 +75,24 @@ export function createNotificationTools(
       requiresPermission: () => null, // No permission needed for notifications
       execute: async (
         args: unknown,
-        _context: ToolContext,
+        context: ToolContext,
       ): Promise<ToolResult> => {
         const { message, chatId } = args as {
           message: string;
           chatId?: string;
         };
+        const skipReason = options?.shouldSkip?.({
+          platform,
+          message,
+          chatId,
+          context,
+        });
+        if (skipReason) {
+          return {
+            success: true,
+            data: `Skipped ${displayName} notification: ${skipReason}`,
+          };
+        }
 
         try {
           const currentBridge = getBridge();

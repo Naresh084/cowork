@@ -16,18 +16,17 @@
     "type": "env",
     "secrets": [
       {
-        "key": "GITLAB_TOKEN",
+        "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
         "description": "GitLab Personal Access Token",
         "required": true,
         "placeholder": "glpat-...",
         "link": "https://gitlab.com/-/user_settings/personal_access_tokens"
       },
       {
-        "key": "GITLAB_URL",
-        "envVar": "GITLAB_URL",
-        "description": "GitLab instance URL (optional, defaults to gitlab.com)",
+        "key": "GITLAB_API_URL",
+        "description": "GitLab API URL (optional, defaults to https://gitlab.com/api/v4)",
         "required": false,
-        "placeholder": "https://gitlab.com"
+        "placeholder": "https://gitlab.com/api/v4"
       }
     ]
   },

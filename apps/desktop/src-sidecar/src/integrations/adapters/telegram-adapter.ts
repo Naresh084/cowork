@@ -18,6 +18,10 @@ export class TelegramAdapter extends BaseAdapter {
     super('telegram');
   }
 
+  override supportsStreamingEdits(): boolean {
+    return true;
+  }
+
   async connect(config: Record<string, unknown>): Promise<void> {
     const telegramConfig = config as unknown as TelegramConfig;
 

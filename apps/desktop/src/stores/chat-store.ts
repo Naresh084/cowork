@@ -214,6 +214,7 @@ interface ChatActions {
   isComputerUseRunning: (sessionId: string | null) => boolean;
   updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => void;
   clearBrowserScreenshot: (sessionId: string) => void;
+  hydrateRuntimeSnapshot: (sessionId: string, runtime: SessionRuntimeSnapshot) => void;
 }
 
 export interface SessionDetails {
@@ -226,6 +227,32 @@ export interface SessionDetails {
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
   hasMoreHistory?: boolean;
   oldestLoadedSequence?: number | null;
+  runtime?: SessionRuntimeSnapshot;
+}
+
+export interface SessionRuntimeSnapshot {
+  version: 1;
+  runState: 'idle' | 'running' | 'stopping' | 'errored';
+  isStreaming: boolean;
+  isThinking: boolean;
+  activeTurnId?: string;
+  activeToolIds: string[];
+  activeTools?: Array<{
+    id: string;
+    name: string;
+    args?: Record<string, unknown>;
+    parentToolId?: string;
+    startedAt?: number;
+  }>;
+  pendingPermissions: ExtendedPermissionRequest[];
+  pendingQuestions: UserQuestion[];
+  messageQueue: Array<{ id: string; content: string; queuedAt: number }>;
+  lastError?: {
+    message: string;
+    code?: string;
+    timestamp: number;
+  } | null;
+  updatedAt: number;
 }
 
 const createSessionState = (): SessionChatState => ({
@@ -1309,5 +1336,58 @@ ${attachment.data}`,
       ...session,
       browserViewScreenshot: null,
     })));
+  },
+
+  hydrateRuntimeSnapshot: (sessionId: string, runtime: SessionRuntimeSnapshot) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => {
+      const activeTool = runtime.activeTools?.[0];
+      const activeToolId = activeTool?.id || runtime.activeToolIds[0];
+      const normalizedPermissions = (runtime.pendingPermissions || []).map((request) => ({
+        ...request,
+        sessionId,
+        createdAt:
+          (request as { timestamp?: number; createdAt?: number }).createdAt ??
+          (request as { timestamp?: number; createdAt?: number }).timestamp ??
+          Date.now(),
+      }));
+      const normalizedQuestions = (runtime.pendingQuestions || []).map((question) => ({
+        id: question.id,
+        sessionId,
+        question: question.question,
+        header: question.header,
+        options: question.options || [],
+        multiSelect: question.multiSelect,
+        allowCustom: question.allowCustom,
+        createdAt:
+          (question as { timestamp?: number; createdAt?: number }).createdAt ??
+          (question as { timestamp?: number; createdAt?: number }).timestamp ??
+          Date.now(),
+      }));
+
+      return {
+        ...session,
+        isStreaming: Boolean(runtime.isStreaming),
+        isThinking: Boolean(runtime.isThinking),
+        activeTurnId: runtime.activeTurnId,
+        pendingPermissions: normalizedPermissions,
+        pendingQuestions: normalizedQuestions,
+        messageQueue: runtime.messageQueue || [],
+        currentTool: activeToolId
+          ? {
+              id: activeToolId,
+              name: activeTool?.name || 'tool',
+              args: activeTool?.args || {},
+              status: 'running',
+              startedAt: activeTool?.startedAt || Date.now(),
+              parentToolId: activeTool?.parentToolId,
+            }
+          : null,
+        error:
+          runtime.runState === 'errored'
+            ? runtime.lastError?.message || session.error
+            : session.error,
+      };
+    }));
   },
 }));

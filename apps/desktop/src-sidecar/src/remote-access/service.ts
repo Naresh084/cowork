@@ -22,6 +22,9 @@ import type {
   RemoteAccessDevice,
   RemoteAccessDeviceSummary,
   RemoteAccessStatus,
+  RemoteConfigHealth,
+  RemoteDiagnosticEntry,
+  RemoteDiagnosticLevel,
   RemoteEnableInput,
   RemoteTunnelAuthStatus,
   RemoteTunnelMode,
@@ -36,6 +39,8 @@ const MAX_JSON_BODY_BYTES = 25 * 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 15_000;
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 const CLOUDFLARE_START_TIMEOUT_MS = 20_000;
+const TUNNEL_HEALTH_REFRESH_COOLDOWN_MS = 60_000;
+const DIAGNOSTIC_LOG_LIMIT = 50;
 const execFileAsync = promisify(execFile);
 
 interface PairingRecord {
@@ -86,11 +91,15 @@ function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function normalizeTunnelMode(value: unknown): RemoteTunnelMode {
+function parseTunnelMode(value: unknown): RemoteTunnelMode | null {
   if (value === 'tailscale' || value === 'cloudflare' || value === 'custom') {
     return value;
   }
-  return 'tailscale';
+  return null;
+}
+
+function normalizeTunnelMode(value: unknown, fallback: RemoteTunnelMode = 'tailscale'): RemoteTunnelMode {
+  return parseTunnelMode(value) ?? fallback;
 }
 
 function normalizeTunnelVisibility(value: unknown): RemoteTunnelVisibility {
@@ -210,6 +219,7 @@ function parseCloudflareUrl(output: string): string | null {
 
 export class RemoteAccessService {
   private configPath: string | null = null;
+  private configBackupPath: string | null = null;
   private config: RemoteAccessConfig = defaultConfig();
   private localBaseUrl: string | null = null;
   private server: Server | null = null;
@@ -228,6 +238,13 @@ export class RemoteAccessService {
   private tunnelStartedAt: number | null = null;
   private tunnelPid: number | null = null;
   private tunnelProcess: ChildProcessWithoutNullStreams | null = null;
+  private lastTunnelHealthRefreshAt = 0;
+  private tunnelHealthRefreshPromise: Promise<void> | null = null;
+  private configHealth: RemoteConfigHealth = 'valid';
+  private configRepairReason: string | null = null;
+  private lastOperation: string | null = null;
+  private lastOperationAt: number | null = null;
+  private diagnostics: RemoteDiagnosticEntry[] = [];
 
   async initialize(appDataDir: string): Promise<void> {
     if (!appDataDir.trim()) {
@@ -238,6 +255,7 @@ export class RemoteAccessService {
     const changedPath = this.configPath !== nextConfigPath;
 
     this.configPath = nextConfigPath;
+    this.configBackupPath = `${nextConfigPath}.bak`;
 
     if (!this.initialized || changedPath) {
       await this.loadConfig();
@@ -247,9 +265,76 @@ export class RemoteAccessService {
       }
     }
 
-    await this.refreshTunnelHealth().catch((error) => {
-      this.tunnelLastError = `Tunnel check failed: ${formatCommandError(error)}`;
+    this.scheduleTunnelHealthRefresh();
+  }
+
+  private scheduleTunnelHealthRefresh(): void {
+    void this.refreshTunnelHealthWithCooldown(false).catch(() => {
+      // Best effort on initialization; explicit refresh actions still surface errors.
     });
+  }
+
+  private markOperation(step: string): void {
+    this.lastOperation = step;
+    this.lastOperationAt = now();
+  }
+
+  private pushDiagnostic(
+    level: RemoteDiagnosticLevel,
+    step: string,
+    message: string,
+    commandHint?: string,
+  ): void {
+    this.diagnostics = [
+      {
+        id: randomId('diag'),
+        level,
+        step,
+        message: message.trim(),
+        at: now(),
+        commandHint,
+      },
+      ...this.diagnostics,
+    ].slice(0, DIAGNOSTIC_LOG_LIMIT);
+  }
+
+  private setConfigRepair(reason: string): void {
+    this.configHealth = 'repair_required';
+    this.configRepairReason = reason;
+    this.pushDiagnostic('warn', 'config', reason);
+  }
+
+  private clearConfigRepair(): void {
+    this.configHealth = 'valid';
+    this.configRepairReason = null;
+  }
+
+  private async refreshTunnelHealthWithCooldown(force: boolean): Promise<void> {
+    const elapsed = now() - this.lastTunnelHealthRefreshAt;
+    if (!force && elapsed < TUNNEL_HEALTH_REFRESH_COOLDOWN_MS) {
+      return;
+    }
+
+    if (this.tunnelHealthRefreshPromise) {
+      await this.tunnelHealthRefreshPromise;
+      return;
+    }
+
+    this.tunnelHealthRefreshPromise = (async () => {
+      try {
+        await this.refreshTunnelHealth();
+        this.lastTunnelHealthRefreshAt = now();
+      } catch (error) {
+        this.tunnelLastError = `Tunnel check failed: ${formatCommandError(error)}`;
+        this.markOperation('refresh');
+        this.pushDiagnostic('error', 'refresh', this.tunnelLastError);
+        throw error;
+      } finally {
+        this.tunnelHealthRefreshPromise = null;
+      }
+    })();
+
+    await this.tunnelHealthRefreshPromise;
   }
 
   private ensureInitialized(): void {
@@ -262,45 +347,77 @@ export class RemoteAccessService {
     this.ensureInitializedPath();
     const fallback = defaultConfig();
 
-    try {
-      const raw = await readFile(this.configPath!, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<RemoteAccessConfig>;
-      this.config = {
-        enabled: Boolean(parsed.enabled),
-        bindHost: '127.0.0.1',
-        bindPort: normalizePort(parsed.bindPort),
-        publicBaseUrl: normalizeBaseUrl(parsed.publicBaseUrl),
-        tunnelMode: normalizeTunnelMode(parsed.tunnelMode),
-        tunnelName: normalizeTunnelName(parsed.tunnelName),
-        tunnelDomain: normalizeTunnelDomain(parsed.tunnelDomain),
-        tunnelVisibility: normalizeTunnelVisibility(parsed.tunnelVisibility),
-        devices: Array.isArray(parsed.devices)
-          ? parsed.devices
-            .filter((device): device is RemoteAccessDevice => {
-              if (!device || typeof device !== 'object') return false;
-              const candidate = device as Partial<RemoteAccessDevice>;
-              return (
-                typeof candidate.id === 'string' &&
-                typeof candidate.name === 'string' &&
-                typeof candidate.platform === 'string' &&
-                typeof candidate.tokenHash === 'string' &&
-                typeof candidate.createdAt === 'number' &&
-                typeof candidate.lastUsedAt === 'number' &&
-                typeof candidate.expiresAt === 'number'
-              );
-            })
-            .map((device) => ({
-              ...device,
-              revokedAt: typeof device.revokedAt === 'number' ? device.revokedAt : undefined,
-            }))
-          : [],
-        createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : fallback.createdAt,
-        updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : fallback.updatedAt,
-      };
-    } catch {
-      this.config = fallback;
-      await this.persistConfig();
+    const primaryFailureReason = await this.tryLoadConfigFromPath(this.configPath!, fallback);
+    if (!primaryFailureReason) {
+      this.clearConfigRepair();
+      return;
     }
+
+    if (this.configBackupPath) {
+      const backupFailureReason = await this.tryLoadConfigFromPath(this.configBackupPath, fallback);
+      if (!backupFailureReason) {
+        this.setConfigRepair(`Recovered remote setup from backup because primary config was invalid: ${primaryFailureReason}`);
+        await this.persistConfig();
+        this.markOperation('config_repair');
+        return;
+      }
+    }
+
+    this.config = fallback;
+    this.setConfigRepair(`Remote setup config was reset. Reason: ${primaryFailureReason}`);
+    await this.persistConfig();
+    this.markOperation('config_repair');
+  }
+
+  private async tryLoadConfigFromPath(path: string, fallback: RemoteAccessConfig): Promise<string | null> {
+    try {
+      const raw = await readFile(path, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<RemoteAccessConfig>;
+      this.config = this.parseConfigValue(parsed, fallback);
+      return null;
+    } catch (error) {
+      return formatCommandError(error);
+    }
+  }
+
+  private parseConfigValue(parsed: Partial<RemoteAccessConfig>, fallback: RemoteAccessConfig): RemoteAccessConfig {
+    const parsedMode = parseTunnelMode(parsed.tunnelMode);
+    if (!parsedMode) {
+      throw new Error('Invalid tunnel mode in config. Expected tailscale, cloudflare, or custom.');
+    }
+
+    return {
+      enabled: Boolean(parsed.enabled),
+      bindHost: '127.0.0.1',
+      bindPort: normalizePort(parsed.bindPort),
+      publicBaseUrl: normalizeBaseUrl(parsed.publicBaseUrl),
+      tunnelMode: parsedMode,
+      tunnelName: normalizeTunnelName(parsed.tunnelName),
+      tunnelDomain: normalizeTunnelDomain(parsed.tunnelDomain),
+      tunnelVisibility: normalizeTunnelVisibility(parsed.tunnelVisibility),
+      devices: Array.isArray(parsed.devices)
+        ? parsed.devices
+          .filter((device): device is RemoteAccessDevice => {
+            if (!device || typeof device !== 'object') return false;
+            const candidate = device as Partial<RemoteAccessDevice>;
+            return (
+              typeof candidate.id === 'string' &&
+              typeof candidate.name === 'string' &&
+              typeof candidate.platform === 'string' &&
+              typeof candidate.tokenHash === 'string' &&
+              typeof candidate.createdAt === 'number' &&
+              typeof candidate.lastUsedAt === 'number' &&
+              typeof candidate.expiresAt === 'number'
+            );
+          })
+          .map((device) => ({
+            ...device,
+            revokedAt: typeof device.revokedAt === 'number' ? device.revokedAt : undefined,
+          }))
+        : [],
+      createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : fallback.createdAt,
+      updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : fallback.updatedAt,
+    };
   }
 
   private ensureInitializedPath(): void {
@@ -312,8 +429,12 @@ export class RemoteAccessService {
   private async persistConfig(): Promise<void> {
     this.ensureInitializedPath();
     const parent = dirname(this.configPath!);
+    const payload = JSON.stringify(this.config, null, 2);
     await mkdir(parent, { recursive: true });
-    await writeFile(this.configPath!, JSON.stringify(this.config, null, 2), 'utf8');
+    await writeFile(this.configPath!, payload, 'utf8');
+    if (this.configBackupPath) {
+      await writeFile(this.configBackupPath, payload, 'utf8');
+    }
   }
 
   private scheduleConfigSave(): void {
@@ -328,6 +449,7 @@ export class RemoteAccessService {
 
   async enable(input: RemoteEnableInput = {}): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('enable');
 
     const settings = this.normalizeEnableInput(input);
     this.config.enabled = true;
@@ -338,6 +460,8 @@ export class RemoteAccessService {
     this.config.tunnelDomain = settings.tunnelDomain;
     this.config.tunnelVisibility = settings.tunnelVisibility;
     this.config.updatedAt = now();
+    this.clearConfigRepair();
+    this.pushDiagnostic('info', 'enable', `Remote access enabled with ${settings.tunnelMode}.`);
 
     await this.persistConfig();
     await this.start();
@@ -346,9 +470,11 @@ export class RemoteAccessService {
 
   async disable(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('disable');
     await this.stopTunnel();
     this.config.enabled = false;
     this.config.updatedAt = now();
+    this.pushDiagnostic('info', 'disable', 'Remote access disabled.');
     await this.persistConfig();
     await this.stop();
     return this.getStatus();
@@ -356,19 +482,29 @@ export class RemoteAccessService {
 
   async updatePublicBaseUrl(publicBaseUrl: string | null): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('set_endpoint');
     this.config.publicBaseUrl = this.resolvePublicBaseUrlForMode(
       this.config.tunnelMode,
       normalizeBaseUrl(publicBaseUrl),
       this.config.tunnelDomain,
     );
     this.config.updatedAt = now();
+    this.clearConfigRepair();
+    this.pushDiagnostic(
+      'info',
+      'set_endpoint',
+      `Endpoint updated to ${this.config.publicBaseUrl || 'auto'}.`,
+    );
     await this.persistConfig();
     return this.getStatus();
   }
 
   async updateTunnelMode(mode: RemoteTunnelMode): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
-    const nextMode = normalizeTunnelMode(mode);
+    const nextMode = parseTunnelMode(mode);
+    if (!nextMode) {
+      throw new Error(`Unsupported tunnel mode "${String(mode)}".`);
+    }
     if (this.config.tunnelMode !== nextMode) {
       await this.stopTunnel();
     }
@@ -379,13 +515,17 @@ export class RemoteAccessService {
       this.config.tunnelDomain,
     );
     this.config.updatedAt = now();
+    this.clearConfigRepair();
+    this.markOperation('set_provider');
+    this.pushDiagnostic('info', 'set_provider', `Tunnel provider set to ${nextMode}.`);
     await this.persistConfig();
-    await this.refreshTunnelHealth();
+    await this.refreshTunnelHealthWithCooldown(true);
     return this.getStatus();
   }
 
   async updateTunnelOptions(input: RemoteTunnelOptionsInput): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('set_options');
     const next = this.normalizeTunnelOptionsInput(input, this.config.tunnelMode, this.config.publicBaseUrl);
     const shouldRestartManagedTunnel =
       this.config.tunnelName !== next.tunnelName ||
@@ -401,19 +541,23 @@ export class RemoteAccessService {
     this.config.tunnelVisibility = next.tunnelVisibility;
     this.config.publicBaseUrl = next.publicBaseUrl;
     this.config.updatedAt = now();
+    this.clearConfigRepair();
+    this.pushDiagnostic('info', 'set_options', 'Tunnel options saved.');
     await this.persistConfig();
-    await this.refreshTunnelHealth();
+    await this.refreshTunnelHealthWithCooldown(true);
     return this.getStatus();
   }
 
   async refreshTunnelStatus(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
-    await this.refreshTunnelHealth();
+    this.markOperation('refresh');
+    await this.refreshTunnelHealthWithCooldown(true);
     return this.getStatus();
   }
 
   async installTunnelBinary(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('install');
 
     const binary = this.getTunnelBinaryName(this.config.tunnelMode);
     if (!binary) {
@@ -429,30 +573,35 @@ export class RemoteAccessService {
 
     this.tunnelState = 'starting';
     this.tunnelLastError = null;
+    this.pushDiagnostic('info', 'install', `Installing ${binary} dependency.`);
 
     try {
       await this.runCommand(installCommand.command, installCommand.args, INSTALL_TIMEOUT_MS);
     } catch (error) {
       this.tunnelState = 'error';
       this.tunnelLastError = `Install failed: ${formatCommandError(error)}`;
+      this.pushDiagnostic('error', 'install', this.tunnelLastError, `${installCommand.command} ${installCommand.args.join(' ')}`);
       throw new Error(this.tunnelLastError);
     }
 
-    await this.refreshTunnelHealth();
+    await this.refreshTunnelHealthWithCooldown(true);
     if (!this.tunnelBinaryInstalled) {
       this.tunnelState = 'error';
       this.tunnelLastError = `Install command completed but "${binary}" is still unavailable in PATH.`;
+      this.pushDiagnostic('error', 'install', this.tunnelLastError);
       throw new Error(this.tunnelLastError);
     }
     if (this.tunnelState === 'starting') {
       this.tunnelState = 'stopped';
     }
+    this.pushDiagnostic('info', 'install', `${binary} dependency installed.`);
     return this.getStatus();
   }
 
   async authenticateTunnel(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
-    await this.refreshTunnelHealth();
+    this.markOperation('authenticate');
+    await this.refreshTunnelHealthWithCooldown(true);
 
     if (this.config.tunnelMode === 'custom') {
       throw new Error('Custom tunnel mode does not require authentication in Cowork.');
@@ -463,6 +612,7 @@ export class RemoteAccessService {
 
     this.tunnelState = 'starting';
     this.tunnelLastError = null;
+    this.pushDiagnostic('info', 'authenticate', `Authenticating ${this.config.tunnelMode} tunnel.`);
 
     if (this.config.tunnelMode === 'cloudflare') {
       if (!this.config.tunnelDomain) {
@@ -476,10 +626,11 @@ export class RemoteAccessService {
       } catch (error) {
         this.tunnelState = 'error';
         this.tunnelLastError = `Authentication failed: ${formatCommandError(error)}`;
+        this.pushDiagnostic('error', 'authenticate', this.tunnelLastError);
         throw new Error(this.tunnelLastError);
       }
 
-      await this.refreshTunnelHealth();
+      await this.refreshTunnelHealthWithCooldown(true);
       if (this.tunnelAuthStatus !== 'authenticated') {
         throw new Error(
           'Cloudflare authentication did not complete. Retry and approve the browser login flow.',
@@ -496,21 +647,24 @@ export class RemoteAccessService {
     } catch (error) {
       this.tunnelState = 'error';
       this.tunnelLastError = `Authentication failed: ${formatCommandError(error)}`;
+      this.pushDiagnostic('error', 'authenticate', this.tunnelLastError);
       throw new Error(this.tunnelLastError);
     }
 
-    await this.refreshTunnelHealth();
+    await this.refreshTunnelHealthWithCooldown(true);
     if (this.tunnelAuthStatus !== 'authenticated') {
       throw new Error('Authentication did not complete. Please retry and approve system prompts.');
     }
     if (this.tunnelState === 'starting') {
       this.tunnelState = 'stopped';
     }
+    this.pushDiagnostic('info', 'authenticate', `${this.config.tunnelMode} authentication completed.`);
     return this.getStatus();
   }
 
   async startTunnel(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('start');
 
     if (!this.config.enabled) {
       this.config.enabled = true;
@@ -521,8 +675,9 @@ export class RemoteAccessService {
       await this.start();
     }
 
-    await this.refreshTunnelHealth();
+    await this.refreshTunnelHealthWithCooldown(true);
     this.tunnelLastError = null;
+    this.pushDiagnostic('info', 'start', `Starting ${this.config.tunnelMode} tunnel.`);
 
     if (this.config.tunnelMode === 'custom') {
       const customEndpoint = this.resolvePublicBaseUrlForMode(
@@ -533,6 +688,7 @@ export class RemoteAccessService {
       if (!customEndpoint) {
         this.tunnelState = 'error';
         this.tunnelLastError = 'Set a public endpoint URL for custom mode before starting the tunnel.';
+        this.pushDiagnostic('error', 'start', this.tunnelLastError);
         throw new Error(this.tunnelLastError);
       }
       this.tunnelState = 'running';
@@ -545,6 +701,7 @@ export class RemoteAccessService {
     if (!this.tunnelBinaryInstalled || !this.tunnelBinaryPath) {
       this.tunnelState = 'error';
       this.tunnelLastError = 'Tunnel dependency is not installed yet. Install it from this screen first.';
+      this.pushDiagnostic('error', 'start', this.tunnelLastError);
       throw new Error(this.tunnelLastError);
     }
 
@@ -552,37 +709,51 @@ export class RemoteAccessService {
       if (this.tunnelAuthStatus !== 'authenticated') {
         this.tunnelState = 'error';
         this.tunnelLastError = 'Tailscale is not authenticated. Run authentication first.';
+        this.pushDiagnostic('error', 'start', this.tunnelLastError);
         throw new Error(this.tunnelLastError);
       }
       await this.startTailscaleTunnel();
+      this.pushDiagnostic('info', 'start', 'Tailscale tunnel is running.');
       return this.getStatus();
     }
 
     if (this.config.tunnelMode === 'cloudflare' && this.config.tunnelDomain && this.tunnelAuthStatus !== 'authenticated') {
       this.tunnelState = 'error';
       this.tunnelLastError = 'Cloudflare domain routing requires authentication. Run authentication first.';
+      this.pushDiagnostic('error', 'start', this.tunnelLastError);
       throw new Error(this.tunnelLastError);
     }
 
     await this.startCloudflareTunnel();
+    this.pushDiagnostic('info', 'start', 'Cloudflare tunnel is running.');
     return this.getStatus();
   }
 
   async stopTunnel(): Promise<RemoteAccessStatus> {
     this.ensureInitialized();
+    this.markOperation('stop');
+    this.pushDiagnostic('info', 'stop', `Stopping ${this.config.tunnelMode} tunnel.`);
 
     if (this.config.tunnelMode === 'cloudflare') {
       await this.stopCloudflareProcess();
     } else if (this.config.tunnelMode === 'tailscale' && this.tunnelBinaryPath) {
+      const stopErrors: string[] = [];
       try {
         await this.runCommand(this.tunnelBinaryPath, ['funnel', 'off'], COMMAND_TIMEOUT_MS);
-      } catch {
-        // Keep best-effort behavior so remote gateway can still continue.
+      } catch (error) {
+        stopErrors.push(`funnel off failed: ${formatCommandError(error)}`);
       }
       try {
         await this.runCommand(this.tunnelBinaryPath, ['serve', 'reset'], COMMAND_TIMEOUT_MS);
-      } catch {
-        // Keep best-effort behavior so remote gateway can still continue.
+      } catch (error) {
+        stopErrors.push(`serve reset failed: ${formatCommandError(error)}`);
+      }
+
+      if (stopErrors.length > 0) {
+        this.tunnelState = 'error';
+        this.tunnelLastError = `Failed to stop tailscale tunnel cleanly: ${stopErrors.join(' | ')}`;
+        this.pushDiagnostic('error', 'stop', this.tunnelLastError, `${this.tunnelBinaryPath} funnel off && serve reset`);
+        throw new Error(this.tunnelLastError);
       }
     }
 
@@ -591,12 +762,16 @@ export class RemoteAccessService {
     this.tunnelLastError = null;
     this.tunnelStartedAt = null;
     this.tunnelPid = null;
-    await this.refreshTunnelHealth();
+    this.pushDiagnostic('info', 'stop', 'Tunnel stopped.');
+    await this.refreshTunnelHealthWithCooldown(true);
     return this.getStatus();
   }
 
   private normalizeEnableInput(input: RemoteEnableInput): RemoteEnableSettings {
-    const mode = normalizeTunnelMode(input.tunnelMode);
+    const mode = input.tunnelMode == null ? this.config.tunnelMode : parseTunnelMode(input.tunnelMode);
+    if (!mode) {
+      throw new Error(`Unsupported tunnel mode "${String(input.tunnelMode)}".`);
+    }
     const tunnelDomain = normalizeTunnelDomain(input.tunnelDomain);
     const explicitPublicBaseUrl = normalizeBaseUrl(input.publicBaseUrl);
     return {
@@ -1177,6 +1352,11 @@ export class RemoteAccessService {
       tunnelAuthStatus: this.tunnelAuthStatus,
       tunnelStartedAt: this.tunnelStartedAt,
       tunnelPid: this.tunnelPid,
+      configHealth: this.configHealth,
+      configRepairReason: this.configRepairReason,
+      lastOperation: this.lastOperation,
+      lastOperationAt: this.lastOperationAt,
+      diagnostics: this.diagnostics,
       deviceCount: activeDevices.length,
       devices: this.listDevices(),
     };
@@ -1209,6 +1389,39 @@ export class RemoteAccessService {
     }
 
     return true;
+  }
+
+  async deleteAll(): Promise<RemoteAccessStatus> {
+    this.ensureInitialized();
+    this.markOperation('delete_all');
+    this.pushDiagnostic('warn', 'delete_all', 'Deleting all remote configuration and paired devices.');
+
+    try {
+      await this.stopTunnel();
+    } catch (error) {
+      this.pushDiagnostic(
+        'warn',
+        'delete_all',
+        `Tunnel stop reported an error during delete: ${formatCommandError(error)}`,
+      );
+    }
+
+    await this.stop();
+
+    this.config = defaultConfig();
+    this.config.updatedAt = now();
+    this.pairingCodes.clear();
+    this.tunnelState = 'stopped';
+    this.tunnelPublicUrl = null;
+    this.tunnelLastError = null;
+    this.tunnelStartedAt = null;
+    this.tunnelPid = null;
+    this.tunnelProcess = null;
+    this.clearConfigRepair();
+
+    await this.persistConfig();
+    this.pushDiagnostic('info', 'delete_all', 'Remote configuration and pairings were deleted.');
+    return this.getStatus();
   }
 
   private buildTunnelHints(): string[] {

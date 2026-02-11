@@ -10,26 +10,17 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-notion"]
+    "args": ["-y", "mcp-remote", "https://mcp.notion.com/mcp"]
   },
   "auth": {
-    "type": "env",
-    "secrets": [
-      {
-        "key": "NOTION_API_KEY",
-        "description": "Notion Integration Token (Internal Integration)",
-        "required": true,
-        "placeholder": "secret_...",
-        "link": "https://www.notion.so/my-integrations"
-      }
-    ]
+    "type": "none"
   },
   "requirements": {
     "runtime": "node",
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/notion#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "setup": "https://developers.notion.com/docs/get-started-with-mcp",
+    "homepage": "https://developers.notion.com/docs/get-started-with-mcp"
   }
 }

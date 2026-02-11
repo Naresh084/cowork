@@ -74,6 +74,9 @@ fn main() {
             commands::agent::agent_list_sessions_page,
             commands::agent::agent_get_session,
             commands::agent::agent_get_session_chunk,
+            commands::agent::agent_get_bootstrap_state,
+            commands::agent::agent_get_events_since,
+            commands::agent::agent_subscribe_events,
             commands::agent::agent_delete_session,
             commands::agent::agent_update_session_title,
             commands::agent::agent_update_session_working_directory,
@@ -222,6 +225,15 @@ fn main() {
             commands::remote_access::remote_access_authenticate_tunnel,
             commands::remote_access::remote_access_start_tunnel,
             commands::remote_access::remote_access_stop_tunnel,
+            // Service lifecycle commands
+            commands::service::service_get_mode,
+            commands::service::service_set_mode,
+            commands::service::service_status,
+            commands::service::service_install,
+            commands::service::service_uninstall,
+            commands::service::service_start,
+            commands::service::service_stop,
+            commands::service::service_restart,
         ])
         .setup(|app| {
             // Auto-update disabled until a proper signing key pair is configured

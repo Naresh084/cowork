@@ -16,6 +16,7 @@ import { heartbeatService } from './heartbeat/service.js';
 import { toolPolicyService } from './tool-policy.js';
 import { remoteAccessService } from './remote-access/service.js';
 import type { RemoteTunnelMode } from './remote-access/types.js';
+import { eventEmitter } from './event-emitter.js';
 import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
 import { SubagentService, createSubagentService } from './subagents/index.js';
@@ -91,6 +92,7 @@ const memoryServices: Map<string, MemoryService> = new Map();
 const agentsMdServices: Map<string, AgentsMdService> = new Map();
 let subagentService: SubagentService | null = null;
 let appDataDirectory: string | null = null;
+let integrationInitCapabilitiesRefreshed = false;
 
 // Connector secret service (lazily initialized)
 let connectorSecretService: SecretService | null = null;
@@ -101,6 +103,16 @@ const VALID_INTEGRATION_PLATFORMS = new Set<PlatformType>(SUPPORTED_PLATFORM_TYP
 
 function isValidIntegrationPlatform(value: string): value is PlatformType {
   return VALID_INTEGRATION_PLATFORMS.has(value as PlatformType);
+}
+
+async function refreshIntegrationCapabilities(reason: string): Promise<void> {
+  const refreshFn = (agentRunner as unknown as {
+    refreshIntegrationCapabilities?: (reason?: string) => Promise<void>;
+  }).refreshIntegrationCapabilities;
+  if (typeof refreshFn !== 'function') {
+    return;
+  }
+  await refreshFn.call(agentRunner, reason);
 }
 
 /**
@@ -595,6 +607,56 @@ registerHandler('ping', async () => {
   return { pong: true, timestamp: Date.now() };
 });
 
+registerHandler('daemon_health', async () => {
+  const init = agentRunner.getInitializationStatus();
+  return {
+    status: init.initialized ? 'healthy' : 'starting',
+    initialized: init.initialized,
+    sessionCount: init.sessionCount,
+    timestamp: Date.now(),
+  };
+});
+
+registerHandler('daemon_ready', async () => {
+  const init = agentRunner.getInitializationStatus();
+  return {
+    ready: init.initialized,
+    sessionCount: init.sessionCount,
+    eventCursor: eventEmitter.getCurrentSequence(),
+    timestamp: Date.now(),
+  };
+});
+
+registerHandler('agent_get_bootstrap_state', async () => {
+  return agentRunner.getBootstrapState(eventEmitter.getCurrentSequence());
+});
+
+registerHandler('agent_get_events_since', async (params) => {
+  const afterSeq =
+    typeof params.afterSeq === 'number'
+      ? params.afterSeq
+      : typeof params.cursor === 'number'
+        ? params.cursor
+        : 0;
+  const limit = typeof params.limit === 'number' ? params.limit : 2000;
+  const replayStart = eventEmitter.getReplayStartSequence();
+  const currentCursor = eventEmitter.getCurrentSequence();
+
+  return {
+    events: eventEmitter.getEventsSince(afterSeq, limit),
+    eventCursor: currentCursor,
+    replayStart,
+    hasGap: afterSeq > 0 && afterSeq < replayStart,
+  };
+});
+
+registerHandler('agent_subscribe_events', async () => {
+  return {
+    ok: true,
+    eventCursor: eventEmitter.getCurrentSequence(),
+  };
+});
+
 // ============================================================================
 // Remote Access (Mobile Gateway)
 // ============================================================================
@@ -720,6 +782,10 @@ registerHandler('initialize', async (params) => {
   try {
     const { integrationBridge } = await import('./integrations/index.js');
     await integrationBridge.initialize(agentRunner);
+    if (!integrationInitCapabilitiesRefreshed) {
+      await refreshIntegrationCapabilities('integration-bridge-initialize');
+      integrationInitCapabilitiesRefreshed = true;
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`[init] Integration bridge init warning: ${msg}\n`);
@@ -2104,6 +2170,7 @@ registerHandler('integration_connect', async (params) => {
   }
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.connect(platform, safeConfig);
+  await refreshIntegrationCapabilities(`integration-connect:${platform}`);
   return integrationBridge.getStatusWithHealth(platform);
 });
 
@@ -2114,6 +2181,7 @@ registerHandler('integration_disconnect', async (params) => {
   }
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.disconnect(platform);
+  await refreshIntegrationCapabilities(`integration-disconnect:${platform}`);
   return { success: true };
 });
 
@@ -2141,6 +2209,7 @@ registerHandler('integration_configure', async (params) => {
   }
   const { integrationBridge } = await import('./integrations/index.js');
   await integrationBridge.configure(platform, config || {});
+  await refreshIntegrationCapabilities(`integration-configure:${platform}`);
   return { success: true };
 });
 

@@ -572,6 +572,15 @@ type ToolView = { node: JSX.Element; hideRaw?: boolean };
 
 function renderToolSpecificResult(execution: ToolExecution): ToolView | null {
   const name = execution.name.toLowerCase();
+  if (isScheduleTaskTool(name)) {
+    const scheduleResult = extractScheduleTaskResult(execution.result, execution.args);
+    if (scheduleResult) {
+      return {
+        hideRaw: true,
+        node: <ScheduleTaskResultView result={scheduleResult} />,
+      };
+    }
+  }
 
   if (isShellTool(name)) {
     const command = String(execution.args.command ?? execution.args.cmd ?? '');
@@ -769,6 +778,260 @@ function resolveExternalCliProvider(execution: ToolExecution): ExternalCliProvid
   return 'shared';
 }
 
+interface ScheduleTaskArgsData {
+  name: string;
+  prompt: string;
+  scheduleLabel: string;
+  timezone: string | null;
+  workingDirectory: string | null;
+  maxRuns: string | null;
+  maxTurns: string | null;
+}
+
+interface ScheduleTaskResultData {
+  workflowId: string | null;
+  workflowVersion: string | null;
+  name: string | null;
+  schedule: string | null;
+  maxRuns: string | null;
+  maxTurns: string | null;
+  timezone: string | null;
+  defaultNotification: string | null;
+  workingDirectory: string | null;
+  message: string | null;
+  prompt: string | null;
+}
+
+function ScheduleTaskArgsView({ args }: { args: ScheduleTaskArgsData }) {
+  return (
+    <div className="rounded-lg border border-[#3B82F6]/25 bg-[#0F1624]">
+      <div className="px-3 py-2 border-b border-white/[0.08] flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[#93C5FD]">
+          Schedule Plan
+        </span>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#1D4ED8]/20 text-[#BFDBFE] border border-[#3B82F6]/30">
+          Pending Creation
+        </span>
+      </div>
+
+      <div className="p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+          <ScheduleField label="Task Name" value={args.name || 'Untitled task'} />
+          <ScheduleField label="Cadence" value={args.scheduleLabel} />
+          <ScheduleField label="Timezone" value={args.timezone || 'Local timezone'} />
+          <ScheduleField label="Working Dir" value={args.workingDirectory || 'Current workspace'} mono />
+          <ScheduleField label="Run Limit" value={args.maxRuns || 'Unlimited'} />
+          <ScheduleField label="Turns / Run" value={args.maxTurns || 'Default'} />
+        </div>
+
+        {args.prompt && (
+          <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wide text-white/45 mb-1">Task Prompt</div>
+            <p className="text-xs text-white/80 whitespace-pre-wrap break-words">
+              {truncateMiddle(args.prompt, 420)}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScheduleTaskResultView({ result }: { result: ScheduleTaskResultData }) {
+  return (
+    <div className="rounded-lg border border-[#50956A]/30 bg-[#0E1712]">
+      <div className="px-3 py-2 border-b border-white/[0.08] flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-[#8FDCA9]">
+          Scheduled Task Created
+        </span>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#50956A]/20 text-[#B9F2CB] border border-[#50956A]/35">
+          Active
+        </span>
+      </div>
+
+      <div className="p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+          <ScheduleField label="Task Name" value={result.name || 'Untitled task'} />
+          <ScheduleField label="Cadence" value={result.schedule || 'Not provided'} />
+          <ScheduleField label="Timezone" value={result.timezone || 'Local timezone'} />
+          <ScheduleField label="Run Limit" value={result.maxRuns || 'Unlimited'} />
+          <ScheduleField label="Turns / Run" value={result.maxTurns || 'Default'} />
+          <ScheduleField label="Delivery" value={result.defaultNotification || 'No default channel'} />
+          <ScheduleField label="Workflow ID" value={result.workflowId || 'n/a'} mono />
+          <ScheduleField
+            label="Workflow Version"
+            value={result.workflowVersion ? `v${result.workflowVersion}` : 'n/a'}
+          />
+          <ScheduleField
+            label="Working Dir"
+            value={result.workingDirectory || 'Current workspace'}
+            mono
+          />
+        </div>
+
+        {result.prompt && (
+          <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2">
+            <div className="text-[11px] uppercase tracking-wide text-white/45 mb-1">Task Prompt</div>
+            <p className="text-xs text-white/80 whitespace-pre-wrap break-words">
+              {truncateMiddle(result.prompt, 420)}
+            </p>
+          </div>
+        )}
+
+        {result.message && (
+          <div className="rounded-lg border border-[#50956A]/25 bg-[#102016] px-3 py-2 text-xs text-[#C4F0D3]">
+            {result.message}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScheduleField({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-2.5 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-white/45">{label}</div>
+      <div className={cn('mt-0.5 text-white/90', mono && 'font-mono text-[11px] break-all')}>{value}</div>
+    </div>
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isScheduleTaskTool(name: string): boolean {
+  return name === 'schedule_task';
+}
+
+function extractScheduleTaskArgs(args: Record<string, unknown>): ScheduleTaskArgsData | null {
+  if (!isRecord(args)) return null;
+
+  const scheduleRecord = isRecord(args.schedule) ? args.schedule : null;
+  const scheduleLabel = formatScheduleInput(scheduleRecord);
+  const timezone = scheduleRecord && typeof scheduleRecord.timezone === 'string'
+    ? scheduleRecord.timezone
+    : null;
+
+  return {
+    name: typeof args.name === 'string' ? args.name : '',
+    prompt: typeof args.prompt === 'string' ? args.prompt : '',
+    scheduleLabel,
+    timezone,
+    workingDirectory: normalizeDisplayValue(args.workingDirectory),
+    maxRuns: normalizeRunLimit(args.maxRuns),
+    maxTurns: normalizeNumeric(args.maxTurns),
+  };
+}
+
+function extractScheduleTaskResult(
+  result: unknown,
+  args: Record<string, unknown>,
+): ScheduleTaskResultData | null {
+  const root = isRecord(result) ? result : null;
+  const payload = root && isRecord(root.data) ? root.data : root;
+  if (!payload) return null;
+
+  const argSchedule = isRecord(args.schedule) ? args.schedule : null;
+  const schedule = normalizeDisplayValue(payload.schedule) || formatScheduleInput(argSchedule);
+  const timezone = extractTimezone(schedule) || normalizeDisplayValue(argSchedule?.timezone);
+  const defaultNotification = formatDefaultNotification(payload.defaultNotification);
+
+  return {
+    workflowId: normalizeDisplayValue(payload.workflowId),
+    workflowVersion: normalizeNumeric(payload.workflowVersion),
+    name: normalizeDisplayValue(payload.name) || normalizeDisplayValue(args.name),
+    schedule,
+    maxRuns: normalizeRunLimit(payload.maxRuns) || normalizeRunLimit(args.maxRuns),
+    maxTurns: normalizeNumeric(args.maxTurns),
+    timezone,
+    defaultNotification,
+    workingDirectory: normalizeDisplayValue(args.workingDirectory),
+    message: normalizeDisplayValue(payload.message),
+    prompt: normalizeDisplayValue(args.prompt),
+  };
+}
+
+function formatScheduleInput(schedule: Record<string, unknown> | null): string {
+  if (!schedule) return 'Not specified';
+
+  const type = typeof schedule.type === 'string' ? schedule.type.toLowerCase() : '';
+  const timezone = normalizeDisplayValue(schedule.timezone);
+  const withTimezone = (value: string): string => timezone ? `${value} (${timezone})` : value;
+
+  if (type === 'once') {
+    const datetime = normalizeDisplayValue(schedule.datetime);
+    return withTimezone(datetime ? `One-time at ${datetime}` : 'One-time');
+  }
+
+  if (type === 'daily') {
+    const time = normalizeDisplayValue(schedule.time);
+    return withTimezone(time ? `Every day at ${time}` : 'Daily');
+  }
+
+  if (type === 'weekly') {
+    const day = normalizeDisplayValue(schedule.dayOfWeek);
+    const time = normalizeDisplayValue(schedule.time);
+    const dayLabel = day ? capitalize(day) : 'Weekly';
+    return withTimezone(time ? `Every ${dayLabel} at ${time}` : `Every ${dayLabel}`);
+  }
+
+  if (type === 'interval') {
+    const every = normalizeNumeric(schedule.every);
+    return every ? `Every ${every} minute${every === '1' ? '' : 's'}` : 'Recurring interval';
+  }
+
+  if (type === 'cron') {
+    const expression = normalizeDisplayValue(schedule.expression);
+    return withTimezone(expression ? `Cron: ${expression}` : 'Cron schedule');
+  }
+
+  return 'Custom schedule';
+}
+
+function extractTimezone(schedule: string | null): string | null {
+  if (!schedule) return null;
+  const tzMatch = schedule.match(/\(([^)]+)\)\s*$/);
+  if (!tzMatch) return null;
+  return tzMatch[1]?.trim() || null;
+}
+
+function formatDefaultNotification(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const platform = normalizeDisplayValue(value.platform);
+  const chatId = normalizeDisplayValue(value.chatId);
+  if (!platform) return null;
+  return chatId ? `${platform} (${chatId})` : platform;
+}
+
+function normalizeDisplayValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeNumeric(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  return null;
+}
+
+function normalizeRunLimit(value: unknown): string | null {
+  if (value === 'unlimited') return 'Unlimited';
+  if (typeof value === 'number' && Number.isFinite(value)) return `${value}`;
+  if (typeof value === 'string' && value.trim().length > 0) {
+    if (value.trim().toLowerCase() === 'unlimited') return 'Unlimited';
+    return value.trim();
+  }
+  return null;
+}
+
+function capitalize(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function ExternalCliAccent({ provider, compact = false }: { provider: ExternalCliProvider; compact?: boolean }) {
   return (
     <div className={cn(
@@ -787,6 +1050,16 @@ function renderToolSpecificArgs(
   execution: ToolExecution,
   presentation: ExternalCliPresentation | null,
 ): ToolView | null {
+  if (isScheduleTaskTool(execution.name.toLowerCase())) {
+    const scheduleArgs = extractScheduleTaskArgs(execution.args);
+    if (scheduleArgs) {
+      return {
+        hideRaw: true,
+        node: <ScheduleTaskArgsView args={scheduleArgs} />,
+      };
+    }
+  }
+
   if (!presentation) {
     return null;
   }

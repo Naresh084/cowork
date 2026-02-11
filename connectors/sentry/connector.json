@@ -10,32 +10,17 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-sentry"]
+    "args": ["-y", "mcp-remote", "https://mcp.sentry.dev/mcp"]
   },
   "auth": {
-    "type": "env",
-    "secrets": [
-      {
-        "key": "SENTRY_AUTH_TOKEN",
-        "description": "Sentry Auth Token",
-        "required": true,
-        "placeholder": "sntrys_...",
-        "link": "https://sentry.io/settings/account/api/auth-tokens/"
-      },
-      {
-        "key": "SENTRY_ORG",
-        "description": "Sentry Organization Slug (optional)",
-        "required": false,
-        "placeholder": "your-org"
-      }
-    ]
+    "type": "none"
   },
   "requirements": {
     "runtime": "node",
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sentry#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "setup": "https://github.com/getsentry/sentry-mcp",
+    "homepage": "https://mcp.sentry.dev"
   }
 }

@@ -7,6 +7,7 @@ import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useAuthStore } from '../../stores/auth-store';
 import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
 import { useCapabilityStore } from '@/stores/capability-store';
+import { BackgroundServiceSettings } from './BackgroundServiceSettings';
 
 interface ExternalCliProviderAvailability {
   installed: boolean;
@@ -191,6 +192,8 @@ export function RuntimeSettings() {
           runtime model IDs.
         </p>
       </div>
+
+      <BackgroundServiceSettings />
 
       {needsExternalSearchFallback ? (
         <div className="space-y-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">

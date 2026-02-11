@@ -58,6 +58,9 @@ jobs:
       - name: Verify synchronized versions
         run: pnpm version:check
 
+      - name: Validate connector manifests
+        run: pnpm validate:connectors
+
       - name: Sync desktop icons
         run: pnpm --filter @gemini-cowork/desktop icon:sync
 

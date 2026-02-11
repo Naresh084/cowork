@@ -44,6 +44,11 @@ export function ConnectorDetailsPanel({
   const status = state?.status || 'available';
   const isConnected = status === 'connected';
   const needsConfig = status === 'installed';
+  const usesRemoteBrowserOAuth =
+    connector.auth.type === 'none' &&
+    connector.transport.type === 'stdio' &&
+    connector.transport.command.trim().split(/[\\/]/).pop() === 'npx' &&
+    connector.transport.args.some((arg) => arg.startsWith('mcp-remote'));
 
   const handleInstall = async () => {
     await installConnector(connectorId);
@@ -126,10 +131,18 @@ export function ConnectorDetailsPanel({
             Authentication
           </h4>
           <div className="text-sm text-zinc-300">
-            {connector.auth.type === 'none' && 'No authentication required'}
+            {connector.auth.type === 'none' &&
+              (usesRemoteBrowserOAuth
+                ? 'Browser-based OAuth during Connect'
+                : 'No authentication required')}
             {connector.auth.type === 'env' && 'Environment variables / API keys'}
             {connector.auth.type === 'oauth' && `OAuth (${connector.auth.provider})`}
           </div>
+          {usesRemoteBrowserOAuth && (
+            <p className="mt-2 text-xs text-zinc-400">
+              Click Connect to open your default browser and authorize this connector.
+            </p>
+          )}
           {connector.auth.type === 'env' && connector.auth.secrets && (
             <div className="mt-2 space-y-1">
               {connector.auth.secrets.map((secret) => (
@@ -259,22 +272,29 @@ export function ConnectorDetailsPanel({
             )}
 
             {!isConnected && !needsConfig && (
-              <button
-                onClick={handleConnect}
-                disabled={isConnectingThis}
-                className={cn(
-                  'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg',
-                  'bg-green-600 hover:bg-green-500 text-white font-medium transition-colors',
-                  isConnectingThis && 'opacity-50 cursor-not-allowed'
+              <>
+                <button
+                  onClick={handleConnect}
+                  disabled={isConnectingThis}
+                  className={cn(
+                    'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg',
+                    'bg-green-600 hover:bg-green-500 text-white font-medium transition-colors',
+                    isConnectingThis && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {isConnectingThis ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Power className="w-4 h-4" />
+                  )}
+                  {isConnectingThis ? 'Connecting...' : 'Connect'}
+                </button>
+                {isConnectingThis && usesRemoteBrowserOAuth && (
+                  <p className="text-xs text-zinc-400">
+                    Finish authorization in your browser, then return here.
+                  </p>
                 )}
-              >
-                {isConnectingThis ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Power className="w-4 h-4" />
-                )}
-                {isConnectingThis ? 'Connecting...' : 'Connect'}
-              </button>
+              </>
             )}
 
             {isConnected && (

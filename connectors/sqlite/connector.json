@@ -10,7 +10,7 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-sqlite", "${SQLITE_DB_PATH}"]
+    "args": ["-y", "mcp-sqlite", "${SQLITE_DB_PATH}"]
   },
   "auth": {
     "type": "env",
@@ -28,7 +28,6 @@
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "homepage": "https://github.com/jparkerweb/mcp-sqlite"
   }
 }

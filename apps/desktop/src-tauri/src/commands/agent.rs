@@ -1,6 +1,7 @@
 use crate::sidecar::{SidecarEvent, SidecarManager};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
 // Re-export types from the shared module for frontend use
@@ -86,6 +87,8 @@ pub struct SessionDetails {
     pub has_more_history: Option<bool>,
     #[serde(default)]
     pub oldest_loaded_sequence: Option<i64>,
+    #[serde(default)]
+    pub runtime: Option<serde_json::Value>,
     #[serde(default)]
     pub created_at: i64,
     #[serde(default)]
@@ -236,12 +239,24 @@ fn default_max_output_bytes() -> i64 {
 /// State wrapper for the sidecar manager
 pub struct AgentState {
     pub manager: Arc<SidecarManager>,
+    bootstrap_state: Arc<Mutex<SidecarBootstrapState>>,
+    bootstrap_lock: Arc<Mutex<()>>,
+}
+
+struct SidecarBootstrapState {
+    initialized: bool,
+    initialized_app_data_dir: Option<String>,
 }
 
 impl AgentState {
     pub fn new() -> Self {
         Self {
             manager: Arc::new(SidecarManager::new()),
+            bootstrap_state: Arc::new(Mutex::new(SidecarBootstrapState {
+                initialized: false,
+                initialized_app_data_dir: None,
+            })),
+            bootstrap_lock: Arc::new(Mutex::new(())),
         }
     }
 }
@@ -280,8 +295,10 @@ pub async fn ensure_sidecar_started(
     app: &AppHandle,
     state: &State<'_, AgentState>,
 ) -> Result<(), String> {
+    let _bootstrap_guard = state.bootstrap_lock.lock().await;
     let manager = &state.manager;
     let app_data_str = resolve_app_data_dir()?;
+    let mut should_initialize = false;
 
     if !manager.is_running().await {
         manager.start(&app_data_str).await?;
@@ -295,17 +312,36 @@ pub async fn ensure_sidecar_started(
                 let _ = app_handle.emit(&event_name, &event);
             })
             .await;
+
+        // New sidecar process needs initialization even if previous process was initialized.
+        let mut bootstrap_state = state.bootstrap_state.lock().await;
+        bootstrap_state.initialized = false;
+        should_initialize = true;
     }
 
-    // Always initialize sidecar services. This closes startup races where
-    // sidecar starts but initialization fails once and leaves services unavailable.
-    let init_params = serde_json::json!({
-        "appDataDir": app_data_str
-    });
-    manager
-        .send_command("initialize", init_params)
-        .await
-        .map_err(|e| format!("Failed to initialize sidecar services: {}", e))?;
+    {
+        let bootstrap_state = state.bootstrap_state.lock().await;
+        if !bootstrap_state.initialized
+            || bootstrap_state.initialized_app_data_dir.as_deref() != Some(app_data_str.as_str())
+        {
+            should_initialize = true;
+        }
+    }
+
+    if should_initialize {
+        let init_params = serde_json::json!({
+            "appDataDir": app_data_str.clone()
+        });
+        if let Err(error) = manager.send_command("initialize", init_params).await {
+            let mut bootstrap_state = state.bootstrap_state.lock().await;
+            bootstrap_state.initialized = false;
+            return Err(format!("Failed to initialize sidecar services: {}", error));
+        }
+
+        let mut bootstrap_state = state.bootstrap_state.lock().await;
+        bootstrap_state.initialized = true;
+        bootstrap_state.initialized_app_data_dir = Some(app_data_str.clone());
+    }
 
     // Always ensure API key is set on sidecar (handles startup race conditions
     // and cases where the sidecar lost state)
@@ -724,6 +760,50 @@ pub async fn agent_get_session_chunk(
 
     let result = manager.send_command("get_session_chunk", params).await?;
     serde_json::from_value(result).map_err(|e| format!("Failed to parse session chunk: {}", e))
+}
+
+#[tauri::command]
+pub async fn agent_get_bootstrap_state(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command("agent_get_bootstrap_state", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_get_events_since(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    after_seq: Option<i64>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "agent_get_events_since",
+            serde_json::json!({
+                "afterSeq": after_seq.unwrap_or(0),
+                "limit": limit.unwrap_or(2000),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_subscribe_events(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command("agent_subscribe_events", serde_json::json!({}))
+        .await
 }
 
 /// Delete a session

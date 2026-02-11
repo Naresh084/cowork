@@ -21,6 +21,10 @@ export class SlackAdapter extends BaseAdapter {
     super('slack');
   }
 
+  override supportsStreamingEdits(): boolean {
+    return true;
+  }
+
   async connect(config: Record<string, unknown>): Promise<void> {
     const slackConfig = config as unknown as SlackConfig;
     // Config stored for potential future use

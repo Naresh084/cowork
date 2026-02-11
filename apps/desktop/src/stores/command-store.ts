@@ -85,6 +85,8 @@ interface CreateCommandParams {
 interface CommandState {
   // Available commands from all sources
   availableCommands: CommandManifest[];
+  lastDiscoveredAt: number | null;
+  lastWorkingDirectory: string | null;
 
   // UI State
   isDiscovering: boolean;
@@ -109,7 +111,10 @@ interface CommandState {
 
 interface CommandActions {
   // Discovery
-  discoverCommands: (workingDirectory?: string) => Promise<void>;
+  discoverCommands: (
+    workingDirectory?: string,
+    options?: { force?: boolean }
+  ) => Promise<void>;
 
   // Installation
   installCommand: (commandId: string) => Promise<void>;
@@ -152,6 +157,8 @@ interface CommandActions {
 
 const initialState: CommandState = {
   availableCommands: [],
+  lastDiscoveredAt: null,
+  lastWorkingDirectory: null,
   isDiscovering: false,
   isInstalling: new Set(),
   searchQuery: '',
@@ -163,6 +170,8 @@ const initialState: CommandState = {
   selectedIndex: 0,
   error: null,
 };
+
+const DISCOVERY_CACHE_TTL_MS = 30_000;
 
 // =============================================================================
 // Store
@@ -220,14 +229,31 @@ export const useCommandStore = create<CommandState & CommandActions>()(
     // Discovery
     // ========================================================================
 
-    discoverCommands: async (workingDirectory) => {
+    discoverCommands: async (workingDirectory, options) => {
+      const force = options?.force === true;
+      const normalizedWorkingDirectory = workingDirectory?.trim() || null;
+      const cacheState = get();
+      if (
+        !force &&
+        cacheState.lastDiscoveredAt !== null &&
+        cacheState.lastWorkingDirectory === normalizedWorkingDirectory &&
+        Date.now() - cacheState.lastDiscoveredAt < DISCOVERY_CACHE_TTL_MS
+      ) {
+        return;
+      }
+
       set({ isDiscovering: true, error: null });
 
       try {
         const commands = await invoke<CommandManifest[]>('deep_command_list', {
           workingDirectory,
         });
-        set({ availableCommands: commands, isDiscovering: false });
+        set({
+          availableCommands: commands,
+          isDiscovering: false,
+          lastDiscoveredAt: Date.now(),
+          lastWorkingDirectory: normalizedWorkingDirectory,
+        });
 
         // Sync installed configs with actual managed commands
         // Skip platform configs during stale cleanup
@@ -297,7 +323,8 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         }
 
         // Re-discover to update command list
-        await get().discoverCommands();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverCommands(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
@@ -345,7 +372,8 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         set({ selectedCommandId: null });
 
         // Re-discover to update command list
-        await get().discoverCommands();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverCommands(rediscoverWorkingDirectory, { force: true });
       } catch (error) {
         // Even if backend fails, try to clean up the config
         const settingsStore = useSettingsStore.getState();
@@ -357,7 +385,8 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         });
 
         // Re-discover to sync state
-        await get().discoverCommands();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverCommands(rediscoverWorkingDirectory, { force: true });
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);
@@ -400,7 +429,8 @@ export const useCommandStore = create<CommandState & CommandActions>()(
         useSettingsStore.getState().addInstalledCommandConfig(config);
 
         // Refresh command list to include the new command
-        await get().discoverCommands();
+        const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
+        await get().discoverCommands(rediscoverWorkingDirectory, { force: true });
 
         return commandId;
       } catch (error) {

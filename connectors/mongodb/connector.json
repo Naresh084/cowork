@@ -10,13 +10,14 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "mongodb-mcp"]
+    "args": ["-y", "mongodb-mcp-server"]
   },
   "auth": {
     "type": "env",
     "secrets": [
       {
         "key": "MONGODB_URI",
+        "envVar": "MDB_MCP_CONNECTION_STRING",
         "description": "MongoDB connection URI",
         "required": true,
         "placeholder": "mongodb://user:password@host:27017/database"
@@ -28,6 +29,6 @@
     "bins": ["npx"]
   },
   "documentation": {
-    "homepage": "https://github.com/kiliczsh/mcp-mongo-server"
+    "homepage": "https://github.com/mongodb-js/mongodb-mcp-server"
   }
 }

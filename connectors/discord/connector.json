@@ -17,6 +17,7 @@
     "secrets": [
       {
         "key": "DISCORD_BOT_TOKEN",
+        "envVar": "DISCORD_TOKEN",
         "description": "Discord Bot Token",
         "required": true,
         "placeholder": "MTIzNDU2Nzg5MDEyMzQ1Njc4OQ...",

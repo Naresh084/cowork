@@ -87,6 +87,11 @@ export function InstalledConnectorItem({
   const config = statusConfig[status];
   const StatusIcon = config.icon;
   const Icon = getConnectorIcon(connector.icon);
+  const usesRemoteBrowserOAuth =
+    connector.auth.type === 'none' &&
+    connector.transport.type === 'stdio' &&
+    connector.transport.command.trim().split(/[\\/]/).pop() === 'npx' &&
+    connector.transport.args.some((arg) => arg.startsWith('mcp-remote'));
 
   const isLoading = isConnecting.has(connectorState.id);
   const showConnectButton = status === 'configured' || status === 'error';
@@ -164,6 +169,16 @@ export function InstalledConnectorItem({
         <p className="text-sm text-zinc-400 truncate mt-0.5">
           {connector.description}
         </p>
+        {usesRemoteBrowserOAuth && status === 'configured' && (
+          <p className="text-xs text-zinc-500 mt-1">
+            Connect will open browser OAuth.
+          </p>
+        )}
+        {usesRemoteBrowserOAuth && status === 'connecting' && (
+          <p className="text-xs text-blue-400 mt-1">
+            Complete authorization in your browser.
+          </p>
+        )}
 
         {/* Error message */}
         {status === 'error' && connectorState.error && (

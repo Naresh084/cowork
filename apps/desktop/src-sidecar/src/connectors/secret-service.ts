@@ -1,7 +1,7 @@
 /**
  * Secret Service
  *
- * Securely stores connector credentials in a local encrypted file.
+ * Stores connector credentials in a local file with restrictive permissions.
  * Uses file-based storage with restrictive permissions (0600) to avoid
  * system keyring prompts entirely.
  *

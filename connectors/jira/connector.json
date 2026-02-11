@@ -10,38 +10,17 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-atlassian"]
+    "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp"]
   },
   "auth": {
-    "type": "env",
-    "secrets": [
-      {
-        "key": "JIRA_URL",
-        "description": "Jira instance URL",
-        "required": true,
-        "placeholder": "https://your-domain.atlassian.net"
-      },
-      {
-        "key": "JIRA_EMAIL",
-        "description": "Atlassian account email",
-        "required": true,
-        "placeholder": "your-email@example.com"
-      },
-      {
-        "key": "JIRA_API_TOKEN",
-        "description": "Atlassian API Token",
-        "required": true,
-        "placeholder": "...",
-        "link": "https://id.atlassian.com/manage-profile/security/api-tokens"
-      }
-    ]
+    "type": "none"
   },
   "requirements": {
     "runtime": "node",
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/atlassian#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "setup": "https://www.atlassian.com/platform/remote-mcp-server",
+    "homepage": "https://www.atlassian.com/platform/remote-mcp-server"
   }
 }

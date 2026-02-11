@@ -409,7 +409,7 @@ export function OAuthFlowModal({
               {(flowState === 'polling' || flowState === 'waiting') && (
                 <div className="p-3 bg-zinc-800/50 rounded-lg border border-zinc-700">
                   <p className="text-xs text-zinc-400">
-                    Your credentials are securely stored in local encrypted storage.
+                    OAuth tokens are stored locally in a file with user-only permissions.
                     We only request the permissions needed for this connector.
                   </p>
                 </div>

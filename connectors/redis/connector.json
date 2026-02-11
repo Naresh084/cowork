@@ -10,16 +10,22 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "redis-mcp"]
+    "args": ["-y", "redis-mcp", "--redis-host", "${REDIS_HOST}", "--redis-port", "${REDIS_PORT}"]
   },
   "auth": {
     "type": "env",
     "secrets": [
       {
-        "key": "REDIS_URL",
-        "description": "Redis connection URL",
+        "key": "REDIS_HOST",
+        "description": "Redis host",
         "required": true,
-        "placeholder": "redis://user:password@host:6379"
+        "placeholder": "localhost"
+      },
+      {
+        "key": "REDIS_PORT",
+        "description": "Redis port",
+        "required": true,
+        "placeholder": "6379"
       }
     ]
   },

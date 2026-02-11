@@ -78,6 +78,8 @@ export const SUBAGENT_CATEGORIES: Record<SubagentCategory, { name: string; icon:
 interface SubagentStoreState {
   // Subagent data
   subagents: Subagent[];
+  lastDiscoveredAt: number | null;
+  lastWorkingDirectory: string | null;
 
   // UI state
   isLoading: boolean;
@@ -97,7 +99,10 @@ interface SubagentStoreState {
 
 interface SubagentStoreActions {
   // Loading
-  loadSubagents: (workingDirectory?: string) => Promise<void>;
+  loadSubagents: (
+    workingDirectory?: string,
+    options?: { force?: boolean }
+  ) => Promise<void>;
 
   // Install/Uninstall
   installSubagent: (name: string, workingDirectory?: string) => Promise<void>;
@@ -129,6 +134,8 @@ interface SubagentStoreActions {
 
 const initialState: SubagentStoreState = {
   subagents: [],
+  lastDiscoveredAt: null,
+  lastWorkingDirectory: null,
   isLoading: false,
   isInstalling: new Set(),
   searchQuery: '',
@@ -137,6 +144,8 @@ const initialState: SubagentStoreState = {
   selectedSubagentName: null,
   error: null,
 };
+
+const DISCOVERY_CACHE_TTL_MS = 30_000;
 
 // ============================================================================
 // Store
@@ -150,7 +159,19 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
     // Loading
     // ========================================================================
 
-    loadSubagents: async (workingDirectory) => {
+    loadSubagents: async (workingDirectory, options) => {
+      const force = options?.force === true;
+      const normalizedWorkingDirectory = workingDirectory?.trim() || null;
+      const cacheState = get();
+      if (
+        !force &&
+        cacheState.lastDiscoveredAt !== null &&
+        cacheState.lastWorkingDirectory === normalizedWorkingDirectory &&
+        Date.now() - cacheState.lastDiscoveredAt < DISCOVERY_CACHE_TTL_MS
+      ) {
+        return;
+      }
+
       set({ isLoading: true, error: null });
 
       try {
@@ -168,7 +189,9 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
 
         set({
           subagents: sortedSubagents,
-          isLoading: false
+          isLoading: false,
+          lastDiscoveredAt: Date.now(),
+          lastWorkingDirectory: normalizedWorkingDirectory,
         });
       } catch (error) {
         console.error('Failed to load subagents:', error);
@@ -195,12 +218,7 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
           workingDirectory,
         });
 
-        // Update the subagent's installed status in state
-        set((state) => ({
-          subagents: state.subagents.map((sub) =>
-            sub.name === name ? { ...sub, installed: true } : sub
-          ),
-        }));
+        await get().loadSubagents(workingDirectory, { force: true });
       } catch (error) {
         console.error('Failed to install subagent:', error);
         set({
@@ -234,12 +252,7 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
           workingDirectory,
         });
 
-        // Update the subagent's installed status in state
-        set((state) => ({
-          subagents: state.subagents.map((sub) =>
-            sub.name === name ? { ...sub, installed: false } : sub
-          ),
-        }));
+        await get().loadSubagents(workingDirectory, { force: true });
       } catch (error) {
         console.error('Failed to uninstall subagent:', error);
         set({

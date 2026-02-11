@@ -6,12 +6,34 @@ describe('session-store', () => {
   beforeEach(() => {
     // Reset store state
     useSessionStore.setState({
+      sessionsTotal: 0,
+      sessionsHasMore: false,
+      sessionsOffset: 0,
+      sessionsQuery: '',
+      bootstrapEventCursor: 0,
       sessions: [],
       activeSessionId: null,
       isLoading: false,
+      hasLoaded: false,
       error: null,
+      backendInitialized: true,
     });
     clearMockInvokeResponses();
+
+    setMockInvokeResponse('agent_get_bootstrap_state', {
+      sessions: [],
+      runtime: {},
+      eventCursor: 0,
+      timestamp: Date.now(),
+    });
+    setMockInvokeResponse('agent_list_sessions_page', {
+      sessions: [],
+      total: 0,
+      hasMore: false,
+      offset: 0,
+      limit: 20,
+      nextOffset: null,
+    });
   });
 
   describe('loadSessions', () => {
@@ -30,7 +52,20 @@ describe('session-store', () => {
         },
       ];
 
-      setMockInvokeResponse('agent_list_sessions', mockSessions);
+      setMockInvokeResponse('agent_get_bootstrap_state', {
+        sessions: [],
+        runtime: {},
+        eventCursor: 0,
+        timestamp: Date.now(),
+      });
+      setMockInvokeResponse('agent_list_sessions_page', {
+        sessions: mockSessions,
+        total: mockSessions.length,
+        hasMore: false,
+        offset: 0,
+        limit: 20,
+        nextOffset: null,
+      });
 
       await useSessionStore.getState().loadSessions();
 
@@ -46,7 +81,13 @@ describe('session-store', () => {
     });
 
     it('should handle load errors', async () => {
-      setMockInvokeResponse('agent_list_sessions', () => {
+      setMockInvokeResponse('agent_get_bootstrap_state', {
+        sessions: [],
+        runtime: {},
+        eventCursor: 0,
+        timestamp: Date.now(),
+      });
+      setMockInvokeResponse('agent_list_sessions_page', () => {
         throw new Error('Failed to load sessions');
       });
 

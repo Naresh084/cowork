@@ -50,6 +50,13 @@ interface SessionListPageResult {
   nextOffset: number | null;
 }
 
+interface BootstrapStateResult {
+  sessions: SessionSummary[];
+  runtime: Record<string, unknown>;
+  eventCursor: number;
+  timestamp: number;
+}
+
 interface SessionState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -61,6 +68,7 @@ interface SessionState {
   sessionsHasMore: boolean;
   sessionsOffset: number;
   sessionsQuery: string;
+  bootstrapEventCursor: number;
 }
 
 interface SessionActions {
@@ -90,6 +98,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       sessionsHasMore: false,
       sessionsOffset: 0,
       sessionsQuery: '',
+      bootstrapEventCursor: 0,
       sessions: [],
       activeSessionId: null,
       isLoading: false,
@@ -163,6 +172,24 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             await get().waitForBackend();
           }
 
+          let bootstrap: BootstrapStateResult | null = null;
+          if (reset && requestQuery.trim().length === 0) {
+            try {
+              bootstrap = await invoke<BootstrapStateResult>('agent_get_bootstrap_state');
+              if (bootstrap?.runtime && typeof bootstrap.runtime === 'object') {
+                const chatStore = useChatStore.getState();
+                for (const [sessionId, runtime] of Object.entries(bootstrap.runtime)) {
+                  if (!sessionId) continue;
+                  if (!runtime || typeof runtime !== 'object') continue;
+                  chatStore.ensureSession(sessionId);
+                  chatStore.hydrateRuntimeSnapshot(sessionId, runtime as any);
+                }
+              }
+            } catch {
+              // Bootstrap is best effort. Fall back to normal list_sessions flow.
+            }
+          }
+
           const page = await invoke<SessionListPageResult>('agent_list_sessions_page', {
             limit,
             offset,
@@ -172,8 +199,12 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             ...session,
             executionMode: session.executionMode || 'execute',
           }));
+          const bootstrapSessions = (bootstrap?.sessions || []).map((session) => ({
+            ...session,
+            executionMode: session.executionMode || 'execute',
+          }));
           const sessions = reset
-            ? incomingSessions
+            ? (incomingSessions.length > 0 ? incomingSessions : bootstrapSessions)
             : [
                 ...get().sessions,
                 ...incomingSessions.filter(
@@ -239,9 +270,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             isLoading: false,
             hasLoaded: true,
             sessionsQuery: query,
-            sessionsTotal: page.total,
+            sessionsTotal: Math.max(page.total, bootstrapSessions.length),
             sessionsHasMore: page.hasMore,
             sessionsOffset: page.nextOffset ?? offset + incomingSessions.length,
+            bootstrapEventCursor: bootstrap?.eventCursor ?? get().bootstrapEventCursor,
             // Keep current selection when valid; otherwise select most recent session if available.
             activeSessionId: activeSessionExists
               ? currentActiveId

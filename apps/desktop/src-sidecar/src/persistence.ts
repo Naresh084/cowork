@@ -2,7 +2,15 @@ import { mkdir, readFile, writeFile, rename, rm, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import type { Task, Artifact, PersistedMessage, PersistedToolExecution, SessionType, ProviderId } from './types.js';
+import type {
+  Task,
+  Artifact,
+  PersistedMessage,
+  PersistedToolExecution,
+  SessionType,
+  ProviderId,
+  SessionRuntimeState,
+} from './types.js';
 import type {
   ChatItem,
   UserMessageItem,
@@ -94,6 +102,7 @@ export interface PersistedSessionDataV2 {
   tasks: Task[];
   artifacts: Artifact[];
   contextUsage?: ContextUsage;
+  runtime?: SessionRuntimeState;
 }
 
 // Union type for loading
@@ -384,7 +393,7 @@ export class SessionPersistence {
     const chatItemsPath = join(sessionDir, 'chat-items.json');
     if (existsSync(chatItemsPath)) {
       // V2 format - load unified data
-      const [metadata, chatItemsData, tasks, artifacts, contextUsage] = await Promise.all([
+      const [metadata, chatItemsData, tasks, artifacts, contextUsage, runtime] = await Promise.all([
         this.readJson<SessionMetadataV2>(join(sessionDir, 'session.json')),
         this.readJson<{ chatItems: ChatItem[] }>(chatItemsPath)
           .then(d => d.chatItems).catch(() => []),
@@ -393,6 +402,7 @@ export class SessionPersistence {
         this.readJson<{ artifacts: Artifact[] }>(join(sessionDir, 'artifacts.json'))
           .then(d => d.artifacts).catch(() => []),
         this.readJson<ContextUsage>(join(sessionDir, 'context.json')).catch(() => undefined),
+        this.readJson<SessionRuntimeState>(join(sessionDir, 'runtime.json')).catch(() => undefined),
       ]);
 
       return {
@@ -408,6 +418,7 @@ export class SessionPersistence {
         tasks,
         artifacts,
         contextUsage,
+        runtime,
       };
     }
 
@@ -505,6 +516,9 @@ export class SessionPersistence {
         }),
         data.contextUsage
           ? this.writeJson(join(sessionDir, 'context.json'), data.contextUsage)
+          : Promise.resolve(),
+        data.runtime
+          ? this.writeJson(join(sessionDir, 'runtime.json'), data.runtime)
           : Promise.resolve(),
       ]);
 
@@ -640,6 +654,33 @@ export class SessionPersistence {
       ...contextUsage,
       lastUpdated: Date.now(),
     });
+  }
+
+  /**
+   * Save runtime snapshot for reconnect hydration.
+   */
+  async saveRuntimeState(sessionId: string, runtime: SessionRuntimeState): Promise<void> {
+    await this.enqueueSessionWrite(sessionId, async () => {
+      const sessionDir = join(this.sessionsDir, sessionId);
+      if (!existsSync(sessionDir)) {
+        await mkdir(sessionDir, { recursive: true });
+      }
+      await this.writeJson(join(sessionDir, 'runtime.json'), runtime);
+    });
+  }
+
+  /**
+   * Load runtime snapshot for reconnect hydration.
+   */
+  async loadRuntimeState(sessionId: string): Promise<SessionRuntimeState | null> {
+    const runtimePath = join(this.sessionsDir, sessionId, 'runtime.json');
+    if (!existsSync(runtimePath)) return null;
+
+    try {
+      return await this.readJson<SessionRuntimeState>(runtimePath);
+    } catch {
+      return null;
+    }
   }
 
   /**

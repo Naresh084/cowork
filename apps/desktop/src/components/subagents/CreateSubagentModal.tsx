@@ -63,7 +63,7 @@ export function CreateSubagentModal({ isOpen, onClose, onCreated }: CreateSubage
       });
 
       // Reload subagents to show the new one
-      await loadSubagents(workingDirectory || undefined);
+      await loadSubagents(workingDirectory || undefined, { force: true });
 
       // Reset form
       setName('');

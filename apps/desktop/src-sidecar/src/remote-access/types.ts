@@ -2,6 +2,17 @@ export type RemoteTunnelMode = 'tailscale' | 'cloudflare' | 'custom';
 export type RemoteTunnelState = 'stopped' | 'starting' | 'running' | 'error';
 export type RemoteTunnelAuthStatus = 'authenticated' | 'unauthenticated' | 'unknown';
 export type RemoteTunnelVisibility = 'public' | 'private';
+export type RemoteConfigHealth = 'valid' | 'repair_required';
+export type RemoteDiagnosticLevel = 'info' | 'warn' | 'error';
+
+export interface RemoteDiagnosticEntry {
+  id: string;
+  level: RemoteDiagnosticLevel;
+  message: string;
+  step: string;
+  at: number;
+  commandHint?: string;
+}
 
 export interface RemoteAccessDevice {
   id: string;
@@ -48,6 +59,11 @@ export interface RemoteAccessStatus {
   tunnelAuthStatus: RemoteTunnelAuthStatus;
   tunnelStartedAt: number | null;
   tunnelPid: number | null;
+  configHealth: RemoteConfigHealth;
+  configRepairReason: string | null;
+  lastOperation: string | null;
+  lastOperationAt: number | null;
+  diagnostics: RemoteDiagnosticEntry[];
   deviceCount: number;
   devices: RemoteAccessDeviceSummary[];
 }

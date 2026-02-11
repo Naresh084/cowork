@@ -10,7 +10,7 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-sequentialthinking"]
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
   },
   "auth": {
     "type": "none"
@@ -21,6 +21,6 @@
   },
   "documentation": {
     "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "homepage": "https://modelcontextprotocol.io"
   }
 }

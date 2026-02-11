@@ -82,9 +82,14 @@ export class WorkflowService extends EventEmitter {
       return { definition, compiled };
     });
 
-    this.recoverInFlightRuns();
-    await this.startTriggerRouter();
     this.initialized = true;
+    try {
+      this.recoverInFlightRuns();
+      await this.startTriggerRouter();
+    } catch (error) {
+      this.initialized = false;
+      throw error;
+    }
   }
 
   private ensureInitialized(): void {

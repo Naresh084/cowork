@@ -16,10 +16,34 @@
     "type": "env",
     "secrets": [
       {
-        "key": "MYSQL_URL",
-        "description": "MySQL connection URL",
+        "key": "MYSQL_HOST",
+        "description": "MySQL host",
         "required": true,
-        "placeholder": "mysql://user:password@host:3306/database"
+        "placeholder": "localhost"
+      },
+      {
+        "key": "MYSQL_PORT",
+        "description": "MySQL port",
+        "required": true,
+        "placeholder": "3306"
+      },
+      {
+        "key": "MYSQL_DATABASE",
+        "description": "MySQL database name",
+        "required": true,
+        "placeholder": "my_database"
+      },
+      {
+        "key": "MYSQL_USER",
+        "description": "MySQL username",
+        "required": true,
+        "placeholder": "root"
+      },
+      {
+        "key": "MYSQL_PASSWORD",
+        "description": "MySQL password",
+        "required": true,
+        "placeholder": "..."
       }
     ]
   },

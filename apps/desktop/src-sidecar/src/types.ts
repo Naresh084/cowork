@@ -11,6 +11,7 @@ export interface IPCRequest {
   id: string;
   command: string; // Rust sends 'command', not 'method'
   params: Record<string, unknown>;
+  authToken?: string;
 }
 
 export interface IPCResponse {
@@ -249,6 +250,51 @@ export interface SessionDetails extends SessionInfo {
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };
   hasMoreHistory?: boolean;
   oldestLoadedSequence?: number | null;
+  runtime?: SessionRuntimeState;
+}
+
+export type SessionRunState = 'idle' | 'running' | 'stopping' | 'errored';
+
+export interface RuntimeToolSnapshot {
+  id: string;
+  name: string;
+  args?: Record<string, unknown>;
+  parentToolId?: string;
+  startedAt?: number;
+}
+
+export interface SessionRuntimeState {
+  version: 1;
+  runState: SessionRunState;
+  isStreaming: boolean;
+  isThinking: boolean;
+  activeTurnId?: string;
+  activeToolIds: string[];
+  activeTools?: RuntimeToolSnapshot[];
+  pendingPermissions: ExtendedPermissionRequest[];
+  pendingQuestions: QuestionRequest[];
+  messageQueue: Array<{ id: string; content: string; queuedAt: number }>;
+  lastError?: {
+    message: string;
+    code?: string;
+    timestamp: number;
+  } | null;
+  updatedAt: number;
+}
+
+export interface RuntimeBootstrapState {
+  sessions: SessionInfo[];
+  runtime: Record<string, SessionRuntimeState>;
+  eventCursor: number;
+  timestamp: number;
+}
+
+export interface SequencedEventEnvelope {
+  seq: number;
+  timestamp: number;
+  type: string;
+  sessionId: string | null;
+  data: unknown;
 }
 
 export interface SessionListPage {

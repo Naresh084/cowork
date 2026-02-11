@@ -10,26 +10,17 @@
   "transport": {
     "type": "stdio",
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-github"]
+    "args": ["-y", "mcp-remote", "https://api.githubcopilot.com/mcp/"]
   },
   "auth": {
-    "type": "env",
-    "secrets": [
-      {
-        "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "description": "GitHub Personal Access Token (Classic or Fine-grained)",
-        "required": true,
-        "placeholder": "ghp_...",
-        "link": "https://github.com/settings/tokens"
-      }
-    ]
+    "type": "none"
   },
   "requirements": {
     "runtime": "node",
     "bins": ["npx"]
   },
   "documentation": {
-    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/github#setup",
-    "homepage": "https://github.com/modelcontextprotocol/servers"
+    "setup": "https://docs.github.com/en/copilot/how-tos/context/model-context-protocol/using-the-github-mcp-server",
+    "homepage": "https://docs.github.com/en/copilot/how-tos/context/model-context-protocol/using-the-github-mcp-server"
   }
 }

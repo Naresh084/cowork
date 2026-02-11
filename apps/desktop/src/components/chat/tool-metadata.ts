@@ -218,6 +218,17 @@ export function getPrimaryArg(toolName: string, args: Record<string, unknown>): 
     return (args.run_id || args.runId || args.provider) as string || null;
   }
 
+  if (lowerName === 'schedule_task') {
+    return (args.name || args.taskName) as string || null;
+  }
+
+  if (lowerName === 'manage_scheduled_task') {
+    const action = (args.action || '') as string;
+    const taskId = (args.taskId || args.task_id || '') as string;
+    if (action && taskId) return `${action}: ${taskId}`;
+    return action || taskId || null;
+  }
+
   // Check for skill reads - show skill name instead of full path
   if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {
     const path = (args.path || args.file_path || args.filePath || args.file) as string | undefined;

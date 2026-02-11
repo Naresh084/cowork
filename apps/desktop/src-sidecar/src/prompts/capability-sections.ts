@@ -121,6 +121,7 @@ function buildIntegrationsSection(context: PromptBuildContext): PromptTemplateSe
   } else {
     lines.push(`- Notification Tools: ${notificationTools.map((name) => `\`${name}\``).join(', ')}`);
     lines.push('- Use notifications for meaningful completion/alert events, not trivial updates.');
+    lines.push('- For integration-origin turns, do not call send_notification_<same platform> for the immediate reply turn; router already returns that response to origin chat.');
   }
 
   return {

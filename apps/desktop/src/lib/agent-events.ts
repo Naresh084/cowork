@@ -365,6 +365,18 @@ function parseTauriEvent(
   }
 }
 
+export function parseSidecarEventEnvelope(envelope: {
+  type: string;
+  sessionId?: string | null;
+  data?: unknown;
+}): AgentEvent | null {
+  return parseTauriEvent(`agent:${envelope.type}`, {
+    type: envelope.type,
+    sessionId: envelope.sessionId ?? undefined,
+    data: envelope.data ?? {},
+  });
+}
+
 /**
  * Subscribe to agent events for a specific session
  * @param sessionId The session ID to filter events for

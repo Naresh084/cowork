@@ -26,6 +26,11 @@
           "name": "binaries/sidecar",
           "sidecar": true,
           "args": true
+        },
+        {
+          "name": "binaries/cowork-agentd",
+          "sidecar": true,
+          "args": true
         }
       ]
     },
@@ -34,6 +39,11 @@
       "allow": [
         {
           "name": "binaries/sidecar",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/cowork-agentd",
           "sidecar": true,
           "args": true
         }

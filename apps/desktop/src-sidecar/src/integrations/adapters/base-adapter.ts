@@ -84,6 +84,14 @@ export abstract class BaseAdapter extends EventEmitter {
   }
 
   /**
+   * Whether this adapter can reliably update a previously sent message in-place.
+   * Platforms returning false should receive one final outbound message per turn.
+   */
+  supportsStreamingEdits(): boolean {
+    return false;
+  }
+
+  /**
    * Send media content to the platform.
    * Default behavior falls back to text-only representation.
    */

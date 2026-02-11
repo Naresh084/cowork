@@ -11,54 +11,193 @@ export interface SidecarEvent {
   data: unknown;
 }
 
-type EventListener = (event: SidecarEvent) => void;
+export interface SequencedSidecarEvent extends SidecarEvent {
+  seq: number;
+  timestamp: number;
+}
+
+export interface EventSink {
+  id: string;
+  emit(event: SequencedSidecarEvent): void;
+  flush?(): void;
+  flushSync?(): void;
+  shutdown?(): Promise<void> | void;
+}
+
+export const STDOUT_EVENT_SINK_ID = 'stdout';
+
+type EventListener = (event: SequencedSidecarEvent) => void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Emits events to the Rust backend via stdout.
- * Events are JSON objects with a specific structure that Tauri can parse.
- */
-export class EventEmitter {
-  private eventBuffer: SidecarEvent[] = [];
-  private flushTimeout: NodeJS.Timeout | null = null;
-  private flushIntervalMs = 10; // Batch events every 10ms for performance
+class StdoutEventSink implements EventSink {
+  readonly id = STDOUT_EVENT_SINK_ID;
+
   private stdoutQueue: string[] = [];
   private stdoutQueueOffset = 0;
   private stdoutBackpressured = false;
   private stdoutFlushing = false;
+
+  emit(event: SequencedSidecarEvent): void {
+    this.stdoutQueue.push(JSON.stringify(event) + '\n');
+    this.flush();
+  }
+
+  flush(): void {
+    if (this.stdoutFlushing || this.stdoutBackpressured) {
+      return;
+    }
+
+    this.stdoutFlushing = true;
+    try {
+      while (this.stdoutQueueOffset < this.stdoutQueue.length) {
+        const line = this.stdoutQueue[this.stdoutQueueOffset]!;
+        const canContinue = process.stdout.write(line);
+        this.stdoutQueueOffset += 1;
+
+        if (!canContinue) {
+          this.stdoutBackpressured = true;
+          process.stdout.once('drain', () => {
+            this.stdoutBackpressured = false;
+            this.flush();
+          });
+          break;
+        }
+      }
+
+      if (this.stdoutQueueOffset >= this.stdoutQueue.length) {
+        this.stdoutQueue = [];
+        this.stdoutQueueOffset = 0;
+        return;
+      }
+
+      if (this.stdoutQueueOffset >= 1024) {
+        this.stdoutQueue = this.stdoutQueue.slice(this.stdoutQueueOffset);
+        this.stdoutQueueOffset = 0;
+      }
+    } finally {
+      this.stdoutFlushing = false;
+    }
+  }
+
+  flushSync(): void {
+    this.flush();
+  }
+}
+
+/**
+ * Emits events to one or more sinks (stdout, local IPC server, remote relays).
+ * Keeps a replay buffer with monotonic sequence IDs for reconnect catch-up.
+ */
+export class EventEmitter {
+  private eventBuffer: SequencedSidecarEvent[] = [];
+  private flushTimeout: NodeJS.Timeout | null = null;
+  private flushIntervalMs = 10;
   private listeners = new Set<EventListener>();
+  private sinks = new Map<string, EventSink>();
+  private seqCounter = 0;
+  private replayLimit: number;
+  private replayBuffer: SequencedSidecarEvent[] = [];
+
+  constructor(options?: { enableStdoutSink?: boolean; replayLimit?: number }) {
+    this.replayLimit = Math.max(100, options?.replayLimit ?? 5000);
+    if (options?.enableStdoutSink !== false) {
+      this.addSink(new StdoutEventSink());
+    }
+  }
 
   /**
-   * Emit an event to the Rust backend.
+   * Attach an event sink.
    */
-  emit(type: AgentEventType, sessionId: string | undefined, data: unknown): void {
-    const event: SidecarEvent = {
+  addSink(sink: EventSink): void {
+    this.sinks.set(sink.id, sink);
+  }
+
+  /**
+   * Remove an event sink.
+   */
+  removeSink(sinkId: string): void {
+    const sink = this.sinks.get(sinkId);
+    if (!sink) return;
+
+    this.sinks.delete(sinkId);
+    try {
+      const cleanup = sink.shutdown?.();
+      if (cleanup && typeof (cleanup as Promise<void>).then === 'function') {
+        void cleanup;
+      }
+    } catch {
+      // Ignore sink cleanup failures.
+    }
+  }
+
+  /**
+   * Remove all sinks.
+   */
+  clearSinks(): void {
+    for (const sinkId of Array.from(this.sinks.keys())) {
+      this.removeSink(sinkId);
+    }
+  }
+
+  hasSink(sinkId: string): boolean {
+    return this.sinks.has(sinkId);
+  }
+
+  getCurrentSequence(): number {
+    return this.seqCounter;
+  }
+
+  getReplayStartSequence(): number {
+    if (this.replayBuffer.length === 0) return this.seqCounter;
+    return this.replayBuffer[0]!.seq;
+  }
+
+  /**
+   * Return sequenced events with seq > afterSeq.
+   */
+  getEventsSince(afterSeq: number, limit = 2000): SequencedSidecarEvent[] {
+    const boundedLimit = Math.max(1, Math.min(10000, Math.floor(limit)));
+    const result = this.replayBuffer.filter((event) => event.seq > afterSeq);
+    if (result.length <= boundedLimit) {
+      return result;
+    }
+    return result.slice(result.length - boundedLimit);
+  }
+
+  private nextEvent(type: AgentEventType, sessionId: string | undefined, data: unknown): SequencedSidecarEvent {
+    const seq = this.seqCounter + 1;
+    this.seqCounter = seq;
+    return {
+      seq,
+      timestamp: Date.now(),
       type,
       sessionId: sessionId ?? null,
       data,
     };
+  }
 
-    if (this.listeners.size > 0) {
-      for (const listener of this.listeners) {
-        try {
-          listener(event);
-        } catch {
-          // Listener failures should never break main IPC event delivery.
-        }
-      }
+  private appendToReplay(event: SequencedSidecarEvent): void {
+    this.replayBuffer.push(event);
+    if (this.replayBuffer.length > this.replayLimit) {
+      this.replayBuffer.splice(0, this.replayBuffer.length - this.replayLimit);
     }
+  }
 
+  /**
+   * Emit an event to all registered sinks.
+   */
+  emit(type: AgentEventType, sessionId: string | undefined, data: unknown): void {
     // Coalesce frequent chat:update events within the current flush window.
-    if (type === 'chat:update' && event.sessionId) {
-      const incoming = event.data as { itemId?: string; updates?: Record<string, unknown> } | null;
+    if (type === 'chat:update' && sessionId) {
+      const incoming = data as { itemId?: string; updates?: Record<string, unknown> } | null;
       const incomingItemId = incoming?.itemId;
       if (incomingItemId) {
         for (let i = this.eventBuffer.length - 1; i >= 0; i -= 1) {
           const buffered = this.eventBuffer[i];
-          if (buffered?.type !== 'chat:update' || buffered.sessionId !== event.sessionId) {
+          if (buffered?.type !== 'chat:update' || buffered.sessionId !== sessionId) {
             continue;
           }
           const bufferedData = buffered.data as {
@@ -71,15 +210,33 @@ export class EventEmitter {
               ...(isRecord(incoming.updates) ? incoming.updates : {}),
             };
 
-            this.eventBuffer[i] = {
-              ...event,
+            const merged = {
+              ...buffered,
+              timestamp: Date.now(),
               data: {
                 ...bufferedData,
                 ...incoming,
                 itemId: incomingItemId,
                 updates: mergedUpdates,
               },
-            };
+            } satisfies SequencedSidecarEvent;
+
+            this.eventBuffer[i] = merged;
+
+            for (const listener of this.listeners) {
+              try {
+                listener(merged);
+              } catch {
+                // Listener failures should never break main event delivery.
+              }
+            }
+
+            const replayIndex = this.replayBuffer.findIndex((entry) => entry.seq === merged.seq);
+            if (replayIndex >= 0) {
+              this.replayBuffer[replayIndex] = merged;
+            } else {
+              this.appendToReplay(merged);
+            }
             this.scheduleFlush();
             return;
           }
@@ -87,55 +244,45 @@ export class EventEmitter {
       }
     }
 
+    const event = this.nextEvent(type, sessionId, data);
+
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        // Listener failures should never break main event delivery.
+      }
+    }
+
+    this.appendToReplay(event);
     this.eventBuffer.push(event);
     this.scheduleFlush();
   }
 
-  /**
-   * Emit stream chunk event.
-   */
   streamStart(sessionId: string): void {
     this.emit('stream:start', sessionId, { timestamp: Date.now() });
   }
 
-  /**
-   * Emit stream chunk event.
-   */
   streamChunk(sessionId: string, content: string): void {
     this.emit('stream:chunk', sessionId, { content });
   }
 
-  /**
-   * Emit stream done event.
-   */
   streamDone(sessionId: string, message: unknown): void {
     this.emit('stream:done', sessionId, { message });
   }
 
-  /**
-   * Emit thinking start event.
-   */
   thinkingStart(sessionId: string): void {
     this.emit('thinking:start', sessionId, { timestamp: Date.now() });
   }
 
-  /**
-   * Emit thinking chunk event (agent's internal reasoning).
-   */
   thinkingChunk(sessionId: string, content: string): void {
     this.emit('thinking:chunk', sessionId, { content });
   }
 
-  /**
-   * Emit thinking done event.
-   */
   thinkingDone(sessionId: string): void {
     this.emit('thinking:done', sessionId, { timestamp: Date.now() });
   }
 
-  /**
-   * Emit tool start event.
-   */
   toolStart(sessionId: string, toolCall: unknown): void {
     const toolCallAny = toolCall as { parentToolId?: string };
     this.emit('tool:start', sessionId, {
@@ -145,9 +292,6 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit tool result event.
-   */
   toolResult(sessionId: string, toolCall: unknown, result: unknown): void {
     const toolCallAny = toolCall as { id?: string; parentToolId?: string };
     const resultAny = result as { parentToolId?: string } | null;
@@ -159,65 +303,38 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit permission request event.
-   */
   permissionRequest(sessionId: string, request: unknown): void {
     this.emit('permission:request', sessionId, { request });
   }
 
-  /**
-   * Emit permission resolved event.
-   */
   permissionResolved(sessionId: string, permissionId: string, decision: string): void {
     this.emit('permission:resolved', sessionId, { permissionId, decision });
   }
 
-  /**
-   * Emit question ask event.
-   */
   questionAsk(sessionId: string, request: unknown): void {
     this.emit('question:ask', sessionId, { request });
   }
 
-  /**
-   * Emit question answered event.
-   */
   questionAnswered(sessionId: string, questionId: string, answer: string | string[]): void {
     this.emit('question:answered', sessionId, { questionId, answer });
   }
 
-  /**
-   * Emit task create event.
-   */
   taskCreate(sessionId: string, task: unknown): void {
     this.emit('task:create', sessionId, { task });
   }
 
-  /**
-   * Emit task update event.
-   */
   taskUpdate(sessionId: string, task: unknown): void {
     this.emit('task:update', sessionId, { task });
   }
 
-  /**
-   * Replace all tasks for a session.
-   */
   taskSet(sessionId: string, tasks: unknown[]): void {
     this.emit('task:set', sessionId, { tasks });
   }
 
-  /**
-   * Emit artifact created event.
-   */
   artifactCreated(sessionId: string, artifact: unknown): void {
     this.emit('artifact:created', sessionId, { artifact });
   }
 
-  /**
-   * Emit artifact event for file preview (convenience wrapper).
-   */
   artifact(sessionId: string, artifact: {
     id: string;
     path: string;
@@ -227,34 +344,29 @@ export class EventEmitter {
     content?: string;
     timestamp?: number;
   }): void {
-    this.emit('artifact:created', sessionId, { artifact: { ...artifact, timestamp: artifact.timestamp || Date.now() } });
+    this.emit('artifact:created', sessionId, {
+      artifact: {
+        ...artifact,
+        timestamp: artifact.timestamp || Date.now(),
+      },
+    });
   }
 
-  /**
-   * Emit context update event.
-   */
   contextUpdate(sessionId: string, used: number, total: number): void {
     this.emit('context:update', sessionId, { used, total });
   }
 
-  /**
-   * Emit research progress event.
-   */
   researchProgress(sessionId: string, status: string, progress: number): void {
     this.emit('research:progress', sessionId, { status, progress, timestamp: Date.now() });
   }
 
-  /**
-   * Emit browser view screenshot event for live view display.
-   * Called during computer_use tool execution after each action.
-   */
   browserViewScreenshot(
     sessionId: string,
     screenshot: {
-      data: string;      // base64 PNG
-      mimeType: string;  // 'image/png'
-      url: string;       // current browser URL
-      timestamp: number; // Date.now()
+      data: string;
+      mimeType: string;
+      url: string;
+      timestamp: number;
     }
   ): void {
     this.emit('browserView:screenshot', sessionId, {
@@ -265,9 +377,6 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit session updated event.
-   */
   sessionUpdated(session: unknown): void {
     const sessionAny = session as { id?: string; title?: string | null; messageCount?: number };
     this.emit('session:updated', undefined, {
@@ -281,39 +390,22 @@ export class EventEmitter {
   // Unified Chat Item Events (V2 architecture)
   // ============================================================================
 
-  /**
-   * Emit a new chat item to be appended to the chat timeline.
-   * This is the primary event for the unified chat storage architecture.
-   */
   chatItem(sessionId: string, item: ChatItem): void {
     this.emit('chat:item', sessionId, { item });
   }
 
-  /**
-   * Emit an update to an existing chat item.
-   * Used to update status (e.g., tool running -> completed, thinking active -> done).
-   */
   chatItemUpdate(sessionId: string, itemId: string, updates: Partial<ChatItem>): void {
     this.emit('chat:update', sessionId, { itemId, updates });
   }
 
-  /**
-   * Emit multiple chat items at once (for batch operations like load).
-   */
   chatItemsBatch(sessionId: string, items: ChatItem[]): void {
     this.emit('chat:items', sessionId, { items });
   }
 
-  /**
-   * Emit message queue update for a session.
-   */
   queueUpdate(sessionId: string, queue: Array<{ id: string; content: string; queuedAt: number }>): void {
     this.emit('queue:update', sessionId, { queue });
   }
 
-  /**
-   * Emit context usage update.
-   */
   contextUsageUpdate(sessionId: string, contextUsage: {
     usedTokens: number;
     maxTokens: number;
@@ -326,9 +418,6 @@ export class EventEmitter {
   // Integration Events
   // ============================================================================
 
-  /**
-   * Emit platform connection status change.
-   */
   integrationStatus(status: {
     platform: string;
     connected: boolean;
@@ -346,16 +435,10 @@ export class EventEmitter {
     this.emit('integration:status', undefined, status);
   }
 
-  /**
-   * Emit WhatsApp QR code for scanning.
-   */
   integrationQR(qrDataUrl: string): void {
     this.emit('integration:qr', undefined, { qrDataUrl });
   }
 
-  /**
-   * Emit incoming message notification from platform.
-   */
   integrationMessageIn(platform: string, sender: string, content: string): void {
     this.emit('integration:message_in', undefined, {
       platform,
@@ -365,9 +448,6 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit outgoing message sent to platform.
-   */
   integrationMessageOut(platform: string, chatId: string): void {
     this.emit('integration:message_out', undefined, {
       platform,
@@ -376,9 +456,6 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit message queued notification.
-   */
   integrationQueued(platform: string, queueSize: number): void {
     this.emit('integration:queued', undefined, {
       platform,
@@ -387,9 +464,6 @@ export class EventEmitter {
     });
   }
 
-  /**
-   * Emit error event.
-   */
   error(sessionId: string | undefined, errorMessage: string, code?: string, details?: unknown): void {
     this.emit('error', sessionId, {
       error: sanitizeProviderErrorMessage(errorMessage),
@@ -409,9 +483,6 @@ export class EventEmitter {
     };
   }
 
-  /**
-   * Schedule a flush of the event buffer.
-   */
   private scheduleFlush(): void {
     if (this.flushTimeout) return;
 
@@ -420,9 +491,6 @@ export class EventEmitter {
     }, this.flushIntervalMs);
   }
 
-  /**
-   * Flush the event buffer to stdout.
-   */
   flush(): void {
     if (this.flushTimeout) {
       clearTimeout(this.flushTimeout);
@@ -435,73 +503,64 @@ export class EventEmitter {
     this.eventBuffer = [];
 
     for (const event of events) {
-      // Queue serialized events, then flush with backpressure-aware writes.
-      // The Rust side expects SidecarEvent format: { type, sessionId, data }.
-      this.stdoutQueue.push(JSON.stringify(event) + '\n');
+      for (const sink of this.sinks.values()) {
+        try {
+          sink.emit(event);
+        } catch {
+          // Sink failures should not break other sinks.
+        }
+      }
     }
 
-    this.flushStdoutQueue();
+    for (const sink of this.sinks.values()) {
+      try {
+        sink.flush?.();
+      } catch {
+        // ignore sink flush errors
+      }
+    }
   }
 
-  /**
-   * Flush all pending events immediately (best effort).
-   * If stdout is backpressured, remaining events stay queued and are resumed
-   * on the next `drain` event.
-   */
   flushSync(): void {
     if (this.flushTimeout) {
       clearTimeout(this.flushTimeout);
       this.flushTimeout = null;
     }
 
-    if (this.eventBuffer.length === 0) return;
+    if (this.eventBuffer.length === 0) {
+      for (const sink of this.sinks.values()) {
+        try {
+          sink.flushSync?.();
+        } catch {
+          // ignore sink flush errors
+        }
+      }
+      return;
+    }
 
     const events = this.eventBuffer;
     this.eventBuffer = [];
 
     for (const event of events) {
-      this.stdoutQueue.push(JSON.stringify(event) + '\n');
-    }
-
-    this.flushStdoutQueue();
-  }
-
-  private flushStdoutQueue(): void {
-    if (this.stdoutFlushing || this.stdoutBackpressured) {
-      return;
-    }
-
-    this.stdoutFlushing = true;
-    try {
-      while (this.stdoutQueueOffset < this.stdoutQueue.length) {
-        const line = this.stdoutQueue[this.stdoutQueueOffset]!;
-        const canContinue = process.stdout.write(line);
-        this.stdoutQueueOffset += 1;
-
-        if (!canContinue) {
-          this.stdoutBackpressured = true;
-          process.stdout.once('drain', () => {
-            this.stdoutBackpressured = false;
-            this.flushStdoutQueue();
-          });
-          break;
+      for (const sink of this.sinks.values()) {
+        try {
+          sink.emit(event);
+        } catch {
+          // Sink failures should not break other sinks.
         }
       }
+    }
 
-      // Fully drained.
-      if (this.stdoutQueueOffset >= this.stdoutQueue.length) {
-        this.stdoutQueue = [];
-        this.stdoutQueueOffset = 0;
-        return;
+    for (const sink of this.sinks.values()) {
+      try {
+        if (sink.flushSync) {
+          sink.flushSync();
+        } else {
+          sink.flush?.();
+        }
+      } catch {
+        // ignore sink flush errors
       }
-
-      // Compact written prefix occasionally to avoid unbounded array growth.
-      if (this.stdoutQueueOffset >= 1024) {
-        this.stdoutQueue = this.stdoutQueue.slice(this.stdoutQueueOffset);
-        this.stdoutQueueOffset = 0;
-      }
-    } finally {
-      this.stdoutFlushing = false;
     }
   }
 }

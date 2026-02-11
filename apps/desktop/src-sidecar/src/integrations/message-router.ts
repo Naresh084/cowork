@@ -41,6 +41,8 @@ interface SessionProcessingState {
   placeholderReplaced: boolean;
   hasDeliveredContent: boolean;
   segmentStateByItemId: Map<string, OutboundSegmentState>;
+  bufferedFinalTextBySegment: Map<number, string>;
+  lastSentFinalHash: string | null;
   sentMediaItemIds: Set<string>;
   outboundChain: Promise<void>;
 }
@@ -411,6 +413,8 @@ export class MessageRouter extends EventEmitter {
         placeholderReplaced: false,
         hasDeliveredContent: false,
         segmentStateByItemId: new Map(),
+        bufferedFinalTextBySegment: new Map(),
+        lastSentFinalHash: null,
         sentMediaItemIds: new Set(),
         outboundChain: Promise.resolve(),
       };
@@ -427,6 +431,8 @@ export class MessageRouter extends EventEmitter {
     state.placeholderReplaced = false;
     state.hasDeliveredContent = false;
     state.segmentStateByItemId.clear();
+    state.bufferedFinalTextBySegment.clear();
+    state.lastSentFinalHash = null;
     state.sentMediaItemIds.clear();
     state.outboundChain = Promise.resolve();
   }
@@ -464,6 +470,47 @@ export class MessageRouter extends EventEmitter {
 
   private hashText(input: string): string {
     return `${input.length}:${input}`;
+  }
+
+  private adapterSupportsStreamingEdits(adapter: BaseAdapter | undefined): boolean {
+    return Boolean(adapter && adapter.supportsStreamingEdits());
+  }
+
+  private stageFinalAssistantText(
+    state: SessionProcessingState,
+    platform: PlatformType,
+    itemId: string,
+    segmentIndex: number,
+    text: string,
+  ): void {
+    const cleanText = formatIntegrationText(platform, text);
+    if (!cleanText.trim()) return;
+
+    const nextHash = this.hashText(cleanText);
+    const current = state.segmentStateByItemId.get(itemId);
+    if (current?.lastHash === nextHash) {
+      return;
+    }
+
+    state.segmentStateByItemId.set(itemId, {
+      segmentIndex,
+      handle: current?.handle ?? null,
+      lastHash: nextHash,
+    });
+    state.bufferedFinalTextBySegment.set(segmentIndex, cleanText);
+  }
+
+  private buildBufferedFinalAssistantText(state: SessionProcessingState): string | null {
+    if (state.bufferedFinalTextBySegment.size === 0) return null;
+
+    const finalText = Array.from(state.bufferedFinalTextBySegment.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map((entry) => entry[1].trim())
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+
+    return finalText || null;
   }
 
   private async ensurePlaceholderReplaced(
@@ -554,10 +601,6 @@ export class MessageRouter extends EventEmitter {
         `Generated ${media.mediaType} is too large to send (${Math.round(size / (1024 * 1024))}MB). Open it in Cowork desktop.`,
       );
       await this.ensurePlaceholderReplaced(state, adapter, platform, chatId, msg);
-      if (state.placeholderReplaced) {
-        await adapter.sendMessage(chatId, msg);
-        eventEmitter.integrationMessageOut(platform, chatId);
-      }
       state.sentMediaItemIds.add(item.id);
       state.hasDeliveredContent = true;
       return;
@@ -632,9 +675,22 @@ export class MessageRouter extends EventEmitter {
       const segmentIndex = item.stream?.segmentIndex ?? 0;
       const text = this.extractTextContent(item.content);
       if (!text.trim()) return;
+      const originPlatform = state.pendingOrigin.platform;
+      const adapter = this.adapters.get(state.pendingOrigin.platform);
+      const supportsStreamingEdits = this.adapterSupportsStreamingEdits(adapter);
 
       this.enqueueOutbound(state, async () => {
-        await this.sendAssistantText(state, item.id, segmentIndex, text);
+        if (supportsStreamingEdits) {
+          await this.sendAssistantText(state, item.id, segmentIndex, text);
+          return;
+        }
+        this.stageFinalAssistantText(
+          state,
+          originPlatform,
+          item.id,
+          segmentIndex,
+          text,
+        );
       });
       return;
     }
@@ -656,17 +712,47 @@ export class MessageRouter extends EventEmitter {
     const state = this.getState(sessionId);
     if (!state.pendingOrigin) return;
 
-    const segment = state.segmentStateByItemId.get(itemId);
-    if (!segment) return;
+    const updatesAny = updates as {
+      stream?: { segmentIndex?: number };
+      content?: unknown;
+    };
+    const existingSegment = state.segmentStateByItemId.get(itemId);
+    const segmentIndex =
+      typeof existingSegment?.segmentIndex === 'number'
+        ? existingSegment.segmentIndex
+        : typeof updatesAny.stream?.segmentIndex === 'number'
+          ? updatesAny.stream.segmentIndex
+          : 0;
 
-    const content = (updates as { content?: unknown }).content;
+    if (!existingSegment) {
+      state.segmentStateByItemId.set(itemId, {
+        segmentIndex,
+        handle: null,
+        lastHash: '',
+      });
+    }
+
+    const content = updatesAny.content;
     if (content === undefined) return;
 
     const text = this.extractTextContent(content);
     if (!text.trim()) return;
+    const originPlatform = state.pendingOrigin.platform;
+    const adapter = this.adapters.get(state.pendingOrigin.platform);
+    const supportsStreamingEdits = this.adapterSupportsStreamingEdits(adapter);
 
     this.enqueueOutbound(state, async () => {
-      await this.sendAssistantText(state, itemId, segment.segmentIndex, text);
+      if (supportsStreamingEdits) {
+        await this.sendAssistantText(state, itemId, segmentIndex, text);
+        return;
+      }
+      this.stageFinalAssistantText(
+        state,
+        originPlatform,
+        itemId,
+        segmentIndex,
+        text,
+      );
     });
   }
 
@@ -682,10 +768,37 @@ export class MessageRouter extends EventEmitter {
 
     const { platform, chatId, thinkingHandle } = state.pendingOrigin;
     const adapter = this.adapters.get(platform);
+    const supportsStreamingEdits = this.adapterSupportsStreamingEdits(adapter);
 
     await state.outboundChain;
 
     try {
+      if (adapter && !supportsStreamingEdits) {
+        const finalText = this.buildBufferedFinalAssistantText(state);
+        if (finalText) {
+          const nextHash = this.hashText(finalText);
+          if (state.lastSentFinalHash !== nextHash) {
+            if (!state.placeholderReplaced) {
+              try {
+                await adapter.replaceProcessingPlaceholder(
+                  chatId,
+                  thinkingHandle,
+                  finalText,
+                );
+              } catch {
+                await adapter.sendMessage(chatId, finalText);
+              }
+              state.placeholderReplaced = true;
+            } else {
+              await adapter.sendMessage(chatId, finalText);
+            }
+            state.lastSentFinalHash = nextHash;
+            state.hasDeliveredContent = true;
+            eventEmitter.integrationMessageOut(platform, chatId);
+          }
+        }
+      }
+
       if (!state.hasDeliveredContent && adapter) {
         const fallbackText = this.getFallbackResponseText();
         try {
@@ -901,6 +1014,8 @@ export class MessageRouter extends EventEmitter {
     state.placeholderReplaced = false;
     state.hasDeliveredContent = false;
     state.segmentStateByItemId.clear();
+    state.bufferedFinalTextBySegment.clear();
+    state.lastSentFinalHash = null;
     state.sentMediaItemIds.clear();
 
     state.pendingOrigin = {

@@ -17,6 +17,7 @@
     "secrets": [
       {
         "key": "TODOIST_API_TOKEN",
+        "envVar": "API_KEY",
         "description": "Todoist API Token",
         "required": true,
         "placeholder": "...",
