@@ -26,6 +26,8 @@ interface AppState {
   currentView: AppView;
   settingsTab: SettingsTab;
   startupIssue: StartupIssue | null;
+  startupIssueFingerprint: string | null;
+  startupIssueSetAt: number;
   runtimeConfigNotice: {
     requiresNewSession: boolean;
     reasons: string[];
@@ -56,6 +58,8 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   currentView: 'chat',
   settingsTab: 'provider',
   startupIssue: null,
+  startupIssueFingerprint: null,
+  startupIssueSetAt: 0,
   runtimeConfigNotice: null,
 
   setShowApiKeyModal: (show, error) =>
@@ -80,13 +84,29 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
     }),
 
   setStartupIssue: (issue) =>
-    set(() => {
+    set((state) => {
       if (!issue?.target) {
-        return { startupIssue: issue };
+        return { startupIssue: issue, startupIssueFingerprint: null, startupIssueSetAt: 0 };
+      }
+
+      const fingerprint = [
+        issue.title.trim().toLowerCase(),
+        issue.message.trim().toLowerCase(),
+        issue.target.view,
+        issue.target.settingsTab || '',
+      ].join('::');
+      const timestamp = Date.now();
+      const duplicateWithinCooldown =
+        state.startupIssueFingerprint === fingerprint && timestamp - state.startupIssueSetAt < 4_000;
+
+      if (duplicateWithinCooldown) {
+        return {};
       }
 
       const nextState: Partial<AppState> = {
         startupIssue: issue,
+        startupIssueFingerprint: fingerprint,
+        startupIssueSetAt: timestamp,
         currentView: sanitizeAppView(issue.target.view),
       };
 

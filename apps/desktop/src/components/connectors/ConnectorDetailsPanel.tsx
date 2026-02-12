@@ -6,13 +6,15 @@ import { getConnectorIcon } from './connector-icons';
 interface ConnectorDetailsPanelProps {
   connectorId: string;
   onClose: () => void;
-  onConfigure?: () => void;
+  onConfigure?: (connectorId: string) => void;
+  onInstalled?: (connectorId: string) => void;
 }
 
 export function ConnectorDetailsPanel({
   connectorId,
   onClose,
   onConfigure,
+  onInstalled,
 }: ConnectorDetailsPanelProps) {
   const {
     getConnectorState,
@@ -51,7 +53,18 @@ export function ConnectorDetailsPanel({
     connector.transport.args.some((arg) => arg.startsWith('mcp-remote'));
 
   const handleInstall = async () => {
-    await installConnector(connectorId);
+    const result = await installConnector(connectorId, { autoSetup: true });
+    const installedConnectorId = result.installedConnectorId;
+
+    if (!installedConnectorId) {
+      return;
+    }
+
+    onInstalled?.(installedConnectorId);
+
+    if (result.nextStep === 'configure' || result.nextStep === 'oauth') {
+      onConfigure?.(installedConnectorId);
+    }
   };
 
   const handleUninstall = async () => {
@@ -263,7 +276,7 @@ export function ConnectorDetailsPanel({
           <>
             {needsConfig && (
               <button
-                onClick={onConfigure}
+                onClick={() => onConfigure?.(connectorId)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-yellow-600 hover:bg-yellow-500 text-white font-medium transition-colors"
               >
                 <Settings className="w-4 h-4" />

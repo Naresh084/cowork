@@ -18,6 +18,8 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
     installSkill,
     uninstallSkill,
     isSkillInstalled,
+    setActiveTab,
+    selectSkill,
   } = useSkillStore();
 
   const skill = availableSkills.find((s) => s.id === skillId);
@@ -49,6 +51,14 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
   const author = skill.frontmatter.metadata?.author;
   const requirements = skill.frontmatter.metadata?.requires;
   const installOptions = skill.frontmatter.metadata?.install;
+
+  const handleInstall = async () => {
+    const installedSkillId = await installSkill(skillId);
+    if (installedSkillId) {
+      setActiveTab('installed');
+      selectSkill(installedSkillId);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -102,7 +112,7 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
             </button>
           ) : (
             <button
-              onClick={() => installSkill(skillId)}
+              onClick={handleInstall}
               disabled={isCurrentlyInstalling}
               className={cn(
                 'flex items-center justify-center gap-2 w-full py-2 rounded-lg font-medium transition-colors',

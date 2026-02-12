@@ -84,6 +84,16 @@ interface CreateCustomConnectorParams {
   };
 }
 
+interface InstallConnectorOptions {
+  autoSetup?: boolean;
+}
+
+interface InstallConnectorResult {
+  installedConnectorId: string | null;
+  nextStep: 'none' | 'configure' | 'oauth' | 'connected';
+  connectionError?: string;
+}
+
 interface ConnectorStoreActions {
   // Discovery
   discoverConnectors: (
@@ -92,7 +102,10 @@ interface ConnectorStoreActions {
   ) => Promise<void>;
 
   // Installation
-  installConnector: (connectorId: string) => Promise<void>;
+  installConnector: (
+    connectorId: string,
+    options?: InstallConnectorOptions
+  ) => Promise<InstallConnectorResult>;
   uninstallConnector: (connectorId: string) => Promise<void>;
 
   // Connection
@@ -158,6 +171,31 @@ const initialState: ConnectorStoreState = {
 };
 
 const DISCOVERY_CACHE_TTL_MS = 30_000;
+
+function isRemoteBrowserOAuthConnector(connector: ConnectorManifest): boolean {
+  if (connector.auth.type !== 'none' || connector.transport.type !== 'stdio') {
+    return false;
+  }
+
+  const commandName = connector.transport.command.trim().split(/[\\/]/).pop() || '';
+  if (commandName !== 'npx') {
+    return false;
+  }
+
+  return connector.transport.args.some((arg) => arg === 'mcp-remote');
+}
+
+function isConnectionClosedError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('connection closed') ||
+    normalized.includes('socket hang up') ||
+    normalized.includes('econnreset') ||
+    normalized.includes('stream closed') ||
+    normalized.includes('broken pipe') ||
+    normalized.includes('-32000')
+  );
+}
 
 // ============================================================================
 // Store
@@ -259,17 +297,19 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
     // Installation
     // ========================================================================
 
-    installConnector: async (connectorId) => {
+    installConnector: async (connectorId, options) => {
+      let requestedConnector: ConnectorManifest | undefined;
       set((state) => ({
         isInstalling: new Set([...state.isInstalling, connectorId]),
         error: null,
       }));
 
       try {
+        requestedConnector = get().availableConnectors.find((c) => c.id === connectorId);
         await invoke('install_connector', { connectorId });
 
         // Find the connector manifest
-        const connector = get().availableConnectors.find((c) => c.id === connectorId);
+        const connector = requestedConnector || get().availableConnectors.find((c) => c.id === connectorId);
         if (connector) {
           // After install, the connector becomes managed with a new ID
           const managedConnectorId = `managed:${connector.name}`;
@@ -289,10 +329,69 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         // Re-discover to update connector list
         const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
         await get().discoverConnectors(rediscoverWorkingDirectory, { force: true });
+
+        const latestState = get();
+        const managedConnector =
+          requestedConnector
+            ? latestState.availableConnectors.find(
+                (c) => c.source.type === 'managed' && c.name === requestedConnector?.name
+              )
+            : undefined;
+        const installedConnectorId = managedConnector?.id || null;
+
+        if (!managedConnector) {
+          return {
+            installedConnectorId,
+            nextStep: 'none',
+          };
+        }
+
+        if (managedConnector.auth.type === 'env') {
+          return {
+            installedConnectorId,
+            nextStep: 'configure',
+          };
+        }
+
+        if (managedConnector.auth.type === 'oauth') {
+          return {
+            installedConnectorId,
+            nextStep: 'oauth',
+          };
+        }
+
+        if (options?.autoSetup !== false) {
+          await get().connectConnector(managedConnector.id);
+          const refreshed = get().connectorStates.get(managedConnector.id);
+
+          if (refreshed?.status === 'connected') {
+            return {
+              installedConnectorId,
+              nextStep: 'connected',
+            };
+          }
+
+          return {
+            installedConnectorId,
+            nextStep: 'none',
+            connectionError: refreshed?.error,
+          };
+        }
+
+        return {
+          installedConnectorId,
+          nextStep: 'none',
+        };
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
         });
+        return {
+          installedConnectorId:
+            requestedConnector?.name ? `managed:${requestedConnector.name}` : null,
+          nextStep: 'none',
+          connectionError: error instanceof Error ? error.message : String(error),
+        };
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);
@@ -406,6 +505,15 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        const connector = get().availableConnectors.find((c) => c.id === connectorId);
+        const remoteBrowserOAuth = connector ? isRemoteBrowserOAuthConnector(connector) : false;
+        const shouldNormalizeClosedConnectionError =
+          remoteBrowserOAuth && isConnectionClosedError(errorMessage);
+        const normalizedErrorMessage = shouldNormalizeClosedConnectionError
+          ? 'OAuth browser session closed before authorization completed. Click Connect again after finishing browser login.'
+          : errorMessage;
+        const normalizedStatus =
+          shouldNormalizeClosedConnectionError && remoteBrowserOAuth ? 'configured' : 'error';
 
         set((state) => {
           const states = new Map(state.connectorStates);
@@ -413,9 +521,9 @@ export const useConnectorStore = create<ConnectorStoreState & ConnectorStoreActi
           if (existing) {
             states.set(connectorId, {
               ...existing,
-              status: 'error',
-              error: errorMessage,
-              lastError: errorMessage,
+              status: normalizedStatus,
+              error: normalizedErrorMessage,
+              lastError: normalizedErrorMessage,
               lastErrorAt: Date.now(),
               retryCount: (existing.retryCount || 0) + 1,
             });

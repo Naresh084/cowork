@@ -227,6 +227,14 @@ export class ConnectorManager {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      if (
+        this.shouldRetryRemoteOAuthConnection(manifest, errorMessage, connection.retryCount)
+      ) {
+        connection.retryCount += 1;
+        await this.sleep(400);
+        return this.connect(manifest);
+      }
+
       connection.status = 'error';
       connection.error = errorMessage;
       connection.lastError = errorMessage;
@@ -290,8 +298,33 @@ export class ConnectorManager {
       throw new Error(`Connector not connected: ${connectorId} (status: ${connection.status})`);
     }
 
-    const result = await this.mcpManager.callTool(connection.serverId, toolName, args);
-    return result;
+    try {
+      return await this.mcpManager.callTool(connection.serverId, toolName, args);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (this.isConnectionClosedError(errorMessage)) {
+        // Mark current connection as unhealthy so UI/backend can reflect reality.
+        connection.status = 'error';
+        connection.error = errorMessage;
+        connection.lastError = errorMessage;
+        connection.retryCount += 1;
+
+        // For browser-auth remote connectors (mcp-remote), attempt a single
+        // reconnect before surfacing the failure to the caller.
+        if (this.isRemoteBrowserOAuthConnector(connection.manifest)) {
+          const reconnectResult = await this.reconnect(connection.manifest);
+          if (reconnectResult.success) {
+            const refreshed = this.connections.get(connectorId);
+            if (refreshed && refreshed.status === 'connected') {
+              return this.mcpManager.callTool(refreshed.serverId, toolName, args);
+            }
+          }
+        }
+      }
+
+      throw error;
+    }
   }
 
   /**
@@ -495,5 +528,46 @@ export class ConnectorManager {
     }
 
     return env;
+  }
+
+  private isRemoteBrowserOAuthConnector(manifest: ConnectorManifest): boolean {
+    if (manifest.auth.type !== 'none' || manifest.transport.type !== 'stdio') {
+      return false;
+    }
+
+    const commandName = manifest.transport.command.trim().split(/[\\/]/).pop() || '';
+    if (commandName !== 'npx') {
+      return false;
+    }
+
+    return manifest.transport.args.some((arg) => arg === 'mcp-remote');
+  }
+
+  private isConnectionClosedError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('connection closed') ||
+      normalized.includes('socket hang up') ||
+      normalized.includes('econnreset') ||
+      normalized.includes('stream closed') ||
+      normalized.includes('broken pipe') ||
+      normalized.includes('-32000')
+    );
+  }
+
+  private shouldRetryRemoteOAuthConnection(
+    manifest: ConnectorManifest,
+    errorMessage: string,
+    retryCount: number
+  ): boolean {
+    return (
+      this.isRemoteBrowserOAuthConnector(manifest) &&
+      this.isConnectionClosedError(errorMessage) &&
+      retryCount < 1
+    );
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 }

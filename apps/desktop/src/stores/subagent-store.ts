@@ -105,7 +105,7 @@ interface SubagentStoreActions {
   ) => Promise<void>;
 
   // Install/Uninstall
-  installSubagent: (name: string, workingDirectory?: string) => Promise<void>;
+  installSubagent: (name: string, workingDirectory?: string) => Promise<string | null>;
   uninstallSubagent: (name: string, workingDirectory?: string) => Promise<void>;
   isSubagentInstalling: (name: string) => boolean;
 
@@ -219,11 +219,13 @@ export const useSubagentStore = create<SubagentStoreState & SubagentStoreActions
         });
 
         await get().loadSubagents(workingDirectory, { force: true });
+        return name;
       } catch (error) {
         console.error('Failed to install subagent:', error);
         set({
           error: error instanceof Error ? error.message : String(error),
         });
+        return null;
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);

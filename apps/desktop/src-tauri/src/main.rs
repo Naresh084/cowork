@@ -225,6 +225,7 @@ fn main() {
             commands::remote_access::remote_access_authenticate_tunnel,
             commands::remote_access::remote_access_start_tunnel,
             commands::remote_access::remote_access_stop_tunnel,
+            commands::remote_access::remote_access_delete_all,
             // Service lifecycle commands
             commands::service::service_get_mode,
             commands::service::service_set_mode,

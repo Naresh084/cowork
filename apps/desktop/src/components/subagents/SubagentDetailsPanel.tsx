@@ -41,6 +41,8 @@ export function SubagentDetailsPanel({ subagentName, onClose }: SubagentDetailsP
     installSubagent,
     uninstallSubagent,
     isInstalling,
+    setActiveTab,
+    selectSubagent,
   } = useSubagentStore();
 
   const { sessions, activeSessionId } = useSessionStore();
@@ -61,6 +63,14 @@ export function SubagentDetailsPanel({ subagentName, onClose }: SubagentDetailsP
 
   const CategoryIcon = CATEGORY_ICONS[subagent.category] || FileText;
   const categoryColor = CATEGORY_COLORS[subagent.category] || 'text-zinc-400';
+
+  const handleInstall = async () => {
+    const installedName = await installSubagent(subagent.name, workingDirectory || undefined);
+    if (installedName) {
+      setActiveTab('installed');
+      selectSubagent(installedName);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -114,7 +124,7 @@ export function SubagentDetailsPanel({ subagentName, onClose }: SubagentDetailsP
             </button>
           ) : (
             <button
-              onClick={() => installSubagent(subagent.name, workingDirectory || undefined)}
+              onClick={handleInstall}
               disabled={isCurrentlyInstalling}
               className={cn(
                 'flex items-center justify-center gap-2 w-full py-2 rounded-lg font-medium transition-colors',

@@ -9,6 +9,7 @@ export function AvailableSubagentsTab() {
     isInstalling,
     selectSubagent,
     installSubagent,
+    setActiveTab,
   } = useSubagentStore();
 
   const { sessions, activeSessionId } = useSessionStore();
@@ -17,6 +18,14 @@ export function AvailableSubagentsTab() {
 
   const isLoading = useIsLoadingSubagents();
   const filteredSubagents = getFilteredSubagents();
+
+  const handleInstall = async (name: string) => {
+    const installedName = await installSubagent(name, workingDirectory || undefined);
+    if (installedName) {
+      setActiveTab('installed');
+      selectSubagent(installedName);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -33,7 +42,7 @@ export function AvailableSubagentsTab() {
         subagents={filteredSubagents}
         installingIds={isInstalling}
         onSelect={selectSubagent}
-        onInstall={(name) => installSubagent(name, workingDirectory || undefined)}
+        onInstall={handleInstall}
       />
     </div>
   );

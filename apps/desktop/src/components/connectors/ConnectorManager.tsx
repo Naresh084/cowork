@@ -83,6 +83,11 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
     }
   };
 
+  const handleConnectorInstalled = (connectorId: string) => {
+    setActiveTab('installed');
+    selectConnector(connectorId);
+  };
+
   if (!isOpen) return null;
 
   return createPortal(
@@ -144,7 +149,8 @@ export function ConnectorManager({ isOpen, onClose }: ConnectorManagerProps) {
                     <ConnectorDetailsPanel
                       connectorId={selectedConnectorId}
                       onClose={() => selectConnector(null)}
-                      onConfigure={() => handleConfigure(selectedConnectorId)}
+                      onConfigure={handleConfigure}
+                      onInstalled={handleConnectorInstalled}
                     />
                   </motion.div>
                 )}

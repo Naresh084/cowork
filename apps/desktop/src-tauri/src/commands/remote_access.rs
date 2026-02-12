@@ -17,6 +17,18 @@ pub struct RemoteAccessDeviceSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RemoteDiagnosticEntry {
+    pub id: String,
+    pub level: String,
+    pub message: String,
+    pub step: String,
+    pub at: i64,
+    #[serde(default)]
+    pub command_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteAccessStatus {
     pub enabled: bool,
     pub running: bool,
@@ -47,6 +59,15 @@ pub struct RemoteAccessStatus {
     pub tunnel_started_at: Option<i64>,
     #[serde(default)]
     pub tunnel_pid: Option<i64>,
+    pub config_health: String,
+    #[serde(default)]
+    pub config_repair_reason: Option<String>,
+    #[serde(default)]
+    pub last_operation: Option<String>,
+    #[serde(default)]
+    pub last_operation_at: Option<i64>,
+    #[serde(default)]
+    pub diagnostics: Vec<RemoteDiagnosticEntry>,
     pub device_count: usize,
     #[serde(default)]
     pub devices: Vec<RemoteAccessDeviceSummary>,
@@ -330,6 +351,22 @@ pub async fn remote_access_stop_tunnel(
     let manager = &state.manager;
     let result = manager
         .send_command("remote_access_stop_tunnel", serde_json::json!({}))
+        .await?;
+
+    serde_json::from_value(result).map_err(|e| format!("Failed to parse remote status: {}", e))
+}
+
+/// Delete all remote setup and paired devices.
+#[tauri::command]
+pub async fn remote_access_delete_all(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<RemoteAccessStatus, String> {
+    ensure_sidecar_started_public(&app, &state).await?;
+
+    let manager = &state.manager;
+    let result = manager
+        .send_command("remote_access_delete_all", serde_json::json!({}))
         .await?;
 
     serde_json::from_value(result).map_err(|e| format!("Failed to parse remote status: {}", e))

@@ -62,7 +62,7 @@ interface SkillStoreActions {
   ) => Promise<void>;
 
   // Installation
-  installSkill: (skillId: string) => Promise<void>;
+  installSkill: (skillId: string) => Promise<string | null>;
   uninstallSkill: (skillId: string) => Promise<void>;
 
   // Creation
@@ -213,9 +213,11 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
 
         // Find the skill manifest
         const skill = get().availableSkills.find((s) => s.id === skillId);
+        let installedSkillId: string | null = null;
         if (skill) {
           // After install, the skill becomes managed with a new ID
           const managedSkillId = `managed:${skill.frontmatter.name}`;
+          installedSkillId = managedSkillId;
 
           // Add to installed configs in settings store
           const config: InstalledSkillConfig = {
@@ -226,15 +228,18 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
             source: 'managed',
           };
           useSettingsStore.getState().addInstalledSkillConfig(config);
+          await useSettingsStore.getState().syncInstalledSkills();
         }
 
         // Re-discover to update skill list
         const rediscoverWorkingDirectory = get().lastWorkingDirectory || undefined;
         await get().discoverSkills(rediscoverWorkingDirectory, { force: true });
+        return installedSkillId;
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
         });
+        return null;
       } finally {
         set((state) => {
           const newInstalling = new Set(state.isInstalling);

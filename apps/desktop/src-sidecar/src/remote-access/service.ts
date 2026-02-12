@@ -98,10 +98,6 @@ function parseTunnelMode(value: unknown): RemoteTunnelMode | null {
   return null;
 }
 
-function normalizeTunnelMode(value: unknown, fallback: RemoteTunnelMode = 'tailscale'): RemoteTunnelMode {
-  return parseTunnelMode(value) ?? fallback;
-}
-
 function normalizeTunnelVisibility(value: unknown): RemoteTunnelVisibility {
   return value === 'private' ? 'private' : 'public';
 }
@@ -353,6 +349,13 @@ export class RemoteAccessService {
       return;
     }
 
+    if (primaryFailureReason === '__missing__') {
+      this.config = fallback;
+      this.clearConfigRepair();
+      await this.persistConfig();
+      return;
+    }
+
     if (this.configBackupPath) {
       const backupFailureReason = await this.tryLoadConfigFromPath(this.configBackupPath, fallback);
       if (!backupFailureReason) {
@@ -376,6 +379,9 @@ export class RemoteAccessService {
       this.config = this.parseConfigValue(parsed, fallback);
       return null;
     } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === 'ENOENT') {
+        return '__missing__';
+      }
       return formatCommandError(error);
     }
   }

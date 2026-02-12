@@ -71,18 +71,22 @@ export function SettingsView() {
   const startTour = useHelpStore((s) => s.startTour);
   const refreshCapabilitySnapshot = useCapabilityStore((s) => s.refreshSnapshot);
 
-  // Refresh platform statuses from sidecar when settings screen opens
+  // Refresh platform statuses while integrations tab is active.
   useEffect(() => {
     const store = useIntegrationStore.getState();
-    store.refreshStatuses();
+    if (activeTab === 'integrations') {
+      store.refreshStatuses();
+    }
     void refreshCapabilitySnapshot();
 
     const interval = setInterval(() => {
-      void useIntegrationStore.getState().refreshStatuses();
+      if (useAppStore.getState().settingsTab === 'integrations') {
+        void useIntegrationStore.getState().refreshStatuses();
+      }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [refreshCapabilitySnapshot]);
+  }, [activeTab, refreshCapabilitySnapshot]);
 
   const ActiveContent = tabContent[activeTab];
   const handleLogout = async () => {

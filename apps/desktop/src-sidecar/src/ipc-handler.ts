@@ -767,6 +767,11 @@ registerHandler('remote_access_stop_tunnel', async () => {
   return remoteAccessService.stopTunnel();
 });
 
+registerHandler('remote_access_delete_all', async () => {
+  await ensureRemoteAccessInitialized();
+  return remoteAccessService.deleteAll();
+});
+
 // Initialize persistence with app data directory
 registerHandler('initialize', async (params) => {
   const { appDataDir } = params as { appDataDir: string };

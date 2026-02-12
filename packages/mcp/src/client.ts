@@ -100,12 +100,24 @@ export class MCPClientManager {
       this.clients.set(serverId, client);
       this.transports.set(serverId, transport);
 
-      state.status = 'connected';
-      this.emit('server:connected', serverId, { name: state.config.name });
-
-      // Discover tools, resources, and prompts
+      // Discover tools/resources/prompts before declaring the server connected.
+      // If the transport closes during discovery, the connection should fail.
       await this.discoverCapabilities(serverId);
+
+      state.status = 'connected';
+      state.error = undefined;
+      this.emit('server:connected', serverId, { name: state.config.name });
     } catch (error) {
+      const client = this.clients.get(serverId);
+      const transport = this.transports.get(serverId);
+      if (client) {
+        await client.close().catch(() => {});
+        this.clients.delete(serverId);
+      }
+      if (transport) {
+        await transport.close().catch(() => {});
+        this.transports.delete(serverId);
+      }
       state.status = 'error';
       state.error = error instanceof Error ? error.message : String(error);
       this.emit('server:error', serverId, { error: state.error });
@@ -280,8 +292,8 @@ export class MCPClientManager {
 
     if (!client || !state) return;
 
+    // Discover tools
     try {
-      // Discover tools
       const toolsResult = await client.listTools();
       state.tools = toolsResult.tools.map((tool) => ({
         name: tool.name,
@@ -293,8 +305,16 @@ export class MCPClientManager {
       for (const tool of state.tools) {
         this.emit('tool:discovered', serverId, tool);
       }
+    } catch (error) {
+      if (this.isConnectionClosedError(error)) {
+        throw error;
+      }
+      state.tools = [];
+      console.warn(`Failed to list tools for ${serverId}:`, error);
+    }
 
-      // Discover resources
+    // Discover resources
+    try {
       const resourcesResult = await client.listResources();
       state.resources = resourcesResult.resources.map((resource) => ({
         uri: resource.uri,
@@ -307,8 +327,16 @@ export class MCPClientManager {
       for (const resource of state.resources) {
         this.emit('resource:discovered', serverId, resource);
       }
+    } catch (error) {
+      if (this.isConnectionClosedError(error)) {
+        throw error;
+      }
+      state.resources = [];
+      console.warn(`Failed to list resources for ${serverId}:`, error);
+    }
 
-      // Discover prompts
+    // Discover prompts
+    try {
       const promptsResult = await client.listPrompts();
       state.prompts = promptsResult.prompts.map((prompt) => ({
         name: prompt.name,
@@ -321,8 +349,24 @@ export class MCPClientManager {
         this.emit('prompt:discovered', serverId, prompt);
       }
     } catch (error) {
-      console.error(`Failed to discover capabilities for ${serverId}:`, error);
+      if (this.isConnectionClosedError(error)) {
+        throw error;
+      }
+      state.prompts = [];
+      console.warn(`Failed to list prompts for ${serverId}:`, error);
     }
+  }
+
+  private isConnectionClosedError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+    return (
+      message.includes('connection closed') ||
+      message.includes('socket hang up') ||
+      message.includes('econnreset') ||
+      message.includes('stream closed') ||
+      message.includes('broken pipe') ||
+      message.includes('-32000')
+    );
   }
 
   private emit<T>(type: MCPEventType, serverId: string, payload: T): void {

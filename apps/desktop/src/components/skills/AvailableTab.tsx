@@ -12,12 +12,21 @@ export function AvailableTab() {
     selectSkill,
     installSkill,
     enableSkill,
+    setActiveTab,
   } = useSkillStore();
 
   const { installedSkillConfigs } = useSettingsStore();
   const installedIds = new Set(installedSkillConfigs.map((c) => c.id));
 
   const filteredSkills = getFilteredSkills();
+
+  const handleInstall = async (skillId: string) => {
+    const installedSkillId = await installSkill(skillId);
+    if (installedSkillId) {
+      setActiveTab('installed');
+      selectSkill(installedSkillId);
+    }
+  };
 
   if (isDiscovering) {
     return (
@@ -36,7 +45,7 @@ export function AvailableTab() {
         installedIds={installedIds}
         installingIds={isInstalling}
         onSelect={selectSkill}
-        onInstall={installSkill}
+        onInstall={handleInstall}
         onEnable={enableSkill}
       />
     </div>
