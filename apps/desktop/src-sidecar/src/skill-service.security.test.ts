@@ -68,4 +68,59 @@ describe('skill-service signed pack validation', () => {
     const managedDiscovered = await service.discoverFromDirectory(path.join(appDataDir, 'skills'), 'managed', 2);
     expect(managedDiscovered.some((skill) => skill.frontmatter.name === 'signed-on-install-skill')).toBe(true);
   });
+
+  it('repairs legacy unsigned managed pack during install', async () => {
+    const appDataDir = createTempDir('cowork-skills-appdata-');
+    const managedDir = path.join(appDataDir, 'skills');
+    const bundledDir = createTempDir('cowork-skills-bundled-');
+
+    await writeSkillMarkdown(path.join(managedDir, 'legacy-skill'), 'legacy-skill');
+    await writeSkillMarkdown(path.join(bundledDir, 'legacy-skill'), 'legacy-skill');
+
+    const service = new SkillService(appDataDir);
+    service.setBundledDir(bundledDir);
+
+    const discovered = await service.discoverAll();
+    const bundledSkill = discovered.find((skill) => skill.id === 'bundled:legacy-skill');
+    expect(bundledSkill).toBeDefined();
+
+    await service.installSkill(bundledSkill!.id);
+
+    const signaturePath = path.join(managedDir, 'legacy-skill', 'SIGNATURE.json');
+    expect(fs.existsSync(signaturePath)).toBe(true);
+
+    const managedDiscovered = await service.discoverFromDirectory(managedDir, 'managed', 2);
+    expect(managedDiscovered.some((skill) => skill.frontmatter.name === 'legacy-skill')).toBe(true);
+  });
+
+  it('does not overwrite a tampered managed pack signature during install', async () => {
+    const appDataDir = createTempDir('cowork-skills-appdata-');
+    const managedDir = path.join(appDataDir, 'skills');
+    const bundledDir = createTempDir('cowork-skills-bundled-');
+    const skillDir = path.join(managedDir, 'tampered-skill');
+
+    await writeSkillMarkdown(skillDir, 'tampered-skill');
+    await writeSkillMarkdown(path.join(bundledDir, 'tampered-skill'), 'tampered-skill');
+    await writeFile(
+      path.join(skillDir, 'SIGNATURE.json'),
+      JSON.stringify({
+        version: 1,
+        algorithm: 'sha256',
+        digest: 'not-a-real-digest',
+        subject: 'tampered-skill',
+        signer: 'test',
+        signedAt: Date.now(),
+      }),
+      'utf-8'
+    );
+
+    const service = new SkillService(appDataDir);
+    service.setBundledDir(bundledDir);
+
+    const discovered = await service.discoverAll();
+    const bundledSkill = discovered.find((skill) => skill.id === 'bundled:tampered-skill');
+    expect(bundledSkill).toBeDefined();
+
+    await expect(service.installSkill(bundledSkill!.id)).rejects.toThrow(/invalid or tampered/i);
+  });
 });

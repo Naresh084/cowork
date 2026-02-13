@@ -81,26 +81,12 @@ export class IntegrationBridgeService {
 
       // Auto-reconnect previously enabled platforms.
       const enabled = this.store.getEnabledPlatforms();
-      for (const platformConfig of enabled) {
-        try {
-          process.stderr.write(
-            `[integration] Auto-reconnecting ${platformConfig.platform}...\n`,
-          );
-          await this.connect(platformConfig.platform, platformConfig.config);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          process.stderr.write(
-            `[integration] Auto-reconnect failed for ${platformConfig.platform}: ${msg}\n`,
-          );
-          eventEmitter.error(
-            undefined,
-            `Auto-reconnect failed for ${platformConfig.platform}: ${msg}`,
-            'INTEGRATION_RECONNECT_ERROR',
-          );
-        }
-      }
-
       this.initialized = true;
+      // Keep startup fast: reconnect in background so one slow platform cannot block
+      // app initialization and discovery surfaces (skills/commands/subagents).
+      if (enabled.length > 0) {
+        void this.autoReconnectEnabledPlatforms(enabled);
+      }
       process.stderr.write(
         `[integration] Bridge initialized. ${enabled.length} platform(s) configured.\n`,
       );
@@ -109,6 +95,29 @@ export class IntegrationBridgeService {
     });
 
     await this.initializePromise;
+  }
+
+  private async autoReconnectEnabledPlatforms(
+    enabled: Array<{ platform: PlatformType; config: Record<string, unknown> }>,
+  ): Promise<void> {
+    for (const platformConfig of enabled) {
+      try {
+        process.stderr.write(
+          `[integration] Auto-reconnecting ${platformConfig.platform}...\n`,
+        );
+        await this.connect(platformConfig.platform, platformConfig.config);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Auto-reconnect failed for ${platformConfig.platform}: ${msg}\n`,
+        );
+        eventEmitter.error(
+          undefined,
+          `Auto-reconnect failed for ${platformConfig.platform}: ${msg}`,
+          'INTEGRATION_RECONNECT_ERROR',
+        );
+      }
+    }
   }
 
   /**

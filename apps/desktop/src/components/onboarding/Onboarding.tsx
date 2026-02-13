@@ -18,7 +18,7 @@ import {
   useAuthStore,
   type ProviderId,
 } from '@/stores/auth-store';
-import { resolveActiveSoul, useSettingsStore } from '@/stores/settings-store';
+import { resolveActiveSoul, useSettingsStore, type ModelInfo } from '@/stores/settings-store';
 import { useHelpStore } from '@/stores/help-store';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { BrandMark } from '../icons/BrandMark';
@@ -52,6 +52,15 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
 
 const FAST_STEPS = ['Welcome', 'Core Setup', 'Quick Start', 'Review'];
 const DEEP_STEPS = ['Welcome', 'Core Setup', 'Media Setup', 'Integrations', 'Review'];
+const DEFAULT_CHAT_MODEL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
+  google: 'gemini-3-flash-preview',
+  openai: 'gpt-5.2',
+  anthropic: 'claude-opus-4-6',
+  openrouter: 'openai/gpt-5.2',
+  moonshot: 'kimi-k2-thinking',
+  glm: 'glm-4.7',
+  deepseek: 'deepseek-chat',
+};
 
 export function Onboarding() {
   const {
@@ -131,10 +140,23 @@ export function Onboarding() {
   const [isRunningChecks, setIsRunningChecks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingDraftModels, setIsLoadingDraftModels] = useState(false);
+  const [draftModelsByProvider, setDraftModelsByProvider] = useState<Partial<Record<ProviderId, ModelInfo[]>>>({});
+  const needsOnlyName = isAuthenticated && !existingUserName;
+
+  const getRecommendedChatModel = (providerId: ProviderId): string => {
+    return DEFAULT_CHAT_MODEL_BY_PROVIDER[providerId] || '';
+  };
 
   const modelsForProvider = useMemo(
-    () => availableModelsByProvider[provider] || [],
-    [availableModelsByProvider, provider],
+    () => {
+      const draftModels = draftModelsByProvider[provider];
+      if (draftModels && draftModels.length > 0) {
+        return draftModels;
+      }
+      return availableModelsByProvider[provider] || [];
+    },
+    [availableModelsByProvider, draftModelsByProvider, provider],
   );
 
   useEffect(() => {
@@ -149,6 +171,71 @@ export function Onboarding() {
   }, [provider, providerApiKeys, fetchProviderModels]);
 
   useEffect(() => {
+    if (needsOnlyName) {
+      return;
+    }
+
+    const baseEditable = BASE_URL_EDITABLE_PROVIDERS.includes(provider);
+    const trimmedProviderKey = providerKey.trim();
+    if (provider !== 'lmstudio' && trimmedProviderKey.length < 12) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        setIsLoadingDraftModels(true);
+        try {
+          const models = await invoke<Array<{
+            id: string;
+            name: string;
+            description: string;
+            input_token_limit: number;
+            output_token_limit: number;
+          }>>('fetch_provider_models', {
+            providerId: provider,
+            apiKey: provider === 'lmstudio' ? '' : trimmedProviderKey,
+            baseUrl: baseEditable && baseUrl.trim() ? baseUrl.trim() : null,
+          });
+
+          if (cancelled) return;
+          const mapped: ModelInfo[] = models.map((model) => ({
+            id: model.id,
+            name: model.name,
+            description: model.description,
+            inputTokenLimit: model.input_token_limit,
+            outputTokenLimit: model.output_token_limit,
+          }));
+          setDraftModelsByProvider((prev) => ({ ...prev, [provider]: mapped }));
+          if (!selectedModel.trim() && !customModel.trim() && mapped[0]?.id) {
+            setSelectedModel(mapped[0].id);
+          }
+        } catch {
+          if (!cancelled) {
+            setDraftModelsByProvider((prev) => ({ ...prev, [provider]: [] }));
+          }
+        } finally {
+          if (!cancelled) {
+            setIsLoadingDraftModels(false);
+          }
+        }
+      })();
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    baseUrl,
+    customModel,
+    needsOnlyName,
+    provider,
+    providerKey,
+    selectedModel,
+  ]);
+
+  useEffect(() => {
     const totalSteps = setupMode === 'deep' ? DEEP_STEPS.length : FAST_STEPS.length;
     if (currentStep > totalSteps - 1) {
       setCurrentStep(totalSteps - 1);
@@ -160,17 +247,25 @@ export function Onboarding() {
   }, [refreshCapabilitySnapshot]);
 
   const baseUrlEditable = BASE_URL_EDITABLE_PROVIDERS.includes(provider);
-  const needsOnlyName = isAuthenticated && !existingUserName;
   const stepLabels = setupMode === 'deep' ? DEEP_STEPS : FAST_STEPS;
   const totalSteps = stepLabels.length;
   const isFinalStep = currentStep === totalSteps - 1;
+  const resolveModelToUse = (): string => {
+    const fromInput = customModel.trim() || selectedModel.trim();
+    if (fromInput) return fromInput;
+    if (modelsForProvider[0]?.id) return modelsForProvider[0].id;
+    return getRecommendedChatModel(provider);
+  };
   const hasBlockingEnvironmentIssues = environmentChecks.some(
     (check) => check.blocking && check.status === 'fail',
   );
 
   const applyRecommendedDefaults = () => {
-    if (!selectedModel.trim() && !customModel.trim() && modelsForProvider[0]?.id) {
-      setSelectedModel(modelsForProvider[0].id);
+    if (!selectedModel.trim() && !customModel.trim()) {
+      const recommended = modelsForProvider[0]?.id || getRecommendedChatModel(provider);
+      if (recommended) {
+        setSelectedModel(recommended);
+      }
     }
 
     if (provider === 'openai') {
@@ -193,7 +288,7 @@ export function Onboarding() {
   const runEnvironmentChecks = async (): Promise<EnvironmentHealthCheck[]> => {
     setIsRunningChecks(true);
     const checks: EnvironmentHealthCheck[] = [];
-    const modelToUse = customModel.trim() || selectedModel.trim();
+    const modelToUse = resolveModelToUse();
 
     let runtimeReady = false;
     try {
@@ -321,9 +416,9 @@ export function Onboarding() {
         return false;
       }
 
-      const modelToSave = customModel.trim() || selectedModel.trim();
-      if (!modelToSave) {
-        setError('Select a model or enter a custom model ID');
+      const modelToSave = resolveModelToUse();
+      if (provider === 'lmstudio' && !modelToSave) {
+        setError('Enter a model ID for LM Studio or start your local server to load models.');
         return false;
       }
     }
@@ -373,7 +468,7 @@ export function Onboarding() {
       }
       await fetchProviderModels(provider);
 
-      const modelToSave = customModel.trim() || selectedModel.trim();
+      const modelToSave = resolveModelToUse();
       if (customModel.trim()) {
         addCustomModelForProvider(provider, customModel.trim());
       }
@@ -592,23 +687,39 @@ export function Onboarding() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-white/75">Chat Model</label>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:ring-2 focus:ring-[#1D4ED8]/35"
-                >
-                  <option value="">Select model</option>
-                  {modelsForProvider.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name || model.id}
-                    </option>
-                  ))}
-                </select>
+                {modelsForProvider.length > 0 ? (
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:ring-2 focus:ring-[#1D4ED8]/35"
+                  >
+                    <option value="">Select model</option>
+                    {modelsForProvider.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name || model.id}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="rounded-xl border border-white/10 bg-[#0A1021]/80 px-4 py-3 text-xs text-white/60">
+                    {isLoadingDraftModels ? (
+                      'Loading models...'
+                    ) : (
+                      <>
+                        Models are not loaded yet. Setup will use
+                        <span className="ml-1 font-mono text-white/80">
+                          {getRecommendedChatModel(provider) || 'your custom model'}
+                        </span>
+                        {' '}unless you enter a custom model below.
+                      </>
+                    )}
+                  </div>
+                )}
                 <input
                   type="text"
                   value={customModel}
                   onChange={(e) => setCustomModel(e.target.value)}
-                  placeholder="Or enter custom model ID"
+                  placeholder="Optional: enter custom model ID"
                   className="mt-2 w-full rounded-xl border bg-[#0A1021]/80 py-3 px-4 text-sm text-white placeholder:text-white/35 border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35"
                 />
               </div>
@@ -637,7 +748,7 @@ export function Onboarding() {
     if (setupMode === 'deep' && currentStep === 2) {
       return (
         <div className="space-y-4" data-tour-id="onboarding-media-block">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-2 block text-sm font-medium text-white/75">Image backend</label>
               <select
@@ -689,7 +800,7 @@ export function Onboarding() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          <div className="grid grid-cols-1 gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-4 sm:grid-cols-2">
             <input
               type="text"
               value={googleImageModel}
@@ -786,7 +897,7 @@ export function Onboarding() {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
               type="password"
               value={exaKeyDraft}
@@ -836,7 +947,17 @@ export function Onboarding() {
             </p>
           </div>
 
-          <CapabilityMatrix compact />
+          <details className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+            <summary className="cursor-pointer list-none text-sm font-medium text-white/85">
+              Advanced capability matrix
+            </summary>
+            <p className="mt-1 text-xs text-white/50">
+              Expand for a full policy and tool readiness checklist.
+            </p>
+            <div className="mt-3">
+              <CapabilityMatrix compact />
+            </div>
+          </details>
         </div>
       );
     }
@@ -848,7 +969,7 @@ export function Onboarding() {
           <div className="mt-2 space-y-1.5 text-xs text-white/60">
             <p>Name: <span className="text-white/85">{userName || 'Not set'}</span></p>
             <p>Provider: <span className="text-white/85">{PROVIDER_LABELS[provider]}</span></p>
-            <p>Model: <span className="font-mono text-white/85">{customModel.trim() || selectedModel || 'Not set'}</span></p>
+            <p>Model: <span className="font-mono text-white/85">{resolveModelToUse() || 'Not set'}</span></p>
             <p>Image backend: <span className="text-white/85">{imageBackend}</span></p>
             <p>Video backend: <span className="text-white/85">{videoBackend}</span></p>
             <p>Search fallback: <span className="text-white/85">{externalSearchDraft}</span></p>
@@ -914,7 +1035,17 @@ export function Onboarding() {
           </div>
         </div>
 
-        <CapabilityMatrix compact />
+        <details className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+          <summary className="cursor-pointer list-none text-sm font-medium text-white/85">
+            Advanced capability matrix
+          </summary>
+          <p className="mt-1 text-xs text-white/50">
+            Expand for full capability and policy coverage before finalizing.
+          </p>
+          <div className="mt-3">
+            <CapabilityMatrix compact />
+          </div>
+        </details>
 
         <div className="rounded-xl border border-[#1D4ED8]/20 bg-[#1D4ED8]/10 p-4">
           <p className="text-xs text-[#93C5FD]">
@@ -939,15 +1070,15 @@ export function Onboarding() {
           <img src={onboardingHero} alt="Cowork onboarding visual" className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#060A15]/55 via-[#060A15]/25 to-[#060A15]/70" />
 
-          <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-14">
+          <div className="relative z-10 flex h-full flex-col justify-between p-8 xl:p-12">
             <div className="inline-flex items-center gap-3 w-fit">
               <BrandMark className="h-6 w-6" />
               <span className="text-sm font-semibold tracking-wide text-white/90">Cowork</span>
             </div>
 
-            <div className="max-w-xl space-y-8">
+            <div className="max-w-xl space-y-6">
               <div className="space-y-4">
-                <h1 className="text-4xl font-semibold leading-tight text-white xl:text-5xl">
+                <h1 className="text-4xl font-semibold leading-tight text-white xl:text-[2.8rem]">
                   Guided setup for provider, automation, tools, and integrations.
                 </h1>
                 <p className="max-w-lg text-sm leading-relaxed text-white/75 xl:text-base">
@@ -969,17 +1100,17 @@ export function Onboarding() {
           </div>
         </motion.aside>
 
-        <section className="relative flex h-full items-center justify-center px-6 py-8 sm:px-10 lg:px-14 overflow-y-auto">
+        <section className="relative flex h-full items-start justify-center overflow-hidden px-4 py-4 sm:px-8 sm:py-6 lg:px-12 lg:py-8">
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className="relative z-10 w-full max-w-xl py-6"
+            className="relative z-10 flex h-full min-h-0 w-full max-w-2xl flex-col rounded-2xl border border-white/10 bg-[#080F22]/72 p-4 shadow-[0_20px_70px_rgba(3,8,24,0.55)] backdrop-blur-xl sm:p-5"
           >
             <div className="space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-3xl font-semibold text-white">Welcome to Cowork</h2>
+                  <h2 className="text-2xl font-semibold text-white sm:text-3xl">Welcome to Cowork</h2>
                   <p className="text-sm leading-relaxed text-white/65">
                     {needsOnlyName
                       ? "Let's personalize your workspace and confirm your runtime setup."
@@ -1001,13 +1132,14 @@ export function Onboarding() {
                     className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs text-white/75 hover:bg-white/[0.05]"
                   >
                     <Sparkles className="h-3.5 w-3.5" />
-                    Start Guided Tour
+                    <span className="hidden sm:inline">Start Guided Tour</span>
+                    <span className="sm:hidden">Tour</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+            <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs text-white/55">Step {currentStep + 1} of {totalSteps}</p>
                 <p className="text-xs text-white/45">{stepLabels[currentStep]}</p>
@@ -1026,17 +1158,19 @@ export function Onboarding() {
               </div>
             </div>
 
-            <div className="mt-5 space-y-4">
-              {renderStepContent()}
+            <div className="mt-4 flex min-h-0 flex-1 flex-col">
+              <div className="space-y-4 overflow-y-auto pr-1">
+                {renderStepContent()}
 
-              {error ? (
-                <div className="flex items-start gap-2 rounded-xl border border-[#FF5449]/30 bg-[#FF5449]/10 px-3.5 py-3 text-sm text-[#FF9A93]">
-                  <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
-                  <span>{error}</span>
-                </div>
-              ) : null}
+                {error ? (
+                  <div className="flex items-start gap-2 rounded-xl border border-[#FF5449]/30 bg-[#FF5449]/10 px-3.5 py-3 text-sm text-[#FF9A93]">
+                    <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                ) : null}
+              </div>
 
-              <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="mt-4 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -1052,7 +1186,7 @@ export function Onboarding() {
                     <ArrowLeft className="h-4 w-4" />
                     Back
                   </button>
-                  {!isFinalStep ? (
+                  {!isFinalStep && currentStep !== 1 ? (
                     <button
                       type="button"
                       onClick={handleSkip}

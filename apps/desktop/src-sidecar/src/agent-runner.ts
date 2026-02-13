@@ -3204,13 +3204,13 @@ export class AgentRunner {
 
     const providerFallbackModel: Partial<Record<ProviderId, string>> = {
       google: 'gemini-3-flash-preview',
-      openai: 'gpt-4o-mini',
-      anthropic: 'claude-3-5-haiku-latest',
-      openrouter: 'openai/gpt-4o-mini',
-      moonshot: 'moonshot-v1-8k',
-      glm: 'glm-4.5-flash',
+      openai: 'gpt-5.2',
+      anthropic: 'claude-opus-4-6',
+      openrouter: 'openai/gpt-5.2',
+      moonshot: 'kimi-k2-thinking',
+      glm: 'glm-4.7',
       deepseek: 'deepseek-chat',
-      lmstudio: 'lm-studio',
+      lmstudio: 'local-model',
     };
 
     // Use provided model or fall back to default

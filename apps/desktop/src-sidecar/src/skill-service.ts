@@ -353,7 +353,21 @@ export class SkillService {
     // Check if already installed
     const targetDir = join(this.managedSkillsDir, skill.frontmatter.name);
     if (existsSync(targetDir)) {
-      throw new Error(`Skill already installed: ${skill.frontmatter.name}`);
+      const existingStatus = await this.reconcileExistingManagedInstall(
+        targetDir,
+        skill.frontmatter.name,
+      );
+      if (existingStatus === 'valid' || existingStatus === 'repaired') {
+        // Idempotent install: skill is already installed, or was healed from a legacy
+        // unsigned state created by older app versions.
+        this.clearCache();
+        return;
+      }
+
+      throw new Error(
+        `Existing managed skill "${skill.frontmatter.name}" is invalid or tampered. ` +
+        'Remove it from ~/.cowork/skills and retry installation.',
+      );
     }
 
     // Ensure managed directory exists
@@ -368,8 +382,7 @@ export class SkillService {
     // The frontend should notify the user about this
 
     // Clear cache to force re-discovery
-    this.skillCache.clear();
-    this.contentCache.clear();
+    this.clearCache();
   }
 
   /**
@@ -604,6 +617,36 @@ ${skillContents.join('\n\n---\n\n')}
       return false;
     }
     return sourceType === 'managed';
+  }
+
+  private async reconcileExistingManagedInstall(
+    skillDir: string,
+    expectedName: string,
+  ): Promise<'valid' | 'repaired' | 'invalid'> {
+    const skillMdPath = join(skillDir, SKILL_MARKDOWN_FILE);
+    if (!existsSync(skillMdPath)) {
+      return 'invalid';
+    }
+
+    try {
+      const content = await readFile(skillMdPath, 'utf-8');
+      const frontmatter = parseFrontmatter(content);
+      if (!frontmatter || frontmatter.name !== expectedName) {
+        return 'invalid';
+      }
+    } catch {
+      return 'invalid';
+    }
+
+    const signaturePath = join(skillDir, PACK_SIGNATURE_FILE);
+    if (existsSync(signaturePath)) {
+      const valid = await this.validatePackSignature(skillDir, expectedName);
+      return valid ? 'valid' : 'invalid';
+    }
+
+    // Legacy install path: older versions created managed skills without signature.
+    await this.writePackSignature(skillDir, expectedName);
+    return 'repaired';
   }
 
   private async computePackDigest(skillDir: string): Promise<string> {

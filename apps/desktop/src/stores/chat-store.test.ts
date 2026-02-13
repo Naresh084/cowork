@@ -73,6 +73,23 @@ describe('chat-store', () => {
       await promise;
     });
 
+    it('should not add optimistic user chatItem when session is already busy', async () => {
+      setMockInvokeResponse('agent_send_message', undefined);
+      useChatStore.getState().ensureSession('session-1');
+      useChatStore.getState().setStreaming('session-1', true);
+
+      await useChatStore.getState().sendMessage('session-1', 'Queued while busy');
+
+      const state = useChatStore.getState().getSessionState('session-1');
+      const userItems = state.chatItems.filter(ci => ci.kind === 'user_message');
+      expect(userItems).toHaveLength(0);
+      expect(invoke).toHaveBeenCalledWith('agent_send_message', {
+        sessionId: 'session-1',
+        content: 'Queued while busy',
+        attachments: undefined,
+      });
+    });
+
     it('should handle send errors', async () => {
       setMockInvokeResponse('agent_send_message', () => {
         throw new Error('Network error');
@@ -320,6 +337,37 @@ describe('chat-store', () => {
   });
 
   describe('durable pending-work persistence', () => {
+    it('should reconcile optimistic temp user items when matching queue updates arrive', () => {
+      useChatStore.getState().ensureSession('session-1');
+      useChatStore.getState().appendChatItem('session-1', {
+        id: 'temp-queued',
+        kind: 'user_message',
+        content: 'gagaga',
+        turnId: 'temp-queued',
+        timestamp: Date.now(),
+      } as any);
+
+      useChatStore.setState((state) => ({
+        ...state,
+        sessions: {
+          ...state.sessions,
+          'session-1': {
+            ...state.sessions['session-1'],
+            activeTurnId: 'temp-queued',
+          },
+        },
+      }));
+
+      useChatStore.getState().updateMessageQueue('session-1', [
+        { id: 'q-1', content: 'gagaga', queuedAt: Date.now() },
+      ]);
+
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.chatItems.filter((item) => item.kind === 'user_message')).toHaveLength(0);
+      expect(state.activeTurnId).toBeUndefined();
+      expect(state.messageQueue).toHaveLength(1);
+    });
+
     it('should build and hydrate a durable snapshot preserving queue and pending items', () => {
       useChatStore.getState().ensureSession('session-1');
       const now = Date.now();

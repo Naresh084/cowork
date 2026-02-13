@@ -9,22 +9,22 @@ export interface ProviderModelCatalog {
 
 const GOOGLE_CATALOG: ProviderModelCatalog = {
   provider: 'google',
-  lastVerifiedAt: '2026-02-06',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://ai.google.dev/gemini-api/docs/models',
   models: [
     {
-      id: 'gemini-2.5-flash',
-      name: 'Gemini 2.5 Flash',
-      description: 'Fast general-purpose model.',
+      id: 'gemini-3-flash-preview',
+      name: 'Gemini 3 Flash Preview',
+      description: 'Latest fast preview model.',
       provider: 'google',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming', 'web_search'],
       contextWindow: 1048576,
       maxTokens: 65536,
     },
     {
-      id: 'gemini-2.5-pro',
-      name: 'Gemini 2.5 Pro',
-      description: 'Reasoning-heavy flagship model.',
+      id: 'gemini-3-pro-preview',
+      name: 'Gemini 3 Pro Preview',
+      description: 'Latest reasoning-focused preview model.',
       provider: 'google',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming', 'web_search'],
       contextWindow: 1048576,
@@ -35,22 +35,22 @@ const GOOGLE_CATALOG: ProviderModelCatalog = {
 
 const OPENAI_CATALOG: ProviderModelCatalog = {
   provider: 'openai',
-  lastVerifiedAt: '2026-02-06',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://platform.openai.com/docs/models',
   models: [
     {
-      id: 'gpt-4.1',
-      name: 'GPT-4.1',
-      description: 'General-purpose flagship model.',
+      id: 'gpt-5.2',
+      name: 'GPT-5.2',
+      description: 'Latest GPT model.',
       provider: 'openai',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming', 'web_search'],
-      contextWindow: 1000000,
-      maxTokens: 32768,
+      contextWindow: 400000,
+      maxTokens: 128000,
     },
     {
-      id: 'gpt-4.1-mini',
-      name: 'GPT-4.1 mini',
-      description: 'Lower latency and cost.',
+      id: 'gpt-4.1',
+      name: 'GPT-4.1',
+      description: 'Broad compatibility fallback model.',
       provider: 'openai',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming', 'web_search'],
       contextWindow: 1000000,
@@ -61,22 +61,22 @@ const OPENAI_CATALOG: ProviderModelCatalog = {
 
 const ANTHROPIC_CATALOG: ProviderModelCatalog = {
   provider: 'anthropic',
-  lastVerifiedAt: '2026-02-06',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://docs.anthropic.com/en/docs/about-claude/models',
   models: [
     {
-      id: 'claude-sonnet-4-5',
-      name: 'Claude Sonnet 4.5',
-      description: 'Balanced reasoning and speed.',
+      id: 'claude-opus-4-6',
+      name: 'Claude Opus 4.6',
+      description: 'Latest Claude flagship model.',
       provider: 'anthropic',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming'],
       contextWindow: 200000,
       maxTokens: 8192,
     },
     {
-      id: 'claude-opus-4-1',
-      name: 'Claude Opus 4.1',
-      description: 'Highest-quality reasoning model.',
+      id: 'claude-sonnet-4-5',
+      name: 'Claude Sonnet 4.5',
+      description: 'Balanced reasoning and speed.',
       provider: 'anthropic',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming'],
       contextWindow: 200000,
@@ -87,18 +87,18 @@ const ANTHROPIC_CATALOG: ProviderModelCatalog = {
 
 const OPENROUTER_CATALOG: ProviderModelCatalog = {
   provider: 'openrouter',
-  lastVerifiedAt: '2026-02-06',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://openrouter.ai/models',
   models: [
     {
-      id: 'openai/gpt-4.1',
-      name: 'OpenAI GPT-4.1 (OpenRouter)',
+      id: 'openai/gpt-5.2',
+      name: 'OpenAI GPT-5.2 (OpenRouter)',
       provider: 'openrouter',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming'],
     },
     {
-      id: 'anthropic/claude-sonnet-4.5',
-      name: 'Claude Sonnet 4.5 (OpenRouter)',
+      id: 'anthropic/claude-opus-4.6',
+      name: 'Claude Opus 4.6 (OpenRouter)',
       provider: 'openrouter',
       capabilities: ['text_generation', 'code_generation', 'vision', 'function_calling', 'streaming'],
     },
@@ -107,9 +107,16 @@ const OPENROUTER_CATALOG: ProviderModelCatalog = {
 
 const MOONSHOT_CATALOG: ProviderModelCatalog = {
   provider: 'moonshot',
-  lastVerifiedAt: '2026-02-07',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://platform.moonshot.ai/docs',
   models: [
+    {
+      id: 'kimi-k2-thinking',
+      name: 'Kimi K2 Thinking',
+      provider: 'moonshot',
+      capabilities: ['text_generation', 'code_generation', 'function_calling', 'streaming', 'web_search', 'thinking'],
+      contextWindow: 262144,
+    },
     {
       id: 'kimi-k2.5',
       name: 'Kimi K2.5',
@@ -139,13 +146,6 @@ const MOONSHOT_CATALOG: ProviderModelCatalog = {
       contextWindow: 262144,
     },
     {
-      id: 'kimi-k2-thinking',
-      name: 'Kimi K2 Thinking',
-      provider: 'moonshot',
-      capabilities: ['text_generation', 'code_generation', 'function_calling', 'streaming', 'web_search', 'thinking'],
-      contextWindow: 262144,
-    },
-    {
       id: 'kimi-k2-thinking-turbo',
       name: 'Kimi K2 Thinking Turbo',
       provider: 'moonshot',
@@ -157,7 +157,7 @@ const MOONSHOT_CATALOG: ProviderModelCatalog = {
 
 const GLM_CATALOG: ProviderModelCatalog = {
   provider: 'glm',
-  lastVerifiedAt: '2026-02-07',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://docs.z.ai',
   models: [
     {
@@ -285,12 +285,13 @@ const GLM_CATALOG: ProviderModelCatalog = {
 
 const DEEPSEEK_CATALOG: ProviderModelCatalog = {
   provider: 'deepseek',
-  lastVerifiedAt: '2026-02-07',
+  lastVerifiedAt: '2026-02-13',
   source: 'https://api-docs.deepseek.com',
   models: [
     {
       id: 'deepseek-chat',
       name: 'DeepSeek Chat',
+      description: 'DeepSeek V3.2 non-thinking mode.',
       provider: 'deepseek',
       capabilities: ['text_generation', 'code_generation', 'function_calling', 'streaming'],
       contextWindow: 131072,
@@ -299,6 +300,7 @@ const DEEPSEEK_CATALOG: ProviderModelCatalog = {
     {
       id: 'deepseek-reasoner',
       name: 'DeepSeek Reasoner',
+      description: 'DeepSeek V3.2 thinking mode.',
       provider: 'deepseek',
       capabilities: ['text_generation', 'code_generation', 'function_calling', 'streaming', 'thinking'],
       contextWindow: 131072,

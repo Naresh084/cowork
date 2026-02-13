@@ -145,7 +145,7 @@ interface ReplayResponse {
 }
 
 const SESSION_RELOAD_COOLDOWN_MS = 5_000;
-const STREAM_STALL_TIMEOUT_MS = 20_000;
+const STREAM_STALL_TIMEOUT_MS = 90_000;
 
 /**
  * Hook to subscribe to agent events for the current session
@@ -224,6 +224,11 @@ export function useAgentEvents(sessionId: string | null): void {
 
     const scheduleStreamStallCheck = (targetSessionId: string) => {
       clearStreamStallTimer(targetSessionId);
+      const chat = chatStoreRef.current;
+      const sessionState = chat.getSessionState(targetSessionId);
+      if (!sessionState.isStreaming) {
+        return;
+      }
       streamStallTimersRef.current[targetSessionId] = window.setTimeout(() => {
         const chat = chatStoreRef.current;
         const sessionState = chat.getSessionState(targetSessionId);
@@ -231,8 +236,23 @@ export function useAgentEvents(sessionId: string | null): void {
           return;
         }
 
-        const lastActivityAt = sessionState.streamStall.lastActivityAt ?? Date.now();
-        if (Date.now() - lastActivityAt < STREAM_STALL_TIMEOUT_MS - 250) {
+        const now = Date.now();
+        const hasPendingInteractiveWait =
+          sessionState.pendingPermissions.length > 0 || sessionState.pendingQuestions.length > 0;
+        const hasActiveTool = sessionState.currentTool?.status === 'running';
+        const browserStatus = sessionState.browserRun.status;
+        const hasActiveBrowserRun = browserStatus === 'running' || browserStatus === 'recovered';
+
+        // Long-running tools, explicit approval waits, and browser runs can have sparse stream chunks.
+        // Do not mark these sessions stalled just because text chunks are quiet.
+        if (hasPendingInteractiveWait || hasActiveTool || hasActiveBrowserRun) {
+          chat.markStreamActivity(targetSessionId, now);
+          scheduleStreamStallCheck(targetSessionId);
+          return;
+        }
+
+        const lastActivityAt = sessionState.streamStall.lastActivityAt ?? now;
+        if (now - lastActivityAt < STREAM_STALL_TIMEOUT_MS - 250) {
           scheduleStreamStallCheck(targetSessionId);
           return;
         }
@@ -631,6 +651,8 @@ export function useAgentEvents(sessionId: string | null): void {
 
         // Tool execution events
         case 'tool:start': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           const parentToolId = event.parentToolId || event.toolCall.parentToolId;
           chat.setStreamingTool(eventSessionId, {
             id: event.toolCall.id,
@@ -668,6 +690,8 @@ export function useAgentEvents(sessionId: string | null): void {
         }
 
         case 'tool:result': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           const result = event.result;
           const toolCallId = event.toolCallId || (result as { toolCallId?: string })?.toolCallId || '';
 
@@ -742,6 +766,8 @@ export function useAgentEvents(sessionId: string | null): void {
 
         // Permission events
         case 'permission:request': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           const requestAny = event.request as {
             createdAt?: number;
             timestamp?: number;
@@ -759,11 +785,15 @@ export function useAgentEvents(sessionId: string | null): void {
         }
 
         case 'permission:resolved':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.removePermissionRequest(eventSessionId, event.permissionId);
           break;
 
         // Question events (agent asking user questions)
         case 'question:ask':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.addQuestion(eventSessionId, {
             id: event.request.id,
             sessionId: eventSessionId,
@@ -781,6 +811,8 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'question:answered':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.removeQuestion(eventSessionId, event.questionId);
           break;
 
@@ -817,10 +849,14 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'research:progress':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           agent.setResearchProgress(eventSessionId, { status: event.status, progress: event.progress });
           break;
 
         case 'research:evidence':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.appendChatItem(eventSessionId, {
             id: `research-evidence-${event.timestamp}-${Math.max(0, event.totalSources)}`,
             kind: 'system_message',
@@ -833,6 +869,8 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'browser:progress':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.updateBrowserRunState(eventSessionId, {
             status: event.status === 'running' ? 'running' : event.status,
             step: event.step,
@@ -853,6 +891,8 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'browser:checkpoint':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.updateBrowserRunState(eventSessionId, {
             step: event.step,
             maxSteps: event.maxSteps,
@@ -874,6 +914,8 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'browser:blocker':
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           chat.updateBrowserRunState(eventSessionId, {
             status: 'blocked',
             step: event.step,
@@ -984,18 +1026,24 @@ export function useAgentEvents(sessionId: string | null): void {
         // ============================================================================
 
         case 'chat:item': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           // Append new chat item to the unified timeline
           chat.appendChatItem(eventSessionId, event.item);
           break;
         }
 
         case 'chat:update': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           // Update an existing chat item (e.g., status change)
           chat.updateChatItem(eventSessionId, event.itemId, event.updates);
           break;
         }
 
         case 'chat:items': {
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           // Batch set chat items (e.g., on session load)
           chat.setChatItems(eventSessionId, event.items);
           break;

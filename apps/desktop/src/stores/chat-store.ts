@@ -1150,6 +1150,11 @@ export const useChatStore = create<ChatState & ChatActions>()(
     attachments?: Attachment[]
   ) => {
     if (!sessionId) return;
+    const sessionSnapshot = get().sessions[sessionId] ?? createSessionState();
+    const likelyQueued =
+      sessionSnapshot.isStreaming ||
+      sessionSnapshot.pendingPermissions.length > 0 ||
+      sessionSnapshot.pendingQuestions.length > 0;
     let userContent: Message['content'] = content;
 
     if (attachments && attachments.length > 0) {
@@ -1221,37 +1226,48 @@ ${attachment.data}`,
 
     const tempId = `temp-${Date.now()}`;
 
-    // V2: Create UserMessageItem as the sole data entry
-    const userChatItem: ChatItem = {
-      id: tempId,
-      kind: 'user_message',
-      content: userContent,
-      turnId: tempId,
-      timestamp: Date.now(),
-      attachments: attachments?.map(a => ({
-        type: a.type,
-        name: a.name,
-        path: a.path,
-        mimeType: a.mimeType,
-        data: a.data,
-        size: a.size,
-      })),
-    };
+    if (!likelyQueued) {
+      // V2: Create UserMessageItem as the sole data entry
+      const userChatItem: ChatItem = {
+        id: tempId,
+        kind: 'user_message',
+        content: userContent,
+        turnId: tempId,
+        timestamp: Date.now(),
+        attachments: attachments?.map(a => ({
+          type: a.type,
+          name: a.name,
+          path: a.path,
+          mimeType: a.mimeType,
+          data: a.data,
+          size: a.size,
+        })),
+      };
 
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      chatItems: [...session.chatItems, userChatItem],
-      isStreaming: true,
-      isThinking: true,
-      thinkingStartedAt: Date.now(),
-      streamingContent: '',
-      error: null,
-      lastUserMessage: {
-        content,
-        attachments,
-      },
-      activeTurnId: tempId,
-    })));
+      set((state) => updateSession(state, sessionId, (session) => ({
+        ...session,
+        chatItems: [...session.chatItems, userChatItem],
+        isStreaming: true,
+        isThinking: true,
+        thinkingStartedAt: Date.now(),
+        streamingContent: '',
+        error: null,
+        lastUserMessage: {
+          content,
+          attachments,
+        },
+        activeTurnId: tempId,
+      })));
+    } else {
+      set((state) => updateSession(state, sessionId, (session) => ({
+        ...session,
+        error: null,
+        lastUserMessage: {
+          content,
+          attachments,
+        },
+      })));
+    }
 
     try {
       await invoke('agent_send_message', {
@@ -1630,10 +1646,59 @@ ${attachment.data}`,
   // Message Queue
   updateMessageQueue: (sessionId: string, queue: Array<{ id: string; content: string; queuedAt: number }>) => {
     if (!sessionId) return;
-    set((state) => updateSession(state, sessionId, (session) => ({
-      ...session,
-      messageQueue: queue,
-    })));
+    set((state) => updateSession(state, sessionId, (session) => {
+      const normalizedQueue = Array.isArray(queue) ? queue : [];
+      if (normalizedQueue.length === 0) {
+        return {
+          ...session,
+          messageQueue: normalizedQueue,
+        };
+      }
+
+      // Reconcile any optimistic temp user messages that were actually queued,
+      // so they are not rendered in both chat timeline and queue list.
+      const queuedContentCounts = new Map<string, number>();
+      for (const queued of normalizedQueue) {
+        const key = queued.content.trim();
+        if (!key) continue;
+        queuedContentCounts.set(key, (queuedContentCounts.get(key) || 0) + 1);
+      }
+
+      if (queuedContentCounts.size === 0) {
+        return {
+          ...session,
+          messageQueue: normalizedQueue,
+        };
+      }
+
+      const chatItems = [...session.chatItems];
+      const removedTurnIds = new Set<string>();
+      for (let i = chatItems.length - 1; i >= 0; i -= 1) {
+        const item = chatItems[i];
+        if (item.kind !== 'user_message' || !item.id.startsWith('temp-')) continue;
+        if (typeof item.content !== 'string') continue;
+        const key = item.content.trim();
+        if (!key) continue;
+        const count = queuedContentCounts.get(key) || 0;
+        if (count <= 0) continue;
+
+        queuedContentCounts.set(key, count - 1);
+        removedTurnIds.add(item.turnId || item.id);
+        chatItems.splice(i, 1);
+      }
+
+      const activeTurnId =
+        session.activeTurnId && removedTurnIds.has(session.activeTurnId)
+          ? undefined
+          : session.activeTurnId;
+
+      return {
+        ...session,
+        activeTurnId,
+        chatItems,
+        messageQueue: normalizedQueue,
+      };
+    }));
   },
 
   removeFromQueue: async (sessionId: string, messageId: string) => {

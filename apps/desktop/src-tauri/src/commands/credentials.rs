@@ -16,6 +16,13 @@ const LEGACY_CREDENTIALS_FILE: &str = "credentials.json";
 const ENCRYPTED_VAULT_FILE: &str = "credentials.vault.json";
 const CONNECTOR_SECRET_SERVICE: &str = "gemini-cowork.connector-secrets";
 const CONNECTOR_SECRET_ACCOUNT: &str = "sidecar-master-key";
+const CREDENTIAL_BACKEND_ENV_VAR: &str = "COWORK_CREDENTIAL_BACKEND";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CredentialBackend {
+    VaultOnly,
+    KeychainWithFallback,
+}
 
 #[derive(Serialize, Deserialize, Default)]
 struct PlaintextCredentialStore {
@@ -29,6 +36,28 @@ struct EncryptedCredentialStore {
 
 fn config_root() -> Result<PathBuf, String> {
     dirs::config_dir().ok_or("Could not determine config directory".to_string())
+}
+
+fn credential_backend() -> CredentialBackend {
+    match std::env::var(CREDENTIAL_BACKEND_ENV_VAR) {
+        Ok(value) => {
+            let normalized = value.trim().to_lowercase();
+            match normalized.as_str() {
+                "keychain" | "keychain_with_encrypted_fallback" => {
+                    CredentialBackend::KeychainWithFallback
+                }
+                _ => CredentialBackend::VaultOnly,
+            }
+        }
+        Err(_) => CredentialBackend::VaultOnly,
+    }
+}
+
+pub fn credential_backend_label() -> &'static str {
+    match credential_backend() {
+        CredentialBackend::VaultOnly => "encrypted_vault",
+        CredentialBackend::KeychainWithFallback => "keychain_with_encrypted_fallback",
+    }
 }
 
 fn app_dir_path() -> Result<PathBuf, String> {
@@ -225,10 +254,18 @@ fn migrate_plaintext_store(path: &PathBuf) -> Result<(), String> {
     }
 
     let store = parse_plaintext_store(path)?;
+    let backend = credential_backend();
     for (key, value) in store.credentials {
         if let Some((service, account)) = split_legacy_key(&key) {
-            if keychain_set(&service, &account, &value).is_err() {
-                fallback_set_secret(&service, &account, &value)?;
+            match backend {
+                CredentialBackend::VaultOnly => {
+                    fallback_set_secret(&service, &account, &value)?;
+                }
+                CredentialBackend::KeychainWithFallback => {
+                    if keychain_set(&service, &account, &value).is_err() {
+                        fallback_set_secret(&service, &account, &value)?;
+                    }
+                }
             }
         }
     }
@@ -257,40 +294,59 @@ pub fn credentials_migrate_on_startup() -> Result<(), String> {
 
 pub fn get_or_create_sidecar_connector_seed() -> Result<String, String> {
     migrate_plaintext_stores_if_needed()?;
+    let backend = credential_backend();
 
-    match keychain_get(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT) {
-        Ok(Some(seed)) => return Ok(seed),
-        Ok(None) | Err(_) => {}
-    }
+    match backend {
+        CredentialBackend::VaultOnly => {
+            if let Ok(Some(seed)) = fallback_get_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT)
+            {
+                return Ok(seed);
+            }
 
-    match fallback_get_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT) {
-        Ok(Some(seed)) => return Ok(seed),
-        Ok(None) | Err(_) => {}
-    }
-
-    let mut seed_bytes = [0_u8; 32];
-    OsRng.fill_bytes(&mut seed_bytes);
-    let seed = BASE64_STANDARD.encode(seed_bytes);
-
-    match keychain_set(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT, &seed) {
-        Ok(_) => {
-            let _ = fallback_delete_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT);
-            Ok(seed)
-        }
-        Err(_) => {
+            let mut seed_bytes = [0_u8; 32];
+            OsRng.fill_bytes(&mut seed_bytes);
+            let seed = BASE64_STANDARD.encode(seed_bytes);
             fallback_set_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT, &seed)?;
             Ok(seed)
+        }
+        CredentialBackend::KeychainWithFallback => {
+            match keychain_get(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT) {
+                Ok(Some(seed)) => return Ok(seed),
+                Ok(None) | Err(_) => {}
+            }
+
+            match fallback_get_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT) {
+                Ok(Some(seed)) => return Ok(seed),
+                Ok(None) | Err(_) => {}
+            }
+
+            let mut seed_bytes = [0_u8; 32];
+            OsRng.fill_bytes(&mut seed_bytes);
+            let seed = BASE64_STANDARD.encode(seed_bytes);
+
+            match keychain_set(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT, &seed) {
+                Ok(_) => {
+                    let _ = fallback_delete_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT);
+                    Ok(seed)
+                }
+                Err(_) => {
+                    fallback_set_secret(CONNECTOR_SECRET_SERVICE, CONNECTOR_SECRET_ACCOUNT, &seed)?;
+                    Ok(seed)
+                }
+            }
         }
     }
 }
 
 pub async fn credentials_get(service: String, account: String) -> Result<Option<String>, String> {
     migrate_plaintext_stores_if_needed()?;
-
-    match keychain_get(&service, &account) {
-        Ok(Some(value)) => Ok(Some(value)),
-        Ok(None) => fallback_get_secret(&service, &account),
-        Err(_) => fallback_get_secret(&service, &account),
+    match credential_backend() {
+        CredentialBackend::VaultOnly => fallback_get_secret(&service, &account),
+        CredentialBackend::KeychainWithFallback => match keychain_get(&service, &account) {
+            Ok(Some(value)) => Ok(Some(value)),
+            Ok(None) => fallback_get_secret(&service, &account),
+            Err(_) => fallback_get_secret(&service, &account),
+        },
     }
 }
 
@@ -300,29 +356,35 @@ pub async fn credentials_set(
     value: String,
 ) -> Result<(), String> {
     migrate_plaintext_stores_if_needed()?;
-
-    match keychain_set(&service, &account, &value) {
-        Ok(_) => {
-            let _ = fallback_delete_secret(&service, &account);
-            Ok(())
-        }
-        Err(_) => fallback_set_secret(&service, &account, &value),
+    match credential_backend() {
+        CredentialBackend::VaultOnly => fallback_set_secret(&service, &account, &value),
+        CredentialBackend::KeychainWithFallback => match keychain_set(&service, &account, &value) {
+            Ok(_) => {
+                let _ = fallback_delete_secret(&service, &account);
+                Ok(())
+            }
+            Err(_) => fallback_set_secret(&service, &account, &value),
+        },
     }
 }
 
 pub async fn credentials_delete(service: String, account: String) -> Result<(), String> {
     migrate_plaintext_stores_if_needed()?;
+    match credential_backend() {
+        CredentialBackend::VaultOnly => fallback_delete_secret(&service, &account),
+        CredentialBackend::KeychainWithFallback => {
+            let keychain_result = keychain_delete(&service, &account);
+            let fallback_result = fallback_delete_secret(&service, &account);
 
-    let keychain_result = keychain_delete(&service, &account);
-    let fallback_result = fallback_delete_secret(&service, &account);
-
-    match (keychain_result, fallback_result) {
-        (Ok(_), Ok(_)) => Ok(()),
-        (Ok(_), Err(_)) => Ok(()),
-        (Err(_), Ok(_)) => Ok(()),
-        (Err(keychain_error), Err(fallback_error)) => Err(format!(
-            "Failed to delete credential from keychain and fallback vault: {}; {}",
-            keychain_error, fallback_error
-        )),
+            match (keychain_result, fallback_result) {
+                (Ok(_), Ok(_)) => Ok(()),
+                (Ok(_), Err(_)) => Ok(()),
+                (Err(_), Ok(_)) => Ok(()),
+                (Err(keychain_error), Err(fallback_error)) => Err(format!(
+                    "Failed to delete credential from keychain and fallback vault: {}; {}",
+                    keychain_error, fallback_error
+                )),
+            }
+        }
     }
 }

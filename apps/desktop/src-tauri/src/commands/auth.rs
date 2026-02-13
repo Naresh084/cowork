@@ -93,37 +93,44 @@ fn curated_models(provider_id: &str) -> Vec<ModelInfo> {
     match provider_id {
         "google" => vec![
             ModelInfo {
-                id: "gemini-2.5-flash".to_string(),
-                name: "Gemini 2.5 Flash".to_string(),
-                description: "Fast general-purpose model".to_string(),
+                id: "gemini-3-flash-preview".to_string(),
+                name: "Gemini 3 Flash Preview".to_string(),
+                description: "Latest fast preview model".to_string(),
                 input_token_limit: 1_048_576,
                 output_token_limit: 65_536,
             },
             ModelInfo {
-                id: "gemini-2.5-pro".to_string(),
-                name: "Gemini 2.5 Pro".to_string(),
-                description: "Reasoning-heavy flagship model".to_string(),
+                id: "gemini-3-pro-preview".to_string(),
+                name: "Gemini 3 Pro Preview".to_string(),
+                description: "Latest reasoning-focused preview model".to_string(),
                 input_token_limit: 1_048_576,
                 output_token_limit: 65_536,
             },
         ],
         "openai" => vec![
             ModelInfo {
-                id: "gpt-4.1".to_string(),
-                name: "GPT-4.1".to_string(),
-                description: "General-purpose flagship model".to_string(),
-                input_token_limit: 1_000_000,
-                output_token_limit: 32_768,
+                id: "gpt-5.2".to_string(),
+                name: "GPT-5.2".to_string(),
+                description: "Latest GPT model".to_string(),
+                input_token_limit: 400_000,
+                output_token_limit: 128_000,
             },
             ModelInfo {
-                id: "gpt-4.1-mini".to_string(),
-                name: "GPT-4.1 mini".to_string(),
-                description: "Lower latency and cost".to_string(),
+                id: "gpt-4.1".to_string(),
+                name: "GPT-4.1".to_string(),
+                description: "Broad compatibility fallback model".to_string(),
                 input_token_limit: 1_000_000,
                 output_token_limit: 32_768,
             },
         ],
         "anthropic" => vec![
+            ModelInfo {
+                id: "claude-opus-4-6".to_string(),
+                name: "Claude Opus 4.6".to_string(),
+                description: "Latest Claude flagship model".to_string(),
+                input_token_limit: 200_000,
+                output_token_limit: 8_192,
+            },
             ModelInfo {
                 id: "claude-sonnet-4-5".to_string(),
                 name: "Claude Sonnet 4.5".to_string(),
@@ -131,25 +138,18 @@ fn curated_models(provider_id: &str) -> Vec<ModelInfo> {
                 input_token_limit: 200_000,
                 output_token_limit: 8_192,
             },
-            ModelInfo {
-                id: "claude-opus-4-1".to_string(),
-                name: "Claude Opus 4.1".to_string(),
-                description: "Highest-quality reasoning model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 8_192,
-            },
         ],
         "openrouter" => vec![
             ModelInfo {
-                id: "openai/gpt-4.1".to_string(),
-                name: "OpenAI GPT-4.1".to_string(),
+                id: "openai/gpt-5.2".to_string(),
+                name: "OpenAI GPT-5.2".to_string(),
                 description: "Via OpenRouter".to_string(),
                 input_token_limit: 0,
                 output_token_limit: 0,
             },
             ModelInfo {
-                id: "anthropic/claude-sonnet-4.5".to_string(),
-                name: "Claude Sonnet 4.5".to_string(),
+                id: "anthropic/claude-opus-4.6".to_string(),
+                name: "Claude Opus 4.6".to_string(),
                 description: "Via OpenRouter".to_string(),
                 input_token_limit: 0,
                 output_token_limit: 0,
@@ -157,16 +157,16 @@ fn curated_models(provider_id: &str) -> Vec<ModelInfo> {
         ],
         "moonshot" => vec![
             ModelInfo {
-                id: "kimi-k2.5".to_string(),
-                name: "Kimi K2.5".to_string(),
-                description: "Moonshot multimodal flagship model".to_string(),
+                id: "kimi-k2-thinking".to_string(),
+                name: "Kimi K2 Thinking".to_string(),
+                description: "Moonshot latest reasoning-focused K2 model".to_string(),
                 input_token_limit: 262_144,
                 output_token_limit: 0,
             },
             ModelInfo {
-                id: "kimi-k2-0905-preview".to_string(),
-                name: "Kimi K2 0905 Preview".to_string(),
-                description: "Moonshot latest K2 preview model".to_string(),
+                id: "kimi-k2.5".to_string(),
+                name: "Kimi K2.5".to_string(),
+                description: "Moonshot multimodal flagship model".to_string(),
                 input_token_limit: 262_144,
                 output_token_limit: 0,
             },
@@ -185,9 +185,9 @@ fn curated_models(provider_id: &str) -> Vec<ModelInfo> {
                 output_token_limit: 0,
             },
             ModelInfo {
-                id: "kimi-k2-thinking".to_string(),
-                name: "Kimi K2 Thinking".to_string(),
-                description: "Moonshot reasoning-optimized K2 model".to_string(),
+                id: "kimi-k2-0905-preview".to_string(),
+                name: "Kimi K2 0905 Preview".to_string(),
+                description: "Moonshot K2 preview model".to_string(),
                 input_token_limit: 262_144,
                 output_token_limit: 0,
             },
@@ -837,7 +837,7 @@ pub async fn auth_get_security_posture() -> Result<SecurityPostureStatus, String
     };
 
     Ok(SecurityPostureStatus {
-        credential_backend: "keychain_with_encrypted_fallback".to_string(),
+        credential_backend: credentials::credential_backend_label().to_string(),
         secure_seed_available,
         credentials_vault_present,
         connector_vault_present,

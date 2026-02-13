@@ -59,6 +59,16 @@ export function SecuritySettings() {
       (status.plaintextCredentialsPresent || status.plaintextConnectorSecretsPresent),
     [status]
   );
+  const seedSourceLabel = useMemo(() => {
+    if (!status) {
+      return 'unknown';
+    }
+    const backend = status.credentialBackend.toLowerCase();
+    if (backend.includes('keychain')) {
+      return status.secureSeedAvailable ? 'system secure-store backed' : 'local fallback';
+    }
+    return status.secureSeedAvailable ? 'encrypted vault backed' : 'local fallback';
+  }, [status]);
 
   return (
     <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
@@ -113,7 +123,7 @@ export function SecuritySettings() {
               {status.connectorVaultPresent ? 'Encrypted vault present' : 'Encrypted vault not yet created'}
             </p>
             <p className="mt-1 text-[11px] text-white/45">
-              Seed source: {status.secureSeedAvailable ? 'secure-store backed' : 'local fallback'}
+              Seed source: {seedSourceLabel}
             </p>
           </div>
 
