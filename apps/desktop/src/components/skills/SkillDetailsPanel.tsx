@@ -3,6 +3,7 @@ import { X, ExternalLink, Download, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSkillStore } from '../../stores/skill-store';
 import { SkillRequirements } from './SkillRequirements';
+import { SkillLifecycleBadges } from './SkillLifecycleBadges';
 
 interface SkillDetailsPanelProps {
   skillId: string;
@@ -18,6 +19,7 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
     installSkill,
     uninstallSkill,
     isSkillInstalled,
+    getSkillLifecycleInfo,
     setActiveTab,
     selectSkill,
   } = useSkillStore();
@@ -26,6 +28,7 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
   const eligibility = eligibilityMap.get(skillId);
   const isInstalled = isSkillInstalled(skillId);
   const isCurrentlyInstalling = isInstalling.has(skillId);
+  const lifecycleInfo = getSkillLifecycleInfo(skillId);
 
   // Check eligibility if not already checked
   useEffect(() => {
@@ -88,6 +91,12 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
         {/* Description */}
         <div>
           <p className="text-sm text-zinc-300">{description}</p>
+          <div className="mt-3">
+            <SkillLifecycleBadges info={lifecycleInfo} />
+          </div>
+          {lifecycleInfo?.verificationNotes && (
+            <p className="mt-2 text-xs text-zinc-400">{lifecycleInfo.verificationNotes}</p>
+          )}
         </div>
 
         {/* Action Button */}
@@ -171,6 +180,22 @@ export function SkillDetailsPanel({ skillId, onClose }: SkillDetailsPanelProps) 
               <dt className="text-zinc-500">Source</dt>
               <dd className="text-zinc-300 capitalize">{skill.source.type}</dd>
             </div>
+            {lifecycleInfo && (
+              <>
+                <div className="flex justify-between">
+                  <dt className="text-zinc-500">Lifecycle</dt>
+                  <dd className="text-zinc-300 capitalize">{lifecycleInfo.lifecycle}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-zinc-500">Trust Level</dt>
+                  <dd className="text-zinc-300 capitalize">{lifecycleInfo.trustLevel}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-zinc-500">Provenance</dt>
+                  <dd className="text-zinc-300 text-right max-w-[220px]">{lifecycleInfo.sourceReason}</dd>
+                </div>
+              </>
+            )}
           </dl>
         </div>
 

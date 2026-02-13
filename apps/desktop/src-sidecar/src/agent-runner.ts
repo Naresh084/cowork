@@ -11,6 +11,7 @@ import type {
   MessageContentPart,
   SessionType,
   PlatformType,
+  ToolEvaluationResult,
 } from '@gemini-cowork/shared';
 import {
   SUPPORTED_PLATFORM_TYPES,
@@ -110,6 +111,17 @@ import {
 } from './external-cli/types.js';
 import { WORKFLOWS_ENABLED } from './config/feature-flags.js';
 import { integrationBridge } from './integrations/index.js';
+import { BenchmarkRunner } from './benchmark/runner.js';
+import { BENCHMARK_SUITES } from './benchmark/suites/index.js';
+import {
+  type SessionPermissionBootstrap,
+} from './permission-bootstrap.js';
+import {
+  BenchmarkRepository,
+  DatabaseConnection,
+  RunCheckpointRepository,
+  SessionBranchRepository,
+} from '@gemini-cowork/storage';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -214,6 +226,8 @@ interface ActiveSession {
   lastCompletedAssistantSegmentText?: string;
   /** Whether any assistant text has been emitted in this turn */
   hasAssistantTextThisTurn: boolean;
+  /** Indicates the runtime is actively retrying after a transient execution failure/fallback. */
+  isRetrying: boolean;
   /** Live runtime flags used for reconnect hydration */
   isStreaming: boolean;
   isThinking: boolean;
@@ -240,6 +254,36 @@ interface ActiveSession {
   updatedAt: number;
   /** Last time the session was accessed/selected by the user */
   lastAccessedAt: number;
+}
+
+interface ManagedRunTimelineEvent {
+  id: string;
+  type: string;
+  timestamp: number;
+  data?: Record<string, unknown>;
+}
+
+interface ManagedRun {
+  id: string;
+  sessionId: string;
+  branchId?: string;
+  status: 'queued' | 'running' | 'recovered' | 'completed' | 'failed' | 'cancelled';
+  runOptions: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  checkpointCount: number;
+  timeline: ManagedRunTimelineEvent[];
+}
+
+interface ManagedBranch {
+  id: string;
+  sessionId: string;
+  name: string;
+  fromTurnId?: string;
+  parentBranchId?: string;
+  status: 'active' | 'merged' | 'abandoned';
+  createdAt: number;
+  updatedAt: number;
 }
 
 interface SpecializedModelsV2Local {
@@ -284,6 +328,15 @@ interface RuntimeConfigState {
     autoExtract: boolean;
     maxInPrompt: number;
     style: 'conservative' | 'balanced' | 'aggressive';
+    consolidation: {
+      enabled: boolean;
+      intervalMinutes: number;
+      redundancyThreshold: number;
+      decayFactor: number;
+      minConfidence: number;
+      staleAfterHours: number;
+      strategy: 'balanced' | 'aggressive' | 'conservative';
+    };
   };
 }
 
@@ -352,6 +405,15 @@ const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
   autoExtract: true,
   maxInPrompt: 5,
   style: 'balanced',
+  consolidation: {
+    enabled: true,
+    intervalMinutes: 60,
+    redundancyThreshold: 0.9,
+    decayFactor: 0.92,
+    minConfidence: 0.15,
+    staleAfterHours: 24 * 14,
+    strategy: 'balanced',
+  },
 };
 
 function normalizeCommandSandboxSettings(
@@ -392,9 +454,15 @@ function normalizeCommandSandboxSettings(
 }
 
 function normalizeRuntimeMemorySettings(
-  value?: Partial<RuntimeConfigState['memory']> | null,
+  value?:
+    | (Partial<RuntimeConfigState['memory']> & {
+        consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
+      })
+    | null,
 ): RuntimeConfigState['memory'] {
   const style = value?.style;
+  const consolidation = value?.consolidation;
+  const consolidationStrategy = consolidation?.strategy;
   return {
     enabled:
       typeof value?.enabled === 'boolean' ? value.enabled : DEFAULT_RUNTIME_MEMORY_SETTINGS.enabled,
@@ -410,6 +478,38 @@ function normalizeRuntimeMemorySettings(
       style === 'conservative' || style === 'balanced' || style === 'aggressive'
         ? style
         : DEFAULT_RUNTIME_MEMORY_SETTINGS.style,
+    consolidation: {
+      enabled:
+        typeof consolidation?.enabled === 'boolean'
+          ? consolidation.enabled
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.enabled,
+      intervalMinutes:
+        typeof consolidation?.intervalMinutes === 'number' && consolidation.intervalMinutes > 0
+          ? Math.min(24 * 60, Math.max(1, Math.floor(consolidation.intervalMinutes)))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.intervalMinutes,
+      redundancyThreshold:
+        typeof consolidation?.redundancyThreshold === 'number'
+          ? Math.max(0.6, Math.min(0.99, consolidation.redundancyThreshold))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.redundancyThreshold,
+      decayFactor:
+        typeof consolidation?.decayFactor === 'number'
+          ? Math.max(0.5, Math.min(0.999, consolidation.decayFactor))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.decayFactor,
+      minConfidence:
+        typeof consolidation?.minConfidence === 'number'
+          ? Math.max(0.05, Math.min(0.95, consolidation.minConfidence))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.minConfidence,
+      staleAfterHours:
+        typeof consolidation?.staleAfterHours === 'number' && consolidation.staleAfterHours > 0
+          ? Math.min(24 * 365, Math.max(1, Math.floor(consolidation.staleAfterHours)))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.staleAfterHours,
+      strategy:
+        consolidationStrategy === 'balanced' ||
+        consolidationStrategy === 'aggressive' ||
+        consolidationStrategy === 'conservative'
+          ? consolidationStrategy
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.strategy,
+    },
   };
 }
 
@@ -616,6 +716,25 @@ export class AgentRunner {
   private memoryExtractors: Map<string, MemoryExtractor> = new Map();
   private agentsMdServices: Map<string, AgentsMdService> = new Map();
   private agentsMdConfigs: Map<string, AgentsMdConfig | null> = new Map();
+  private storageDb: DatabaseConnection | null = null;
+  private runCheckpointRepository: RunCheckpointRepository | null = null;
+  private sessionBranchRepository: SessionBranchRepository | null = null;
+  private benchmarkRepository: BenchmarkRepository | null = null;
+  private benchmarkRunner: BenchmarkRunner = new BenchmarkRunner(BENCHMARK_SUITES);
+  private runs: Map<string, ManagedRun> = new Map();
+  private activeRunBySession: Map<string, string> = new Map();
+  private sessionBranches: Map<string, ManagedBranch[]> = new Map();
+  private activeBranchBySession: Map<string, string> = new Map();
+  private latestReleaseGateStatus: {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard?: Record<string, unknown>;
+    evaluatedAt: number;
+  } = {
+    status: 'warning',
+    reasons: ['No benchmark suite has been executed yet.'],
+    evaluatedAt: Date.now(),
+  };
 
   constructor() {
     // Session-based Chrome instances are created on-demand by ChromeCDPDriver.forSession()
@@ -640,6 +759,22 @@ export class AgentRunner {
       }
 
       this.appDataDir = appDataDir;
+      this.storageDb = new DatabaseConnection({ path: join(appDataDir, 'data.db') });
+      this.runCheckpointRepository = new RunCheckpointRepository(this.storageDb);
+      this.sessionBranchRepository = new SessionBranchRepository(this.storageDb);
+      this.benchmarkRepository = new BenchmarkRepository(this.storageDb);
+      const nowTs = Date.now();
+      for (const suite of this.benchmarkRunner.listSuites()) {
+        this.benchmarkRepository.upsertSuite({
+          id: suite.id,
+          name: suite.name,
+          description: suite.description,
+          version: suite.version,
+          config: { scenarioCount: suite.scenarios.length },
+          createdAt: nowTs,
+          updatedAt: nowTs,
+        });
+      }
       setCheckpointerDataDir(appDataDir);
       this.persistence = new SessionPersistence(appDataDir);
       await this.persistence.initialize();
@@ -699,7 +834,7 @@ export class AgentRunner {
     const dir = workingDirectory || homedir();
     let service = this.memoryServices.get(dir);
     if (!service) {
-      service = createMemoryService(dir);
+      service = createMemoryService(dir, { appDataDir: this.appDataDir || undefined });
       await service.initialize();
       this.memoryServices.set(dir, service);
     }
@@ -901,6 +1036,7 @@ export class AgentRunner {
       assistantSegmentIndex: 0,
       lastCompletedAssistantSegmentText: undefined,
       hasAssistantTextThisTurn: false,
+      isRetrying: false,
       isStreaming: false,
       isThinking: false,
       lastError: data.runtime?.lastError || null,
@@ -919,6 +1055,7 @@ export class AgentRunner {
     if (data.runtime) {
       session.isStreaming = Boolean(data.runtime.isStreaming);
       session.isThinking = Boolean(data.runtime.isThinking);
+      session.isRetrying = data.runtime.runState === 'retrying';
       session.currentTurnId = data.runtime.activeTurnId;
       session.messageQueue = [...data.runtime.messageQueue];
       if (Array.isArray(data.runtime.activeTools)) {
@@ -941,6 +1078,28 @@ export class AgentRunner {
           request: question,
           resolve: () => {},
         });
+      }
+      if (data.runtime.permissionScopes) {
+        for (const [permissionType, rawPaths] of Object.entries(data.runtime.permissionScopes)) {
+          if (!Array.isArray(rawPaths) || rawPaths.length === 0) continue;
+          const scopeSet = session.permissionScopes.get(permissionType) ?? new Set<string>();
+          for (const rawPath of rawPaths) {
+            const normalized = this.normalizePermissionPath(session, String(rawPath));
+            if (normalized) {
+              scopeSet.add(normalized);
+            }
+          }
+          if (scopeSet.size > 0) {
+            session.permissionScopes.set(permissionType, scopeSet);
+          }
+        }
+      }
+      if (data.runtime.permissionCache) {
+        for (const [cacheKey, decision] of Object.entries(data.runtime.permissionCache)) {
+          if (decision === 'allow_session') {
+            session.permissionCache.set(cacheKey, decision);
+          }
+        }
       }
     }
 
@@ -1675,10 +1834,17 @@ export class AgentRunner {
         ...(config.externalCli?.claude || {}),
       },
     };
-    const nextMemory = normalizeRuntimeMemorySettings({
+    const mergedMemory: Partial<RuntimeConfigState['memory']> & {
+      consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
+    } = {
       ...this.runtimeConfig.memory,
       ...(config.memory || {}),
-    });
+      consolidation: {
+        ...this.runtimeConfig.memory.consolidation,
+        ...(config.memory?.consolidation || {}),
+      },
+    };
+    const nextMemory = normalizeRuntimeMemorySettings(mergedMemory);
     const nextActiveSoul = normalizeRuntimeSoulProfile(
       config.activeSoul === undefined ? this.runtimeConfig.activeSoul : config.activeSoul,
     );
@@ -3027,6 +3193,7 @@ export class AgentRunner {
     type: SessionType = 'main',
     provider?: ProviderId | null,
     executionMode: ExecutionMode = 'execute',
+    permissionBootstrap?: SessionPermissionBootstrap,
   ): Promise<SessionInfo> {
     const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
     const providerKey = this.getProviderApiKey(selectedProvider);
@@ -3094,6 +3261,7 @@ export class AgentRunner {
       assistantSegmentIndex: 0,
       lastCompletedAssistantSegmentText: undefined,
       hasAssistantTextThisTurn: false,
+      isRetrying: false,
       isStreaming: false,
       isThinking: false,
       lastError: null,
@@ -3108,6 +3276,8 @@ export class AgentRunner {
       updatedAt: now,
       lastAccessedAt: now,
     };
+
+    this.applySessionPermissionBootstrap(session, permissionBootstrap);
 
     const toolHandlers = this.buildToolHandlers(session);
     session.agent = await this.createDeepAgent(session, toolHandlers);
@@ -3190,6 +3360,947 @@ export class AgentRunner {
 
     // After execution completes, process any queued messages
     await this.processMessageQueue(sessionId);
+  }
+
+  async runStartV2(
+    sessionId: string,
+    message: string,
+    runOptions?: Record<string, unknown>,
+    attachments?: Attachment[],
+  ): Promise<{ runId: string; sessionId: string; status: ManagedRun['status'] }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const runId = generateId('run');
+    const startedAt = Date.now();
+    const branchId = this.getActiveBranchIdForSession(sessionId);
+    const run: ManagedRun = {
+      id: runId,
+      sessionId,
+      branchId,
+      status: 'running',
+      runOptions: runOptions || {},
+      createdAt: startedAt,
+      updatedAt: startedAt,
+      checkpointCount: 0,
+      timeline: [],
+    };
+
+    this.runs.set(runId, run);
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    const maxTurns = this.resolveRunMaxTurns(run.runOptions);
+    this.appendRunTimelineEvent(run, 'run:start', {
+      messageLength: message.length,
+      hasAttachments,
+    });
+    this.activeRunBySession.set(sessionId, runId);
+    this.writeRunCheckpoint(
+      run,
+      'before_send',
+      {
+        messageLength: message.length,
+        hasAttachments,
+        dispatch: this.createCheckpointDispatchState(message, attachments),
+      },
+      {
+        publicState: {
+          messageLength: message.length,
+          hasAttachments,
+        },
+        branchId: run.branchId,
+      },
+    );
+
+    try {
+      await this.sendMessage(sessionId, message, attachments, maxTurns);
+      run.status = 'completed';
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'after_send',
+        {
+          runState: 'completed',
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:completed');
+      return { runId, sessionId, status: run.status };
+    } catch (error) {
+      run.status = 'failed';
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'failed',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      if (this.activeRunBySession.get(sessionId) === runId) {
+        this.activeRunBySession.delete(sessionId);
+      }
+    }
+  }
+
+  async resumeRunFromCheckpoint(
+    sessionId: string,
+    runId: string,
+  ): Promise<{ runId: string; sessionId: string; status: ManagedRun['status'] }> {
+    const run = this.runs.get(runId) || this.hydrateRunFromCheckpointStore(runId);
+    if (!run || run.sessionId !== sessionId) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const conflictingRunId = this.activeRunBySession.get(sessionId);
+    if (conflictingRunId && conflictingRunId !== runId) {
+      throw new Error(`Session already has an active run: ${conflictingRunId}`);
+    }
+
+    const latestCheckpoint = this.runCheckpointRepository?.getLatestForRun(runId) || null;
+    if (latestCheckpoint && latestCheckpoint.sessionId !== sessionId) {
+      throw new Error(`Run checkpoint belongs to a different session: ${runId}`);
+    }
+    if (latestCheckpoint?.branchId) {
+      run.branchId = latestCheckpoint.branchId;
+    }
+    const latestStatus = this.normalizeManagedRunStatus(
+      latestCheckpoint?.state?.runStatus,
+      run.status,
+    );
+    if (latestStatus === 'completed' || latestStatus === 'cancelled') {
+      run.status = latestStatus;
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'resume_noop',
+        {
+          reason: 'terminal_state',
+          resumeFromStage: latestCheckpoint?.stage,
+          resumeFromCheckpoint: latestCheckpoint?.id,
+        },
+        {
+          publicState: {
+            reason: 'terminal_state',
+            resumeFromStage: latestCheckpoint?.stage,
+          },
+          branchId: run.branchId,
+        },
+      );
+      this.appendRunTimelineEvent(run, 'run:resume_skipped', {
+        reason: 'terminal_state',
+        runStatus: latestStatus,
+        checkpointStage: latestCheckpoint?.stage,
+      });
+      this.runs.set(runId, run);
+      return { runId: run.id, sessionId: run.sessionId, status: run.status };
+    }
+
+    const resumePayload = this.resolveRunResumePayload(session, latestCheckpoint);
+    if (!resumePayload) {
+      throw new Error(
+        `Run ${runId} cannot be resumed because no replay payload was found in checkpoints or session history.`,
+      );
+    }
+
+    this.runs.set(runId, run);
+    run.status = 'recovered';
+    run.updatedAt = Date.now();
+    this.appendRunTimelineEvent(run, 'run:recovered', {
+      checkpointCount: run.checkpointCount,
+      resumeSource: resumePayload.source,
+      resumeFromStage: latestCheckpoint?.stage,
+    });
+    this.writeRunCheckpoint(
+      run,
+      'resume',
+      {
+        checkpointCount: run.checkpointCount,
+        resumeSource: resumePayload.source,
+        resumeFromCheckpoint: latestCheckpoint?.id,
+        resumeFromStage: latestCheckpoint?.stage,
+      },
+      {
+        publicState: {
+          checkpointCount: run.checkpointCount,
+          resumeSource: resumePayload.source,
+          resumeFromStage: latestCheckpoint?.stage,
+        },
+        branchId: run.branchId,
+      },
+    );
+    eventEmitter.emit('run:recovered', sessionId, {
+      runId,
+      checkpointCount: run.checkpointCount,
+      resumeSource: resumePayload.source,
+      checkpointStage: latestCheckpoint?.stage,
+    });
+
+    run.status = 'running';
+    run.updatedAt = Date.now();
+    const maxTurns = this.resolveRunMaxTurns(run.runOptions);
+    this.activeRunBySession.set(sessionId, runId);
+
+    try {
+      await this.executeMessage(
+        sessionId,
+        resumePayload.payload.message,
+        resumePayload.payload.attachments,
+        maxTurns,
+      );
+      await this.processMessageQueue(sessionId);
+      run.status = session.lastError ? 'failed' : 'completed';
+      run.updatedAt = Date.now();
+      if (run.status === 'failed') {
+        this.writeRunCheckpoint(
+          run,
+          'failed',
+          {
+            error: session.lastError?.message || 'Unknown error during resumed execution',
+            resumed: true,
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:failed', {
+          error: session.lastError?.message || 'Unknown error during resumed execution',
+          resumed: true,
+        });
+        throw new Error(session.lastError?.message || 'Unknown error during resumed execution');
+      }
+      this.writeRunCheckpoint(
+        run,
+        'after_send',
+        {
+          runState: 'completed',
+          resumed: true,
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:completed', { resumed: true });
+      return { runId: run.id, sessionId: run.sessionId, status: run.status };
+    } catch (error) {
+      if (run.status !== 'failed') {
+        run.status = 'failed';
+        run.updatedAt = Date.now();
+        this.writeRunCheckpoint(
+          run,
+          'failed',
+          {
+            error: error instanceof Error ? error.message : String(error),
+            resumed: true,
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:failed', {
+          error: error instanceof Error ? error.message : String(error),
+          resumed: true,
+        });
+      }
+      throw error;
+    } finally {
+      if (this.activeRunBySession.get(sessionId) === runId) {
+        this.activeRunBySession.delete(sessionId);
+      }
+    }
+  }
+
+  private resolveRunMaxTurns(runOptions: Record<string, unknown>): number | undefined {
+    const candidate = runOptions.maxTurns;
+    if (typeof candidate !== 'number' || !Number.isFinite(candidate) || candidate <= 0) {
+      return undefined;
+    }
+    return Math.floor(candidate);
+  }
+
+  private createCheckpointDispatchState(
+    message: string,
+    attachments?: Attachment[],
+  ): { message: string; attachments?: Attachment[] } {
+    return {
+      message,
+      attachments:
+        Array.isArray(attachments) && attachments.length > 0
+          ? attachments.map((attachment) => ({ ...attachment }))
+          : undefined,
+    };
+  }
+
+  private normalizeManagedRunStatus(
+    value: unknown,
+    fallback: ManagedRun['status'] = 'recovered',
+  ): ManagedRun['status'] {
+    return value === 'queued' ||
+      value === 'running' ||
+      value === 'recovered' ||
+      value === 'completed' ||
+      value === 'failed' ||
+      value === 'cancelled'
+      ? value
+      : fallback;
+  }
+
+  private resolveRunResumePayload(
+    session: ActiveSession,
+    latestCheckpoint: { state: Record<string, unknown>; id: string; stage: string } | null,
+  ):
+    | {
+        payload: { message: string; attachments?: Attachment[] };
+        source: 'checkpoint' | 'latest_user_message';
+      }
+    | null {
+    if (latestCheckpoint) {
+      const checkpointPayload = this.parseCheckpointDispatchPayload(latestCheckpoint.state.dispatch);
+      if (checkpointPayload) {
+        return { payload: checkpointPayload, source: 'checkpoint' };
+      }
+    }
+
+    const fallbackMessage = this.getLatestUserMessageText(session);
+    if (fallbackMessage) {
+      return {
+        payload: { message: fallbackMessage },
+        source: 'latest_user_message',
+      };
+    }
+
+    return null;
+  }
+
+  private parseCheckpointDispatchPayload(
+    value: unknown,
+  ): { message: string; attachments?: Attachment[] } | null {
+    if (!value || typeof value !== 'object') return null;
+    const payload = value as Record<string, unknown>;
+    if (typeof payload.message !== 'string') return null;
+
+    const attachments = this.normalizeCheckpointAttachments(payload.attachments);
+    return {
+      message: payload.message,
+      attachments,
+    };
+  }
+
+  private normalizeCheckpointAttachments(value: unknown): Attachment[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+
+    const normalized: Attachment[] = [];
+    for (const candidate of value) {
+      if (!candidate || typeof candidate !== 'object') continue;
+      const raw = candidate as Record<string, unknown>;
+      const type = raw.type;
+      if (
+        type !== 'image' &&
+        type !== 'pdf' &&
+        type !== 'audio' &&
+        type !== 'video' &&
+        type !== 'text' &&
+        type !== 'file' &&
+        type !== 'other'
+      ) {
+        continue;
+      }
+      if (
+        typeof raw.mimeType !== 'string' ||
+        typeof raw.data !== 'string' ||
+        typeof raw.name !== 'string'
+      ) {
+        continue;
+      }
+      normalized.push({
+        type,
+        mimeType: raw.mimeType,
+        data: raw.data,
+        name: raw.name,
+      });
+    }
+
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private getLatestUserMessageText(session: ActiveSession): string | null {
+    const latestUserItem = [...session.chatItems]
+      .reverse()
+      .find((item): item is UserMessageItem => item.kind === 'user_message');
+    if (!latestUserItem) return null;
+
+    const text = this.getTextFromMessageContent(latestUserItem.content as Message['content']);
+    return text.trim().length > 0 ? text : null;
+  }
+
+  private getOrLoadSessionBranches(sessionId: string): ManagedBranch[] {
+    const existing = this.sessionBranches.get(sessionId);
+    if (existing) return existing;
+
+    const loaded =
+      (this.sessionBranchRepository?.listBranchesForSession(sessionId).map((row) => ({
+        id: row.id,
+        sessionId: row.sessionId,
+        fromTurnId: row.fromTurnId,
+        parentBranchId: row.parentBranchId,
+        name: row.name,
+        status: row.status,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      })) as ManagedBranch[] | undefined) || [];
+    this.sessionBranches.set(sessionId, loaded);
+    return loaded;
+  }
+
+  private getActiveBranchIdForSession(sessionId: string): string | undefined {
+    const cached = this.activeBranchBySession.get(sessionId);
+    if (cached) return cached;
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    for (let idx = branches.length - 1; idx >= 0; idx -= 1) {
+      const branch = branches[idx];
+      if (branch?.status === 'active') {
+        this.activeBranchBySession.set(sessionId, branch.id);
+        return branch.id;
+      }
+    }
+    return undefined;
+  }
+
+  getRunTimeline(runId: string): {
+    runId: string;
+    sessionId: string;
+    branchId?: string;
+    status: ManagedRun['status'];
+    checkpointCount: number;
+    timeline: ManagedRunTimelineEvent[];
+  } {
+    const run = this.runs.get(runId) || this.hydrateRunFromCheckpointStore(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    this.runs.set(runId, run);
+    return {
+      runId: run.id,
+      sessionId: run.sessionId,
+      branchId: run.branchId,
+      status: run.status,
+      checkpointCount: run.checkpointCount,
+      timeline: [...run.timeline],
+    };
+  }
+
+  createSessionBranch(
+    sessionId: string,
+    branchName: string,
+    fromTurnId?: string,
+  ): {
+    id: string;
+    sessionId: string;
+    fromTurnId?: string;
+    parentBranchId?: string;
+    name: string;
+    status: 'active' | 'merged' | 'abandoned';
+    createdAt: number;
+    updatedAt: number;
+  } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const nowTs = Date.now();
+    const parentBranchId = this.getActiveBranchIdForSession(sessionId);
+    const branch: ManagedBranch = {
+      id: generateId('branch'),
+      sessionId,
+      name: branchName,
+      fromTurnId,
+      parentBranchId,
+      status: 'active',
+      createdAt: nowTs,
+      updatedAt: nowTs,
+    };
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    branches.push(branch);
+    this.sessionBranches.set(sessionId, branches);
+    this.activeBranchBySession.set(sessionId, branch.id);
+    this.sessionBranchRepository?.createBranch({
+      id: branch.id,
+      sessionId: branch.sessionId,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      name: branch.name,
+      status: branch.status,
+      createdAt: branch.createdAt,
+      updatedAt: branch.updatedAt,
+    });
+    eventEmitter.emit('branch:created', sessionId, {
+      branchId: branch.id,
+      name: branch.name,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      activeBranchId: branch.id,
+    });
+
+    return {
+      id: branch.id,
+      sessionId: branch.sessionId,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      name: branch.name,
+      status: branch.status,
+      createdAt: branch.createdAt,
+      updatedAt: branch.updatedAt,
+    };
+  }
+
+  mergeSessionBranch(
+    sessionId: string,
+    sourceBranchId: string,
+    targetBranchId: string,
+    strategy: 'auto' | 'ours' | 'theirs' | 'manual',
+  ): {
+    mergeId: string;
+    sourceBranchId: string;
+    targetBranchId: string;
+    strategy: 'auto' | 'ours' | 'theirs' | 'manual';
+    status: 'merged' | 'conflict' | 'failed';
+    conflictCount: number;
+    conflicts: Array<{ id: string; path: string; reason: string; resolution?: 'ours' | 'theirs' | 'manual' }>;
+    mergedAt: number;
+  } {
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    this.sessionBranches.set(sessionId, branches);
+    const source = branches.find((branch) => branch.id === sourceBranchId);
+    const target = branches.find((branch) => branch.id === targetBranchId);
+    if (!source || !target) {
+      return {
+        mergeId: generateId('merge'),
+        sourceBranchId,
+        targetBranchId,
+        strategy,
+        status: 'failed',
+        conflictCount: 0,
+        conflicts: [],
+        mergedAt: Date.now(),
+      };
+    }
+
+    const parentDiverged =
+      typeof source.parentBranchId === 'string' && source.parentBranchId.length > 0
+        ? source.parentBranchId !== targetBranchId
+        : false;
+    const conflictEntry = parentDiverged
+      ? {
+          id: `conflict:${sourceBranchId}:${targetBranchId}`,
+          path: 'branch_context',
+          reason: `Source branch parent (${source.parentBranchId}) differs from merge target (${targetBranchId}).`,
+          resolution: strategy === 'ours' || strategy === 'theirs' ? strategy : undefined,
+        }
+      : null;
+
+    const shouldReturnConflict = Boolean(parentDiverged && (strategy === 'auto' || strategy === 'manual'));
+    const result = {
+      mergeId: generateId('merge'),
+      sourceBranchId,
+      targetBranchId,
+      strategy,
+      status: (shouldReturnConflict ? 'conflict' : 'merged') as 'merged' | 'conflict',
+      conflictCount: conflictEntry ? 1 : 0,
+      conflicts: conflictEntry ? [conflictEntry] : [],
+      mergedAt: Date.now(),
+    };
+
+    if (result.status === 'merged') {
+      source.status = 'merged';
+      source.updatedAt = Date.now();
+      this.sessionBranchRepository?.updateBranchStatus(sourceBranchId, 'merged');
+      if (this.activeBranchBySession.get(sessionId) === sourceBranchId) {
+        this.activeBranchBySession.set(sessionId, targetBranchId);
+      }
+    }
+
+    this.sessionBranchRepository?.recordMerge(result);
+
+    eventEmitter.emit('branch:merged', sessionId, {
+      mergeId: result.mergeId,
+      sourceBranchId,
+      targetBranchId,
+      strategy,
+      status: result.status,
+      activeBranchId: this.getActiveBranchIdForSession(sessionId),
+    });
+
+    return result;
+  }
+
+  setActiveSessionBranch(
+    sessionId: string,
+    branchId: string,
+  ): { sessionId: string; activeBranchId: string } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    const target = branches.find((branch) => branch.id === branchId);
+    if (!target) {
+      throw new Error(`Branch not found: ${branchId}`);
+    }
+    if (target.status !== 'active') {
+      throw new Error(`Branch is not active and cannot be selected: ${branchId}`);
+    }
+
+    this.activeBranchBySession.set(sessionId, branchId);
+    return {
+      sessionId,
+      activeBranchId: branchId,
+    };
+  }
+
+  async runBenchmarkSuite(
+    suiteId: string,
+    profile: string,
+  ): Promise<{
+    runId: string;
+    suiteId: string;
+    profile: string;
+    status: 'completed';
+    scorecard: Record<string, unknown>;
+  }> {
+    const runId = generateId('bench');
+    const startedAt = Date.now();
+    this.benchmarkRepository?.createRun({
+      id: runId,
+      suiteId,
+      profile,
+      status: 'running',
+      startedAt,
+    });
+    eventEmitter.emit('benchmark:progress', undefined, {
+      runId,
+      suiteId,
+      profile,
+      progress: 0,
+      status: 'running',
+    });
+
+    try {
+      const result = await this.benchmarkRunner.runSuite(runId, suiteId, profile);
+      const scorecard = {
+        runId,
+        suiteId,
+        benchmarkScore: result.scorecard.benchmarkScore,
+        featureChecklistScore: result.scorecard.featureChecklistScore,
+        finalScore: result.scorecard.finalScore,
+        generatedAt: result.scorecard.generatedAt,
+        dimensions: result.scorecard.dimensions,
+        passed:
+          result.scorecard.finalScore >= 0.9 &&
+          result.scorecard.dimensions.every((dimension) => dimension.passed),
+      };
+
+      const completedAt = Date.now();
+      this.benchmarkRepository?.writeResults(
+        result.metrics.map((metric) => ({
+          id: generateId('bres'),
+          runId,
+          scenarioId: metric.scenarioId,
+          dimension: metric.dimension,
+          score: metric.score,
+          maxScore: metric.maxScore,
+          details: { weight: metric.weight },
+          createdAt: completedAt,
+        })),
+      );
+      this.benchmarkRepository?.updateRun(runId, {
+        status: 'completed',
+        completedAt,
+        scorecard,
+      });
+
+      const failedDimensions = scorecard.dimensions.filter((dimension) => !dimension.passed);
+      this.latestReleaseGateStatus = this.evaluateReleaseGateFromScorecard(scorecard, failedDimensions);
+
+      this.benchmarkRepository?.createReleaseGateSnapshot({
+        id: generateId('gate'),
+        benchmarkRunId: runId,
+        status: this.latestReleaseGateStatus.status,
+        scorecard: scorecard,
+        gates: { reasons: this.latestReleaseGateStatus.reasons },
+        createdAt: this.latestReleaseGateStatus.evaluatedAt,
+      });
+
+      eventEmitter.emit('benchmark:progress', undefined, {
+        runId,
+        suiteId,
+        profile,
+        progress: 100,
+        status: 'completed',
+      });
+      eventEmitter.emit('benchmark:score_updated', undefined, {
+        runId,
+        suiteId,
+        scorecard,
+      });
+
+      return {
+        runId,
+        suiteId,
+        profile,
+        status: 'completed',
+        scorecard,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.benchmarkRepository?.updateRun(runId, {
+        status: 'failed',
+        completedAt: Date.now(),
+        error: message,
+      });
+      this.latestReleaseGateStatus = {
+        status: 'fail',
+        reasons: [`Benchmark execution failed: ${message}`],
+        evaluatedAt: Date.now(),
+      };
+      this.benchmarkRepository?.createReleaseGateSnapshot({
+        id: generateId('gate'),
+        benchmarkRunId: runId,
+        status: 'fail',
+        gates: { reasons: this.latestReleaseGateStatus.reasons },
+        createdAt: this.latestReleaseGateStatus.evaluatedAt,
+      });
+      eventEmitter.emit('benchmark:progress', undefined, {
+        runId,
+        suiteId,
+        profile,
+        progress: 100,
+        status: 'failed',
+      });
+      throw error;
+    }
+  }
+
+  getReleaseGateStatus(): {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard?: Record<string, unknown>;
+    evaluatedAt: number;
+  } {
+    const persisted = this.benchmarkRepository?.getLatestReleaseGateStatus();
+    if (persisted) {
+      this.latestReleaseGateStatus = {
+        status: persisted.status,
+        reasons: persisted.reasons,
+        scorecard: persisted.scorecard as unknown as Record<string, unknown> | undefined,
+        evaluatedAt: persisted.evaluatedAt,
+      };
+    }
+    eventEmitter.emit('release_gate:status', undefined, this.latestReleaseGateStatus);
+    return this.latestReleaseGateStatus;
+  }
+
+  assertReleaseGateForLaunch(): {
+    allowed: true;
+    status: 'pass' | 'warning';
+    reasons: string[];
+    evaluatedAt: number;
+  } {
+    const gate = this.getReleaseGateStatus();
+    if (gate.status === 'fail') {
+      throw new Error(
+        `Release gate failed: ${gate.reasons.length > 0 ? gate.reasons.join(' | ') : 'unknown failure'}`,
+      );
+    }
+
+    return {
+      allowed: true,
+      status: gate.status,
+      reasons: gate.reasons,
+      evaluatedAt: gate.evaluatedAt,
+    };
+  }
+
+  private evaluateReleaseGateFromScorecard(
+    scorecard: {
+      finalScore: number;
+      benchmarkScore: number;
+      featureChecklistScore: number;
+      dimensions: Array<{ dimension: string; passed: boolean; score: number; threshold: number }>;
+    },
+    precomputedFailures?: Array<{ dimension: string; passed: boolean; score: number; threshold: number }>,
+  ): {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard: Record<string, unknown>;
+    evaluatedAt: number;
+  } {
+    const failedDimensions = precomputedFailures || scorecard.dimensions.filter((dimension) => !dimension.passed);
+    const reasons: string[] = [];
+    let status: 'pass' | 'fail' | 'warning' = 'pass';
+
+    if (failedDimensions.length > 0) {
+      status = 'fail';
+      for (const dimension of failedDimensions) {
+        reasons.push(
+          `Dimension below threshold: ${dimension.dimension} (${dimension.score.toFixed(3)} < ${dimension.threshold.toFixed(3)})`,
+        );
+      }
+    }
+
+    if (scorecard.featureChecklistScore < 1) {
+      if (status !== 'fail') status = 'warning';
+      reasons.push('Feature checklist is not 100% complete.');
+    }
+
+    if (scorecard.finalScore < 0.85) {
+      status = 'fail';
+      reasons.push(`Final score below hard fail threshold (0.85): ${scorecard.finalScore.toFixed(3)}.`);
+    } else if (scorecard.finalScore < 0.9 && status !== 'fail') {
+      status = 'warning';
+      reasons.push('Final score is below launch pass threshold (0.90).');
+    }
+
+    return {
+      status,
+      reasons,
+      scorecard: scorecard as unknown as Record<string, unknown>,
+      evaluatedAt: Date.now(),
+    };
+  }
+
+  private hydrateRunFromCheckpointStore(runId: string): ManagedRun | null {
+    const checkpoints = this.runCheckpointRepository?.listForRun(runId) || [];
+    if (checkpoints.length === 0) {
+      return null;
+    }
+
+    const first = checkpoints[0]!;
+    const latest = checkpoints[checkpoints.length - 1]!;
+    const status = this.normalizeManagedRunStatus(latest.state.runStatus);
+
+    return {
+      id: runId,
+      sessionId: latest.sessionId,
+      branchId: latest.branchId,
+      status,
+      runOptions:
+        typeof latest.state.runOptions === 'object' && latest.state.runOptions !== null
+          ? (latest.state.runOptions as Record<string, unknown>)
+          : {},
+      createdAt: first.createdAt,
+      updatedAt: latest.createdAt,
+      checkpointCount: latest.checkpointIndex,
+      timeline: checkpoints.map((checkpoint) => ({
+        id: checkpoint.id,
+        type: 'run:checkpoint',
+        timestamp: checkpoint.createdAt,
+        data: {
+          stage: checkpoint.stage,
+          branchId: checkpoint.branchId,
+          checkpointIndex: checkpoint.checkpointIndex,
+          ...this.buildPublicCheckpointState(checkpoint.state),
+        },
+      })),
+    };
+  }
+
+  private writeRunCheckpoint(
+    run: ManagedRun,
+    stage: string,
+    state?: Record<string, unknown>,
+    opts?: { branchId?: string; emitEvent?: boolean; publicState?: Record<string, unknown> },
+  ): void {
+    run.checkpointCount += 1;
+    const checkpointIndex = run.checkpointCount;
+    const payloadState = {
+      ...(state || {}),
+      runStatus: run.status,
+      runOptions: run.runOptions,
+    };
+    const publicState = this.buildPublicCheckpointState(opts?.publicState || payloadState);
+    const timestamp = Date.now();
+
+    this.runCheckpointRepository?.upsert({
+      id: generateId('chk'),
+      runId: run.id,
+      sessionId: run.sessionId,
+      branchId: opts?.branchId,
+      checkpointIndex,
+      stage,
+      state: payloadState,
+      createdAt: timestamp,
+    });
+
+    this.appendRunTimelineEvent(run, 'run:checkpoint', {
+      checkpointIndex,
+      stage,
+      branchId: opts?.branchId || run.branchId,
+      ...publicState,
+    });
+
+    if (opts?.emitEvent === false) {
+      return;
+    }
+
+    eventEmitter.emit('run:checkpoint', run.sessionId, {
+      runId: run.id,
+      checkpointIndex,
+      stage,
+      branchId: opts?.branchId || run.branchId,
+      state: publicState,
+    });
+  }
+
+  private buildPublicCheckpointState(state: Record<string, unknown>): Record<string, unknown> {
+    const publicState: Record<string, unknown> = { ...state };
+    const dispatch = publicState.dispatch;
+    if (dispatch && typeof dispatch === 'object') {
+      const dispatchState = dispatch as Record<string, unknown>;
+      const message = typeof dispatchState.message === 'string' ? dispatchState.message : '';
+      const attachmentCount = Array.isArray(dispatchState.attachments)
+        ? dispatchState.attachments.length
+        : 0;
+      publicState.dispatch = {
+        messageLength: message.length,
+        attachmentCount,
+        hasAttachments: attachmentCount > 0,
+      };
+    }
+    return publicState;
+  }
+
+  private checkpointActiveRun(
+    sessionId: string,
+    stage: string,
+    state?: Record<string, unknown>,
+  ): void {
+    const runId = this.activeRunBySession.get(sessionId);
+    if (!runId) return;
+    const run = this.runs.get(runId);
+    if (!run) return;
+    this.writeRunCheckpoint(run, stage, state, { branchId: run.branchId });
+  }
+
+  private appendRunTimelineEvent(
+    run: ManagedRun,
+    type: string,
+    data?: Record<string, unknown>,
+  ): void {
+    run.timeline.push({
+      id: generateId('evt'),
+      type,
+      timestamp: Date.now(),
+      data,
+    });
+    run.updatedAt = Date.now();
   }
 
   /**
@@ -3794,6 +4905,12 @@ export class AgentRunner {
 
     // Emit resolved event
     eventEmitter.permissionResolved(sessionId, permissionId, decision);
+    this.checkpointActiveRun(sessionId, 'permission_resolved', {
+      permissionId,
+      decision,
+      permissionType: pending.request.type,
+      resource: pending.request.resource,
+    });
     this.persistRuntimeSnapshot(session);
   }
 
@@ -3841,6 +4958,28 @@ export class AgentRunner {
     } else if (agentAny.stop) {
       agentAny.stop();
     }
+
+    const activeRunId = this.activeRunBySession.get(sessionId);
+    if (activeRunId) {
+      const run = this.runs.get(activeRunId);
+      if (run && run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled') {
+        run.status = 'cancelled';
+        run.updatedAt = Date.now();
+        this.writeRunCheckpoint(
+          run,
+          'cancelled',
+          {
+            reason: 'stop_generation',
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:cancelled', {
+          reason: 'stop_generation',
+        });
+      }
+      this.activeRunBySession.delete(sessionId);
+    }
+
     this.persistRuntimeSnapshot(session);
   }
 
@@ -3988,6 +5127,10 @@ export class AgentRunner {
 
       // Emit question event
       eventEmitter.questionAsk(sessionId, questionRequest);
+      this.checkpointActiveRun(sessionId, 'question_asked', {
+        questionId,
+        hasOptions: Array.isArray(options) && options.length > 0,
+      });
       this.persistRuntimeSnapshot(session);
     });
   }
@@ -4017,6 +5160,10 @@ export class AgentRunner {
 
     // Emit answered event
     eventEmitter.questionAnswered(sessionId, questionId, answer);
+    this.checkpointActiveRun(sessionId, 'question_answered', {
+      questionId,
+      answerType: Array.isArray(answer) ? 'multi' : 'single',
+    });
     this.persistRuntimeSnapshot(session);
   }
 
@@ -4039,30 +5186,95 @@ export class AgentRunner {
     } as Partial<QuestionItem>);
   }
 
+  private getLatestRunForSession(sessionId: string): ManagedRun | null {
+    let latest: ManagedRun | null = null;
+    for (const run of this.runs.values()) {
+      if (run.sessionId !== sessionId) continue;
+      if (!latest || run.updatedAt > latest.updatedAt) {
+        latest = run;
+      }
+    }
+    return latest;
+  }
+
   private getSessionRunState(session: ActiveSession): SessionRuntimeState['runState'] {
+    const activeRunId = this.activeRunBySession.get(session.id);
+    const activeRun = activeRunId ? this.runs.get(activeRunId) : null;
+
+    if (session.stopRequested && activeRun) {
+      return 'paused';
+    }
     if (session.stopRequested) {
       return 'stopping';
     }
 
-    if (session.lastError && !session.isStreaming && !session.isThinking) {
-      return 'errored';
+    if (session.pendingPermissions.size > 0) {
+      return 'waiting_permission';
     }
 
-    const hasBlockingInteraction =
-      session.pendingPermissions.size > 0 || session.pendingQuestions.size > 0;
+    if (session.pendingQuestions.size > 0) {
+      return 'waiting_question';
+    }
+
+    if (session.isRetrying) {
+      return 'retrying';
+    }
+
     const hasActiveTools = session.activeTools.size > 0;
     const hasAbortController = Boolean(
       session.abortController && !session.abortController.signal.aborted,
     );
 
-    if (session.isStreaming || session.isThinking || hasActiveTools || hasAbortController || hasBlockingInteraction) {
+    if (activeRun?.status === 'recovered') {
+      return 'recovered';
+    }
+
+    if (activeRun?.status === 'running') {
       return 'running';
+    }
+
+    if (session.isStreaming || session.isThinking || hasActiveTools || hasAbortController) {
+      return 'running';
+    }
+
+    if (session.messageQueue.length > 0) {
+      return 'queued';
+    }
+
+    const latestRun = this.getLatestRunForSession(session.id);
+    if (latestRun?.status === 'completed') {
+      return 'completed';
+    }
+    if (latestRun?.status === 'failed') {
+      return 'failed';
+    }
+    if (latestRun?.status === 'cancelled') {
+      return 'cancelled';
+    }
+
+    if (session.lastError) {
+      return 'errored';
     }
 
     return 'idle';
   }
 
   private buildRuntimeState(session: ActiveSession): SessionRuntimeState {
+    const serializedScopes: Record<string, string[]> = {};
+    for (const [permissionType, scopes] of session.permissionScopes.entries()) {
+      const values = Array.from(scopes);
+      if (values.length > 0) {
+        serializedScopes[permissionType] = values;
+      }
+    }
+
+    const serializedCache: Record<string, PermissionDecision> = {};
+    for (const [cacheKey, decision] of session.permissionCache.entries()) {
+      if (decision === 'allow_session') {
+        serializedCache[cacheKey] = decision;
+      }
+    }
+
     return {
       version: 1,
       runState: this.getSessionRunState(session),
@@ -4078,6 +5290,8 @@ export class AgentRunner {
         content: message.content,
         queuedAt: message.queuedAt,
       })),
+      permissionScopes: serializedScopes,
+      permissionCache: serializedCache,
       lastError: session.lastError ? { ...session.lastError } : null,
       updatedAt: Date.now(),
     };
@@ -5382,15 +6596,27 @@ ${stitchGuidance}
   }
 
   private async buildSkillsPrompt(session: ActiveSession): Promise<string> {
-    // First, try to use the new SkillService for marketplace skills
+    // Prefer DeepAgents native skill loading to avoid duplicating full skill content
+    // in the system prompt. This keeps prompt size smaller and aligns with tool-driven
+    // skill retrieval.
     if (this.enabledSkillIds.size > 0) {
       try {
-        const skillsPrompt = await skillService.getSkillsForAgent([...this.enabledSkillIds]);
-        if (skillsPrompt) {
-          return skillsPrompt;
+        const names: string[] = [];
+        for (const skillId of this.enabledSkillIds) {
+          const skill = await skillService.getSkill(skillId);
+          if (!skill) continue;
+          names.push(skill.frontmatter.name || skill.id);
+        }
+        if (names.length > 0) {
+          return [
+            '## Skills',
+            'Enabled skills are available through native skill loading from `/skills/`.',
+            `Available skills: ${names.sort((a, b) => a.localeCompare(b)).join(', ')}`,
+            'Load and apply only the skills relevant to the current task.',
+          ].join('\n');
         }
       } catch {
-        // Fall back to legacy skill loading
+        // Fall back to legacy skill loading.
       }
     }
 
@@ -5554,6 +6780,15 @@ ${stitchGuidance}
         {
           maxMemoriesInPrompt: memorySettings.maxInPrompt,
           autoExtract: autoExtractEnabled,
+          consolidation: {
+            enabled: memorySettings.consolidation.enabled,
+            intervalMinutes: memorySettings.consolidation.intervalMinutes,
+            redundancyThreshold: memorySettings.consolidation.redundancyThreshold,
+            decayFactor: memorySettings.consolidation.decayFactor,
+            minConfidence: memorySettings.consolidation.minConfidence,
+            staleAfterHours: memorySettings.consolidation.staleAfterHours,
+            strategy: memorySettings.consolidation.strategy,
+          },
         },
       );
       this.storeMiddlewareHooks(session.id, middlewareStack);
@@ -5584,9 +6819,15 @@ ${stitchGuidance}
 
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
 
-    // Determine skills paths for DeepAgents
-    // When skills are enabled, pass the virtual /skills/ path for DeepAgents to discover
-    const skillsParam = this.enabledSkillIds.size > 0 ? ['/skills/'] : undefined;
+    // Determine skills paths for DeepAgents.
+    // Expose /skills/ whenever either explicit session skills are enabled or
+    // installed managed skills are available.
+    const deepAgentSkillConfig = await this.resolveDeepAgentSkillConfig();
+    const skillsParam = deepAgentSkillConfig.skills;
+    const syncedSkillFiles =
+      deepAgentSkillConfig.syncSkillIds.length > 0
+        ? await skillService.syncSkillsForAgent(deepAgentSkillConfig.syncSkillIds)
+        : undefined;
 
     const skillsDir = this.getSkillsDirectory();
 
@@ -5612,6 +6853,7 @@ ${stitchGuidance}
         () => this.getBackendAllowedScopes(session),
         skillsDir,
         () => this.getSessionSandboxSettings(session),
+        syncedSkillFiles,
       ),
     });
 
@@ -5641,6 +6883,35 @@ ${stitchGuidance}
    */
   private getSkillsDirectory(): string {
     return skillService.getManagedSkillsDir();
+  }
+
+  private async resolveDeepAgentSkillConfig(): Promise<{
+    skills: string[] | undefined;
+    syncSkillIds: string[];
+  }> {
+    const syncSkillIds = Array.from(
+      new Set(
+        [...this.enabledSkillIds]
+          .map((skillId) => (typeof skillId === 'string' ? skillId.trim() : ''))
+          .filter((skillId) => skillId.length > 0),
+      ),
+    );
+
+    let installedSkillIds: string[] = [];
+    try {
+      installedSkillIds = await skillService.getInstalledSkillIds();
+    } catch {
+      installedSkillIds = [];
+    }
+
+    const hasInstalledSkills = installedSkillIds.some(
+      (skillId) => typeof skillId === 'string' && skillId.trim().length > 0,
+    );
+
+    return {
+      skills: syncSkillIds.length > 0 || hasInstalledSkills ? ['/skills/'] : undefined,
+      syncSkillIds,
+    };
   }
 
   private getCurrentIntegrationOrigin(
@@ -5749,11 +7020,12 @@ ${stitchGuidance}
     // Create read_any_file tool - unified file reading for ALL types
     const readAnyFileTool: ToolHandler = {
       name: 'read_any_file',
-      description: 'Read and analyze ANY type of file. This is the PREFERRED tool for all file reading. Handles text/code files with line numbers and offset/limit, AND images/PDFs/videos/audio for visual/audio analysis by the model. Automatically detects file type. Use this instead of read_file or view_file.',
+      description: 'Read and analyze ANY type of file. This is the PREFERRED tool for all file reading. Handles text/code files with line numbers and offset/limit, images/PDFs/videos/audio for visual/audio analysis, and raw file reads when raw=true.',
       parameters: z.object({
         file_path: z.string().describe('Path to the file to read'),
         offset: z.number().optional().default(0).describe('Starting line number (0-indexed, text files only)'),
         limit: z.number().optional().default(2000).describe('Maximum lines to return (text files only)'),
+        raw: z.boolean().optional().default(false).describe('Return raw backend content including binary/base64 envelopes when true'),
       }),
       requiresPermission: (args: unknown) => ({
         type: 'file_read',
@@ -5762,7 +7034,12 @@ ${stitchGuidance}
         toolName: 'read_any_file',
       }),
       execute: async (args: unknown): Promise<{ success: boolean; data?: unknown; error?: string }> => {
-        const { file_path, offset = 0, limit = 2000 } = args as { file_path: string; offset?: number; limit?: number };
+        const { file_path, offset = 0, limit = 2000, raw = false } = args as {
+          file_path: string;
+          offset?: number;
+          limit?: number;
+          raw?: boolean;
+        };
         const backend = new CoworkBackend(
           session.workingDirectory,
           session.id,
@@ -5772,6 +7049,22 @@ ${stitchGuidance}
         );
 
         try {
+          if (raw) {
+            const rawData = await backend.readRaw(file_path);
+            return {
+              success: true,
+              data: {
+                type: 'raw',
+                path: file_path,
+                createdAt: rawData.created_at,
+                modifiedAt: rawData.modified_at,
+                lineCount: rawData.content.length,
+                content: rawData.content.join('\n'),
+                contentLines: rawData.content,
+              },
+            };
+          }
+
           const result = await backend.readForAnalysis(file_path);
 
           if (result.type === 'multimodal') {
@@ -5857,8 +7150,11 @@ ${stitchGuidance}
     const cronTools =
       session.type === 'isolated' || session.type === 'cron'
         ? []
-        : createCronTools((sourceSessionId) =>
-            this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
+        : createCronTools(
+            (sourceSessionId) =>
+              this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
+            (sourceSessionId) =>
+              this.getSessionPermissionBootstrap(sourceSessionId),
           );
 
     const workflowTools =
@@ -5934,6 +7230,11 @@ ${stitchGuidance}
         this.persistRuntimeSnapshot(session);
         this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCall);
+        this.checkpointActiveRun(session.id, 'tool_start', {
+          toolCallId,
+          toolName: tool.name,
+          parentToolId,
+        });
 
         // Create and emit ToolStartItem
         const toolStartItem: ToolStartItem = {
@@ -5967,6 +7268,13 @@ ${stitchGuidance}
             error,
             duration,
             parentToolId,
+          });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: false,
+            error,
+            duration,
           });
           toolStartItem.status = 'error';
           this.updateChatItem(session, toolStartItem.id, { status: 'error' });
@@ -6006,6 +7314,13 @@ ${stitchGuidance}
                 parentToolId,
               };
               eventEmitter.toolResult(session.id, toolCall, payload);
+              this.checkpointActiveRun(session.id, 'tool_result', {
+                toolCallId,
+                toolName: tool.name,
+                success: false,
+                error: 'Permission denied',
+                duration,
+              });
               // Update ToolStartItem and emit ToolResultItem
               toolStartItem.status = 'error';
               this.updateChatItem(session, toolStartItem.id, { status: 'error' });
@@ -6042,6 +7357,13 @@ ${stitchGuidance}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCall, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: result.success,
+            error: result.error,
+            duration,
+          });
           this.recordArtifactForTool(session, tool.name, args, result.data);
           if (result.success && this.isTodoTool(tool.name)) {
             session.hasTodoStateThisTurn = true;
@@ -6083,6 +7405,13 @@ ${stitchGuidance}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCall, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: false,
+            error: payload.error,
+            duration,
+          });
           // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = 'error';
           this.updateChatItem(session, toolStartItem.id, { status: 'error' });
@@ -6231,6 +7560,11 @@ ${stitchGuidance}
         this.persistRuntimeSnapshot(session);
         this.finalizeAssistantSegment(session);
         eventEmitter.toolStart(session.id, toolCallPayload);
+        this.checkpointActiveRun(session.id, 'tool_start', {
+          toolCallId,
+          toolName,
+          parentToolId,
+        });
 
         // Create and emit ToolStartItem
         const toolStartItem: ToolStartItem = {
@@ -6291,6 +7625,13 @@ ${stitchGuidance}
             duration,
             parentToolId,
           });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
           emitToolResult('error', null, errorMsg, duration);
           finishRuntimeTool();
           return new ToolMessage({
@@ -6313,11 +7654,21 @@ ${stitchGuidance}
           sessionId: session.id,
         };
         const policyResult = toolPolicyService.evaluate(policyContext);
+        const permissionRequest = this.getPermissionForDeepagentsTool(
+          toolName,
+          args,
+          toolCallId,
+          policyResult,
+        );
+        const shouldPromptForPolicyDeny =
+          policyResult.action === 'deny'
+            && this.shouldPromptForPolicyDeny(policyResult, permissionRequest);
 
         // If policy explicitly denies, block immediately
-        if (policyResult.action === 'deny') {
+        if (policyResult.action === 'deny' && !shouldPromptForPolicyDeny) {
           const duration = this.consumeToolDuration(session, toolCallId);
-          const errorMsg = `Tool blocked by policy: ${policyResult.reason}`;
+          const policyCode = policyResult.reasonCode ? ` (${policyResult.reasonCode})` : '';
+          const errorMsg = `Tool blocked by policy${policyCode}: ${policyResult.reason}`;
           const payload = {
             toolCallId,
             success: false,
@@ -6327,6 +7678,13 @@ ${stitchGuidance}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
           // Emit tool result
           emitToolResult('error', null, errorMsg, duration);
           finishRuntimeTool();
@@ -6339,11 +7697,13 @@ ${stitchGuidance}
         }
 
         // Step 2: Check existing permission system (for 'ask' or when policy allows but still needs user approval)
-        const permissionRequest = this.getPermissionForDeepagentsTool(toolName, args, toolCallId);
         if (permissionRequest) {
           // If policy says 'allow', we can skip the permission prompt for non-dangerous ops
           // But we still respect the existing permission system for dangerous operations
-          const skipPermission = policyResult.action === 'allow' && !this.isDangerousOperation(toolName, args);
+          const skipPermission =
+            !shouldPromptForPolicyDeny
+            && policyResult.action === 'allow'
+            && !this.isDangerousOperation(toolName, args);
 
           if (!skipPermission) {
             const decision = await this.requestPermission(session, permissionRequest);
@@ -6353,17 +7713,24 @@ ${stitchGuidance}
                 toolCallId,
                 success: false,
                 result: null,
-                error: 'Permission denied by user',
+                error: 'Permission denied',
                 duration,
                 parentToolId,
               };
               eventEmitter.toolResult(session.id, toolCallPayload, payload);
+              this.checkpointActiveRun(session.id, 'tool_result', {
+                toolCallId,
+                toolName,
+                success: false,
+                error: 'Permission denied',
+                duration,
+              });
               // Emit tool result
-              emitToolResult('error', null, 'Permission denied by user', duration);
+              emitToolResult('error', null, 'Permission denied', duration);
               finishRuntimeTool();
 
               return new ToolMessage({
-                content: 'Permission denied by user',
+                content: 'Permission denied',
                 tool_call_id: toolCallId,
                 name: toolName,
               });
@@ -6389,6 +7756,13 @@ ${stitchGuidance}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: normalized.success,
+            error: normalized.error,
+            duration,
+          });
           this.recordArtifactForTool(session, toolName, args, normalized.output);
           if (normalized.success && this.isTodoTool(toolName)) {
             session.hasTodoStateThisTurn = true;
@@ -6410,6 +7784,13 @@ ${stitchGuidance}
             parentToolId,
           };
           eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: payload.error,
+            duration,
+          });
 
           // Emit tool result
           emitToolResult('error', null, payload.error, duration);
@@ -6446,8 +7827,15 @@ ${stitchGuidance}
   private getPermissionForDeepagentsTool(
     toolName: string,
     args: Record<string, unknown>,
-    toolCallId: string
+    toolCallId: string,
+    policyResult?: Pick<ToolEvaluationResult, 'action' | 'reason' | 'reasonCode'>,
   ): PermissionRequest | null {
+    const policyExplainability = {
+      policyAction: policyResult?.action,
+      policyReason: policyResult?.reason,
+      policyReasonCode: policyResult?.reasonCode,
+    };
+
     switch (toolName) {
       case 'read_file':
       case 'ls':
@@ -6460,6 +7848,7 @@ ${stitchGuidance}
           reason: `Read file data: ${resource || toolName}`,
           toolName,
           toolCallId,
+          ...policyExplainability,
         };
       }
       case 'write_file':
@@ -6471,6 +7860,7 @@ ${stitchGuidance}
           reason: `Write file data: ${resource || toolName}`,
           toolName,
           toolCallId,
+          ...policyExplainability,
         };
       }
       case 'delete_file': {
@@ -6481,6 +7871,7 @@ ${stitchGuidance}
           reason: `Delete file: ${resource || toolName}`,
           toolName,
           toolCallId,
+          ...policyExplainability,
         };
       }
       case 'execute': {
@@ -6491,11 +7882,28 @@ ${stitchGuidance}
           reason: `Execute command: ${resource || toolName}`,
           toolName,
           toolCallId,
+          ...policyExplainability,
         };
       }
       default:
         return null;
     }
+  }
+
+  private shouldPromptForPolicyDeny(
+    policyResult: Pick<ToolEvaluationResult, 'action' | 'reasonCode'>,
+    permissionRequest: PermissionRequest | null,
+  ): boolean {
+    if (!permissionRequest) return false;
+    if (policyResult.action !== 'deny') return false;
+
+    // Profile defaults are guardrails; allow a runtime permission override so users
+    // can approve case-by-case without permanently relaxing policy.
+    if (policyResult.reasonCode === 'profile_deny') {
+      return true;
+    }
+
+    return false;
   }
 
   private normalizeDeepagentsToolResult(result: unknown): { success: boolean; output: unknown; error?: string } {
@@ -6587,7 +7995,14 @@ ${stitchGuidance}
         ),
       ];
 
-      return session.agent.invoke({ messages: retryMessages }, invokeOptions);
+      session.isRetrying = true;
+      this.persistRuntimeSnapshot(session);
+      try {
+        return await session.agent.invoke({ messages: retryMessages }, invokeOptions);
+      } finally {
+        session.isRetrying = false;
+        this.persistRuntimeSnapshot(session);
+      }
     }
   }
 
@@ -6597,6 +8012,66 @@ ${stitchGuidance}
       sessionId: session.id,
       agentId: session.id,
       appDataDir: this.appDataDir ?? undefined,
+    };
+  }
+
+  private applySessionPermissionBootstrap(
+    session: ActiveSession,
+    bootstrap?: SessionPermissionBootstrap | null,
+  ): void {
+    if (!bootstrap) return;
+
+    if (bootstrap.approvalMode) {
+      session.approvalMode = bootstrap.approvalMode;
+    }
+
+    for (const [permissionType, rawPaths] of Object.entries(bootstrap.permissionScopes || {})) {
+      if (!Array.isArray(rawPaths) || rawPaths.length === 0) continue;
+      const scopeSet = session.permissionScopes.get(permissionType) ?? new Set<string>();
+      for (const rawPath of rawPaths) {
+        const normalized = this.normalizePermissionPath(session, String(rawPath));
+        if (normalized) {
+          scopeSet.add(normalized);
+        }
+      }
+      if (scopeSet.size > 0) {
+        session.permissionScopes.set(permissionType, scopeSet);
+      }
+    }
+
+    for (const [cacheKey, decision] of Object.entries(bootstrap.permissionCache || {})) {
+      if (decision === 'allow_session') {
+        session.permissionCache.set(cacheKey, decision);
+      }
+    }
+  }
+
+  getSessionPermissionBootstrap(sessionId: string): SessionPermissionBootstrap | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+
+    const permissionScopes: Record<string, string[]> = {};
+    for (const [permissionType, scopes] of session.permissionScopes.entries()) {
+      const values = Array.from(scopes).map((scope) => String(scope || '').trim()).filter(Boolean);
+      if (values.length > 0) {
+        permissionScopes[permissionType] = Array.from(new Set(values));
+      }
+    }
+
+    const permissionCache: Record<string, PermissionDecision> = {};
+    for (const [cacheKey, decision] of session.permissionCache.entries()) {
+      if (decision === 'allow_session') {
+        permissionCache[cacheKey] = decision;
+      }
+    }
+
+    return {
+      version: 1,
+      sourceSessionId: session.id,
+      approvalMode: session.approvalMode,
+      permissionScopes,
+      permissionCache,
+      createdAt: Date.now(),
     };
   }
 
@@ -6689,12 +8164,21 @@ ${stitchGuidance}
           toolName: extendedRequest.toolName,
           riskLevel: extendedRequest.riskLevel,
           command: extendedRequest.command,
+          policyAction: extendedRequest.policyAction,
+          policyReason: extendedRequest.policyReason,
+          policyReasonCode: extendedRequest.policyReasonCode,
         },
         status: 'pending',
       };
       this.appendChatItem(session, permissionItem);
 
       eventEmitter.permissionRequest(session.id, extendedRequest);
+      this.checkpointActiveRun(session.id, 'permission_request', {
+        permissionId,
+        permissionType: extendedRequest.type,
+        resource: extendedRequest.resource,
+        riskLevel: extendedRequest.riskLevel,
+      });
       this.persistRuntimeSnapshot(session);
     });
   }
@@ -6702,6 +8186,7 @@ ${stitchGuidance}
   private getSessionSandboxSettings(session: ActiveSession): CommandSandboxSettings {
     const base = normalizeCommandSandboxSettings(this.runtimeConfig.sandbox);
     const allowedRoots = new Set<string>([resolve(session.workingDirectory)]);
+    const grantedScopes: string[] = [];
 
     for (const configuredPath of base.allowedPaths) {
       const normalized = this.normalizePermissionPath(session, configuredPath);
@@ -6714,14 +8199,28 @@ ${stitchGuidance}
       for (const scope of scopes) {
         const normalized = this.normalizePermissionPath(session, scope);
         if (normalized) {
-          allowedRoots.add(resolve(normalized));
+          const resolvedScope = resolve(normalized);
+          allowedRoots.add(resolvedScope);
+          grantedScopes.push(resolvedScope);
         }
       }
     }
 
+    const filteredDeniedPaths = base.deniedPaths.filter((deniedPath) => {
+      const normalizedDenied = this.normalizePermissionPath(session, deniedPath);
+      if (!normalizedDenied) return true;
+      const deniedAbsolute = resolve(normalizedDenied);
+      // If user granted a narrower session scope inside a denied root, allow that scope
+      // by removing the denied ancestor for this session.
+      return !grantedScopes.some((scope) =>
+        scope === deniedAbsolute || scope.startsWith(`${deniedAbsolute}${sep}`),
+      );
+    });
+
     return {
       ...base,
       allowedPaths: Array.from(allowedRoots),
+      deniedPaths: filteredDeniedPaths,
     };
   }
 
@@ -6741,6 +8240,8 @@ ${stitchGuidance}
       ? evaluateSandboxPolicy(request.resource, sandboxSettings, session.workingDirectory)
       : null;
     const shellAllowed = shellPolicy?.allowed ?? false;
+    const shellRisk = shellPolicy?.analysis.risk;
+    const shellViolations = shellPolicy?.violations ?? [];
     const isTrustedShell = isShell
       ? this.isTrustedShellCommand(request.resource, sandboxSettings)
       : false;
@@ -6749,7 +8250,31 @@ ${stitchGuidance}
       : false;
 
     if (isShell && !shellAllowed) {
-      return 'deny';
+      // Keep hard-deny for explicitly blocked/dangerous shell commands, but ask user
+      // for runtime approval when the denial is caused by default sandbox scope.
+      if (mode === 'read_only') {
+        return 'deny';
+      }
+      const hasHardSecurityViolation = shellViolations.some(
+        (violation) =>
+          violation.startsWith('Command is explicitly blocked.')
+          || violation.startsWith('Command matches dangerous shell patterns.'),
+      );
+      const hasOnlyPathBoundaryViolations =
+        shellViolations.length > 0
+        && shellViolations.every(
+          (violation) =>
+            violation.startsWith('Path is denied:')
+            || violation.startsWith('Path is outside allowed roots:'),
+        );
+
+      if (shellRisk === 'blocked' || hasHardSecurityViolation) {
+        return 'deny';
+      }
+      if (shellRisk === 'dangerous' && !hasOnlyPathBoundaryViolations) {
+        return 'deny';
+      }
+      return null;
     }
 
     if (mode === 'read_only') {

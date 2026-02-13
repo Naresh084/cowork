@@ -6,6 +6,8 @@ import type {
   SkillEligibility,
   SkillCategory,
   InstalledSkillConfig,
+  SkillLifecycle,
+  SkillTrustLevel,
 } from '@gemini-cowork/shared';
 
 // ============================================================================
@@ -36,6 +38,14 @@ interface SkillStoreState {
 
   // Error state
   error: string | null;
+}
+
+export interface SkillLifecycleInfo {
+  lifecycle: SkillLifecycle;
+  trustLevel: SkillTrustLevel;
+  confidence: number;
+  sourceReason: string;
+  verificationNotes?: string;
 }
 
 /**
@@ -91,6 +101,7 @@ interface SkillStoreActions {
   isSkillInstalled: (skillId: string) => boolean;
   isSkillEnabled: (skillId: string) => boolean;
   getSkillEligibility: (skillId: string) => SkillEligibility | undefined;
+  getSkillLifecycleInfo: (skillId: string) => SkillLifecycleInfo | null;
 
   clearError: () => void;
   reset: () => void;
@@ -116,6 +127,85 @@ const initialState: SkillStoreState = {
 };
 
 const DISCOVERY_CACHE_TTL_MS = 30_000;
+
+function isSkillLifecycle(value: unknown): value is SkillLifecycle {
+  return (
+    value === 'draft'
+    || value === 'verified'
+    || value === 'published'
+    || value === 'deprecated'
+  );
+}
+
+function isSkillTrustLevel(value: unknown): value is SkillTrustLevel {
+  return (
+    value === 'unverified'
+    || value === 'community'
+    || value === 'verified'
+    || value === 'official'
+  );
+}
+
+function deriveSkillLifecycleInfo(skill: SkillManifest): SkillLifecycleInfo {
+  const metadata = skill.frontmatter.metadata || {};
+  const explicitLifecycle = isSkillLifecycle(metadata.lifecycle)
+    ? metadata.lifecycle
+    : null;
+  const explicitTrust = isSkillTrustLevel(metadata.trustLevel)
+    ? metadata.trustLevel
+    : null;
+
+  if (explicitLifecycle || explicitTrust) {
+    const lifecycle = explicitLifecycle ?? 'draft';
+    const trustLevel = explicitTrust ?? 'unverified';
+    return {
+      lifecycle,
+      trustLevel,
+      confidence: 0.95,
+      sourceReason: 'Declared by skill metadata',
+      verificationNotes: metadata.verificationNotes,
+    };
+  }
+
+  switch (skill.source.type) {
+    case 'bundled':
+      return {
+        lifecycle: 'published',
+        trustLevel: 'official',
+        confidence: 0.85,
+        sourceReason: 'Shipped with product bundle',
+      };
+    case 'managed':
+      return {
+        lifecycle: 'verified',
+        trustLevel: 'verified',
+        confidence: 0.75,
+        sourceReason: 'Installed managed package',
+      };
+    case 'platform':
+      return {
+        lifecycle: 'verified',
+        trustLevel: 'community',
+        confidence: 0.65,
+        sourceReason: 'Discovered from external platform directory',
+      };
+    case 'workspace':
+      return {
+        lifecycle: 'draft',
+        trustLevel: 'community',
+        confidence: 0.6,
+        sourceReason: 'Workspace-local skill',
+      };
+    case 'custom':
+    default:
+      return {
+        lifecycle: 'draft',
+        trustLevel: 'unverified',
+        confidence: 0.6,
+        sourceReason: 'User-provided custom skill',
+      };
+  }
+}
 
 // ============================================================================
 // Store
@@ -603,6 +693,12 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
 
     getSkillEligibility: (skillId) => {
       return get().eligibilityMap.get(skillId);
+    },
+
+    getSkillLifecycleInfo: (skillId) => {
+      const skill = get().availableSkills.find((candidate) => candidate.id === skillId);
+      if (!skill) return null;
+      return deriveSkillLifecycleInfo(skill);
     },
 
     clearError: () => {

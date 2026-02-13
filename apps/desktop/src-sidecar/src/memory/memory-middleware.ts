@@ -8,6 +8,7 @@ import type { Message, MessageContentPart } from '@gemini-cowork/shared';
 import type { MemoryService } from './memory-service.js';
 import type { MemoryExtractor } from './memory-extractor.js';
 import type { ScoredMemory, Memory } from './types.js';
+import { eventEmitter } from '../event-emitter.js';
 
 /**
  * Extract text content from a message.
@@ -23,6 +24,93 @@ function getTextContent(message: Message): string {
     .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
     .map(part => part.text)
     .join('\n');
+}
+
+const SENSITIVE_PATTERNS: RegExp[] = [
+  /\b(?:api[_-\s]?key|access[_-\s]?token|refresh[_-\s]?token|secret|password|passcode)\b/i,
+  /\bsk-[a-z0-9]{16,}\b/i,
+  /\bAIza[0-9A-Za-z\-_]{20,}\b/,
+];
+
+const NEGATION_TOKENS = new Set([
+  'no',
+  'not',
+  'never',
+  'without',
+  'avoid',
+  'dont',
+  "don't",
+  'cannot',
+  "can't",
+]);
+
+const CONTRADICTION_STOP_TOKENS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'for',
+  'with',
+  'from',
+  'this',
+  'that',
+  'these',
+  'those',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'do',
+  'does',
+  'did',
+  'user',
+  'users',
+]);
+
+function normalizeStatement(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stemToken(token: string): string {
+  if (token.length > 5 && token.endsWith('ing')) return token.slice(0, -3);
+  if (token.length > 4 && token.endsWith('ed')) return token.slice(0, -2);
+  if (token.length > 4 && token.endsWith('es')) return token.slice(0, -2);
+  if (token.length > 3 && token.endsWith('s')) return token.slice(0, -1);
+  return token;
+}
+
+function contradictionKey(value: string): string {
+  const normalized = normalizeStatement(value);
+  if (!normalized) return '';
+  return normalized
+    .split(' ')
+    .filter((token) => token.length > 2)
+    .filter((token) => !NEGATION_TOKENS.has(token))
+    .filter((token) => !CONTRADICTION_STOP_TOKENS.has(token))
+    .map((token) => stemToken(token))
+    .slice(0, 14)
+    .join(' ');
+}
+
+function hasNegation(value: string): boolean {
+  return normalizeStatement(value)
+    .split(' ')
+    .some((token) => NEGATION_TOKENS.has(token));
+}
+
+function isSensitiveText(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return SENSITIVE_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 /**
@@ -142,18 +230,54 @@ export class MemoryMiddleware {
 
     // Extract potential memories
     const result = await this.extractor.extract(context.messages);
+    const existingMemories = await this.memoryService.getAll();
+    const seenPolarityByKey = new Map<string, boolean>();
+
+    for (const existing of existingMemories) {
+      const key = contradictionKey(existing.content);
+      if (!key) continue;
+      seenPolarityByKey.set(key, hasNegation(existing.content));
+    }
 
     let saved = 0;
     for (const memory of result.memories) {
+      if (memory.sensitive || isSensitiveText(memory.content)) {
+        continue;
+      }
+
+      const key = contradictionKey(memory.content);
+      const polarity = hasNegation(memory.content);
+      if (key) {
+        const existingPolarity = seenPolarityByKey.get(key);
+        if (typeof existingPolarity === 'boolean' && existingPolarity !== polarity) {
+          eventEmitter.emit('memory:conflict_detected', context.sessionId, {
+            atomId: key,
+            reason: `Contradictory memory candidate rejected (${memory.group}): ${memory.title}`,
+          });
+          continue;
+        }
+      }
+
+      const provenanceTags = [
+        ...(memory.tags || []),
+        `scope:${memory.scope || 'general'}`,
+        `stable:${memory.stable === false ? 'false' : 'true'}`,
+        'source:auto_extract',
+      ];
+      const mergedTags = [...new Set(provenanceTags.map((tag) => tag.trim()).filter(Boolean))];
+
       try {
         await this.memoryService.upsertAutoMemory({
           title: memory.title,
           content: memory.content,
           group: memory.group,
-          tags: memory.tags,
+          tags: mergedTags,
           source: 'auto',
           confidence: memory.confidence,
         });
+        if (key) {
+          seenPolarityByKey.set(key, polarity);
+        }
         saved++;
       } catch {
         // Failed to save extracted memory - continue

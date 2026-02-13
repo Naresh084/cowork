@@ -163,6 +163,7 @@ export class CoworkBackend implements SandboxBackendProtocol {
   private allowedPathProvider: () => string[];
   private skillsDir: string | null;
   private sandboxSettingsProvider: () => CommandSandboxSettings;
+  private virtualSkillFiles: Map<string, string>;
 
   constructor(
     workingDirectory: string,
@@ -170,6 +171,7 @@ export class CoworkBackend implements SandboxBackendProtocol {
     allowedPathProvider?: () => string[],
     skillsDir?: string,
     sandboxSettingsProvider?: () => CommandSandboxSettings,
+    virtualSkillFiles?: Map<string, string> | Record<string, string>,
   ) {
     this.workingDirectory = resolve(workingDirectory);
     this.id = id;
@@ -177,6 +179,28 @@ export class CoworkBackend implements SandboxBackendProtocol {
     this.sandboxSettingsProvider = sandboxSettingsProvider || (() => ({ ...DEFAULT_COMMAND_SANDBOX }));
     this.executor = new CommandExecutor(this.getEffectiveSandboxSettings());
     this.skillsDir = skillsDir || null;
+    this.virtualSkillFiles = new Map();
+    if (virtualSkillFiles instanceof Map) {
+      for (const [path, content] of virtualSkillFiles.entries()) {
+        this.virtualSkillFiles.set(this.normalizeSkillVirtualPath(path), content);
+      }
+    } else if (virtualSkillFiles && typeof virtualSkillFiles === 'object') {
+      for (const [path, content] of Object.entries(virtualSkillFiles)) {
+        this.virtualSkillFiles.set(this.normalizeSkillVirtualPath(path), content);
+      }
+    }
+  }
+
+  private normalizeSkillVirtualPath(path: string): string {
+    return ensureLeadingSlash(toPosixPath(path)).replace(/\/{2,}/g, '/');
+  }
+
+  private hasSkillSources(): boolean {
+    return Boolean(this.skillsDir) || this.virtualSkillFiles.size > 0;
+  }
+
+  private getVirtualSkillContent(path: string): string | null {
+    return this.virtualSkillFiles.get(this.normalizeSkillVirtualPath(path)) ?? null;
   }
 
   private getEffectiveSandboxSettings(): CommandSandboxSettings {
@@ -201,8 +225,8 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   async lsInfo(path: string): Promise<FileInfo[]> {
-    // Handle /skills/ virtual path - list managed skills directory
-    if ((path === '/skills/' || path === '/skills') && this.skillsDir) {
+    // Handle /skills/ virtual path - list skill sources.
+    if ((path === '/skills/' || path === '/skills') && this.hasSkillSources()) {
       return this.lsSkillsDir();
     }
 
@@ -240,48 +264,62 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   /**
-   * List the managed skills directory.
-   * Returns FileInfo for each skill subdirectory.
+   * List skill directories from both virtual skill map and managed skills directory.
    */
   private async lsSkillsDir(): Promise<FileInfo[]> {
-    if (!this.skillsDir) {
+    if (!this.hasSkillSources()) {
       return [];
     }
 
-    try {
-      const entries = await readdir(this.skillsDir, { withFileTypes: true });
-      const infos: FileInfo[] = [];
+    const infosByPath = new Map<string, FileInfo>();
 
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    for (const virtualPath of this.virtualSkillFiles.keys()) {
+      const match = virtualPath.match(/^\/skills\/([^/]+)\/SKILL\.md$/);
+      if (!match) continue;
+      const skillName = match[1]!;
+      const path = `/skills/${skillName}/`;
+      infosByPath.set(path, {
+        path,
+        is_dir: true,
+        size: 0,
+        modified_at: '',
+      });
+    }
 
-        const entryPath = join(this.skillsDir, entry.name);
-        let modifiedAt = '';
-        try {
-          const entryStats = await stat(entryPath);
-          modifiedAt = entryStats.mtime.toISOString();
-        } catch {
-          // ignore stat failures
+    if (this.skillsDir) {
+      try {
+        const entries = await readdir(this.skillsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+
+          const entryPath = join(this.skillsDir, entry.name);
+          let modifiedAt = '';
+          try {
+            const entryStats = await stat(entryPath);
+            modifiedAt = entryStats.mtime.toISOString();
+          } catch {
+            // ignore stat failures
+          }
+
+          const path = `/skills/${entry.name}/`;
+          infosByPath.set(path, {
+            path,
+            is_dir: true,
+            size: 0,
+            modified_at: modifiedAt,
+          });
         }
-
-        // Return as virtual path /skills/skillname/
-        infos.push({
-          path: `/skills/${entry.name}/`,
-          is_dir: true,
-          size: 0,
-          modified_at: modifiedAt,
-        });
+      } catch {
+        // ignore managed directory listing failures
       }
-
-      return infos;
-    } catch {
-      return [];
     }
+
+    return Array.from(infosByPath.values()).sort((a, b) => a.path.localeCompare(b.path));
   }
 
   async read(filePath: string, offset = 0, limit = 500): Promise<string> {
     // Handle skill virtual paths
-    if (filePath.startsWith('/skills/') && this.skillsDir) {
+    if (filePath.startsWith('/skills/') && this.hasSkillSources()) {
       return this.readSkillFile(filePath, offset, limit);
     }
 
@@ -302,31 +340,28 @@ export class CoworkBackend implements SandboxBackendProtocol {
    * Maps virtual path /skills/name/SKILL.md to actual filesystem path.
    */
   private async readSkillFile(virtualPath: string, offset = 0, limit = 500): Promise<string> {
-    if (!this.skillsDir) {
-      return `Error: Skills directory not configured`;
-    }
-
-    // Map /skills/github/SKILL.md → skillsDir/github/SKILL.md
-    const relativePath = virtualPath.replace('/skills/', '');
-    const realPath = join(this.skillsDir, relativePath);
-
-    try {
-      const buffer = await readFile(realPath);
-      const content = buffer.toString('utf-8');
-      const lines = splitLines(content);
-
-      if (offset >= lines.length) {
-        return `Error: Line offset ${offset} exceeds file length (${lines.length} lines)`;
-      }
-      const end = Math.min(offset + limit, lines.length);
-      const slice = lines.slice(offset, end);
-      return formatContentWithLineNumbers(slice, offset + 1);
-    } catch (error) {
+    const raw = await this.readSkillRaw(virtualPath);
+    if (!raw) {
       return `Error: Skill file '${virtualPath}' not found`;
     }
+    const lines = raw.content;
+    if (offset >= lines.length) {
+      return `Error: Line offset ${offset} exceeds file length (${lines.length} lines)`;
+    }
+    const end = Math.min(offset + limit, lines.length);
+    const slice = lines.slice(offset, end);
+    return formatContentWithLineNumbers(slice, offset + 1);
   }
 
   async readRaw(filePath: string): Promise<FileData> {
+    if (filePath.startsWith('/skills/') && this.hasSkillSources()) {
+      const rawSkill = await this.readSkillRaw(filePath);
+      if (!rawSkill) {
+        throw new Error(`Skill file '${filePath}' not found`);
+      }
+      return rawSkill;
+    }
+
     const { absolutePath, error } = await this.resolvePath(filePath);
     if (error) {
       throw new Error(error);
@@ -359,6 +394,37 @@ export class CoworkBackend implements SandboxBackendProtocol {
       created_at: stats.birthtime.toISOString(),
       modified_at: stats.mtime.toISOString(),
     };
+  }
+
+  private async readSkillRaw(virtualPath: string): Promise<FileData | null> {
+    const normalizedPath = this.normalizeSkillVirtualPath(virtualPath);
+    const nowIso = new Date().toISOString();
+
+    const fromMap = this.getVirtualSkillContent(normalizedPath);
+    if (fromMap !== null) {
+      return {
+        content: splitLines(fromMap),
+        created_at: nowIso,
+        modified_at: nowIso,
+      };
+    }
+
+    if (!this.skillsDir) {
+      return null;
+    }
+
+    const relativePath = normalizedPath.replace('/skills/', '');
+    const realPath = join(this.skillsDir, relativePath);
+    try {
+      const [buffer, stats] = await Promise.all([readFile(realPath), stat(realPath)]);
+      return {
+        content: splitLines(buffer.toString('utf-8')),
+        created_at: stats.birthtime.toISOString(),
+        modified_at: stats.mtime.toISOString(),
+      };
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -423,6 +489,34 @@ export class CoworkBackend implements SandboxBackendProtocol {
       return `Error: Invalid regex pattern: ${pattern}`;
     }
 
+    if (path.startsWith('/skills/') && this.hasSkillSources()) {
+      const records = await this.listSkillFileRecords();
+      const filteredByPath = records.filter((record) => {
+        if (path === '/skills' || path === '/skills/') {
+          return true;
+        }
+        return record.path.startsWith(this.normalizeSkillVirtualPath(path).replace(/\/$/, ''));
+      });
+      const filtered = glob
+        ? filteredByPath.filter((record) => micromatch.isMatch(record.path, glob, { dot: true }))
+        : filteredByPath;
+
+      const matches: GrepMatch[] = [];
+      for (const record of filtered) {
+        const lines = splitLines(record.content);
+        lines.forEach((line, index) => {
+          if (regex.test(line)) {
+            matches.push({
+              path: record.path,
+              line: index + 1,
+              text: line,
+            });
+          }
+        });
+      }
+      return matches;
+    }
+
     const { absolutePath, virtualPath, error } = await this.resolvePath(path);
     if (error) return `Error: ${error}`;
 
@@ -455,7 +549,7 @@ export class CoworkBackend implements SandboxBackendProtocol {
 
   async globInfo(pattern: string, path = '/'): Promise<FileInfo[]> {
     // Handle skill glob patterns
-    if ((pattern.startsWith('/skills/') || path.startsWith('/skills/')) && this.skillsDir) {
+    if ((pattern.startsWith('/skills/') || path.startsWith('/skills/')) && this.hasSkillSources()) {
       return this.globSkillFiles(pattern);
     }
 
@@ -484,41 +578,74 @@ export class CoworkBackend implements SandboxBackendProtocol {
   }
 
   /**
-   * Glob skill files from the managed skills directory.
+   * Glob skill files from virtual skill map and managed skills directory.
    * Used by DeepAgents to discover available skills.
    */
   private async globSkillFiles(pattern: string): Promise<FileInfo[]> {
-    if (!this.skillsDir) return [];
+    const records = await this.listSkillFileRecords();
+    return records
+      .filter((record) => micromatch.isMatch(record.path, pattern, { dot: true }))
+      .map((record) => ({
+        path: record.path,
+        is_dir: false,
+        size: record.size,
+        modified_at: record.modifiedAt,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }
 
-    const infos: FileInfo[] = [];
-    try {
-      const entries = await readdir(this.skillsDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+  private async listSkillFileRecords(): Promise<Array<{
+    path: string;
+    content: string;
+    size: number;
+    modifiedAt: string;
+  }>> {
+    const recordsByPath = new Map<string, {
+      path: string;
+      content: string;
+      size: number;
+      modifiedAt: string;
+    }>();
 
-        const skillMdPath = join(this.skillsDir, entry.name, 'SKILL.md');
-        try {
-          const stats = await stat(skillMdPath);
-          const virtualPath = `/skills/${entry.name}/SKILL.md`;
-
-          // Check if matches the glob pattern
-          if (micromatch.isMatch(virtualPath, pattern, { dot: true })) {
-            infos.push({
-              path: virtualPath,
-              is_dir: false,
-              size: stats.size,
-              modified_at: stats.mtime.toISOString(),
-            });
-          }
-        } catch {
-          // SKILL.md doesn't exist in this directory, skip
-        }
-      }
-    } catch {
-      // Skills directory doesn't exist
+    for (const [path, content] of this.virtualSkillFiles.entries()) {
+      const normalizedPath = this.normalizeSkillVirtualPath(path);
+      recordsByPath.set(normalizedPath, {
+        path: normalizedPath,
+        content,
+        size: Buffer.byteLength(content, 'utf-8'),
+        modifiedAt: '',
+      });
     }
 
-    return infos;
+    if (this.skillsDir) {
+      try {
+        const entries = await readdir(this.skillsDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+          const skillMdPath = join(this.skillsDir, entry.name, 'SKILL.md');
+          try {
+            const [buffer, stats] = await Promise.all([readFile(skillMdPath), stat(skillMdPath)]);
+            const virtualPath = `/skills/${entry.name}/SKILL.md`;
+            // Synced virtual skills should win over managed directory copies to keep
+            // one deterministic source of truth for the active session.
+            if (!recordsByPath.has(virtualPath)) {
+              recordsByPath.set(virtualPath, {
+                path: virtualPath,
+                content: buffer.toString('utf-8'),
+                size: stats.size,
+                modifiedAt: stats.mtime.toISOString(),
+              });
+            }
+          } catch {
+            // SKILL.md doesn't exist or is unreadable; skip.
+          }
+        }
+      } catch {
+        // Skills directory doesn't exist; ignore.
+      }
+    }
+
+    return Array.from(recordsByPath.values());
   }
 
   async write(filePath: string, content: string): Promise<WriteResult> {

@@ -1,6 +1,8 @@
 import { Check, AlertTriangle, Download, Loader2, FolderOpen, ToggleRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SkillManifest, SkillEligibility } from '@gemini-cowork/shared';
+import { useSkillStore } from '../../stores/skill-store';
+import { SkillLifecycleBadges } from './SkillLifecycleBadges';
 
 interface SkillCardProps {
   skill: SkillManifest;
@@ -21,12 +23,14 @@ export function SkillCard({
   onInstall,
   onEnable,
 }: SkillCardProps) {
+  const getSkillLifecycleInfo = useSkillStore((state) => state.getSkillLifecycleInfo);
   const emoji = skill.frontmatter.metadata?.emoji || '📦';
   const name = skill.frontmatter.name;
   const description = skill.frontmatter.description;
   const isEligible = !eligibility || eligibility.eligible;
   const hasRequirements = eligibility && !eligibility.eligible;
   const isPlatform = skill.source.type === 'platform';
+  const lifecycleInfo = getSkillLifecycleInfo(skill.id);
 
   const handleInstallClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -72,6 +76,10 @@ export function SkillCard({
       {/* Description */}
       <p className="text-sm text-zinc-400 mb-3 line-clamp-2">{description}</p>
 
+      <div className="mb-3">
+        <SkillLifecycleBadges info={lifecycleInfo} compact />
+      </div>
+
       {/* Status and Actions */}
       <div className="flex items-center justify-between">
         {/* Status */}
@@ -82,8 +90,8 @@ export function SkillCard({
               Requires setup
             </span>
           ) : isEligible ? (
-            <span className="text-xs text-zinc-500">
-              {skill.frontmatter.metadata?.category || 'custom'}
+            <span className="text-xs text-zinc-500 truncate max-w-[140px]">
+              {lifecycleInfo?.sourceReason || skill.frontmatter.metadata?.category || 'custom'}
             </span>
           ) : null}
         </div>

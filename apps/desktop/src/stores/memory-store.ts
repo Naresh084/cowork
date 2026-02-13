@@ -70,15 +70,90 @@ export interface UpdateMemoryInput {
   tags?: string[];
 }
 
+export type DeepMemoryFeedbackType =
+  | 'positive'
+  | 'negative'
+  | 'pin'
+  | 'unpin'
+  | 'hide'
+  | 'report_conflict';
+
+export interface DeepMemoryQueryOptions {
+  limit?: number;
+  includeSensitive?: boolean;
+  includeGraphExpansion?: boolean;
+  lexicalWeight?: number;
+  denseWeight?: number;
+  graphWeight?: number;
+  rerankWeight?: number;
+}
+
+export interface DeepMemoryQueryEvidence {
+  atomId: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface DeepMemoryAtom {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  runId?: string;
+  atomType: 'instructions' | 'semantic' | 'episodic' | 'procedural' | 'preference' | 'context';
+  content: string;
+  summary?: string;
+  keywords?: string[];
+  confidence: number;
+  sensitivity?: 'normal' | 'sensitive' | 'restricted';
+  pinned?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeepMemoryQueryResult {
+  queryId: string;
+  sessionId?: string;
+  query: string;
+  options: DeepMemoryQueryOptions;
+  evidence: DeepMemoryQueryEvidence[];
+  atoms: DeepMemoryAtom[];
+  totalCandidates: number;
+  latencyMs: number;
+  createdAt: number;
+}
+
+export interface DeepMemoryFeedback {
+  id: string;
+  sessionId: string;
+  queryId: string;
+  atomId: string;
+  feedback: DeepMemoryFeedbackType;
+  note?: string;
+  createdAt: number;
+}
+
+export interface DeepMemoryAtomView extends DeepMemoryAtom {
+  rank: number;
+  queryScore: number;
+  confidenceScore: number;
+  explanations: string[];
+}
+
 interface MemoryStoreState {
   // Data
   memories: Memory[];
   groups: MemoryGroup[];
+  deepQueryResult: DeepMemoryQueryResult | null;
+  deepQueryAtoms: DeepMemoryAtomView[];
+  feedbackLog: DeepMemoryFeedback[];
+  lastFeedback: DeepMemoryFeedback | null;
 
   // UI state
   isLoading: boolean;
   isCreating: boolean;
   isDeleting: Set<string>;
+  isDeepQuerying: boolean;
+  isSubmittingFeedback: boolean;
 
   // Current working directory
   workingDirectory: string | null;
@@ -92,6 +167,9 @@ interface MemoryStoreState {
 
   // Error state
   error: string | null;
+
+  // Query diagnostics
+  lastDeepQueryAt: number | null;
 }
 
 interface MemoryStoreActions {
@@ -111,6 +189,19 @@ interface MemoryStoreActions {
   // Search
   searchMemories: (query: string) => Promise<Memory[]>;
   getRelevantMemories: (context: string, limit?: number) => Promise<ScoredMemory[]>;
+  runDeepQuery: (
+    sessionId: string,
+    query: string,
+    options?: DeepMemoryQueryOptions,
+  ) => Promise<DeepMemoryAtomView[]>;
+  submitDeepFeedback: (
+    sessionId: string,
+    queryId: string,
+    atomId: string,
+    feedback: DeepMemoryFeedbackType,
+    note?: string,
+  ) => Promise<DeepMemoryFeedback | null>;
+  clearDeepQueryState: () => void;
 
   // UI Actions
   setSelectedGroup: (group: MemoryGroup | 'all') => void;
@@ -136,14 +227,21 @@ const DEFAULT_GROUPS: MemoryGroup[] = ['preferences', 'learnings', 'context', 'i
 const initialState: MemoryStoreState = {
   memories: [],
   groups: DEFAULT_GROUPS,
+  deepQueryResult: null,
+  deepQueryAtoms: [],
+  feedbackLog: [],
+  lastFeedback: null,
   isLoading: false,
   isCreating: false,
   isDeleting: new Set(),
+  isDeepQuerying: false,
+  isSubmittingFeedback: false,
   workingDirectory: null,
   selectedGroup: 'all',
   searchQuery: '',
   selectedMemoryId: null,
   error: null,
+  lastDeepQueryAt: null,
 };
 
 // ============================================================================
@@ -382,6 +480,102 @@ export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
       }
     },
 
+    runDeepQuery: async (sessionId, query, options = {}) => {
+      if (!sessionId.trim() || !query.trim()) {
+        set({ error: 'Session ID and query are required for deep query' });
+        return [];
+      }
+
+      set({ isDeepQuerying: true, error: null });
+
+      try {
+        const result = await invoke<DeepMemoryQueryResult>('deep_memory_query', {
+          sessionId,
+          query,
+          options,
+        });
+
+        const evidenceByAtomId = new Map(
+          result.evidence.map((item, index) => [
+            item.atomId,
+            { score: item.score, reasons: item.reasons || [], rank: index + 1 },
+          ]),
+        );
+
+        const atoms: DeepMemoryAtomView[] = result.atoms
+          .map((atom, index) => {
+            const evidence = evidenceByAtomId.get(atom.id);
+            return {
+              ...atom,
+              rank: evidence?.rank ?? result.evidence.length + index + 1,
+              queryScore: evidence?.score ?? 0,
+              confidenceScore: atom.confidence ?? 0,
+              explanations: evidence?.reasons ?? [],
+            };
+          })
+          .sort((a, b) => {
+            if (a.rank !== b.rank) return a.rank - b.rank;
+            return b.queryScore - a.queryScore;
+          });
+
+        set({
+          deepQueryResult: result,
+          deepQueryAtoms: atoms,
+          isDeepQuerying: false,
+          lastDeepQueryAt: Date.now(),
+        });
+
+        return atoms;
+      } catch (error) {
+        set({
+          isDeepQuerying: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      }
+    },
+
+    submitDeepFeedback: async (sessionId, queryId, atomId, feedback, note) => {
+      if (!sessionId.trim() || !queryId.trim() || !atomId.trim()) {
+        set({ error: 'Session ID, query ID, and atom ID are required for feedback' });
+        return null;
+      }
+
+      set({ isSubmittingFeedback: true, error: null });
+
+      try {
+        const result = await invoke<DeepMemoryFeedback>('deep_memory_feedback', {
+          sessionId,
+          queryId,
+          atomId,
+          feedback,
+          note,
+        });
+
+        set((state) => ({
+          isSubmittingFeedback: false,
+          lastFeedback: result,
+          feedbackLog: [result, ...state.feedbackLog].slice(0, 200),
+        }));
+
+        return result;
+      } catch (error) {
+        set({
+          isSubmittingFeedback: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    },
+
+    clearDeepQueryState: () => {
+      set({
+        deepQueryResult: null,
+        deepQueryAtoms: [],
+        lastFeedback: null,
+      });
+    },
+
     // ========================================================================
     // UI Actions
     // ========================================================================
@@ -465,6 +659,14 @@ export const useSelectedGroup = () => useMemoryStore((state) => state.selectedGr
 export const useMemorySearchQuery = () => useMemoryStore((state) => state.searchQuery);
 export const useSelectedMemoryId = () => useMemoryStore((state) => state.selectedMemoryId);
 export const useMemoryError = () => useMemoryStore((state) => state.error);
+export const useDeepQueryResult = () => useMemoryStore((state) => state.deepQueryResult);
+export const useDeepQueryAtoms = () => useMemoryStore((state) => state.deepQueryAtoms);
+export const useDeepQueryLoading = () => useMemoryStore((state) => state.isDeepQuerying);
+export const useDeepFeedbackLog = () => useMemoryStore((state) => state.feedbackLog);
+export const useDeepFeedbackSubmitting = () =>
+  useMemoryStore((state) => state.isSubmittingFeedback);
+export const useLastDeepFeedback = () => useMemoryStore((state) => state.lastFeedback);
+export const useLastDeepQueryAt = () => useMemoryStore((state) => state.lastDeepQueryAt);
 
 // ============================================================================
 // Legacy Compatibility

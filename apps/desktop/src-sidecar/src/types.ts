@@ -46,6 +46,40 @@ export interface SendMessageParams {
   attachments?: Attachment[];
 }
 
+export interface SendMessageV2Params {
+  sessionId: string;
+  message: string;
+  runOptions?: Record<string, unknown>;
+  attachments?: Attachment[];
+}
+
+export interface ResumeRunParams {
+  sessionId: string;
+  runId: string;
+}
+
+export interface GetRunTimelineParams {
+  runId: string;
+}
+
+export interface BranchSessionParams {
+  sessionId: string;
+  fromTurnId?: string;
+  branchName: string;
+}
+
+export interface MergeBranchParams {
+  sessionId: string;
+  sourceBranchId: string;
+  targetBranchId: string;
+  strategy?: 'auto' | 'ours' | 'theirs' | 'manual';
+}
+
+export interface SetActiveBranchParams {
+  sessionId: string;
+  branchId: string;
+}
+
 export interface RespondPermissionParams {
   sessionId: string;
   permissionId: string;
@@ -173,6 +207,42 @@ export interface MemoryGroupDeleteParams {
   groupName: string;
 }
 
+export interface DeepMemoryQueryParams {
+  sessionId: string;
+  query: string;
+  options?: Record<string, unknown>;
+}
+
+export interface DeepMemoryFeedbackParams {
+  sessionId: string;
+  queryId: string;
+  atomId: string;
+  feedback: 'positive' | 'negative' | 'pin' | 'unpin' | 'hide' | 'report_conflict';
+  note?: string;
+}
+
+export interface DeepMemoryExportBundleParams {
+  projectId: string;
+  path: string;
+  encrypted?: boolean;
+}
+
+export interface DeepMemoryImportBundleParams {
+  projectId: string;
+  path: string;
+  mergeMode?: 'replace' | 'merge' | 'append';
+}
+
+export interface DeepMemoryMigrationReportParams {
+  workingDirectory?: string;
+  projectId?: string;
+}
+
+export interface BenchmarkRunSuiteParams {
+  suiteId: string;
+  profile?: string;
+}
+
 // ============================================================================
 // Command System Parameters (New)
 // ============================================================================
@@ -253,7 +323,20 @@ export interface SessionDetails extends SessionInfo {
   runtime?: SessionRuntimeState;
 }
 
-export type SessionRunState = 'idle' | 'running' | 'stopping' | 'errored';
+export type SessionRunState =
+  | 'idle'
+  | 'queued'
+  | 'running'
+  | 'waiting_permission'
+  | 'waiting_question'
+  | 'retrying'
+  | 'paused'
+  | 'recovered'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'stopping'
+  | 'errored';
 
 export interface RuntimeToolSnapshot {
   id: string;
@@ -274,6 +357,8 @@ export interface SessionRuntimeState {
   pendingPermissions: ExtendedPermissionRequest[];
   pendingQuestions: QuestionRequest[];
   messageQueue: Array<{ id: string; content: string; queuedAt: number }>;
+  permissionScopes?: Record<string, string[]>;
+  permissionCache?: Record<string, PermissionDecision>;
   lastError?: {
     message: string;
     code?: string;
@@ -369,17 +454,41 @@ export interface RuntimeSoulProfile {
   path?: string;
 }
 
+export type UxProfile = 'simple' | 'pro';
+
 export type RuntimeMemoryStyle = 'conservative' | 'balanced' | 'aggressive';
+
+export interface RuntimeMemoryRetrievalSettings {
+  enabled: boolean;
+  lexicalWeight: number;
+  denseWeight: number;
+  graphWeight: number;
+  rerankWeight: number;
+  maxResults: number;
+}
+
+export interface RuntimeMemoryConsolidationSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  redundancyThreshold: number;
+  decayFactor: number;
+  minConfidence?: number;
+  staleAfterHours?: number;
+  strategy?: 'balanced' | 'aggressive' | 'conservative';
+}
 
 export interface RuntimeMemorySettings {
   enabled: boolean;
   autoExtract: boolean;
   maxInPrompt: number;
   style: RuntimeMemoryStyle;
+  retrieval?: RuntimeMemoryRetrievalSettings;
+  consolidation?: RuntimeMemoryConsolidationSettings;
 }
 
 export interface RuntimeConfig {
   activeProvider: ProviderId;
+  uxProfile?: UxProfile;
   providerApiKeys?: Partial<Record<ProviderId, string>>;
   providerBaseUrls?: Partial<Record<ProviderId, string>>;
   googleApiKey?: string | null;
@@ -435,11 +544,26 @@ export type AgentEventType =
   | 'stream:start'
   | 'stream:chunk'
   | 'stream:done'
+  | 'run:checkpoint'
+  | 'run:recovered'
+  | 'run:fallback_applied'
+  | 'run:stalled'
+  | 'run:health'
   | 'thinking:start'
   | 'thinking:chunk'
   | 'thinking:done'
   | 'tool:start'
   | 'tool:result'
+  | 'branch:created'
+  | 'branch:merged'
+  | 'workflow:activated'
+  | 'workflow:fallback'
+  | 'memory:retrieved'
+  | 'memory:consolidated'
+  | 'memory:conflict_detected'
+  | 'benchmark:progress'
+  | 'benchmark:score_updated'
+  | 'release_gate:status'
   | 'permission:request'
   | 'permission:resolved'
   | 'question:ask'
@@ -449,6 +573,10 @@ export type AgentEventType =
   | 'task:set'
   | 'artifact:created'
   | 'research:progress'
+  | 'research:evidence'
+  | 'browser:progress'
+  | 'browser:checkpoint'
+  | 'browser:blocker'
   | 'context:update'
   | 'context:usage'
   | 'session:updated'

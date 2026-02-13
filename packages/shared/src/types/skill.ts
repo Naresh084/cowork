@@ -16,6 +16,24 @@ export const SkillCategorySchema = z.enum([
 
 export type SkillCategory = z.infer<typeof SkillCategorySchema>;
 
+export const SkillLifecycleSchema = z.enum([
+  'draft',
+  'verified',
+  'published',
+  'deprecated',
+]);
+
+export type SkillLifecycle = z.infer<typeof SkillLifecycleSchema>;
+
+export const SkillTrustLevelSchema = z.enum([
+  'unverified',
+  'community',
+  'verified',
+  'official',
+]);
+
+export type SkillTrustLevel = z.infer<typeof SkillTrustLevelSchema>;
+
 // ============================================================================
 // Skill Requirements Types
 // ============================================================================
@@ -81,6 +99,9 @@ export const SkillMetadataSchema = z.object({
   emoji: z.string().optional(),
   homepage: z.string().optional(),
   category: SkillCategorySchema.optional(),
+  lifecycle: SkillLifecycleSchema.optional(),
+  trustLevel: SkillTrustLevelSchema.optional(),
+  verificationNotes: z.string().optional(),
   tags: z.array(z.string()).optional(),
   requires: SkillRequirementsSchema.optional(),
   install: z.array(InstallOptionSchema).optional(),

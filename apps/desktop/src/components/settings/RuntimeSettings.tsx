@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Info, Monitor, Search } from 'lucide-react';
+import { Database, Info, Monitor, RefreshCw, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useAuthStore } from '../../stores/auth-store';
 import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
+import { useActiveSession } from '../../stores/session-store';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { BackgroundServiceSettings } from './BackgroundServiceSettings';
+import { SecuritySettings } from './SecuritySettings';
 
 interface ExternalCliProviderAvailability {
   installed: boolean;
   binaryPath: string | null;
+  binarySha256: string | null;
+  binaryTrust: 'trusted' | 'untrusted' | 'unknown';
+  trustReason: string | null;
   version: string | null;
   authStatus: 'authenticated' | 'unauthenticated' | 'unknown';
   authMessage: string | null;
@@ -20,6 +25,18 @@ interface ExternalCliProviderAvailability {
 interface ExternalCliAvailabilitySnapshot {
   codex: ExternalCliProviderAvailability;
   claude: ExternalCliProviderAvailability;
+}
+
+interface MemoryMigrationReport {
+  migratedAt: number;
+  workingDirectory: string;
+  projectId: string;
+  importedFromLegacyIndex: number;
+  skippedFromLegacyIndex: number;
+  importedGeminiMd: number;
+  skippedGeminiMd: number;
+  legacySourceDir: string;
+  legacyGeminiPath: string;
 }
 
 function KeyField({
@@ -123,12 +140,18 @@ export function RuntimeSettings() {
     updateExternalCliSettings,
   } = useSettingsStore();
   const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
+  const activeSession = useActiveSession();
   const [computerUseModel, setComputerUseModel] = useState(specializedModelsV2.google.computerUse);
   const [deepResearchModel, setDeepResearchModel] = useState(
     specializedModelsV2.google.deepResearchAgent,
   );
   const [externalCliAvailability, setExternalCliAvailability] =
     useState<ExternalCliAvailabilitySnapshot | null>(null);
+  const [memoryMigrationReport, setMemoryMigrationReport] = useState<MemoryMigrationReport | null>(
+    null,
+  );
+  const [memoryMigrationLoading, setMemoryMigrationLoading] = useState(false);
+  const [memoryMigrationError, setMemoryMigrationError] = useState<string | null>(null);
 
   useEffect(() => {
     void invoke<ExternalCliAvailabilitySnapshot>('agent_get_external_cli_availability', {
@@ -137,6 +160,35 @@ export function RuntimeSettings() {
       .then((snapshot) => setExternalCliAvailability(snapshot))
       .catch(() => setExternalCliAvailability(null));
   }, []);
+
+  useEffect(() => {
+    const loadMigrationReport = async () => {
+      if (!activeSession?.workingDirectory) {
+        setMemoryMigrationReport(null);
+        setMemoryMigrationError(null);
+        return;
+      }
+
+      setMemoryMigrationLoading(true);
+      setMemoryMigrationError(null);
+      try {
+        const response = await invoke<{ report: MemoryMigrationReport | null }>(
+          'deep_memory_get_migration_report',
+          {
+            workingDirectory: activeSession.workingDirectory,
+          },
+        );
+        setMemoryMigrationReport(response?.report || null);
+      } catch (error) {
+        setMemoryMigrationReport(null);
+        setMemoryMigrationError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setMemoryMigrationLoading(false);
+      }
+    };
+
+    void loadMigrationReport();
+  }, [activeSession?.workingDirectory]);
 
   useEffect(() => {
     setComputerUseModel(specializedModelsV2.google.computerUse);
@@ -182,6 +234,8 @@ export function RuntimeSettings() {
   );
   const codexAvailability = externalCliAvailability?.codex;
   const claudeAvailability = externalCliAvailability?.claude;
+  const codexTrustBlocked = codexAvailability?.binaryTrust === 'untrusted';
+  const claudeTrustBlocked = claudeAvailability?.binaryTrust === 'untrusted';
 
   return (
     <div className="space-y-4" data-tour-id="settings-runtime-section">
@@ -194,6 +248,96 @@ export function RuntimeSettings() {
       </div>
 
       <BackgroundServiceSettings />
+      <SecuritySettings />
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-medium text-white/88">Memory Migration Diagnostics</h4>
+            <p className="text-xs text-white/42">
+              Legacy memory import status for the active workspace.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (!activeSession?.workingDirectory) return;
+              setMemoryMigrationLoading(true);
+              setMemoryMigrationError(null);
+              void invoke<{ report: MemoryMigrationReport | null }>('deep_memory_get_migration_report', {
+                workingDirectory: activeSession.workingDirectory,
+              })
+                .then((response) => {
+                  setMemoryMigrationReport(response?.report || null);
+                })
+                .catch((error) => {
+                  setMemoryMigrationError(error instanceof Error ? error.message : String(error));
+                })
+                .finally(() => {
+                  setMemoryMigrationLoading(false);
+                });
+            }}
+            disabled={!activeSession?.workingDirectory || memoryMigrationLoading}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-colors',
+              !activeSession?.workingDirectory || memoryMigrationLoading
+                ? 'border-white/[0.08] text-white/35 cursor-not-allowed'
+                : 'border-white/[0.12] text-white/70 hover:bg-white/[0.05] hover:text-white/90',
+            )}
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', memoryMigrationLoading && 'animate-spin')} />
+            Refresh
+          </button>
+        </div>
+
+        {!activeSession?.workingDirectory ? (
+          <p className="text-xs text-white/45">
+            Select a session to view workspace migration diagnostics.
+          </p>
+        ) : memoryMigrationError ? (
+          <div className="rounded-lg border border-[#FF5449]/30 bg-[#FF5449]/10 px-3 py-2 text-xs text-[#FFB4AF]">
+            Failed to load memory migration report: {memoryMigrationError}
+          </div>
+        ) : memoryMigrationReport ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="rounded-lg border border-white/[0.07] bg-[#0B0C10]/60 px-3 py-2">
+              <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-white/45">
+                <Database className="h-3.5 w-3.5" />
+                Imported Records
+              </div>
+              <p className="mt-1 text-sm text-white/88">
+                Index: {memoryMigrationReport.importedFromLegacyIndex} | GEMINI.md:{' '}
+                {memoryMigrationReport.importedGeminiMd}
+              </p>
+              <p className="mt-1 text-[11px] text-white/45">
+                Skipped index: {memoryMigrationReport.skippedFromLegacyIndex} | Skipped GEMINI.md:{' '}
+                {memoryMigrationReport.skippedGeminiMd}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-white/[0.07] bg-[#0B0C10]/60 px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-white/45">Migration Timestamp</div>
+              <p className="mt-1 text-sm text-white/88">
+                {new Date(memoryMigrationReport.migratedAt).toLocaleString()}
+              </p>
+              <p className="mt-1 text-[11px] text-white/45">Project: {memoryMigrationReport.projectId}</p>
+            </div>
+
+            <div className="rounded-lg border border-white/[0.07] bg-[#0B0C10]/60 px-3 py-2 sm:col-span-2">
+              <div className="text-[11px] uppercase tracking-wide text-white/45">Legacy Sources</div>
+              <p className="mt-1 text-[11px] text-white/70 break-all">
+                memories: {memoryMigrationReport.legacySourceDir}
+              </p>
+              <p className="mt-1 text-[11px] text-white/70 break-all">
+                instructions: {memoryMigrationReport.legacyGeminiPath}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-white/45">
+            No migration report found for the current workspace.
+          </p>
+        )}
+      </section>
 
       {needsExternalSearchFallback ? (
         <div className="space-y-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
@@ -339,11 +483,25 @@ export function RuntimeSettings() {
                     ? 'Authenticated'
                     : 'Auth unknown'}
                 </p>
+                <p
+                  className={cn(
+                    'text-[11px]',
+                    codexTrustBlocked ? 'text-[#FCA5A5]' : 'text-white/40',
+                  )}
+                >
+                  Trust:{' '}
+                  {codexAvailability.binaryTrust === 'trusted'
+                    ? 'Trusted binary'
+                    : codexAvailability.binaryTrust === 'untrusted'
+                    ? 'Blocked by trust policy'
+                    : 'Unknown'}
+                </p>
               </div>
               <label className="flex items-center gap-2 text-xs text-white/70">
                 <input
                   type="checkbox"
                   checked={externalCli.codex.enabled}
+                  disabled={codexTrustBlocked}
                   onChange={(event) => {
                     void (async () => {
                       await updateExternalCliSettings('codex', {
@@ -376,6 +534,21 @@ export function RuntimeSettings() {
             {codexAvailability.authMessage ? (
               <p className="text-[11px] text-[#FCA5A5]">{codexAvailability.authMessage}</p>
             ) : null}
+            {codexAvailability.trustReason ? (
+              <p
+                className={cn(
+                  'text-[11px]',
+                  codexTrustBlocked ? 'text-[#FCA5A5]' : 'text-white/45',
+                )}
+              >
+                {codexAvailability.trustReason}
+              </p>
+            ) : null}
+            {codexAvailability.binarySha256 ? (
+              <p className="text-[10px] text-white/35 font-mono break-all">
+                sha256: {codexAvailability.binarySha256}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -392,11 +565,25 @@ export function RuntimeSettings() {
                     ? 'Authenticated'
                     : 'Auth checked at run time'}
                 </p>
+                <p
+                  className={cn(
+                    'text-[11px]',
+                    claudeTrustBlocked ? 'text-[#FCA5A5]' : 'text-white/40',
+                  )}
+                >
+                  Trust:{' '}
+                  {claudeAvailability.binaryTrust === 'trusted'
+                    ? 'Trusted binary'
+                    : claudeAvailability.binaryTrust === 'untrusted'
+                    ? 'Blocked by trust policy'
+                    : 'Unknown'}
+                </p>
               </div>
               <label className="flex items-center gap-2 text-xs text-white/70">
                 <input
                   type="checkbox"
                   checked={externalCli.claude.enabled}
+                  disabled={claudeTrustBlocked}
                   onChange={(event) => {
                     void (async () => {
                       await updateExternalCliSettings('claude', {
@@ -428,6 +615,21 @@ export function RuntimeSettings() {
             </label>
             {claudeAvailability.authMessage ? (
               <p className="text-[11px] text-[#FCA5A5]">{claudeAvailability.authMessage}</p>
+            ) : null}
+            {claudeAvailability.trustReason ? (
+              <p
+                className={cn(
+                  'text-[11px]',
+                  claudeTrustBlocked ? 'text-[#FCA5A5]' : 'text-white/45',
+                )}
+              >
+                {claudeAvailability.trustReason}
+              </p>
+            ) : null}
+            {claudeAvailability.binarySha256 ? (
+              <p className="text-[10px] text-white/35 font-mono break-all">
+                sha256: {claudeAvailability.binarySha256}
+              </p>
             ) : null}
           </div>
         ) : null}

@@ -1,7 +1,15 @@
 import { resolve, isAbsolute, normalize, sep } from 'path';
 import { realpathSync, lstatSync, existsSync } from 'fs';
 import { spawnSync } from 'child_process';
-import type { CommandAnalysis, CommandPolicyEvaluation, CommandRisk, SandboxConfig } from './types.js';
+import type {
+  CommandAnalysis,
+  CommandIntent,
+  CommandIntentClassification,
+  CommandPolicyEvaluation,
+  CommandRisk,
+  CommandTrustAssessment,
+  SandboxConfig,
+} from './types.js';
 import { DEFAULT_SANDBOX_CONFIG, BLOCKED_COMMANDS, DANGEROUS_PATTERNS } from './types.js';
 
 // ============================================================================
@@ -39,6 +47,66 @@ const NETWORK_COMMANDS = [
   'nslookup',
   'dig',
   'host',
+] as const;
+
+const DELETE_INTENT_PREFIXES = [
+  'rm',
+  'rmdir',
+  'unlink',
+  'git clean',
+  'git reset --hard',
+  'shred',
+] as const;
+
+const WRITE_INTENT_PREFIXES = [
+  'mv',
+  'cp',
+  'touch',
+  'mkdir',
+  'chmod',
+  'chown',
+  'ln',
+  'truncate',
+  'tee',
+  'sed -i',
+  'perl -i',
+  'npm install',
+  'npm update',
+  'pnpm install',
+  'pnpm add',
+  'yarn add',
+  'pip install',
+  'cargo add',
+] as const;
+
+const VERSION_CONTROL_PREFIXES = [
+  'git status',
+  'git diff',
+  'git log',
+  'git show',
+  'git branch',
+  'git checkout',
+  'git switch',
+  'git add',
+  'git commit',
+  'git reset',
+  'git clean',
+  'git push',
+  'git pull',
+  'git fetch',
+  'git merge',
+  'git rebase',
+] as const;
+
+const PACKAGE_MANAGER_PREFIXES = [
+  'npm',
+  'pnpm',
+  'yarn',
+  'pip',
+  'pip3',
+  'uv',
+  'cargo',
+  'brew',
 ] as const;
 
 let cachedSandboxExecAvailable: boolean | null = null;
@@ -80,14 +148,15 @@ export class CommandValidator {
     const reasons: string[] = [];
     let risk: CommandRisk = 'safe';
     const cwd = context.cwd || process.cwd();
+    const segments = this.splitCommandSegments(command);
+    let deniedPathCount = 0;
+    let outsideAllowedPathCount = 0;
 
     // Check for blocked commands
-    if (this.isBlockedCommand(command)) {
-      return {
-        command,
-        risk: 'blocked',
-        reasons: ['Command is explicitly blocked for security reasons'],
-      };
+    const blockedCommand = this.isBlockedCommand(command);
+    if (blockedCommand) {
+      risk = 'blocked';
+      reasons.push('Command is explicitly blocked for security reasons');
     }
 
     // Check for dangerous patterns
@@ -100,16 +169,20 @@ export class CommandValidator {
     // Analyze path access
     const paths = this.extractPaths(command);
     const modifiedPaths: string[] = [];
+    const accessedPaths: string[] = [];
 
     for (const path of paths) {
       const absolutePath = this.resolvePath(path, cwd);
+      accessedPaths.push(absolutePath);
 
       if (this.isDeniedPath(absolutePath, cwd)) {
         risk = this.escalateRisk(risk, 'dangerous');
         reasons.push(`Accesses denied path: ${absolutePath}`);
+        deniedPathCount += 1;
       } else if (!this.isAllowedPath(absolutePath, cwd)) {
         risk = this.escalateRisk(risk, 'moderate');
         reasons.push(`Accesses path outside allowed directories: ${absolutePath}`);
+        outsideAllowedPathCount += 1;
       }
 
       // Check if command modifies files
@@ -133,17 +206,33 @@ export class CommandValidator {
     }
 
     // Check for shell injection risks
-    if (this.hasShellInjectionRisk(command)) {
+    const shellInjectionRisk = this.hasShellInjectionRisk(command);
+    if (shellInjectionRisk) {
       risk = this.escalateRisk(risk, 'moderate');
       reasons.push('Command contains potential shell injection patterns');
     }
+
+    const intent = this.classifyIntent(command, segments, networkAccess);
+    const trust = this.assessTrust({
+      command,
+      risk,
+      networkAccess,
+      processSpawn,
+      modifiedPathCount: modifiedPaths.length,
+      deniedPathCount,
+      outsideAllowedPathCount,
+      shellInjectionRisk,
+      intent,
+    });
 
     return {
       command,
       risk,
       reasons,
+      intent,
+      trust,
       modifiedPaths: modifiedPaths.length > 0 ? modifiedPaths : undefined,
-      accessedPaths: paths.length > 0 ? paths.map((p) => this.resolvePath(p, cwd)) : undefined,
+      accessedPaths: accessedPaths.length > 0 ? accessedPaths : undefined,
       networkAccess,
       processSpawn,
     };
@@ -498,6 +587,204 @@ export class CommandValidator {
     ];
 
     return injectionPatterns.some((pattern) => pattern.test(command));
+  }
+
+  private classifyIntent(
+    command: string,
+    segments: string[],
+    networkAccess: boolean,
+  ): CommandIntentClassification {
+    const intents = new Set<CommandIntent>();
+    const reasons: string[] = [];
+    const normalizedSegments = segments.map((segment) =>
+      segment.trim().replace(/\s+/g, ' ').toLowerCase(),
+    );
+
+    if (networkAccess) {
+      intents.add('network');
+      reasons.push('Network utility detected in command tokens.');
+    }
+
+    for (const segment of normalizedSegments) {
+      if (!segment) continue;
+      if (/(^|\s)(>>?|1>|2>|&>)(\s|$)/.test(segment)) {
+        intents.add('write');
+        reasons.push(`Shell redirection indicates write intent: "${segment}"`);
+      }
+      if (this.matchesAnyPrefix(segment, DELETE_INTENT_PREFIXES)) {
+        intents.add('delete');
+        reasons.push(`Delete-oriented segment detected: "${segment}"`);
+      }
+      if (this.matchesAnyPrefix(segment, WRITE_INTENT_PREFIXES)) {
+        intents.add('write');
+        reasons.push(`Write-oriented segment detected: "${segment}"`);
+      }
+      if (this.matchesAnyPrefix(segment, READ_ONLY_SAFE_COMMAND_PREFIXES)) {
+        intents.add('read');
+        reasons.push(`Read-oriented segment detected: "${segment}"`);
+      }
+      if (this.matchesAnyPrefix(segment, VERSION_CONTROL_PREFIXES)) {
+        intents.add('version_control');
+        reasons.push(`Version-control segment detected: "${segment}"`);
+      }
+      if (this.matchesAnyPrefix(segment, PACKAGE_MANAGER_PREFIXES)) {
+        intents.add('package_management');
+        reasons.push(`Package-management segment detected: "${segment}"`);
+      }
+    }
+
+    if (intents.size === 0) {
+      const normalized = command.trim().replace(/\s+/g, ' ').toLowerCase();
+      if (normalized.length === 0) {
+        intents.add('unknown');
+        reasons.push('Command is empty after normalization.');
+      } else {
+        intents.add('execute');
+        reasons.push('Command intent defaults to generic execute.');
+      }
+    }
+
+    const priority: CommandIntent[] = [
+      'delete',
+      'write',
+      'network',
+      'version_control',
+      'package_management',
+      'read',
+      'execute',
+      'unknown',
+    ];
+    const primary =
+      priority.find((candidate) => intents.has(candidate)) || 'unknown';
+
+    let confidence = 0.55;
+    if (intents.size === 1 && primary !== 'unknown') confidence += 0.25;
+    if (intents.has('unknown')) confidence -= 0.2;
+    if (intents.size > 2) confidence -= 0.08;
+    confidence = Math.max(0.2, Math.min(0.98, confidence));
+
+    return {
+      primary,
+      intents: Array.from(intents),
+      confidence: Number(confidence.toFixed(3)),
+      reasons: reasons.length > 0 ? reasons : ['No explicit intent patterns matched.'],
+    };
+  }
+
+  private assessTrust(input: {
+    command: string;
+    risk: CommandRisk;
+    networkAccess: boolean;
+    processSpawn: boolean;
+    modifiedPathCount: number;
+    deniedPathCount: number;
+    outsideAllowedPathCount: number;
+    shellInjectionRisk: boolean;
+    intent: CommandIntentClassification;
+  }): CommandTrustAssessment {
+    let score = 0.5;
+    const factors: string[] = [];
+
+    if (isReadOnlySafeCommand(input.command)) {
+      score += 0.2;
+      factors.push('Matches read-only safe command profile.');
+    }
+
+    if (this.commandMatchesTrustedPrefix(input.command)) {
+      score += 0.2;
+      factors.push('Matches configured trusted command prefixes.');
+    } else {
+      factors.push('Does not match configured trusted command prefixes.');
+    }
+
+    if (input.networkAccess) {
+      score -= 0.15;
+      factors.push('Network access detected.');
+    } else {
+      score += 0.08;
+      factors.push('No network access detected.');
+    }
+
+    if (input.processSpawn) {
+      score -= 0.12;
+      factors.push('Process chaining/spawn pattern detected.');
+    } else {
+      score += 0.07;
+      factors.push('No process chaining/spawn pattern detected.');
+    }
+
+    if (input.modifiedPathCount > 0) {
+      score -= 0.18;
+      factors.push(`Modifies ${input.modifiedPathCount} path(s).`);
+    } else {
+      score += 0.08;
+      factors.push('No file modifications detected.');
+    }
+
+    if (input.outsideAllowedPathCount > 0) {
+      score -= 0.2;
+      factors.push(`${input.outsideAllowedPathCount} path(s) outside allowed roots.`);
+    }
+    if (input.deniedPathCount > 0) {
+      score -= 0.35;
+      factors.push(`${input.deniedPathCount} path(s) in denied roots.`);
+    }
+
+    if (input.shellInjectionRisk) {
+      score -= 0.18;
+      factors.push('Shell injection pattern detected.');
+    }
+
+    if (input.intent.primary === 'read') score += 0.07;
+    if (input.intent.primary === 'delete') score -= 0.2;
+    if (input.intent.primary === 'network') score -= 0.08;
+    if (input.intent.primary === 'package_management') score -= 0.05;
+
+    switch (input.risk) {
+      case 'safe':
+        score += 0.05;
+        break;
+      case 'moderate':
+        score -= 0.2;
+        break;
+      case 'dangerous':
+        score -= 0.4;
+        break;
+      case 'blocked':
+        score -= 0.6;
+        break;
+    }
+
+    score = Math.max(0, Math.min(1, score));
+    const level = score >= 0.75 ? 'high' : score >= 0.45 ? 'medium' : 'low';
+
+    return {
+      score: Number(score.toFixed(3)),
+      level,
+      factors,
+    };
+  }
+
+  private commandMatchesTrustedPrefix(command: string): boolean {
+    const normalized = command.trim().replace(/\s+/g, ' ').toLowerCase();
+    return this.config.trustedCommands.some((trusted) => {
+      const normalizedTrusted = trusted.trim().replace(/\s+/g, ' ').toLowerCase();
+      if (!normalizedTrusted) return false;
+      return (
+        normalized === normalizedTrusted ||
+        normalized.startsWith(`${normalizedTrusted} `)
+      );
+    });
+  }
+
+  private matchesAnyPrefix(command: string, prefixes: readonly string[]): boolean {
+    return prefixes.some((prefix) => {
+      const normalizedPrefix = prefix.trim().toLowerCase();
+      return (
+        command === normalizedPrefix ||
+        command.startsWith(`${normalizedPrefix} `)
+      );
+    });
   }
 
   /**

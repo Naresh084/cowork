@@ -49,6 +49,30 @@ export * from './connector.js';
 export * from './workflow.js';
 
 // ============================================================================
+// Memory Types (re-exported from memory.ts)
+// ============================================================================
+
+export * from './memory.js';
+
+// ============================================================================
+// Branch Types (re-exported from branch.ts)
+// ============================================================================
+
+export * from './branch.js';
+
+// ============================================================================
+// Run Types (re-exported from run.ts)
+// ============================================================================
+
+export * from './run.js';
+
+// ============================================================================
+// Benchmark Types (re-exported from benchmark.ts)
+// ============================================================================
+
+export * from './benchmark.js';
+
+// ============================================================================
 // Platform Integration Types
 // ============================================================================
 
@@ -286,6 +310,9 @@ export const PermissionRequestSchema = z.object({
   reason: z.string().optional(),
   toolCallId: z.string().optional(),
   toolName: z.string().optional(),
+  policyAction: z.enum(['allow', 'ask', 'deny']).optional(),
+  policyReason: z.string().optional(),
+  policyReasonCode: z.string().optional(),
 });
 
 export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;

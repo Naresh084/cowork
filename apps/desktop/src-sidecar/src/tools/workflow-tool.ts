@@ -8,6 +8,113 @@ import type {
   WorkflowRunStatus,
 } from '@gemini-cowork/shared';
 
+type WorkflowToolOperation =
+  | 'create_workflow'
+  | 'update_workflow'
+  | 'publish_workflow'
+  | 'run_workflow'
+  | 'execute_workflow_pack'
+  | 'manage_workflow'
+  | 'get_workflow_runs';
+
+type WorkflowToolErrorCode =
+  | 'invalid_request'
+  | 'workflow_not_found'
+  | 'workflow_archived'
+  | 'workflow_validation_failed'
+  | 'trigger_match_not_found'
+  | 'run_not_found'
+  | 'timeout'
+  | 'internal_error';
+
+interface WorkflowToolErrorDetails {
+  code: WorkflowToolErrorCode;
+  operation: WorkflowToolOperation;
+  retryable: boolean;
+  suggestion: string;
+  message: string;
+}
+
+function mapWorkflowToolError(error: unknown, operation: WorkflowToolOperation): WorkflowToolErrorDetails {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes('is required')
+    || normalized.includes('invalid')
+    || normalized.includes('must be')
+  ) {
+    return {
+      code: 'invalid_request',
+      operation,
+      retryable: false,
+      suggestion: 'Check tool arguments and required fields.',
+      message,
+    };
+  }
+
+  if (normalized.includes('not found')) {
+    return {
+      code: operation === 'get_workflow_runs' || operation === 'manage_workflow'
+        ? 'run_not_found'
+        : 'workflow_not_found',
+      operation,
+      retryable: false,
+      suggestion: 'Verify workflow/run identifiers and published version availability.',
+      message,
+    };
+  }
+
+  if (normalized.includes('archived')) {
+    return {
+      code: 'workflow_archived',
+      operation,
+      retryable: false,
+      suggestion: 'Unarchive or choose a published workflow.',
+      message,
+    };
+  }
+
+  if (normalized.includes('validation failed')) {
+    return {
+      code: 'workflow_validation_failed',
+      operation,
+      retryable: false,
+      suggestion: 'Fix workflow graph/config validation errors and retry.',
+      message,
+    };
+  }
+
+  if (normalized.includes('timed out')) {
+    return {
+      code: 'timeout',
+      operation,
+      retryable: true,
+      suggestion: 'Retry with lighter input or profile tuned for higher reliability.',
+      message,
+    };
+  }
+
+  return {
+    code: 'internal_error',
+    operation,
+    retryable: true,
+    suggestion: 'Retry once. If persistent, inspect workflow run logs for node-level failures.',
+    message,
+  };
+}
+
+function workflowToolFailure(error: unknown, operation: WorkflowToolOperation): ToolResult {
+  const mapped = mapWorkflowToolError(error, operation);
+  return {
+    success: false,
+    error: mapped.message,
+    data: {
+      error: mapped,
+    },
+  };
+}
+
 export function createCreateWorkflowTool(): ToolHandler {
   return {
     name: 'create_workflow',
@@ -36,10 +143,7 @@ export function createCreateWorkflowTool(): ToolHandler {
           },
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'create_workflow');
       }
     },
   };
@@ -71,10 +175,7 @@ export function createUpdateWorkflowTool(): ToolHandler {
           },
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'update_workflow');
       }
     },
   };
@@ -102,10 +203,7 @@ export function createPublishWorkflowTool(): ToolHandler {
           },
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'publish_workflow');
       }
     },
   };
@@ -149,10 +247,133 @@ export function createRunWorkflowTool(): ToolHandler {
           },
         };
       } catch (error) {
+        return workflowToolFailure(error, 'run_workflow');
+      }
+    },
+  };
+}
+
+export function createExecuteWorkflowPackTool(): ToolHandler {
+  return {
+    name: 'execute_workflow_pack',
+    description:
+      'Execute workflow packs by explicit workflow id or by adaptive trigger matching. Returns typed diagnostics and activation context.',
+    parameters: z.object({
+      workflowId: z.string().optional(),
+      version: z.number().int().min(1).optional(),
+      input: z.record(z.unknown()).optional(),
+      triggerType: z.string().optional(),
+      triggerContext: z.record(z.unknown()).optional(),
+      message: z.string().optional(),
+      workflowIds: z.array(z.string()).optional(),
+      minConfidence: z.number().min(0).max(1).optional(),
+      activationThreshold: z.number().min(0).max(1).optional(),
+      maxResults: z.number().int().min(1).optional(),
+      requireActivation: z.boolean().optional(),
+      correlationId: z.string().optional(),
+    }),
+    execute: async (args: unknown): Promise<ToolResult> => {
+      const parsed = args as {
+        workflowId?: string;
+        version?: number;
+        input?: Record<string, unknown>;
+        triggerType?: string;
+        triggerContext?: Record<string, unknown>;
+        message?: string;
+        workflowIds?: string[];
+        minConfidence?: number;
+        activationThreshold?: number;
+        maxResults?: number;
+        requireActivation?: boolean;
+        correlationId?: string;
+      };
+
+      try {
+        let selectedWorkflowId = parsed.workflowId;
+        let selectedWorkflowVersion = parsed.version;
+        let triggerContext = parsed.triggerContext || {};
+        let triggerType = parsed.triggerType || 'manual';
+        let triggerDiagnostics: ReturnType<typeof workflowService.evaluateChatTriggers> = [];
+
+        if (!selectedWorkflowId && parsed.message?.trim()) {
+          triggerDiagnostics = workflowService.evaluateChatTriggers({
+            message: parsed.message,
+            workflowIds: parsed.workflowIds,
+            minConfidence: parsed.minConfidence,
+            activationThreshold: parsed.activationThreshold,
+            maxResults: parsed.maxResults,
+          });
+
+          const activated = triggerDiagnostics.find((match) => match.shouldActivate);
+          if (activated) {
+            selectedWorkflowId = activated.workflowId;
+            selectedWorkflowVersion = activated.workflowVersion;
+            triggerType = 'chat';
+            triggerContext = {
+              ...triggerContext,
+              triggerId: activated.triggerId,
+              confidence: activated.confidence,
+              reasonCodes: activated.reasonCodes,
+              matchedPhrase: activated.matchedPhrase,
+            };
+          } else if (parsed.requireActivation !== false) {
+            return {
+              success: false,
+              error: 'No workflow trigger met activation threshold.',
+              data: {
+                error: {
+                  code: 'trigger_match_not_found',
+                  operation: 'execute_workflow_pack',
+                  retryable: false,
+                  suggestion: 'Lower threshold or provide explicit workflowId.',
+                  message: 'No workflow trigger met activation threshold.',
+                } satisfies WorkflowToolErrorDetails,
+                triggerDiagnostics,
+              },
+            };
+          }
+        }
+
+        if (!selectedWorkflowId) {
+          return {
+            success: false,
+            error: 'workflowId is required when no trigger activation is selected',
+            data: {
+              error: {
+                code: 'invalid_request',
+                operation: 'execute_workflow_pack',
+                retryable: false,
+                suggestion: 'Provide workflowId or a trigger message that can activate a workflow.',
+                message: 'workflowId is required when no trigger activation is selected',
+              } satisfies WorkflowToolErrorDetails,
+            },
+          };
+        }
+
+        const run = await workflowService.run({
+          workflowId: selectedWorkflowId,
+          version: selectedWorkflowVersion,
+          input: parsed.input,
+          triggerType,
+          triggerContext,
+          correlationId: parsed.correlationId,
+        });
+
         return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
+          success: true,
+          data: {
+            runId: run.id,
+            workflowId: run.workflowId,
+            workflowVersion: run.workflowVersion,
+            status: run.status,
+            triggerType,
+            triggerContext,
+            triggerDiagnostics,
+            message: `Workflow pack execution queued: ${run.id}`,
+          },
         };
+      } catch (error) {
+        return workflowToolFailure(error, 'execute_workflow_pack');
       }
     },
   };
@@ -190,10 +411,7 @@ export function createWorkflowFromChatTool(): ToolHandler {
           },
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'create_workflow');
       }
     },
   };
@@ -332,10 +550,7 @@ export function createManageWorkflowTool(): ToolHandler {
             return { success: false, error: `Unknown action: ${(parsed as { action: string }).action}` };
         }
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'manage_workflow');
       }
     },
   };
@@ -392,10 +607,7 @@ export function createGetWorkflowRunsTool(): ToolHandler {
           },
         };
       } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+        return workflowToolFailure(error, 'get_workflow_runs');
       }
     },
   };
@@ -408,6 +620,7 @@ export function createWorkflowTools(): ToolHandler[] {
     createUpdateWorkflowTool(),
     createPublishWorkflowTool(),
     createRunWorkflowTool(),
+    createExecuteWorkflowPackTool(),
     createManageWorkflowTool(),
     createGetWorkflowRunsTool(),
   ];

@@ -25,7 +25,13 @@ export function ChatView() {
   const pendingMessageRef = useRef<{ message: string; attachments?: Attachment[] } | null>(null);
 
   // Store state
-  const { sendMessage, stopGeneration, ensureSession, setChatItems, getSessionState } = useChatStore();
+  const {
+    sendMessage,
+    stopGeneration,
+    ensureSession,
+    setChatItems,
+    getSessionState,
+  } = useChatStore();
   const { activeSessionId, createSession, updateSessionTitle } = useSessionStore();
   const { defaultWorkingDirectory, selectedModel, availableModels, modelsLoading } = useSettingsStore();
   // Use direct selector to ensure Zustand properly tracks state changes

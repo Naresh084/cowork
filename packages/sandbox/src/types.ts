@@ -14,6 +14,8 @@ export interface ExecutionOptions {
   mode?: ExecutionMode;
   shell?: string | boolean;
   stdin?: string;
+  idempotencyKey?: string;
+  idempotencyStrategy?: 'return_cached' | 'reject';
 }
 
 export interface ExecutionResult {
@@ -23,6 +25,8 @@ export interface ExecutionResult {
   duration: number;
   killed?: boolean;
   signal?: string;
+  idempotencyReused?: boolean;
+  idempotencyKey?: string;
 }
 
 // ============================================================================
@@ -31,10 +35,37 @@ export interface ExecutionResult {
 
 export type CommandRisk = 'safe' | 'moderate' | 'dangerous' | 'blocked';
 
+export type CommandIntent =
+  | 'read'
+  | 'write'
+  | 'delete'
+  | 'network'
+  | 'version_control'
+  | 'package_management'
+  | 'execute'
+  | 'unknown';
+
+export interface CommandIntentClassification {
+  primary: CommandIntent;
+  intents: CommandIntent[];
+  confidence: number;
+  reasons: string[];
+}
+
+export type CommandTrustLevel = 'low' | 'medium' | 'high';
+
+export interface CommandTrustAssessment {
+  score: number;
+  level: CommandTrustLevel;
+  factors: string[];
+}
+
 export interface CommandAnalysis {
   command: string;
   risk: CommandRisk;
   reasons: string[];
+  intent: CommandIntentClassification;
+  trust: CommandTrustAssessment;
   modifiedPaths?: string[];
   accessedPaths?: string[];
   networkAccess?: boolean;

@@ -47,10 +47,10 @@
     "react-markdown": "^10.1.0",
     "react-pdf": "^10.3.0",
     "react-player": "^3.4.0",
+    "read-excel-file": "^6.0.1",
     "remark-gfm": "^4.0.1",
     "shiki": "^3.22.0",
     "tailwind-merge": "^2.6.0",
-    "xlsx": "^0.18.5",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

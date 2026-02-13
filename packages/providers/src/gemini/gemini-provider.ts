@@ -22,8 +22,32 @@ import {
   now,
   ProviderError,
   AuthenticationError,
+  NetworkError,
+  sanitizeProviderErrorMessage,
 } from '@gemini-cowork/shared';
 import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel, fetchGeminiModels, setModelContextWindows } from './models.js';
+
+type GeminiErrorCategory =
+  | 'authentication'
+  | 'rate_limit'
+  | 'quota_exceeded'
+  | 'model_not_found'
+  | 'network_timeout'
+  | 'network_error'
+  | 'service_unavailable'
+  | 'bad_request'
+  | 'unknown';
+
+interface GeminiErrorTaxonomy {
+  category: GeminiErrorCategory;
+  reasonCode: string;
+  message: string;
+  statusCode?: number;
+  providerCode?: string;
+  retryable: boolean;
+  retryAfterMs?: number;
+  modelId?: string;
+}
 
 // ============================================================================
 // Gemini Provider
@@ -433,29 +457,317 @@ export class GeminiProvider implements AIProvider {
   }
 
   private handleError(error: unknown, modelId?: string): Error {
-    if (error instanceof Error) {
-      const message = error.message.toLowerCase();
+    const taxonomy = this.classifyProviderError(error, modelId);
 
-      if (message.includes('api key') || message.includes('unauthorized')) {
-        return AuthenticationError.invalidApiKey();
+    switch (taxonomy.category) {
+      case 'authentication':
+        return new AuthenticationError(
+          taxonomy.reasonCode === 'AUTH_TOKEN_EXPIRED'
+            ? 'Authentication token expired. Please sign in again.'
+            : 'Invalid API key. Please check your API key and try again.',
+          { provider: 'google', taxonomy },
+        );
+      case 'model_not_found': {
+        const actualModel = taxonomy.modelId || modelId || 'unknown';
+        return new ProviderError(
+          'google',
+          `Model "${actualModel}" not found or not available.`,
+          taxonomy.statusCode ?? 404,
+          { model: actualModel, taxonomy },
+        );
       }
+      case 'rate_limit':
+        return new ProviderError(
+          'google',
+          'Rate limit exceeded. Please try again later.',
+          taxonomy.statusCode ?? 429,
+          { taxonomy },
+        );
+      case 'quota_exceeded':
+        return new ProviderError(
+          'google',
+          'API quota exceeded. Please check your usage limits.',
+          taxonomy.statusCode ?? 429,
+          { taxonomy },
+        );
+      case 'network_timeout':
+        return new NetworkError(
+          taxonomy.message,
+          undefined,
+          { timeoutMs: taxonomy.retryAfterMs, provider: 'google', taxonomy },
+        );
+      case 'network_error':
+        return new NetworkError(
+          taxonomy.message,
+          undefined,
+          { provider: 'google', taxonomy },
+        );
+      default:
+        return new ProviderError(
+          'google',
+          taxonomy.message,
+          taxonomy.statusCode ?? 500,
+          { taxonomy },
+        );
+    }
+  }
 
-      if (message.includes('quota') || message.includes('rate limit')) {
-        return ProviderError.rateLimit('google');
-      }
+  private classifyProviderError(error: unknown, modelId?: string): GeminiErrorTaxonomy {
+    const normalizedMessage = sanitizeProviderErrorMessage(this.extractErrorMessage(error));
+    const message = normalizedMessage || 'Request failed with unknown provider error';
+    const lower = message.toLowerCase();
+    const statusCode = this.extractStatusCode(error);
+    const providerCode = this.extractProviderCode(error);
+    const retryAfterMs = this.extractRetryAfterMs(error, lower);
+    const extractedModelId = this.extractModelId(lower, message, modelId);
 
-      if (message.includes('model') && message.includes('not found')) {
-        // Extract model ID from error or use provided/unknown
-        // Stop at colon to avoid capturing ":generateContent" from API URLs
-        const modelMatch = error.message.match(/models\/([\w.-]+)/);
-        const actualModel = modelMatch?.[1] || modelId || 'unknown';
-        return ProviderError.modelNotFound('google', actualModel);
-      }
-
-      return ProviderError.requestFailed('google', 500, error.message);
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      lower.includes('api key') ||
+      lower.includes('unauthorized') ||
+      lower.includes('invalid credential') ||
+      lower.includes('authentication failed') ||
+      lower.includes('forbidden')
+    ) {
+      return {
+        category: 'authentication',
+        reasonCode: lower.includes('expired') ? 'AUTH_TOKEN_EXPIRED' : 'AUTH_INVALID_CREDENTIALS',
+        message,
+        statusCode,
+        providerCode,
+        retryable: false,
+      };
     }
 
-    return ProviderError.requestFailed('google', 500, String(error));
+    if (
+      (statusCode === 404 && lower.includes('model')) ||
+      (lower.includes('model') && lower.includes('not found'))
+    ) {
+      return {
+        category: 'model_not_found',
+        reasonCode: 'MODEL_NOT_FOUND',
+        message,
+        statusCode: statusCode ?? 404,
+        providerCode,
+        retryable: false,
+        modelId: extractedModelId,
+      };
+    }
+
+    if (
+      statusCode === 429 ||
+      lower.includes('rate limit') ||
+      lower.includes('too many requests')
+    ) {
+      const isQuota = lower.includes('quota') || lower.includes('billing') || lower.includes('resource exhausted');
+      return {
+        category: isQuota ? 'quota_exceeded' : 'rate_limit',
+        reasonCode: isQuota ? 'QUOTA_EXCEEDED' : 'RATE_LIMIT',
+        message,
+        statusCode: statusCode ?? 429,
+        providerCode,
+        retryable: true,
+        retryAfterMs,
+      };
+    }
+
+    if (
+      statusCode === 408 ||
+      lower.includes('timeout') ||
+      lower.includes('timed out') ||
+      lower.includes('deadline exceeded') ||
+      lower.includes('etimedout')
+    ) {
+      return {
+        category: 'network_timeout',
+        reasonCode: 'NETWORK_TIMEOUT',
+        message,
+        statusCode: statusCode ?? 408,
+        providerCode,
+        retryable: true,
+        retryAfterMs,
+      };
+    }
+
+    if (
+      lower.includes('network') ||
+      lower.includes('failed to fetch') ||
+      lower.includes('connection reset') ||
+      lower.includes('econnreset') ||
+      lower.includes('econnrefused') ||
+      lower.includes('enotfound') ||
+      lower.includes('eai_again')
+    ) {
+      return {
+        category: 'network_error',
+        reasonCode: 'NETWORK_ERROR',
+        message,
+        statusCode,
+        providerCode,
+        retryable: true,
+        retryAfterMs,
+      };
+    }
+
+    if (
+      (typeof statusCode === 'number' && statusCode >= 500) ||
+      lower.includes('service unavailable') ||
+      lower.includes('temporarily unavailable') ||
+      lower.includes('internal server error') ||
+      lower.includes('gateway')
+    ) {
+      return {
+        category: 'service_unavailable',
+        reasonCode: 'SERVICE_UNAVAILABLE',
+        message,
+        statusCode: statusCode ?? 503,
+        providerCode,
+        retryable: true,
+        retryAfterMs,
+      };
+    }
+
+    if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+      return {
+        category: 'bad_request',
+        reasonCode: 'BAD_REQUEST',
+        message,
+        statusCode,
+        providerCode,
+        retryable: false,
+      };
+    }
+
+    return {
+      category: 'unknown',
+      reasonCode: 'UNKNOWN_PROVIDER_ERROR',
+      message,
+      statusCode,
+      providerCode,
+      retryable: typeof statusCode === 'number' ? statusCode >= 500 : false,
+      retryAfterMs,
+      modelId: extractedModelId,
+    };
+  }
+
+  private extractErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string') return error;
+    if (error && typeof error === 'object') {
+      const candidate = error as {
+        message?: unknown;
+        error?: { message?: unknown };
+      };
+      if (typeof candidate.message === 'string') return candidate.message;
+      if (typeof candidate.error?.message === 'string') return candidate.error.message;
+    }
+    return String(error);
+  }
+
+  private extractStatusCode(error: unknown): number | undefined {
+    if (!error || typeof error !== 'object') return undefined;
+    const candidate = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      code?: unknown;
+      response?: { status?: unknown };
+      error?: { code?: unknown; status?: unknown };
+    };
+
+    const statusLike = [
+      candidate.status,
+      candidate.statusCode,
+      candidate.response?.status,
+      candidate.error?.status,
+      candidate.error?.code,
+    ];
+
+    for (const value of statusLike) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+      if (typeof value === 'string') {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    return undefined;
+  }
+
+  private extractProviderCode(error: unknown): string | undefined {
+    if (!error || typeof error !== 'object') return undefined;
+    const candidate = error as {
+      code?: unknown;
+      error?: { code?: unknown; status?: unknown };
+      status?: unknown;
+    };
+    const values = [candidate.code, candidate.error?.status, candidate.error?.code, candidate.status];
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return undefined;
+  }
+
+  private extractRetryAfterMs(error: unknown, normalizedLowerMessage: string): number | undefined {
+    const retryAfterFromMessage = normalizedLowerMessage.match(
+      /retry(?:ing)? after\s+(\d+)\s*(ms|millisecond|milliseconds|s|sec|secs|second|seconds|m|min|mins|minute|minutes)?/,
+    );
+    if (retryAfterFromMessage) {
+      const value = Number.parseInt(retryAfterFromMessage[1] || '0', 10);
+      const unit = retryAfterFromMessage[2] || 's';
+      if (Number.isFinite(value) && value > 0) {
+        if (unit.startsWith('m')) return value * 60_000;
+        if (unit.startsWith('ms')) return value;
+        return value * 1_000;
+      }
+    }
+
+    if (!error || typeof error !== 'object') return undefined;
+    const candidate = error as {
+      retryAfterMs?: unknown;
+      retryAfter?: unknown;
+      response?: { headers?: Record<string, unknown> | Headers };
+    };
+
+    if (typeof candidate.retryAfterMs === 'number' && Number.isFinite(candidate.retryAfterMs)) {
+      return candidate.retryAfterMs;
+    }
+
+    if (typeof candidate.retryAfter === 'number' && Number.isFinite(candidate.retryAfter)) {
+      return candidate.retryAfter * 1_000;
+    }
+
+    const headers = candidate.response?.headers;
+    if (headers instanceof Headers) {
+      const headerValue = headers.get('retry-after');
+      if (!headerValue) return undefined;
+      const seconds = Number.parseInt(headerValue, 10);
+      return Number.isFinite(seconds) ? seconds * 1_000 : undefined;
+    }
+
+    if (headers && typeof headers === 'object') {
+      const raw = headers['retry-after'];
+      if (typeof raw === 'number' && Number.isFinite(raw)) return raw * 1_000;
+      if (typeof raw === 'string') {
+        const seconds = Number.parseInt(raw, 10);
+        return Number.isFinite(seconds) ? seconds * 1_000 : undefined;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractModelId(lowerMessage: string, rawMessage: string, fallbackModelId?: string): string | undefined {
+    if (!(lowerMessage.includes('model') && lowerMessage.includes('not found'))) {
+      return fallbackModelId;
+    }
+
+    const fromPath = rawMessage.match(/models\/([\w.-]+)/i)?.[1];
+    if (fromPath) return fromPath;
+
+    const fromQuoted = rawMessage.match(/model\s+["']?([\w.-]+)["']?/i)?.[1];
+    if (fromQuoted) return fromQuoted;
+
+    return fallbackModelId;
   }
 
   private extractGroundingMetadata(response: unknown): {

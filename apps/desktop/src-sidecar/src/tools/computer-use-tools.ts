@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { GoogleGenAI, Environment } from '@google/genai';
 import { chromium, type Browser, type Page } from 'playwright';
+import { dirname, join } from 'path';
+import { homedir } from 'os';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { ChromeCDPDriver } from './chrome-cdp-driver.js';
 import { eventEmitter } from '../event-emitter.js';
@@ -15,6 +18,188 @@ interface ActionHistoryEntry {
   action: string;
   args: Record<string, unknown>;
   url: string;
+  ts: number;
+  signature: string;
+}
+
+interface ActionSafetyDecision {
+  allowed: boolean;
+  reason?: string;
+}
+
+interface BrowserRunCheckpoint {
+  version: 1;
+  sessionId: string;
+  goal: string;
+  provider: ProviderId;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  steps: number;
+  maxSteps: number;
+  completed: boolean;
+  blocked: boolean;
+  blockedReason?: string;
+  finalAnalysis?: string;
+  lastUrl?: string;
+  urlStabilityCount: number;
+  actions: string[];
+  pagesVisited: string[];
+  actionHistory: ActionHistoryEntry[];
+}
+
+const ACTION_RETRY_LIMIT = 2;
+const ACTION_REPEAT_LIMIT = 4;
+const URL_STABILITY_LIMIT = 6;
+const SCROLL_REPEAT_LIMIT = 3;
+
+function getBrowserStateDir(context: ToolContext): string {
+  const baseDir = context.appDataDir || join(homedir(), '.cowork');
+  return join(baseDir, 'sessions', context.sessionId, 'browser');
+}
+
+function getBrowserCheckpointPath(context: ToolContext, overridePath?: string): string {
+  if (overridePath && overridePath.trim().length > 0) {
+    return overridePath.trim();
+  }
+  return join(getBrowserStateDir(context), 'computer-use-checkpoint.json');
+}
+
+async function loadBrowserCheckpoint(path: string): Promise<BrowserRunCheckpoint | null> {
+  try {
+    const raw = await readFile(path, 'utf-8');
+    const parsed = JSON.parse(raw) as BrowserRunCheckpoint;
+    if (parsed && parsed.version === 1 && typeof parsed.goal === 'string') {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveBrowserCheckpoint(path: string, checkpoint: BrowserRunCheckpoint): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(checkpoint, null, 2), 'utf-8');
+}
+
+function actionSignature(action: string, args: Record<string, unknown>): string {
+  const sortedEntries = Object.entries(args)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, 8);
+  return `${action}:${JSON.stringify(Object.fromEntries(sortedEntries))}`;
+}
+
+function classifyActionSafety(action: string, args: Record<string, unknown>): ActionSafetyDecision {
+  const normalized = action.trim().toLowerCase();
+
+  if (normalized === 'navigate' || normalized === 'open_web_browser') {
+    const rawUrl = String(args.url ?? '').trim().toLowerCase();
+    if (!rawUrl) {
+      return { allowed: false, reason: 'Navigate action missing URL.' };
+    }
+    if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+      return {
+        allowed: false,
+        reason: `Unsafe navigation target blocked (${rawUrl.split(':')[0] || 'unknown'} scheme).`,
+      };
+    }
+  }
+
+  if (normalized === 'key_combination') {
+    const keys = Array.isArray(args.keys) ? args.keys.map(String).join('+').toLowerCase() : '';
+    const blockedCombos = ['alt+f4', 'meta+q', 'cmd+q', 'control+q', 'ctrl+q'];
+    if (blockedCombos.some((combo) => keys.includes(combo))) {
+      return {
+        allowed: false,
+        reason: `Blocked unsafe key combination: ${keys}`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function isTransientBrowserError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('timeout')
+    || normalized.includes('timed out')
+    || normalized.includes('navigation')
+    || normalized.includes('context was destroyed')
+    || normalized.includes('target closed')
+    || normalized.includes('detached')
+    || normalized.includes('temporar')
+  );
+}
+
+async function performActionWithRetry(
+  driver: BrowserDriver,
+  action: ComputerUseAction,
+): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= ACTION_RETRY_LIMIT; attempt += 1) {
+    try {
+      await driver.performAction(action);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientBrowserError(error) || attempt === ACTION_RETRY_LIMIT) {
+        throw error;
+      }
+      const waitMs = 300 * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'unknown action error'));
+}
+
+function detectBrowserBlocker(params: {
+  currentUrl: string;
+  previousUrl: string | null;
+  actionHistory: ActionHistoryEntry[];
+  currentUrlStabilityCount: number;
+}): string | null {
+  const normalizedUrl = params.currentUrl.toLowerCase();
+  if (
+    normalizedUrl.includes('/login')
+    || normalizedUrl.includes('/signin')
+    || normalizedUrl.includes('/auth')
+    || normalizedUrl.includes('consent')
+  ) {
+    return 'Login/consent blocker detected. Cannot proceed without user authentication.';
+  }
+
+  if (params.currentUrlStabilityCount >= URL_STABILITY_LIMIT) {
+    return `No navigation progress detected after ${params.currentUrlStabilityCount} steps on the same page.`;
+  }
+
+  if (params.actionHistory.length >= ACTION_REPEAT_LIMIT) {
+    const recent = params.actionHistory.slice(-ACTION_REPEAT_LIMIT);
+    const firstSignature = recent[0]?.signature;
+    if (firstSignature && recent.every((entry) => entry.signature === firstSignature)) {
+      return `Loop detected: repeated action pattern ${ACTION_REPEAT_LIMIT} times.`;
+    }
+  }
+
+  if (params.actionHistory.length >= SCROLL_REPEAT_LIMIT) {
+    const recentScrolls = params.actionHistory
+      .slice(-SCROLL_REPEAT_LIMIT)
+      .filter((entry) => entry.action === 'scroll_document' || entry.action === 'scroll_at');
+    if (
+      recentScrolls.length === SCROLL_REPEAT_LIMIT
+      && recentScrolls.every((entry) => entry.url === params.currentUrl)
+    ) {
+      return `Scroll loop detected on ${params.currentUrl}.`;
+    }
+  }
+
+  if (params.previousUrl && params.previousUrl !== params.currentUrl) {
+    return null;
+  }
+
+  return null;
 }
 
 const COMPUTER_USE_SYSTEM_PROMPT = `You are an expert browser research agent. Efficiently gather information and complete the task.
@@ -233,31 +418,31 @@ async function performProviderAction(
       const url = String(actionInput.url || actionInput.target_url || '');
       if (!url) throw new Error('Computer use navigate action missing URL.');
       const args = { url };
-      await driver.performAction({ name: 'navigate', args });
+      await performActionWithRetry(driver, { name: 'navigate', args });
       return { log: `navigate(${JSON.stringify(args)})`, args };
     }
     case 'click':
     case 'left_click':
     case 'single_click': {
       const args = { x, y };
-      await driver.performAction({ name: 'click_at', args });
+      await performActionWithRetry(driver, { name: 'click_at', args });
       return { log: `click_at(${JSON.stringify(args)})`, args };
     }
     case 'double_click': {
       const args = { x, y };
-      await driver.performAction({ name: 'click_at', args });
-      await driver.performAction({ name: 'click_at', args });
+      await performActionWithRetry(driver, { name: 'click_at', args });
+      await performActionWithRetry(driver, { name: 'click_at', args });
       return { log: `double_click(${JSON.stringify(args)})`, args };
     }
     case 'right_click': {
       const args = { x, y };
-      await driver.performAction({ name: 'click_at', args });
+      await performActionWithRetry(driver, { name: 'click_at', args });
       return { log: `right_click_as_click(${JSON.stringify(args)})`, args };
     }
     case 'mouse_move':
     case 'hover': {
       const args = { x, y };
-      await driver.performAction({ name: 'hover_at', args });
+      await performActionWithRetry(driver, { name: 'hover_at', args });
       return { log: `hover_at(${JSON.stringify(args)})`, args };
     }
     case 'drag':
@@ -272,7 +457,7 @@ async function performProviderAction(
         'y',
       );
       const args = { x, y, destination_x: destinationX, destination_y: destinationY };
-      await driver.performAction({ name: 'drag_and_drop', args });
+      await performActionWithRetry(driver, { name: 'drag_and_drop', args });
       return { log: `drag_and_drop(${JSON.stringify(args)})`, args };
     }
     case 'type':
@@ -287,7 +472,7 @@ async function performProviderAction(
         press_enter: pressEnter,
         clear_before_typing: Boolean(actionInput.clear_before_typing || actionInput.clear_text),
       };
-      await driver.performAction({ name: 'type_text_at', args });
+      await performActionWithRetry(driver, { name: 'type_text_at', args });
       return { log: `type_text_at(${JSON.stringify(args)})`, args };
     }
     case 'keypress':
@@ -296,7 +481,7 @@ async function performProviderAction(
       const keysRaw = actionInput.keys ?? actionInput.key ?? actionInput.key_code;
       const keys = Array.isArray(keysRaw) ? keysRaw.map(String) : [String(keysRaw || '')].filter(Boolean);
       const args = { keys };
-      await driver.performAction({ name: 'key_combination', args });
+      await performActionWithRetry(driver, { name: 'key_combination', args });
       return { log: `key_combination(${JSON.stringify(args)})`, args };
     }
     case 'scroll':
@@ -310,28 +495,28 @@ async function performProviderAction(
           direction: deltaY > 0 ? 'down' : 'up',
           magnitude: Math.max(50, Math.min(2000, Math.abs(Math.round(deltaY)))),
         };
-        await driver.performAction({ name: 'scroll_at', args });
+        await performActionWithRetry(driver, { name: 'scroll_at', args });
         return { log: `scroll_at(${JSON.stringify(args)})`, args };
       }
       const direction = String(actionInput.direction || 'down').toLowerCase().includes('up') ? 'up' : 'down';
       const args = { direction };
-      await driver.performAction({ name: 'scroll_document', args });
+      await performActionWithRetry(driver, { name: 'scroll_document', args });
       return { log: `scroll_document(${JSON.stringify(args)})`, args };
     }
     case 'go_back': {
       const args = {};
-      await driver.performAction({ name: 'go_back', args });
+      await performActionWithRetry(driver, { name: 'go_back', args });
       return { log: 'go_back()', args };
     }
     case 'go_forward': {
       const args = {};
-      await driver.performAction({ name: 'go_forward', args });
+      await performActionWithRetry(driver, { name: 'go_forward', args });
       return { log: 'go_forward()', args };
     }
     case 'wait':
     case 'wait_5_seconds': {
       const args = {};
-      await driver.performAction({ name: 'wait_5_seconds', args });
+      await performActionWithRetry(driver, { name: 'wait_5_seconds', args });
       return { log: 'wait_5_seconds()', args };
     }
     default:
@@ -465,6 +650,14 @@ export function createComputerUseTool(
       maxSteps: z.number().optional().describe('Maximum number of steps (default: 15)'),
       headless: z.boolean().optional().describe('Run browser headless (default: false)'),
       model: z.string().optional().describe('Optional model override'),
+      resumeFromCheckpoint: z
+        .boolean()
+        .optional()
+        .describe('Resume this browser run from the last saved checkpoint'),
+      checkpointPath: z
+        .string()
+        .optional()
+        .describe('Optional custom checkpoint path for run recovery'),
     }),
 
     requiresPermission: (): { type: 'network_request'; resource: string; reason: string } => ({
@@ -474,12 +667,21 @@ export function createComputerUseTool(
     }),
 
     execute: async (args: unknown, _context: ToolContext): Promise<ToolResult> => {
-      const { goal, startUrl, maxSteps = 15, model } = args as {
+      const {
+        goal,
+        startUrl,
+        maxSteps = 15,
+        model,
+        resumeFromCheckpoint = false,
+        checkpointPath: checkpointPathOverride,
+      } = args as {
         goal: string;
         startUrl?: string;
         maxSteps?: number;
         headless?: boolean;
         model?: string;
+        resumeFromCheckpoint?: boolean;
+        checkpointPath?: string;
       };
 
       const provider = getProvider();
@@ -499,6 +701,23 @@ export function createComputerUseTool(
         };
       }
 
+      const checkpointPath = getBrowserCheckpointPath(_context, checkpointPathOverride);
+      const requestedMaxSteps = Math.max(1, Math.round(Number(maxSteps) || 15));
+      const checkpointCandidate = resumeFromCheckpoint
+        ? await loadBrowserCheckpoint(checkpointPath)
+        : null;
+      const canResumeFromCheckpoint = Boolean(
+        checkpointCandidate
+          && checkpointCandidate.goal === goal
+          && checkpointCandidate.completed === false,
+      );
+      const effectiveMaxSteps = canResumeFromCheckpoint
+        ? Math.max(requestedMaxSteps, checkpointCandidate?.maxSteps || requestedMaxSteps)
+        : requestedMaxSteps;
+      const resumeStartUrl = canResumeFromCheckpoint
+        ? checkpointCandidate?.lastUrl || checkpointCandidate?.pagesVisited[checkpointCandidate.pagesVisited.length - 1]
+        : startUrl;
+
       let driver: BrowserDriver | null = null;
 
       // Get or create a Chrome instance for this session
@@ -508,8 +727,8 @@ export function createComputerUseTool(
       try {
         driver = await ChromeCDPDriver.forSession(_context.sessionId);
 
-        if (startUrl) {
-          await driver.performAction({ name: 'navigate', args: { url: startUrl } });
+        if (resumeStartUrl) {
+          await performActionWithRetry(driver, { name: 'navigate', args: { url: resumeStartUrl } });
         }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -529,28 +748,126 @@ export function createComputerUseTool(
         };
       }
 
-      let steps = 0;
+      let steps = canResumeFromCheckpoint ? checkpointCandidate?.steps || 0 : 0;
       let completed = false;
       let blocked = false;
-      let blockedReason: string | undefined;
-      const actions: string[] = [];
-      const actionHistory: ActionHistoryEntry[] = [];
-      const pagesVisited: string[] = [];
+      let blockedReason: string | undefined = canResumeFromCheckpoint
+        ? checkpointCandidate?.blockedReason
+        : undefined;
+      const actions: string[] = canResumeFromCheckpoint
+        ? [...(checkpointCandidate?.actions || [])]
+        : [];
+      const actionHistory: ActionHistoryEntry[] = canResumeFromCheckpoint
+        ? [...(checkpointCandidate?.actionHistory || [])]
+        : [];
+      const pagesVisited: string[] = canResumeFromCheckpoint
+        ? [...(checkpointCandidate?.pagesVisited || [])]
+        : [];
       let finalAnalysis = '';
+      let lastObservedUrl: string | null = canResumeFromCheckpoint
+        ? checkpointCandidate?.lastUrl || null
+        : null;
+      let urlStabilityCount = canResumeFromCheckpoint ? checkpointCandidate?.urlStabilityCount || 0 : 0;
 
       // Initial URL tracking
-      if (startUrl) {
+      if (resumeStartUrl && !pagesVisited.includes(resumeStartUrl)) {
+        pagesVisited.push(resumeStartUrl);
+      }
+      if (startUrl && !pagesVisited.includes(startUrl)) {
         pagesVisited.push(startUrl);
       }
 
+      const persistCheckpoint = async (
+        status: 'running' | 'blocked' | 'completed' | 'recovered',
+        currentUrl?: string,
+      ): Promise<void> => {
+        const now = Date.now();
+        const checkpoint: BrowserRunCheckpoint = {
+          version: 1,
+          sessionId: _context.sessionId,
+          goal,
+          provider: providerContext.provider,
+          model: providerContext.model,
+          createdAt: checkpointCandidate?.createdAt || now,
+          updatedAt: now,
+          steps,
+          maxSteps: effectiveMaxSteps,
+          completed,
+          blocked,
+          blockedReason,
+          finalAnalysis,
+          lastUrl: currentUrl || lastObservedUrl || undefined,
+          urlStabilityCount,
+          actions: [...actions],
+          pagesVisited: [...pagesVisited],
+          actionHistory: [...actionHistory],
+        };
+        await saveBrowserCheckpoint(checkpointPath, checkpoint);
+        eventEmitter.browserCheckpoint(_context.sessionId, {
+          checkpointPath,
+          step: steps,
+          maxSteps: effectiveMaxSteps,
+          url: checkpoint.lastUrl,
+          recoverable: !completed || blocked,
+        });
+        if (status === 'recovered') {
+          eventEmitter.browserProgress(_context.sessionId, {
+            status: 'recovered',
+            step: steps,
+            maxSteps: effectiveMaxSteps,
+            url: checkpoint.lastUrl,
+            detail: 'Recovered browser run from checkpoint.',
+          });
+        }
+      };
+
       try {
-        while (steps < maxSteps) {
+        if (canResumeFromCheckpoint) {
+          await persistCheckpoint('recovered', resumeStartUrl || lastObservedUrl || undefined);
+        }
+
+        while (steps < effectiveMaxSteps) {
           const screenshot = await driver.getScreenshot();
           const currentUrl = screenshot.url || await driver.getUrl();
+          if (lastObservedUrl && currentUrl === lastObservedUrl) {
+            urlStabilityCount += 1;
+          } else {
+            urlStabilityCount = 0;
+          }
+          lastObservedUrl = currentUrl;
 
           // Track visited pages
           if (currentUrl && !pagesVisited.includes(currentUrl)) {
             pagesVisited.push(currentUrl);
+          }
+
+          eventEmitter.browserProgress(_context.sessionId, {
+            status: 'running',
+            step: steps,
+            maxSteps: effectiveMaxSteps,
+            url: currentUrl,
+            detail: `Running browser step ${steps + 1} of ${effectiveMaxSteps}.`,
+          });
+
+          const blockerReason = detectBrowserBlocker({
+            currentUrl,
+            previousUrl: pagesVisited.length > 1 ? pagesVisited[pagesVisited.length - 2] || null : null,
+            actionHistory,
+            currentUrlStabilityCount: urlStabilityCount,
+          });
+          if (blockerReason) {
+            blocked = true;
+            blockedReason = blockerReason;
+            completed = true;
+            eventEmitter.browserBlocked(_context.sessionId, {
+              reason: blockerReason,
+              step: steps,
+              maxSteps: effectiveMaxSteps,
+              url: currentUrl,
+              checkpointPath,
+            });
+            await persistCheckpoint('blocked', currentUrl);
+            break;
           }
 
           // Emit screenshot for live browser view
@@ -615,6 +932,14 @@ export function createComputerUseTool(
               blocked = true;
               blockedReason = String(finishReason);
               completed = true;
+              eventEmitter.browserBlocked(_context.sessionId, {
+                reason: blockedReason,
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                checkpointPath,
+              });
+              await persistCheckpoint('blocked', currentUrl);
               break;
             }
 
@@ -635,22 +960,48 @@ export function createComputerUseTool(
                 finalAnalysis = textResponse;
                 actions.push(`[Analysis]: ${textResponse}`);
               }
+              eventEmitter.browserProgress(_context.sessionId, {
+                status: 'completed',
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                detail: 'Model returned final browser analysis.',
+              });
+              await persistCheckpoint('completed', currentUrl);
               break;
             }
 
             for (const call of functionCalls) {
               const name = call.name || 'unknown';
               const actionArgs = call.args || {};
+              const safety = classifyActionSafety(name, actionArgs);
+              if (!safety.allowed) {
+                blocked = true;
+                blockedReason = safety.reason || `Blocked unsafe action: ${name}`;
+                completed = true;
+                eventEmitter.browserBlocked(_context.sessionId, {
+                  reason: blockedReason,
+                  step: steps,
+                  maxSteps: effectiveMaxSteps,
+                  url: currentUrl,
+                  checkpointPath,
+                });
+                await persistCheckpoint('blocked', currentUrl);
+                break;
+              }
               const action = { name, args: actionArgs };
 
-              await driver.performAction(action);
+              await performActionWithRetry(driver, action);
               actions.push(`${name}(${JSON.stringify(actionArgs)})`);
               actionHistory.push({
                 action: name,
                 args: actionArgs,
                 url: currentUrl,
+                ts: Date.now(),
+                signature: actionSignature(name, actionArgs),
               });
             }
+            if (completed) break;
           } else if (providerContext.provider === 'openai') {
             const endpoint = `${ensureOpenAIBaseUrl(providerContext.baseUrl)}/responses`;
             const openaiPrompt =
@@ -705,17 +1056,44 @@ export function createComputerUseTool(
                 finalAnalysis = textResponse;
                 actions.push(`[Analysis]: ${textResponse}`);
               }
+              eventEmitter.browserProgress(_context.sessionId, {
+                status: 'completed',
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                detail: 'Provider returned final browser analysis.',
+              });
+              await persistCheckpoint('completed', currentUrl);
               break;
             }
 
             const actionInput = (computerCall.action || {}) as Record<string, unknown>;
+            const actionType = parseActionType(actionInput);
+            const safety = classifyActionSafety(actionType, actionInput);
+            if (!safety.allowed) {
+              blocked = true;
+              blockedReason = safety.reason || `Blocked unsafe action: ${actionType}`;
+              completed = true;
+              eventEmitter.browserBlocked(_context.sessionId, {
+                reason: blockedReason,
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                checkpointPath,
+              });
+              await persistCheckpoint('blocked', currentUrl);
+              break;
+            }
             const executed = await performProviderAction(driver, actionInput);
             actions.push(executed.log);
             actionHistory.push({
-              action: parseActionType(actionInput),
+              action: actionType,
               args: executed.args,
               url: currentUrl,
+              ts: Date.now(),
+              signature: actionSignature(actionType, executed.args),
             });
+            if (completed) break;
           } else if (providerContext.provider === 'anthropic') {
             const anthropicPrompt =
               `${COMPUTER_USE_SYSTEM_PROMPT.replace('{goal}', goal)}\n\nCurrent URL: ${currentUrl}`;
@@ -775,6 +1153,14 @@ export function createComputerUseTool(
               blocked = true;
               blockedReason = String(payload.stop_reason);
               completed = true;
+              eventEmitter.browserBlocked(_context.sessionId, {
+                reason: blockedReason,
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                checkpointPath,
+              });
+              await persistCheckpoint('blocked', currentUrl);
               break;
             }
 
@@ -786,16 +1172,43 @@ export function createComputerUseTool(
                 finalAnalysis = textResponse;
                 actions.push(`[Analysis]: ${textResponse}`);
               }
+              eventEmitter.browserProgress(_context.sessionId, {
+                status: 'completed',
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                detail: 'Provider returned final browser analysis.',
+              });
+              await persistCheckpoint('completed', currentUrl);
               break;
             }
 
+            const actionType = parseActionType(toolUse.input);
+            const safety = classifyActionSafety(actionType, toolUse.input);
+            if (!safety.allowed) {
+              blocked = true;
+              blockedReason = safety.reason || `Blocked unsafe action: ${actionType}`;
+              completed = true;
+              eventEmitter.browserBlocked(_context.sessionId, {
+                reason: blockedReason,
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                checkpointPath,
+              });
+              await persistCheckpoint('blocked', currentUrl);
+              break;
+            }
             const executed = await performProviderAction(driver, toolUse.input);
             actions.push(executed.log);
             actionHistory.push({
-              action: parseActionType(toolUse.input),
+              action: actionType,
               args: executed.args,
               url: currentUrl,
+              ts: Date.now(),
+              signature: actionSignature(actionType, executed.args),
             });
+            if (completed) break;
           } else {
             return {
               success: false,
@@ -804,6 +1217,15 @@ export function createComputerUseTool(
           }
 
           steps += 1;
+          await persistCheckpoint('running', lastObservedUrl || undefined);
+          eventEmitter.browserProgress(_context.sessionId, {
+            status: 'running',
+            step: steps,
+            maxSteps: effectiveMaxSteps,
+            url: lastObservedUrl || undefined,
+            lastAction: actions.length > 0 ? actions[actions.length - 1] : undefined,
+            detail: 'Browser step executed.',
+          });
 
           // Small delay between iterations to avoid rate limits
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -826,6 +1248,21 @@ export function createComputerUseTool(
           // Ignore screenshot errors at the end
         }
 
+        const finalUrl = await driver.getUrl();
+        await persistCheckpoint(
+          blocked ? 'blocked' : completed ? 'completed' : 'running',
+          finalUrl,
+        );
+        if (!completed && !blocked && steps >= effectiveMaxSteps) {
+          eventEmitter.browserProgress(_context.sessionId, {
+            status: 'running',
+            step: steps,
+            maxSteps: effectiveMaxSteps,
+            url: finalUrl,
+            detail: 'Stopped after reaching maximum step budget. Resume is available from checkpoint.',
+          });
+        }
+
         return {
           success: true,
           data: {
@@ -833,9 +1270,13 @@ export function createComputerUseTool(
             blocked,
             blockedReason,
             actions,
+            actionHistory,
             pagesVisited,
-            finalUrl: await driver.getUrl(),
+            finalUrl,
             steps,
+            maxSteps: effectiveMaxSteps,
+            checkpointPath,
+            resumedFromCheckpoint: canResumeFromCheckpoint,
             sessionId: _context.sessionId,
             ...(finalAnalysis && { analysis: finalAnalysis }),
           },

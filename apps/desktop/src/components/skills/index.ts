@@ -7,4 +7,5 @@ export { SkillGrid } from './SkillGrid';
 export { InstalledSkillItem } from './InstalledSkillItem';
 export { SkillDetailsPanel } from './SkillDetailsPanel';
 export { SkillRequirements } from './SkillRequirements';
+export { SkillLifecycleBadges } from './SkillLifecycleBadges';
 export { CreateSkillModal } from './CreateSkillModal';

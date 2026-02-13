@@ -2,6 +2,8 @@ import type { AgentEventType } from './types.js';
 import type { ChatItem } from '@gemini-cowork/shared';
 import { sanitizeProviderErrorMessage } from '@gemini-cowork/shared';
 
+const EVENT_SCHEMA_VERSION = 1;
+
 /**
  * SidecarEvent format expected by Rust (camelCase due to serde rename_all)
  */
@@ -9,11 +11,15 @@ export interface SidecarEvent {
   type: string;
   sessionId: string | null;
   data: unknown;
+  schemaVersion?: number;
+  correlationId?: string;
 }
 
 export interface SequencedSidecarEvent extends SidecarEvent {
   seq: number;
   timestamp: number;
+  schemaVersion: number;
+  correlationId: string;
 }
 
 export interface EventSink {
@@ -31,6 +37,30 @@ type EventListener = (event: SequencedSidecarEvent) => void;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
+
+interface ReliabilityCounters {
+  streamStarts: number;
+  streamDone: number;
+  checkpoints: number;
+  runRecovered: number;
+  runStalled: number;
+  fallbackApplied: number;
+  errors: number;
+  toolErrors: number;
+  lastUpdatedAt: number;
+}
+
+const EMPTY_RELIABILITY_COUNTERS: ReliabilityCounters = {
+  streamStarts: 0,
+  streamDone: 0,
+  checkpoints: 0,
+  runRecovered: 0,
+  runStalled: 0,
+  fallbackApplied: 0,
+  errors: 0,
+  toolErrors: 0,
+  lastUpdatedAt: 0,
+};
 
 class StdoutEventSink implements EventSink {
   readonly id = STDOUT_EVENT_SINK_ID;
@@ -100,6 +130,8 @@ export class EventEmitter {
   private seqCounter = 0;
   private replayLimit: number;
   private replayBuffer: SequencedSidecarEvent[] = [];
+  private reliabilityBySession = new Map<string, ReliabilityCounters>();
+  private correlationBySession = new Map<string, string>();
 
   constructor(options?: { enableStdoutSink?: boolean; replayLimit?: number }) {
     this.replayLimit = Math.max(100, options?.replayLimit ?? 5000);
@@ -170,13 +202,60 @@ export class EventEmitter {
   private nextEvent(type: AgentEventType, sessionId: string | undefined, data: unknown): SequencedSidecarEvent {
     const seq = this.seqCounter + 1;
     this.seqCounter = seq;
+    const correlationId = this.resolveCorrelationId(type, sessionId, data, seq);
     return {
       seq,
       timestamp: Date.now(),
+      schemaVersion: EVENT_SCHEMA_VERSION,
+      correlationId,
       type,
       sessionId: sessionId ?? null,
       data,
     };
+  }
+
+  private resolveCorrelationId(
+    type: AgentEventType,
+    sessionId: string | undefined,
+    data: unknown,
+    seq: number,
+  ): string {
+    const sessionKey = sessionId || '__global__';
+    const runId = this.extractRunId(data);
+
+    if (runId) {
+      const correlationId = `${sessionKey}:${runId}`;
+      this.correlationBySession.set(sessionKey, correlationId);
+      return correlationId;
+    }
+
+    const existing = this.correlationBySession.get(sessionKey);
+    if (existing) {
+      return existing;
+    }
+
+    const fallback = `${sessionKey}:${type}:${seq}`;
+    this.correlationBySession.set(sessionKey, fallback);
+    return fallback;
+  }
+
+  private extractRunId(data: unknown): string | null {
+    if (!isRecord(data)) return null;
+
+    const directRunId = data.runId;
+    if (typeof directRunId === 'string' && directRunId.trim().length > 0) {
+      return directRunId;
+    }
+
+    const nestedRun = data.run;
+    if (isRecord(nestedRun)) {
+      const nestedRunId = nestedRun.id;
+      if (typeof nestedRunId === 'string' && nestedRunId.trim().length > 0) {
+        return nestedRunId;
+      }
+    }
+
+    return null;
   }
 
   private appendToReplay(event: SequencedSidecarEvent): void {
@@ -256,7 +335,90 @@ export class EventEmitter {
 
     this.appendToReplay(event);
     this.eventBuffer.push(event);
+    this.maybeEmitRunHealth(type, sessionId, data);
     this.scheduleFlush();
+  }
+
+  private reliabilityKey(sessionId: string | undefined): string {
+    return sessionId || '__global__';
+  }
+
+  private updateReliabilityCounters(
+    type: AgentEventType,
+    sessionId: string | undefined,
+    data: unknown,
+  ): ReliabilityCounters | null {
+    if (type === 'run:health') return null;
+
+    const key = this.reliabilityKey(sessionId);
+    const counters = this.reliabilityBySession.get(key) || { ...EMPTY_RELIABILITY_COUNTERS };
+    const updated: ReliabilityCounters = {
+      ...counters,
+      lastUpdatedAt: Date.now(),
+    };
+
+    switch (type) {
+      case 'stream:start':
+        updated.streamStarts += 1;
+        break;
+      case 'stream:done':
+        updated.streamDone += 1;
+        break;
+      case 'run:checkpoint':
+        updated.checkpoints += 1;
+        break;
+      case 'run:recovered':
+        updated.runRecovered += 1;
+        break;
+      case 'run:stalled':
+        updated.runStalled += 1;
+        break;
+      case 'run:fallback_applied':
+        updated.fallbackApplied += 1;
+        break;
+      case 'error':
+        updated.errors += 1;
+        break;
+      case 'tool:result': {
+        const envelope = data as { result?: { success?: unknown } } | undefined;
+        if (envelope?.result && isRecord(envelope.result) && envelope.result.success === false) {
+          updated.toolErrors += 1;
+        }
+        break;
+      }
+      default:
+        return null;
+    }
+
+    this.reliabilityBySession.set(key, updated);
+    return updated;
+  }
+
+  private maybeEmitRunHealth(type: AgentEventType, sessionId: string | undefined, data: unknown): void {
+    const counters = this.updateReliabilityCounters(type, sessionId, data);
+    if (!counters) return;
+
+    const streamStarts = counters.streamStarts;
+    const failureCount = counters.runStalled + counters.errors + counters.toolErrors;
+    const completionRate = streamStarts > 0 ? counters.streamDone / streamStarts : 1;
+    const failureRate = streamStarts > 0 ? failureCount / streamStarts : 0;
+    const recoveryRate =
+      failureCount > 0 ? (counters.runRecovered + counters.fallbackApplied) / failureCount : 1;
+
+    const reliabilityScore = Math.max(
+      0,
+      Math.min(1, completionRate - failureRate * 0.65 + recoveryRate * 0.15),
+    );
+
+    const health =
+      reliabilityScore >= 0.9 ? 'healthy' : reliabilityScore >= 0.75 ? 'degraded' : 'unhealthy';
+
+    this.emit('run:health', sessionId, {
+      counters,
+      reliabilityScore,
+      health,
+      timestamp: Date.now(),
+    });
   }
 
   streamStart(sessionId: string): void {
@@ -358,6 +520,80 @@ export class EventEmitter {
 
   researchProgress(sessionId: string, status: string, progress: number): void {
     this.emit('research:progress', sessionId, { status, progress, timestamp: Date.now() });
+  }
+
+  researchEvidence(
+    sessionId: string,
+    payload: {
+      query: string;
+      totalSources: number;
+      avgConfidence: number;
+      topSources: Array<{
+        title: string;
+        url: string;
+        confidence: number;
+        rank: number;
+      }>;
+      timestamp?: number;
+    },
+  ): void {
+    this.emit('research:evidence', sessionId, {
+      ...payload,
+      timestamp: payload.timestamp ?? Date.now(),
+    });
+  }
+
+  browserProgress(
+    sessionId: string,
+    payload: {
+      step: number;
+      maxSteps: number;
+      status: 'running' | 'blocked' | 'completed' | 'recovered';
+      url?: string;
+      detail?: string;
+      lastAction?: string;
+      timestamp?: number;
+    },
+  ): void {
+    this.emit('browser:progress', sessionId, {
+      ...payload,
+      timestamp: payload.timestamp ?? Date.now(),
+    });
+  }
+
+  browserCheckpoint(
+    sessionId: string,
+    payload: {
+      checkpointPath: string;
+      step: number;
+      maxSteps: number;
+      url?: string;
+      recoverable?: boolean;
+      timestamp?: number;
+    },
+  ): void {
+    this.emit('browser:checkpoint', sessionId, {
+      ...payload,
+      recoverable: payload.recoverable ?? true,
+      timestamp: payload.timestamp ?? Date.now(),
+    });
+  }
+
+  browserBlocked(
+    sessionId: string,
+    payload: {
+      reason: string;
+      step: number;
+      maxSteps: number;
+      url?: string;
+      checkpointPath?: string;
+      timestamp?: number;
+    },
+  ): void {
+    this.emit('browser:blocker', sessionId, {
+      ...payload,
+      timestamp: payload.timestamp ?? Date.now(),
+    });
   }
 
   browserViewScreenshot(

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
+  BarChart3,
   Settings2,
   SlidersHorizontal,
   KeyRound,
@@ -33,6 +34,7 @@ import { CapabilitySettings } from './CapabilitySettings';
 import { RuntimeSettings } from './RuntimeSettings';
 import { SoulSettings } from './SoulSettings';
 import { RemoteAccessSettings } from './RemoteAccessSettings';
+import { BenchmarkDashboard } from '@/components/benchmark/BenchmarkDashboard';
 
 interface TabConfig {
   id: SettingsTab;
@@ -46,6 +48,7 @@ const tabConfig: TabConfig[] = [
   { id: 'media', label: 'Media', icon: Image },
   { id: 'capabilities', label: 'Capabilities', icon: Wrench },
   { id: 'runtime', label: 'Runtime', icon: Cpu },
+  { id: 'benchmarks', label: 'Benchmarks', icon: BarChart3 },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
   { id: 'remote', label: 'Remote', icon: Smartphone },
   { id: 'souls', label: 'Souls', icon: Bot },
@@ -56,6 +59,7 @@ const tabContent: Record<SettingsTab, React.ComponentType> = {
   media: GeneralSettings,
   capabilities: CapabilitySettings,
   runtime: RuntimeSettings,
+  benchmarks: BenchmarkDashboard,
   integrations: IntegrationSettings,
   remote: RemoteAccessSettings,
   souls: SoulSettings,
@@ -66,10 +70,27 @@ export function SettingsView() {
   const setCurrentView = useAppStore((s) => s.setCurrentView);
   const activeTab = useAppStore((s) => s.settingsTab);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
+  const uxProfile = useSettingsStore((s) => s.uxProfile);
+  const setUxProfile = useSettingsStore((s) => s.setUxProfile);
   const platforms = useIntegrationStore((s) => s.platforms);
   const openHelp = useHelpStore((s) => s.openHelp);
   const startTour = useHelpStore((s) => s.startTour);
   const refreshCapabilitySnapshot = useCapabilityStore((s) => s.refreshSnapshot);
+  const visibleTabs = useMemo(() => {
+    if (uxProfile === 'pro') {
+      return tabConfig;
+    }
+    const allowed = new Set<SettingsTab>(['provider', 'runtime', 'benchmarks']);
+    return tabConfig.filter((tab) => allowed.has(tab.id));
+  }, [uxProfile]);
+
+  useEffect(() => {
+    if (visibleTabs.some((tab) => tab.id === activeTab)) {
+      return;
+    }
+    const fallback = visibleTabs[0]?.id || 'provider';
+    setSettingsTab(fallback);
+  }, [activeTab, setSettingsTab, visibleTabs]);
 
   // Refresh platform statuses while integrations tab is active.
   useEffect(() => {
@@ -88,7 +109,10 @@ export function SettingsView() {
     return () => clearInterval(interval);
   }, [activeTab, refreshCapabilitySnapshot]);
 
-  const ActiveContent = tabContent[activeTab];
+  const resolvedTab = visibleTabs.some((tab) => tab.id === activeTab)
+    ? activeTab
+    : (visibleTabs[0]?.id || 'provider');
+  const ActiveContent = tabContent[resolvedTab];
   const handleLogout = async () => {
     if (isLoggingOut) return;
 
@@ -171,6 +195,32 @@ export function SettingsView() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2" data-tour-id="settings-help-actions">
+          <div className="inline-flex rounded-lg border border-white/[0.1] bg-white/[0.03] p-1">
+            <button
+              type="button"
+              onClick={() => setUxProfile('simple')}
+              className={cn(
+                'rounded-md px-2 py-1 text-xs transition-colors',
+                uxProfile === 'simple'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-white/65 hover:text-white/85',
+              )}
+            >
+              Simple
+            </button>
+            <button
+              type="button"
+              onClick={() => setUxProfile('pro')}
+              className={cn(
+                'rounded-md px-2 py-1 text-xs transition-colors',
+                uxProfile === 'pro'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-white/65 hover:text-white/85',
+              )}
+            >
+              Pro
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => void handleLogout()}
@@ -209,7 +259,7 @@ export function SettingsView() {
 
       {/* Tab Navigation */}
       <div className="flex items-center gap-1 px-6 py-3 border-b border-white/[0.08] overflow-x-auto" data-tour-id="settings-tab-nav">
-        {tabConfig.map((tab) => {
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           const isConnected =
@@ -262,13 +312,18 @@ export function SettingsView() {
           );
         })}
       </div>
+      {uxProfile === 'simple' ? (
+        <div className="border-b border-white/[0.06] px-6 py-2 text-xs text-white/45">
+          Simple profile hides advanced controls. Switch to <span className="text-white/75">Pro</span> for full settings.
+        </div>
+      ) : null}
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto">
         <div className="w-full px-4 py-5 lg:px-6" data-tour-id="settings-content-region">
           <AnimatePresence mode="wait">
             <motion.div
-              key={activeTab}
+              key={resolvedTab}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}

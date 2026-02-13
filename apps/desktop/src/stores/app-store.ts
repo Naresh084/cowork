@@ -7,6 +7,7 @@ export type SettingsTab =
   | 'media'
   | 'capabilities'
   | 'runtime'
+  | 'benchmarks'
   | 'integrations'
   | 'souls'
   | 'remote';

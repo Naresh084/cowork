@@ -44,6 +44,7 @@ fn main() {
             commands::auth::set_stitch_api_key,
             commands::auth::delete_stitch_api_key,
             commands::auth::auth_logout_and_cleanup,
+            commands::auth::auth_get_security_posture,
             commands::auth::validate_api_key,
             commands::auth::fetch_models,
             // File commands
@@ -59,6 +60,15 @@ fn main() {
             commands::agent::agent_set_stitch_api_key,
             commands::agent::agent_create_session,
             commands::agent::agent_send_message,
+            commands::agent::agent_send_message_v2,
+            commands::agent::agent_resume_run,
+            commands::agent::agent_branch_session,
+            commands::agent::agent_merge_branch,
+            commands::agent::agent_set_active_branch,
+            commands::agent::agent_get_run_timeline,
+            commands::agent::agent_run_benchmark,
+            commands::agent::agent_get_release_gate_status,
+            commands::agent::agent_assert_release_gate,
             commands::agent::agent_respond_permission,
             commands::agent::agent_set_approval_mode,
             commands::agent::agent_set_execution_mode,
@@ -130,6 +140,7 @@ fn main() {
             commands::workflow::workflow_list_scheduled,
             commands::workflow::workflow_pause_scheduled,
             commands::workflow::workflow_resume_scheduled,
+            commands::workflow::workflow_evaluate_triggers,
             // Heartbeat commands
             commands::heartbeat::heartbeat_get_status,
             commands::heartbeat::heartbeat_get_config,
@@ -158,6 +169,11 @@ fn main() {
             commands::deep::deep_memory_update,
             commands::deep::deep_memory_delete,
             commands::deep::deep_memory_search,
+            commands::deep::deep_memory_query,
+            commands::deep::deep_memory_feedback,
+            commands::deep::deep_memory_export_bundle,
+            commands::deep::deep_memory_import_bundle,
+            commands::deep::deep_memory_get_migration_report,
             commands::deep::deep_memory_list_groups,
             commands::deep::deep_memory_create_group,
             commands::deep::deep_memory_delete_group,
@@ -239,6 +255,8 @@ fn main() {
         .setup(|app| {
             // Auto-update disabled until a proper signing key pair is configured
             let _ = app;
+            commands::credentials::credentials_migrate_on_startup()
+                .map_err(|error| format!("Credential migration failed during startup: {}", error))?;
 
             Ok(())
         })

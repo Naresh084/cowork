@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
+import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowLeft,
   ArrowRight,
@@ -28,6 +29,15 @@ import { CapabilityMatrix } from '../help/CapabilityMatrix';
 const onboardingHero = new URL('../../assets/onboarding/image_2.png', import.meta.url).href;
 
 type SetupMode = 'fast' | 'deep';
+type HealthCheckStatus = 'pass' | 'warn' | 'fail';
+
+interface EnvironmentHealthCheck {
+  id: string;
+  label: string;
+  status: HealthCheckStatus;
+  detail: string;
+  blocking: boolean;
+}
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   google: 'Google',
@@ -67,6 +77,7 @@ export function Onboarding() {
   } = useAuthStore();
   const {
     userName: existingUserName,
+    defaultWorkingDirectory,
     availableModelsByProvider,
     selectedModelByProvider,
     mediaRouting,
@@ -116,6 +127,8 @@ export function Onboarding() {
   const [deepResearchModel, setDeepResearchModel] = useState(specializedModelsV2.google.deepResearchAgent);
   const [sandboxMode, setSandboxMode] = useState(commandSandbox.mode);
   const [sandboxAllowNetwork, setSandboxAllowNetwork] = useState(commandSandbox.allowNetwork);
+  const [environmentChecks, setEnvironmentChecks] = useState<EnvironmentHealthCheck[]>([]);
+  const [isRunningChecks, setIsRunningChecks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -151,6 +164,137 @@ export function Onboarding() {
   const stepLabels = setupMode === 'deep' ? DEEP_STEPS : FAST_STEPS;
   const totalSteps = stepLabels.length;
   const isFinalStep = currentStep === totalSteps - 1;
+  const hasBlockingEnvironmentIssues = environmentChecks.some(
+    (check) => check.blocking && check.status === 'fail',
+  );
+
+  const applyRecommendedDefaults = () => {
+    if (!selectedModel.trim() && !customModel.trim() && modelsForProvider[0]?.id) {
+      setSelectedModel(modelsForProvider[0].id);
+    }
+
+    if (provider === 'openai') {
+      setImageBackend('openai');
+      setVideoBackend('openai');
+    } else {
+      setImageBackend('google');
+      setVideoBackend('google');
+    }
+
+    if (externalSearchDraft !== 'google') {
+      setExternalSearchDraft('google');
+    }
+
+    setSandboxMode('workspace-write');
+    setSandboxAllowNetwork(false);
+    setError(null);
+  };
+
+  const runEnvironmentChecks = async (): Promise<EnvironmentHealthCheck[]> => {
+    setIsRunningChecks(true);
+    const checks: EnvironmentHealthCheck[] = [];
+    const modelToUse = customModel.trim() || selectedModel.trim();
+
+    let runtimeReady = false;
+    try {
+      const status = await invoke<{ initialized: boolean }>('agent_get_initialization_status');
+      runtimeReady = status?.initialized === true;
+    } catch {
+      runtimeReady = false;
+    }
+
+    checks.push({
+      id: 'runtime_backend',
+      label: 'Runtime backend',
+      status: runtimeReady ? 'pass' : 'fail',
+      detail: runtimeReady
+        ? 'Desktop runtime is ready.'
+        : 'Runtime is still starting. Wait a moment and run checks again.',
+      blocking: true,
+    });
+
+    const hasProviderCredentials =
+      needsOnlyName || provider === 'lmstudio' || providerKey.trim().length > 0;
+    checks.push({
+      id: 'provider_credentials',
+      label: 'Provider credentials',
+      status: hasProviderCredentials ? 'pass' : 'fail',
+      detail: hasProviderCredentials
+        ? 'Provider credentials are configured for setup.'
+        : `Missing ${PROVIDER_LABELS[provider]} API key.`,
+      blocking: true,
+    });
+
+    const hasModelSelection = needsOnlyName || modelToUse.length > 0;
+    checks.push({
+      id: 'chat_model',
+      label: 'Chat model selection',
+      status: hasModelSelection ? 'pass' : 'fail',
+      detail: hasModelSelection
+        ? `Using model ${modelToUse || 'from existing settings'}.`
+        : 'No chat model selected.',
+      blocking: true,
+    });
+
+    const hasSearchKey =
+      externalSearchDraft === 'google' ||
+      (externalSearchDraft === 'exa' && exaKeyDraft.trim().length > 0) ||
+      (externalSearchDraft === 'tavily' && tavilyKeyDraft.trim().length > 0);
+    checks.push({
+      id: 'search_fallback',
+      label: 'Search fallback',
+      status: hasSearchKey ? 'pass' : 'warn',
+      detail: hasSearchKey
+        ? `${externalSearchDraft} fallback is ready.`
+        : `${externalSearchDraft} selected without API key. Switch to Google or add key.`,
+      blocking: false,
+    });
+
+    const mediaDefaultsAligned =
+      provider === 'openai'
+        ? imageBackend === 'openai' && videoBackend === 'openai'
+        : imageBackend === 'google' && videoBackend === 'google';
+    checks.push({
+      id: 'media_defaults',
+      label: 'Media defaults',
+      status: mediaDefaultsAligned ? 'pass' : 'warn',
+      detail: mediaDefaultsAligned
+        ? 'Media backends match recommended defaults.'
+        : 'Media backends are customized from recommended defaults.',
+      blocking: false,
+    });
+
+    const sandboxSafetyReady = sandboxMode !== 'danger-full-access' || !sandboxAllowNetwork;
+    checks.push({
+      id: 'sandbox_safety',
+      label: 'Command safety defaults',
+      status: sandboxSafetyReady ? 'pass' : 'warn',
+      detail: sandboxSafetyReady
+        ? 'Command sandbox is set to a safe default profile.'
+        : 'Danger-full-access with network is enabled.',
+      blocking: false,
+    });
+
+    checks.push({
+      id: 'default_workspace',
+      label: 'Default workspace',
+      status: defaultWorkingDirectory.trim().length > 0 ? 'pass' : 'warn',
+      detail:
+        defaultWorkingDirectory.trim().length > 0
+          ? `Default workspace set to ${defaultWorkingDirectory}.`
+          : 'No default workspace path configured yet.',
+      blocking: false,
+    });
+
+    setEnvironmentChecks(checks);
+    setIsRunningChecks(false);
+    return checks;
+  };
+
+  useEffect(() => {
+    if (!isFinalStep) return;
+    void runEnvironmentChecks();
+  }, [isFinalStep]);
 
   const handleProviderChange = async (nextProvider: ProviderId) => {
     setProvider(nextProvider);
@@ -192,7 +336,14 @@ export function Onboarding() {
     if (isSaving) return;
     if (!validateCoreStep()) return;
 
+    const checks = await runEnvironmentChecks();
+    if (checks.some((check) => check.blocking && check.status === 'fail')) {
+      setError('Resolve blocking environment checks before completing setup.');
+      return;
+    }
+
     if (needsOnlyName) {
+      updateSetting('uxProfile', setupMode === 'fast' ? 'simple' : 'pro');
       updateSetting('userName', userName.trim());
       return;
     }
@@ -297,6 +448,7 @@ export function Onboarding() {
       });
 
       await refreshCapabilitySnapshot();
+      updateSetting('uxProfile', setupMode === 'fast' ? 'simple' : 'pro');
       updateSetting('userName', userName.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save onboarding settings');
@@ -703,6 +855,65 @@ export function Onboarding() {
           </div>
         </div>
 
+        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium text-white/90">Environment Health Checks</h3>
+            <button
+              type="button"
+              onClick={() => {
+                void runEnvironmentChecks();
+              }}
+              disabled={isRunningChecks}
+              className={cn(
+                'rounded-lg px-3 py-1.5 text-xs transition-colors',
+                isRunningChecks
+                  ? 'cursor-not-allowed bg-white/[0.08] text-white/35'
+                  : 'bg-white/[0.08] text-white/75 hover:bg-white/[0.12]',
+              )}
+            >
+              {isRunningChecks ? 'Running checks...' : 'Run Checks'}
+            </button>
+          </div>
+
+          {environmentChecks.length === 0 ? (
+            <p className="text-xs text-white/50">
+              Run checks to validate runtime readiness and safe defaults.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {environmentChecks.map((check) => (
+                <div
+                  key={check.id}
+                  className={cn(
+                    'rounded-lg border px-3 py-2 text-xs',
+                    check.status === 'pass'
+                      ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100'
+                      : check.status === 'warn'
+                        ? 'border-amber-400/30 bg-amber-500/10 text-amber-100'
+                        : 'border-[#FF5449]/35 bg-[#FF5449]/10 text-[#FFB4AF]',
+                  )}
+                >
+                  <p className="font-medium">{check.label}</p>
+                  <p className="mt-0.5 opacity-90">{check.detail}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-[#0A1021]/75 px-3 py-2">
+            <p className="text-xs text-white/60">
+              Apply recommended defaults for fast first success.
+            </p>
+            <button
+              type="button"
+              onClick={applyRecommendedDefaults}
+              className="rounded-lg bg-[#1D4ED8]/30 px-3 py-1.5 text-xs text-[#BFDBFE] hover:bg-[#1D4ED8]/45"
+            >
+              Apply Defaults
+            </button>
+          </div>
+        </div>
+
         <CapabilityMatrix compact />
 
         <div className="rounded-xl border border-[#1D4ED8]/20 bg-[#1D4ED8]/10 p-4">
@@ -857,7 +1068,7 @@ export function Onboarding() {
                   <button
                     type="button"
                     onClick={() => void handleComplete()}
-                    disabled={isSaving}
+                    disabled={isSaving || isRunningChecks || hasBlockingEnvironmentIssues}
                     className={cn(
                       'inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white',
                       'bg-gradient-to-r from-[#1E3A8A] via-[#1D4ED8] to-[#3B82F6]',

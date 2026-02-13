@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { platform } from 'os';
+import { resolve } from 'path';
 import type {
   CommandPolicyEvaluation,
   ExecutionMode,
@@ -63,6 +64,7 @@ export function isOsSandboxAvailable(): boolean {
 export class CommandExecutor {
   private config: SandboxConfig;
   private validator: CommandValidator;
+  private readonly idempotencyResults = new Map<string, ExecutionResult>();
 
   constructor(config: Partial<SandboxConfig> = {}) {
     this.config = normalizeConfig(config);
@@ -80,12 +82,39 @@ export class CommandExecutor {
       mode = 'normal',
       shell = true,
       stdin,
+      idempotencyKey,
+      idempotencyStrategy = 'return_cached',
     } = options;
 
     // Validate command using deterministic policy gate.
     const policy = this.validator.evaluatePolicy(command, { cwd });
     if (!policy.allowed) {
       throw PermissionError.shellExecute(`${command}\n${policy.violations.join(' ')}`);
+    }
+
+    const guardByIdempotency = this.requiresIdempotencyGuard(policy);
+    const idempotencyMarker =
+      idempotencyKey && guardByIdempotency
+        ? this.buildIdempotencyMarker(command, cwd, idempotencyKey)
+        : null;
+
+    if (idempotencyMarker) {
+      const existing = this.idempotencyResults.get(idempotencyMarker);
+      if (existing) {
+        if (idempotencyStrategy === 'reject') {
+          throw PermissionError.shellExecute(
+            `${command}\nRetry blocked by idempotency marker ${idempotencyKey}.`,
+          );
+        }
+        return {
+          ...existing,
+          stderr: existing.stderr
+            ? `${existing.stderr}\n[Idempotency replay: execution skipped]`
+            : '[Idempotency replay: execution skipped]',
+          idempotencyReused: true,
+          idempotencyKey,
+        };
+      }
     }
 
     // In dry run mode, just return the analysis
@@ -95,6 +124,7 @@ export class CommandExecutor {
         stdout: `[DRY RUN] Would execute: ${command}\nAllowed: ${policy.allowed}\nViolations: ${policy.violations.join(', ') || 'None'}\nRisk: ${policy.analysis.risk}`,
         stderr: '',
         duration: 0,
+        idempotencyKey,
       };
     }
 
@@ -109,11 +139,22 @@ export class CommandExecutor {
     };
 
     // Apply sandboxing on macOS if requested and available
+    let result: ExecutionResult;
     if (executionMode === 'sandboxed' && isOsSandboxAvailable()) {
-      return this.executeSandboxed(command, spawnOptions, stdin);
+      result = await this.executeSandboxed(command, spawnOptions, stdin);
+    } else {
+      result = await this.executeNormal(command, spawnOptions, stdin, timeout);
+    }
+    const enrichedResult: ExecutionResult = {
+      ...result,
+      idempotencyKey,
+    };
+
+    if (idempotencyMarker) {
+      this.cacheIdempotencyResult(idempotencyMarker, enrichedResult);
     }
 
-    return this.executeNormal(command, spawnOptions, stdin, timeout);
+    return enrichedResult;
   }
 
   /**
@@ -126,6 +167,27 @@ export class CommandExecutor {
       return 'normal';
     }
     return isOsSandboxAvailable() ? 'sandboxed' : 'normal';
+  }
+
+  private requiresIdempotencyGuard(policy: CommandPolicyEvaluation): boolean {
+    const primaryIntent = policy.analysis.intent.primary;
+    if (primaryIntent === 'write' || primaryIntent === 'delete') return true;
+    if (policy.analysis.modifiedPaths && policy.analysis.modifiedPaths.length > 0) return true;
+    return policy.analysis.risk !== 'safe';
+  }
+
+  private buildIdempotencyMarker(command: string, cwd: string, key: string): string {
+    const normalizedCommand = command.trim().replace(/\s+/g, ' ');
+    return `${resolve(cwd)}::${normalizedCommand}::${key}`;
+  }
+
+  private cacheIdempotencyResult(marker: string, result: ExecutionResult): void {
+    this.idempotencyResults.set(marker, result);
+    if (this.idempotencyResults.size <= 200) return;
+    const oldestKey = this.idempotencyResults.keys().next().value;
+    if (typeof oldestKey === 'string') {
+      this.idempotencyResults.delete(oldestKey);
+    }
   }
 
   /**

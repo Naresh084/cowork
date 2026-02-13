@@ -5,11 +5,12 @@
  * Sources are prioritized: workspace > managed > bundled
  */
 
-import { readFile, readdir, mkdir, cp, rm, writeFile } from 'fs/promises';
+import { readFile, readdir, mkdir, cp, rm, writeFile, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 import type {
   SkillManifest,
   SkillSource,
@@ -40,6 +41,35 @@ const __dirname = dirname(__filename);
 
 // Default paths
 const DEFAULT_BUNDLED_DIR = join(__dirname, '..', '..', '..', '..', 'skills'); // Project root skills/
+const PACK_SIGNATURE_FILE = 'SIGNATURE.json';
+const SKILL_MARKDOWN_FILE = 'SKILL.md';
+const PACK_SIGNATURE_VERSION = 1;
+const ALLOW_UNSIGNED_MANAGED_PACKS = process.env.COWORK_ALLOW_UNSIGNED_MANAGED_PACKS === 'true';
+const MAX_SKILL_MD_BYTES = 10 * 1024 * 1024;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function getDiscoveryCacheTtlMs(): number {
+  return parsePositiveInt(process.env.COWORK_SKILL_DISCOVERY_CACHE_TTL_MS, 15_000);
+}
+
+function getDiscoveryPerDirTimeoutMs(): number {
+  return parsePositiveInt(process.env.COWORK_SKILL_DISCOVERY_PER_DIR_TIMEOUT_MS, 3_000);
+}
+
+interface PackSignature {
+  version: number;
+  algorithm: 'sha256';
+  digest: string;
+  subject: string;
+  signer: string;
+  signedAt: number;
+}
 
 /**
  * Skill Service for managing skills across multiple sources
@@ -50,6 +80,7 @@ export class SkillService {
   private customDirs: string[] = [];
   private skillCache: Map<string, SkillManifest> = new Map();
   private contentCache: Map<string, string> = new Map();
+  private discoveryCache: { key: string; discoveredAt: number; skills: SkillManifest[] } | null = null;
   private appDataDir: string;
 
   constructor(appDataDir?: string) {
@@ -63,6 +94,7 @@ export class SkillService {
    */
   setCustomDirs(dirs: string[]): void {
     this.customDirs = dirs;
+    this.discoveryCache = null;
   }
 
   /**
@@ -70,6 +102,58 @@ export class SkillService {
    */
   setBundledDir(dir: string): void {
     this.bundledSkillsDir = dir;
+    this.discoveryCache = null;
+  }
+
+  private buildDiscoveryCacheKey(workingDirectory?: string): string {
+    return JSON.stringify({
+      workingDirectory: workingDirectory?.trim() || '',
+      managedSkillsDir: this.managedSkillsDir,
+      bundledSkillsDir: this.bundledSkillsDir,
+      customDirs: [...this.customDirs].sort(),
+    });
+  }
+
+  private async withTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+      });
+      return await Promise.race([work, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async isDirectoryAccessible(dir: string): Promise<boolean> {
+    try {
+      const info = await this.withTimeout(stat(dir), getDiscoveryPerDirTimeoutMs());
+      return info.isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  private async discoverDirectorySafe(
+    dir: string,
+    sourceType: SkillSourceType,
+    priority: number,
+  ): Promise<SkillManifest[]> {
+    if (!(await this.isDirectoryAccessible(dir))) {
+      return [];
+    }
+
+    try {
+      return await this.withTimeout(
+        this.discoverFromDirectory(dir, sourceType, priority),
+        getDiscoveryPerDirTimeoutMs(),
+      );
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[skills] Skipping slow or invalid skill directory ${dir}: ${reason}`);
+      return [];
+    }
   }
 
   /**
@@ -81,8 +165,29 @@ export class SkillService {
    * 4. Bundled skills (lowest priority)
    */
   async discoverAll(workingDirectory?: string): Promise<SkillManifest[]> {
+    const cacheKey = this.buildDiscoveryCacheKey(workingDirectory);
+    const nowMs = Date.now();
+    const ttlMs = getDiscoveryCacheTtlMs();
+    if (this.discoveryCache
+      && this.discoveryCache.key === cacheKey
+      && nowMs - this.discoveryCache.discoveredAt < ttlMs
+    ) {
+      for (const skill of this.discoveryCache.skills) {
+        this.skillCache.set(skill.id, skill);
+      }
+      return [...this.discoveryCache.skills];
+    }
+
     const allSkills: SkillManifest[] = [];
     const seenNames = new Set<string>();
+    const pushUniqueSkills = (skills: SkillManifest[]) => {
+      for (const skill of skills) {
+        if (!seenNames.has(skill.frontmatter.name)) {
+          seenNames.add(skill.frontmatter.name);
+          allSkills.push(skill);
+        }
+      }
+    };
 
     // Priority 1: Workspace skills
     if (workingDirectory) {
@@ -92,15 +197,8 @@ export class SkillService {
       ];
 
       for (const dir of workspaceSkillDirs) {
-        if (existsSync(dir)) {
-          const skills = await this.discoverFromDirectory(dir, 'workspace', 1);
-          for (const skill of skills) {
-            if (!seenNames.has(skill.frontmatter.name)) {
-              seenNames.add(skill.frontmatter.name);
-              allSkills.push(skill);
-            }
-          }
-        }
+        const skills = await this.discoverDirectorySafe(dir, 'workspace', 1);
+        pushUniqueSkills(skills);
       }
     }
 
@@ -118,57 +216,32 @@ export class SkillService {
     );
 
     for (const dir of platformSkillDirs) {
-      if (existsSync(dir)) {
-        const skills = await this.discoverFromDirectory(dir, 'platform', 1);
-        for (const skill of skills) {
-          if (!seenNames.has(skill.frontmatter.name)) {
-            seenNames.add(skill.frontmatter.name);
-            allSkills.push(skill);
-          }
-        }
-      }
+      const skills = await this.discoverDirectorySafe(dir, 'platform', 1);
+      pushUniqueSkills(skills);
     }
 
     // Priority 2: Managed skills (installed from marketplace)
-    if (existsSync(this.managedSkillsDir)) {
-      const skills = await this.discoverFromDirectory(this.managedSkillsDir, 'managed', 2);
-      for (const skill of skills) {
-        if (!seenNames.has(skill.frontmatter.name)) {
-          seenNames.add(skill.frontmatter.name);
-          allSkills.push(skill);
-        }
-      }
-    }
+    pushUniqueSkills(await this.discoverDirectorySafe(this.managedSkillsDir, 'managed', 2));
 
     // Priority 3: Custom directories
     for (let i = 0; i < this.customDirs.length; i++) {
       const dir = this.customDirs[i];
-      if (existsSync(dir)) {
-        const skills = await this.discoverFromDirectory(dir, 'custom', 3 + i);
-        for (const skill of skills) {
-          if (!seenNames.has(skill.frontmatter.name)) {
-            seenNames.add(skill.frontmatter.name);
-            allSkills.push(skill);
-          }
-        }
-      }
+      const skills = await this.discoverDirectorySafe(dir, 'custom', 3 + i);
+      pushUniqueSkills(skills);
     }
 
     // Priority 4: Bundled skills (lowest priority)
-    if (existsSync(this.bundledSkillsDir)) {
-      const skills = await this.discoverFromDirectory(this.bundledSkillsDir, 'bundled', 100);
-      for (const skill of skills) {
-        if (!seenNames.has(skill.frontmatter.name)) {
-          seenNames.add(skill.frontmatter.name);
-          allSkills.push(skill);
-        }
-      }
-    }
+    pushUniqueSkills(await this.discoverDirectorySafe(this.bundledSkillsDir, 'bundled', 100));
 
     // Update cache
     for (const skill of allSkills) {
       this.skillCache.set(skill.id, skill);
     }
+    this.discoveryCache = {
+      key: cacheKey,
+      discoveredAt: Date.now(),
+      skills: [...allSkills],
+    };
 
     return allSkills;
   }
@@ -187,7 +260,7 @@ export class SkillService {
       const entries = await readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith('.')) {
+        if (!entry.isDirectory() || entry.name.startsWith('.') || entry.isSymbolicLink()) {
           continue;
         }
 
@@ -199,11 +272,26 @@ export class SkillService {
         }
 
         try {
+          const stats = await stat(skillMdPath);
+          if (!stats.isFile() || stats.size > MAX_SKILL_MD_BYTES) {
+            continue;
+          }
           const content = await readFile(skillMdPath, 'utf-8');
           const frontmatter = parseFrontmatter(content);
 
           if (!frontmatter) {
             continue;
+          }
+
+          if (this.shouldEnforcePackSignature(sourceType)) {
+            const subject =
+              typeof frontmatter.name === 'string' && frontmatter.name.trim()
+                ? frontmatter.name
+                : entry.name;
+            const isSignatureValid = await this.validatePackSignature(skillDir, subject);
+            if (!isSignatureValid) {
+              continue;
+            }
           }
 
           const source: SkillSource = {
@@ -273,6 +361,7 @@ export class SkillService {
 
     // Copy skill directory
     await cp(skill.skillPath, targetDir, { recursive: true });
+    await this.writePackSignature(targetDir, skill.frontmatter.name);
 
     // Check for setup.sh and run it if exists (with user notification)
     // Note: We don't auto-execute setup scripts for security reasons
@@ -345,6 +434,7 @@ export class SkillService {
     // Write SKILL.md
     const skillMdPath = join(skillDir, 'SKILL.md');
     await writeFile(skillMdPath, skillMd, 'utf-8');
+    await this.writePackSignature(skillDir, params.name);
 
     // Clear cache and re-discover
     this.skillCache.clear();
@@ -368,6 +458,9 @@ export class SkillService {
     metadataLines.push(`  version: "1.0.0"`);
     metadataLines.push(`  emoji: ${params.emoji || '📦'}`);
     metadataLines.push(`  category: ${params.category || 'custom'}`);
+    metadataLines.push(`  lifecycle: draft`);
+    metadataLines.push(`  trustLevel: unverified`);
+    metadataLines.push(`  verificationNotes: "User-created draft skill. Validate before team-wide use."`);
 
     // Add requirements if provided
     if (params.requirements) {
@@ -503,6 +596,60 @@ ${skillContents.join('\n\n---\n\n')}
   clearCache(): void {
     this.skillCache.clear();
     this.contentCache.clear();
+    this.discoveryCache = null;
+  }
+
+  private shouldEnforcePackSignature(sourceType: SkillSourceType): boolean {
+    if (ALLOW_UNSIGNED_MANAGED_PACKS) {
+      return false;
+    }
+    return sourceType === 'managed';
+  }
+
+  private async computePackDigest(skillDir: string): Promise<string> {
+    const content = await readFile(join(skillDir, SKILL_MARKDOWN_FILE), 'utf-8');
+    return createHash('sha256').update(content).digest('hex');
+  }
+
+  private async writePackSignature(skillDir: string, subject: string): Promise<void> {
+    const digest = await this.computePackDigest(skillDir);
+    const signature: PackSignature = {
+      version: PACK_SIGNATURE_VERSION,
+      algorithm: 'sha256',
+      digest,
+      subject,
+      signer: 'local-managed-installer',
+      signedAt: Date.now(),
+    };
+    await writeFile(join(skillDir, PACK_SIGNATURE_FILE), JSON.stringify(signature, null, 2), 'utf-8');
+  }
+
+  private async validatePackSignature(skillDir: string, expectedSubject: string): Promise<boolean> {
+    const signaturePath = join(skillDir, PACK_SIGNATURE_FILE);
+    if (!existsSync(signaturePath)) {
+      return false;
+    }
+
+    try {
+      const raw = await readFile(signaturePath, 'utf-8');
+      const signature = JSON.parse(raw) as Partial<PackSignature>;
+      if (
+        signature.version !== PACK_SIGNATURE_VERSION ||
+        signature.algorithm !== 'sha256' ||
+        typeof signature.digest !== 'string' ||
+        typeof signature.subject !== 'string'
+      ) {
+        return false;
+      }
+      if (signature.subject !== expectedSubject) {
+        return false;
+      }
+
+      const computedDigest = await this.computePackDigest(skillDir);
+      return computedDigest === signature.digest;
+    } catch {
+      return false;
+    }
   }
 
   /**

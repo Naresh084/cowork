@@ -1,8 +1,26 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, Suspense } from 'react';
 import { cn } from '../../lib/utils';
-import { Copy, Check, ChevronDown, ChevronRight, Sparkles, Code, Shield, ShieldAlert, CheckCircle2, XCircle, Circle, Loader2, Mic, ArrowDown, Search } from 'lucide-react';
-import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type UserQuestion } from '../../stores/chat-store';
-import { useSessionStore } from '../../stores/session-store';
+import {
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
+  Code,
+  Shield,
+  ShieldAlert,
+  CheckCircle2,
+  XCircle,
+  Circle,
+  Loader2,
+  Mic,
+  ArrowDown,
+  Search,
+  Clock3,
+  Database,
+} from 'lucide-react';
+import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type MemoryActivityItem, type UserQuestion } from '../../stores/chat-store';
+import { useSessionStore, type SessionBranch } from '../../stores/session-store';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { CodeBlock } from './CodeBlock';
@@ -17,6 +35,7 @@ import { ToolExecutionCard } from './ToolExecutionCard';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import remarkGfm from 'remark-gfm';
 import { fixNestedCodeFences } from '../../lib/fix-markdown';
+import { PolicyPill } from '../ui/PolicyPill';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -97,8 +116,30 @@ function messageContentToSearchText(content: Message['content']): string {
     .trim();
 }
 
+function sortPendingPermissions(
+  pendingPermissions: ExtendedPermissionRequest[],
+): ExtendedPermissionRequest[] {
+  return [...pendingPermissions].sort((left, right) => {
+    if (left.createdAt !== right.createdAt) {
+      return left.createdAt - right.createdAt;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+const PERMISSION_TIMEOUT_SECONDS_BY_RISK: Record<'low' | 'medium' | 'high', number> = {
+  low: 90,
+  medium: 60,
+  high: 30,
+};
+
 export function MessageList({ optimisticFirstMessage = null }: MessageListProps) {
   const { activeSessionId } = useSessionStore();
+  const branchesBySession = useSessionStore((state) => state.branchesBySession);
+  const activeBranchBySession = useSessionStore((state) => state.activeBranchBySession);
+  const createBranch = useSessionStore((state) => state.createBranch);
+  const mergeBranch = useSessionStore((state) => state.mergeBranch);
+  const setActiveBranch = useSessionStore((state) => state.setActiveBranch);
   // Use direct selector to ensure Zustand properly tracks state changes
   const sessionState = useChatStore((state) => {
     if (!activeSessionId) return EMPTY_SESSION_STATE;
@@ -153,10 +194,52 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
+  const permissionRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasManualScroll, setHasManualScroll] = useState(false);
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
+  const [activePendingPermissionIndex, setActivePendingPermissionIndex] = useState(0);
+  const [mergeSourceBranchId, setMergeSourceBranchId] = useState('');
+  const [branchActionBusy, setBranchActionBusy] = useState<null | 'create' | 'switch' | 'merge'>(null);
+
+  const sessionBranches = useMemo<SessionBranch[]>(
+    () => (activeSessionId ? branchesBySession[activeSessionId] || [] : []),
+    [activeSessionId, branchesBySession],
+  );
+  const activeBranchId = activeSessionId ? activeBranchBySession[activeSessionId] ?? null : null;
+  const activeBranch = useMemo(
+    () => sessionBranches.find((branch) => branch.id === activeBranchId) ?? null,
+    [sessionBranches, activeBranchId],
+  );
+  const activeBranches = useMemo(
+    () =>
+      sessionBranches
+        .filter((branch) => branch.status === 'active' || branch.id === activeBranchId)
+        .sort((left, right) => left.createdAt - right.createdAt),
+    [sessionBranches, activeBranchId],
+  );
+  const mergeCandidates = useMemo(
+    () => activeBranches.filter((branch) => branch.id !== activeBranchId),
+    [activeBranches, activeBranchId],
+  );
+  const branchCountForDisplay = Math.max(sessionBranches.length, 1);
+  const activeBranchLabel = activeBranch?.name || 'main';
+
+  useEffect(() => {
+    if (mergeCandidates.length === 0) {
+      setMergeSourceBranchId('');
+      return;
+    }
+    if (!mergeCandidates.some((branch) => branch.id === mergeSourceBranchId)) {
+      setMergeSourceBranchId(mergeCandidates[0]?.id ?? '');
+    }
+  }, [mergeCandidates, mergeSourceBranchId]);
+
+  const sortedPendingPermissions = useMemo(
+    () => sortPendingPermissions(pendingPermissions),
+    [pendingPermissions],
+  );
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -205,6 +288,96 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     messageRefMap.current.delete(messageId);
   }, []);
 
+  const registerPermissionRef = useCallback(
+    (permissionId: string, node: HTMLDivElement | null) => {
+      if (node) {
+        permissionRefMap.current.set(permissionId, node);
+        return;
+      }
+      permissionRefMap.current.delete(permissionId);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (sortedPendingPermissions.length === 0) {
+      setActivePendingPermissionIndex(0);
+      return;
+    }
+    setActivePendingPermissionIndex((previous) =>
+      Math.min(Math.max(previous, 0), sortedPendingPermissions.length - 1),
+    );
+  }, [sortedPendingPermissions.length]);
+
+  const jumpToPermission = useCallback(
+    (permissionId: string) => {
+      const node = permissionRefMap.current.get(permissionId);
+      if (node) {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    },
+    [],
+  );
+
+  const cyclePendingPermission = useCallback(
+    (offset: number) => {
+      if (sortedPendingPermissions.length === 0) return;
+      setActivePendingPermissionIndex((previous) => {
+        const nextIndex =
+          (previous + offset + sortedPendingPermissions.length) %
+          sortedPendingPermissions.length;
+        const nextPermission = sortedPendingPermissions[nextIndex];
+        if (nextPermission) {
+          jumpToPermission(nextPermission.id);
+        }
+        return nextIndex;
+      });
+    },
+    [jumpToPermission, sortedPendingPermissions],
+  );
+
+  const handleCreateBranchInline = useCallback(async () => {
+    if (!activeSessionId) return;
+    const suggested = `branch-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+    const branchName = window.prompt('New branch name', suggested)?.trim();
+    if (!branchName) return;
+
+    setBranchActionBusy('create');
+    try {
+      await createBranch(activeSessionId, branchName, activeTurnId);
+    } finally {
+      setBranchActionBusy(null);
+    }
+  }, [activeSessionId, activeTurnId, createBranch]);
+
+  const handleSwitchBranchInline = useCallback(
+    async (branchId: string) => {
+      if (!activeSessionId || !branchId || branchId === activeBranchId) return;
+
+      setBranchActionBusy('switch');
+      try {
+        await setActiveBranch(activeSessionId, branchId);
+      } finally {
+        setBranchActionBusy(null);
+      }
+    },
+    [activeSessionId, activeBranchId, setActiveBranch],
+  );
+
+  const handleMergeIntoActiveInline = useCallback(async () => {
+    if (!activeSessionId || !activeBranchId || !mergeSourceBranchId) return;
+
+    setBranchActionBusy('merge');
+    try {
+      await mergeBranch(activeSessionId, mergeSourceBranchId, activeBranchId, 'auto');
+      setMergeSourceBranchId('');
+    } finally {
+      setBranchActionBusy(null);
+    }
+  }, [activeSessionId, activeBranchId, mergeSourceBranchId, mergeBranch]);
+
   const normalizedSearchQuery = messageSearchQuery.trim().toLowerCase();
   const matchingMessageIds = useMemo(() => {
     if (!normalizedSearchQuery) return [] as string[];
@@ -219,6 +392,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
           Math.min(
             Math.max(activeSearchResultIndex, 0),
             Math.max(0, matchingMessageIds.length - 1)
+          )
+        ]
+      : null;
+  const activePendingPermission =
+    sortedPendingPermissions.length > 0
+      ? sortedPendingPermissions[
+          Math.min(
+            Math.max(activePendingPermissionIndex, 0),
+            sortedPendingPermissions.length - 1,
           )
         ]
       : null;
@@ -363,17 +545,27 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
               );
             }
 
+            if (activity.type === 'memory') {
+              if (!activity.memory) return null;
+              return <MemoryActivityRow key={activity.id} memory={activity.memory} />;
+            }
+
             if (activity.type === 'permission') {
               const permission = pendingPermissions.find((p) => p.id === activity.permissionId);
               if (!permission) return null;
               return (
-                <PermissionInlineCard
+                <div
                   key={activity.id}
-                  request={permission}
-                  onDecision={(decision) => {
-                    respondToPermission(permission.sessionId, permission.id, decision);
-                  }}
-                />
+                  ref={(node) => registerPermissionRef(permission.id, node)}
+                  data-pending-permission-id={permission.id}
+                >
+                  <PermissionInlineCard
+                    request={permission}
+                    onDecision={(decision) => {
+                      void respondToPermission(permission.sessionId, permission.id, decision);
+                    }}
+                  />
+                </div>
               );
             }
 
@@ -436,6 +628,66 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
         <div className="mx-3 md:mx-8 lg:mx-10 py-3 px-0 space-y-2">
           <div className="sticky top-0 z-20 pb-1">
             <div className="rounded-xl border border-white/[0.08] bg-[#0E1017]/85 backdrop-blur-sm px-2.5 py-2">
+              <div className="mb-2 flex flex-wrap items-center gap-2 border-b border-white/[0.08] pb-2">
+                <span className="h-7 rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 text-[11px] text-white/70 inline-flex items-center">
+                  Branches {branchCountForDisplay}
+                </span>
+                <span className="h-7 rounded-lg border border-[#1D4ED8]/35 bg-[#1D4ED8]/12 px-2 text-[11px] text-[#BFDBFE] inline-flex items-center">
+                  Active: {activeBranchLabel}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => void handleCreateBranchInline()}
+                  disabled={!activeSessionId || branchActionBusy !== null}
+                  className="h-7 rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 text-[11px] text-white/75 hover:bg-white/[0.08] disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  New branch
+                </button>
+
+                {activeBranches.length > 0 ? (
+                  <select
+                    value={activeBranchId || ''}
+                    onChange={(event) => void handleSwitchBranchInline(event.target.value)}
+                    disabled={!activeSessionId || branchActionBusy !== null}
+                    className="h-7 min-w-[140px] rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 text-[11px] text-white/75 focus:outline-none focus:border-white/[0.2] disabled:opacity-45 disabled:cursor-not-allowed"
+                    title="Switch active branch"
+                  >
+                    {activeBranches.map((branch) => (
+                      <option key={branch.id} value={branch.id} className="bg-[#111218] text-white">
+                        {branch.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+
+                {activeBranchId && mergeCandidates.length > 0 ? (
+                  <>
+                    <select
+                      value={mergeSourceBranchId}
+                      onChange={(event) => setMergeSourceBranchId(event.target.value)}
+                      disabled={branchActionBusy !== null}
+                      className="h-7 min-w-[140px] rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 text-[11px] text-white/75 focus:outline-none focus:border-white/[0.2] disabled:opacity-45 disabled:cursor-not-allowed"
+                      title="Select branch to merge into active"
+                    >
+                      {mergeCandidates.map((branch) => (
+                        <option key={branch.id} value={branch.id} className="bg-[#111218] text-white">
+                          Merge {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void handleMergeIntoActiveInline()}
+                      disabled={!mergeSourceBranchId || branchActionBusy !== null}
+                      className="h-7 rounded-lg border border-white/[0.12] bg-white/[0.03] px-2 text-[11px] text-white/75 hover:bg-white/[0.08] disabled:opacity-45 disabled:cursor-not-allowed"
+                    >
+                      Merge
+                    </button>
+                  </>
+                ) : null}
+              </div>
+
               <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/35 pointer-events-none" />
@@ -487,6 +739,18 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
                   </>
                 )}
               </div>
+              {sortedPendingPermissions.length > 0 && (
+                <PendingPermissionSummaryCard
+                  permissions={sortedPendingPermissions}
+                  activePermissionId={activePendingPermission?.id ?? null}
+                  onJumpToPermission={(permissionId, index) => {
+                    setActivePendingPermissionIndex(index);
+                    jumpToPermission(permissionId);
+                  }}
+                  onJumpPrevious={() => cyclePendingPermission(-1)}
+                  onJumpNext={() => cyclePendingPermission(1)}
+                />
+              )}
             </div>
           </div>
 
@@ -649,6 +913,105 @@ interface MessageBubbleProps {
   showAvatar?: boolean;
 }
 
+interface PendingPermissionSummaryCardProps {
+  permissions: ExtendedPermissionRequest[];
+  activePermissionId: string | null;
+  onJumpToPermission: (permissionId: string, index: number) => void;
+  onJumpPrevious: () => void;
+  onJumpNext: () => void;
+}
+
+function PendingPermissionSummaryCard({
+  permissions,
+  activePermissionId,
+  onJumpToPermission,
+  onJumpPrevious,
+  onJumpNext,
+}: PendingPermissionSummaryCardProps) {
+  const highRiskCount = permissions.filter(
+    (permission) => permission.riskLevel === 'high',
+  ).length;
+  const oldestPermission = permissions[0];
+  const oldestRisk = oldestPermission?.riskLevel || 'medium';
+  const oldestTimeoutSeconds =
+    PERMISSION_TIMEOUT_SECONDS_BY_RISK[oldestRisk];
+  const oldestRemainingSeconds = oldestPermission
+    ? Math.max(
+        0,
+        oldestTimeoutSeconds -
+          Math.floor((Date.now() - oldestPermission.createdAt) / 1000),
+      )
+    : 0;
+
+  return (
+    <div className="mt-2 rounded-xl border border-[#1D4ED8]/30 bg-[#1D4ED8]/10 p-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-[#BFDBFE]">
+            {permissions.length} approval{permissions.length === 1 ? '' : 's'} pending
+            {highRiskCount > 0 ? ` (${highRiskCount} high risk)` : ''}
+          </p>
+          {oldestPermission && (
+            <p className="mt-0.5 text-[11px] text-[#93C5FD]/85">
+              Oldest request auto-denies in {oldestRemainingSeconds}s
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onJumpPrevious}
+            className="h-7 rounded-md border border-white/[0.16] px-2 text-[11px] text-white/75 hover:bg-white/[0.08]"
+          >
+            Prev Pending
+          </button>
+          <button
+            type="button"
+            onClick={onJumpNext}
+            className="h-7 rounded-md border border-white/[0.16] px-2 text-[11px] text-white/75 hover:bg-white/[0.08]"
+          >
+            Next Pending
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {permissions.slice(0, 8).map((permission, index) => {
+          const isActive = permission.id === activePermissionId;
+          const risk = permission.riskLevel || 'medium';
+          return (
+            <button
+              key={permission.id}
+              type="button"
+              onClick={() => onJumpToPermission(permission.id, index)}
+              className={cn(
+                'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[11px] transition-colors',
+                isActive
+                  ? 'border-[#93C5FD]/80 bg-[#1D4ED8]/30 text-white'
+                  : 'border-white/[0.14] bg-white/[0.04] text-white/75 hover:bg-white/[0.12]',
+              )}
+            >
+              {risk === 'high' ? (
+                <ShieldAlert className="h-3 w-3 text-[#FCA5A5]" />
+              ) : (
+                <Clock3 className="h-3 w-3 text-[#93C5FD]" />
+              )}
+              <span className="truncate">
+                {permission.toolName || permission.type}
+              </span>
+            </button>
+          );
+        })}
+        {permissions.length > 8 && (
+          <span className="inline-flex items-center rounded-full border border-white/[0.14] px-2 py-1 text-[11px] text-white/55">
+            +{permissions.length - 8} more
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface PermissionInlineCardProps {
   request: ExtendedPermissionRequest;
   onDecision: (decision: 'allow' | 'deny' | 'allow_once' | 'allow_session') => void;
@@ -703,16 +1066,10 @@ function PermissionInlineCard({ request, onDecision }: PermissionInlineCardProps
             ) : (
               <span className="text-sm font-medium text-white/90">{typeLabel}</span>
             )}
-            <span
-              className={cn(
-                'text-[11px] px-2 py-0.5 rounded-full',
-                riskLevel === 'high'
-                  ? 'bg-[#FF5449]/15 text-[#FF5449]'
-                  : 'bg-white/[0.06] text-white/50'
-              )}
-            >
-              {riskLevel === 'high' ? 'High risk' : riskLevel === 'low' ? 'Low risk' : 'Review'}
-            </span>
+            <PolicyPill
+              action={riskLevel === 'high' ? 'deny' : riskLevel === 'low' ? 'allow' : 'review'}
+              label={riskLevel === 'high' ? 'High risk' : riskLevel === 'low' ? 'Low risk' : 'Review'}
+            />
           </div>
           <button
             onClick={() => {
@@ -1922,6 +2279,40 @@ function DesignActivityRow({
         >
           Open
         </button>
+    </div>
+  );
+}
+
+function MemoryActivityRow({
+  memory,
+}: {
+  memory: MemoryActivityItem;
+}) {
+  const typeLabel =
+    memory.eventType === 'memory:retrieved'
+      ? 'Retrieved'
+      : memory.eventType === 'memory:consolidated'
+        ? 'Consolidated'
+        : memory.eventType === 'memory:conflict_detected'
+          ? 'Conflict'
+          : 'Memory';
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+      <div className="min-w-0 flex items-start gap-2">
+        <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border border-white/[0.12] bg-white/[0.04]">
+          <Database className="h-3 w-3 text-[#A7F3D0]" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[12px] text-white/80">{memory.summary}</p>
+          {memory.detail ? (
+            <p className="mt-0.5 truncate text-[11px] text-white/45">{memory.detail}</p>
+          ) : null}
+        </div>
+      </div>
+      <span className="inline-flex shrink-0 items-center rounded-full border border-white/[0.14] bg-white/[0.03] px-2 py-0.5 text-[10px] text-white/55">
+        {typeLabel}
+      </span>
     </div>
   );
 }

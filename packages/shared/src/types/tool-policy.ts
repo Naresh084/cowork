@@ -49,6 +49,8 @@ export const ToolProfileSchema = z.enum([
   'coding',     // Full coding tools, limited shell
   'messaging',  // Network + limited file access
   'research',   // Research + network + read
+  'enterprise_balanced', // Enterprise profile with restricted execution + audit defaults
+  'enterprise_strict',   // Enterprise locked-down profile
   'full',       // All tools enabled
   'custom',     // User-defined
 ]);
@@ -78,6 +80,14 @@ export const TOOL_PROFILES: Record<ToolProfile, { allow: string[]; deny: string[
   research: {
     allow: ['group:network', 'group:fs', 'deep_research', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['group:shell', 'group:media', 'write_file', 'edit_file', 'delete_file'],
+  },
+  enterprise_balanced: {
+    allow: ['group:fs', 'group:network', 'group:tasks', 'group:memory', 'web_search', 'web_fetch'],
+    deny: ['group:media', 'group:computer', 'delete_file', 'deep_memory_delete'],
+  },
+  enterprise_strict: {
+    allow: ['read_file', 'glob', 'ls', 'grep', 'web_search'],
+    deny: ['group:shell', 'group:media', 'group:computer', 'write_file', 'edit_file', 'delete_file', 'deep_research'],
   },
   full: {
     allow: ['*'],
@@ -188,9 +198,51 @@ export const ToolEvaluationResultSchema = z.object({
   action: ToolRuleActionSchema,
   matchedRule: ToolRuleSchema.optional(),
   reason: z.string().optional(),
+  reasonCode: z.string().optional(),
+  explainability: z.record(z.string()).optional(),
 });
 
 export type ToolEvaluationResult = z.infer<typeof ToolEvaluationResultSchema>;
+
+/**
+ * Policy reason codes for explainability and auditing.
+ */
+export const PolicyReasonCodeSchema = z.enum([
+  'global_allow',
+  'global_deny',
+  'provider_disabled',
+  'provider_tool_denied',
+  'provider_allowlist_miss',
+  'rule_allow',
+  'rule_deny',
+  'profile_allow',
+  'profile_deny',
+  'default_ask',
+  'condition_session_mismatch',
+  'condition_path_excluded',
+  'condition_path_not_allowed',
+  'condition_command_denied',
+  'condition_command_not_allowed',
+  'condition_provider_mismatch',
+]);
+
+export type PolicyReasonCode = z.infer<typeof PolicyReasonCodeSchema>;
+
+export const PolicyDenyReasonCodeSchema = z.enum([
+  'global_deny',
+  'provider_disabled',
+  'provider_tool_denied',
+  'provider_allowlist_miss',
+  'rule_deny',
+  'profile_deny',
+  'condition_path_excluded',
+  'condition_path_not_allowed',
+  'condition_command_denied',
+  'condition_command_not_allowed',
+  'condition_provider_mismatch',
+]);
+
+export type PolicyDenyReasonCode = z.infer<typeof PolicyDenyReasonCodeSchema>;
 
 /**
  * Context for tool evaluation

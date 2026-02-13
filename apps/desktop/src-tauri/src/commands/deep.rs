@@ -208,6 +208,118 @@ pub async fn deep_memory_search(
     serde_json::from_value(memories).map_err(|e| format!("Failed to parse memories: {}", e))
 }
 
+#[tauri::command]
+pub async fn deep_memory_query(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    query: String,
+    options: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "deep_memory_query",
+            serde_json::json!({
+                "sessionId": session_id,
+                "query": query,
+                "options": options.unwrap_or(serde_json::json!({})),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn deep_memory_feedback(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    query_id: String,
+    atom_id: String,
+    feedback: String,
+    note: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "deep_memory_feedback",
+            serde_json::json!({
+                "sessionId": session_id,
+                "queryId": query_id,
+                "atomId": atom_id,
+                "feedback": feedback,
+                "note": note,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn deep_memory_export_bundle(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    project_id: String,
+    path: String,
+    encrypted: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "deep_memory_export_bundle",
+            serde_json::json!({
+                "projectId": project_id,
+                "path": path,
+                "encrypted": encrypted.unwrap_or(false),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn deep_memory_import_bundle(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    project_id: String,
+    path: String,
+    merge_mode: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "deep_memory_import_bundle",
+            serde_json::json!({
+                "projectId": project_id,
+                "path": path,
+                "mergeMode": merge_mode.unwrap_or_else(|| "merge".to_string()),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn deep_memory_get_migration_report(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    working_directory: Option<String>,
+    project_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "deep_memory_get_migration_report",
+            serde_json::json!({
+                "workingDirectory": working_directory,
+                "projectId": project_id,
+            }),
+        )
+        .await
+}
+
 /// List memory groups
 #[tauri::command]
 pub async fn deep_memory_list_groups(

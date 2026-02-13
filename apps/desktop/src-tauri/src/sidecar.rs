@@ -15,6 +15,9 @@ use tokio::sync::{mpsc, oneshot};
 /// Default timeout for sidecar requests in seconds.
 /// This is set high (5 minutes) to accommodate large context operations.
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_RETRY_ATTEMPTS: u32 = 3;
+const DEFAULT_RETRY_BACKOFF_MS: u64 = 250;
+const CONNECTOR_SECRET_ENV_VAR: &str = "COWORK_CONNECTOR_SECRET_KEY";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TransportMode {
@@ -147,12 +150,15 @@ impl SidecarManager {
 
         let mut child = if cfg!(debug_assertions) {
             let pnpm_cmd = if cfg!(windows) { "pnpm.cmd" } else { "pnpm" };
-            Command::new(pnpm_cmd)
+            let mut command = Command::new(pnpm_cmd);
+            command
                 .args(["exec", "tsx", "src/index.ts"])
                 .current_dir(&sidecar_path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
+                .stderr(Stdio::inherit());
+            apply_connector_secret_seed_env(&mut command);
+            command
                 .spawn()
                 .map_err(|e| format!("Failed to spawn sidecar (dev mode): {}", e))?
         } else {
@@ -166,11 +172,14 @@ impl SidecarManager {
                 ));
             }
 
-            Command::new(&binary_path)
+            let mut command = Command::new(&binary_path);
+            command
                 .current_dir(&sidecar_path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
+                .stderr(Stdio::inherit());
+            apply_connector_secret_seed_env(&mut command);
+            command
                 .spawn()
                 .map_err(|e| format!("Failed to spawn sidecar binary: {}", e))?
         };
@@ -391,6 +400,62 @@ impl SidecarManager {
         command: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        let idempotency_key = format!(
+            "{}-{}",
+            command,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_micros())
+                .unwrap_or(0)
+        );
+
+        let mut last_error = String::new();
+        for attempt in 1..=DEFAULT_RETRY_ATTEMPTS {
+            let mut params_with_envelope = params.clone();
+            match &mut params_with_envelope {
+                serde_json::Value::Object(map) => {
+                    map.insert(
+                        "_idempotencyKey".to_string(),
+                        serde_json::Value::String(idempotency_key.clone()),
+                    );
+                    map.insert(
+                        "_retryAttempt".to_string(),
+                        serde_json::Value::Number(serde_json::Number::from(attempt)),
+                    );
+                }
+                _ => {
+                    params_with_envelope = serde_json::json!({
+                        "_idempotencyKey": idempotency_key.clone(),
+                        "_retryAttempt": attempt,
+                        "payload": params_with_envelope,
+                    });
+                }
+            }
+
+            match self.send_command_once(command, params_with_envelope).await {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    let retryable = Self::is_retryable_transport_error(&err);
+                    if !retryable || attempt >= DEFAULT_RETRY_ATTEMPTS {
+                        return Err(err);
+                    }
+                    last_error = err;
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        DEFAULT_RETRY_BACKOFF_MS * u64::from(attempt),
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        Err(last_error)
+    }
+
+    async fn send_command_once(
+        &self,
+        command: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         if !*self.stdin_healthy.lock().await {
             return Err("Transport writer is not healthy - please restart the application".to_string());
         }
@@ -459,6 +524,14 @@ impl SidecarManager {
             }
             Ok(Err(_)) => Err("Response channel closed".to_string()),
         }
+    }
+
+    fn is_retryable_transport_error(error: &str) -> bool {
+        let normalized = error.to_lowercase();
+        normalized.contains("timed out")
+            || normalized.contains("failed to send to transport")
+            || normalized.contains("transport is not running")
+            || normalized.contains("response channel closed")
     }
 
     pub async fn is_running(&self) -> bool {
@@ -825,7 +898,8 @@ fn spawn_daemon_process(
 ) -> Result<Child, String> {
     if cfg!(debug_assertions) {
         let pnpm_cmd = if cfg!(windows) { "pnpm.cmd" } else { "pnpm" };
-        Command::new(pnpm_cmd)
+        let mut command = Command::new(pnpm_cmd);
+        command
             .args([
                 "exec",
                 "tsx",
@@ -846,7 +920,9 @@ fn spawn_daemon_process(
             .current_dir(sidecar_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        apply_connector_secret_seed_env(&mut command);
+        command
             .spawn()
             .map_err(|e| format!("Failed to spawn daemon (dev mode): {}", e))
     } else {
@@ -864,7 +940,8 @@ fn spawn_daemon_process(
             ));
         }
 
-        Command::new(binary_path)
+        let mut command = Command::new(binary_path);
+        command
             .args([
                 "--app-data-dir",
                 app_data_dir,
@@ -882,8 +959,24 @@ fn spawn_daemon_process(
             .current_dir(sidecar_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        apply_connector_secret_seed_env(&mut command);
+        command
             .spawn()
             .map_err(|e| format!("Failed to spawn daemon binary: {}", e))
+    }
+}
+
+fn apply_connector_secret_seed_env(command: &mut Command) {
+    match crate::commands::credentials::get_or_create_sidecar_connector_seed() {
+        Ok(seed) => {
+            command.env(CONNECTOR_SECRET_ENV_VAR, seed);
+        }
+        Err(err) => {
+            eprintln!(
+                "[security] Unable to load connector secret seed from secure store; using fallback in sidecar: {}",
+                err
+            );
+        }
     }
 }

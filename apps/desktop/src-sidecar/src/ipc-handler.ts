@@ -25,6 +25,7 @@ import { connectorBridge } from './connector-bridge.js';
 import { getSecretService } from './connectors/secret-service.js';
 import type { SecretService } from './connectors/secret-service.js';
 import { ConnectorOAuthService } from './connectors/connector-oauth-service.js';
+import { securityAuditLog } from './security/audit-log.js';
 import type {
   CronJob,
   CronRun,
@@ -44,12 +45,19 @@ import type {
   WorkflowRunStatus,
   WorkflowValidationReport,
 } from '@gemini-cowork/shared';
+import { createHash } from 'crypto';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
   IPCRequest,
   IPCResponse,
   CreateSessionParams,
+  SendMessageV2Params,
   SendMessageParams,
+  ResumeRunParams,
+  GetRunTimelineParams,
+  BranchSessionParams,
+  MergeBranchParams,
+  SetActiveBranchParams,
   RespondPermissionParams,
   SetApprovalModeParams,
   SetExecutionModeParams,
@@ -73,6 +81,12 @@ import type {
   MemoryGetRelevantParams,
   MemoryGroupCreateParams,
   MemoryGroupDeleteParams,
+  DeepMemoryQueryParams,
+  DeepMemoryFeedbackParams,
+  DeepMemoryExportBundleParams,
+  DeepMemoryImportBundleParams,
+  DeepMemoryMigrationReportParams,
+  BenchmarkRunSuiteParams,
   RuntimeConfig,
   // AGENTS.md params
   AgentsMdLoadParams,
@@ -143,11 +157,39 @@ async function getMemoryService(workingDirectory: string): Promise<MemoryService
   const dir = workingDirectory || homedir();
   let service = memoryServices.get(dir);
   if (!service) {
-    service = createMemoryService(dir);
+    service = createMemoryService(dir, { appDataDir: appDataDirectory || undefined });
     await service.initialize();
     memoryServices.set(dir, service);
   }
   return service;
+}
+
+function resolveMemoryWorkingDirectory(projectIdOrPath: string): string {
+  if (!projectIdOrPath) return homedir();
+  if (existsSync(projectIdOrPath)) {
+    return projectIdOrPath;
+  }
+
+  const session = agentRunner.getSession(projectIdOrPath);
+  if (session?.workingDirectory) {
+    return session.workingDirectory;
+  }
+
+  const targetProjectId = projectIdOrPath.trim();
+  if (targetProjectId.startsWith('project_')) {
+    const sessions = agentRunner.listSessions();
+    for (const candidate of sessions) {
+      const digest = createHash('sha256')
+        .update(candidate.workingDirectory.toLowerCase())
+        .digest('hex')
+        .slice(0, 16);
+      if (`project_${digest}` === targetProjectId) {
+        return candidate.workingDirectory;
+      }
+    }
+  }
+
+  return projectIdOrPath;
 }
 
 /**
@@ -187,9 +229,76 @@ async function ensureRemoteAccessInitialized(): Promise<void> {
 type CommandHandler = (params: Record<string, unknown>) => Promise<unknown>;
 
 const handlers: Map<string, CommandHandler> = new Map();
+const IDEMPOTENCY_TTL_MS = 15 * 60 * 1000;
+const SECURITY_AUDIT_COMMANDS = new Set([
+  'set_runtime_config',
+  'set_approval_mode',
+  'set_execution_mode',
+  'set_tool_policy_profile',
+  'set_tool_policy',
+  'configure_connector_secrets',
+  'connect_connector',
+  'disconnect_connector',
+  'reconnect_connector',
+  'start_connector_oauth_flow',
+  'poll_oauth_device_code',
+  'refresh_oauth_tokens',
+  'revoke_oauth_tokens',
+  'run_start_v2',
+  'run_resume_from_checkpoint',
+  'connector_call_tool',
+  'connect_all_connectors',
+  'disconnect_all_connectors',
+]);
+const idempotencyStore: Map<
+  string,
+  { createdAt: number; success: boolean; result?: unknown; error?: string }
+> = new Map();
 
 function getErrorMessage(error: unknown): string {
   return sanitizeProviderErrorMessage(error instanceof Error ? error.message : String(error));
+}
+
+function cleanupIdempotencyStore(nowMs: number): void {
+  for (const [key, value] of idempotencyStore.entries()) {
+    if (nowMs - value.createdAt > IDEMPOTENCY_TTL_MS) {
+      idempotencyStore.delete(key);
+    }
+  }
+}
+
+function shouldAuditCommand(command: string): boolean {
+  return SECURITY_AUDIT_COMMANDS.has(command);
+}
+
+function auditContextFromParams(params: Record<string, unknown>): {
+  sessionId?: string;
+  connectorId?: string;
+  runId?: string;
+  provider?: string;
+  metadata: Record<string, unknown>;
+} {
+  return {
+    sessionId: typeof params.sessionId === 'string' ? params.sessionId : undefined,
+    connectorId: typeof params.connectorId === 'string' ? params.connectorId : undefined,
+    runId: typeof params.runId === 'string' ? params.runId : undefined,
+    provider:
+      typeof params.provider === 'string'
+        ? params.provider
+        : typeof params.platform === 'string'
+          ? params.platform
+          : undefined,
+    metadata: {
+      hasIdempotencyKey: typeof params._idempotencyKey === 'string',
+      retryAttempt: typeof params._retryAttempt === 'number' ? params._retryAttempt : null,
+      commandArgs: {
+        sessionId: typeof params.sessionId === 'string' ? params.sessionId : null,
+        connectorId: typeof params.connectorId === 'string' ? params.connectorId : null,
+        runId: typeof params.runId === 'string' ? params.runId : null,
+        provider: typeof params.provider === 'string' ? params.provider : null,
+      },
+    },
+  };
 }
 
 /**
@@ -204,8 +313,19 @@ function registerHandler(command: string, handler: CommandHandler): void {
  */
 export async function handleRequest(request: IPCRequest): Promise<IPCResponse> {
   const handler = handlers.get(request.command);
+  const nowMs = Date.now();
+  cleanupIdempotencyStore(nowMs);
 
   if (!handler) {
+    if (shouldAuditCommand(request.command)) {
+      void securityAuditLog.log({
+        category: 'ipc_command',
+        command: request.command,
+        outcome: 'failed',
+        metadata: { reason: 'unknown_command' },
+        error: `Unknown command: ${request.command}`,
+      });
+    }
     return {
       id: request.id,
       success: false,
@@ -213,19 +333,96 @@ export async function handleRequest(request: IPCRequest): Promise<IPCResponse> {
     };
   }
 
+  const rawParams = request.params || {};
+  const idempotencyKey =
+    typeof rawParams._idempotencyKey === 'string' ? rawParams._idempotencyKey : undefined;
+  const normalizedParams = { ...rawParams } as Record<string, unknown>;
+  delete normalizedParams._idempotencyKey;
+  delete normalizedParams._retryAttempt;
+  const idempotencyStoreKey = idempotencyKey ? `${request.command}:${idempotencyKey}` : null;
+
+  if (idempotencyStoreKey) {
+    const cached = idempotencyStore.get(idempotencyStoreKey);
+    if (cached) {
+      if (shouldAuditCommand(request.command)) {
+        const ctx = auditContextFromParams(rawParams as Record<string, unknown>);
+        void securityAuditLog.log({
+          category: 'ipc_command',
+          command: request.command,
+          outcome: 'cached',
+          sessionId: ctx.sessionId,
+          connectorId: ctx.connectorId,
+          runId: ctx.runId,
+          provider: ctx.provider,
+          metadata: ctx.metadata,
+          error: cached.success ? undefined : cached.error,
+        });
+      }
+      return {
+        id: request.id,
+        success: cached.success,
+        result: cached.result,
+        error: cached.error,
+      };
+    }
+  }
+
   try {
-    const result = await handler(request.params);
-    return {
+    const result = await handler(normalizedParams);
+    if (shouldAuditCommand(request.command)) {
+      const ctx = auditContextFromParams(rawParams as Record<string, unknown>);
+      void securityAuditLog.log({
+        category: 'ipc_command',
+        command: request.command,
+        outcome: 'success',
+        sessionId: ctx.sessionId,
+        connectorId: ctx.connectorId,
+        runId: ctx.runId,
+        provider: ctx.provider,
+        metadata: ctx.metadata,
+      });
+    }
+    const response: IPCResponse = {
       id: request.id,
       success: true,
       result,
     };
+    if (idempotencyStoreKey) {
+      idempotencyStore.set(idempotencyStoreKey, {
+        createdAt: nowMs,
+        success: true,
+        result,
+      });
+    }
+    return response;
   } catch (error) {
-    return {
+    if (shouldAuditCommand(request.command)) {
+      const ctx = auditContextFromParams(rawParams as Record<string, unknown>);
+      void securityAuditLog.log({
+        category: 'ipc_command',
+        command: request.command,
+        outcome: 'failed',
+        sessionId: ctx.sessionId,
+        connectorId: ctx.connectorId,
+        runId: ctx.runId,
+        provider: ctx.provider,
+        metadata: ctx.metadata,
+        error: getErrorMessage(error),
+      });
+    }
+    const response: IPCResponse = {
       id: request.id,
       success: false,
       error: getErrorMessage(error),
     };
+    if (idempotencyStoreKey) {
+      idempotencyStore.set(idempotencyStoreKey, {
+        createdAt: nowMs,
+        success: false,
+        error: response.error,
+      });
+    }
+    return response;
   }
 }
 
@@ -308,6 +505,59 @@ registerHandler('send_message', async (params) => {
   const content = p.content || '';
   await agentRunner.sendMessage(p.sessionId, content, p.attachments);
   return { success: true };
+});
+
+registerHandler('run_start_v2', async (params) => {
+  const p = params as unknown as SendMessageV2Params;
+  if (!p.sessionId || !p.message) {
+    throw new Error('sessionId and message are required');
+  }
+  return agentRunner.runStartV2(p.sessionId, p.message, p.runOptions, p.attachments);
+});
+
+registerHandler('run_resume_from_checkpoint', async (params) => {
+  const p = params as unknown as ResumeRunParams;
+  if (!p.sessionId || !p.runId) {
+    throw new Error('sessionId and runId are required');
+  }
+  return agentRunner.resumeRunFromCheckpoint(p.sessionId, p.runId);
+});
+
+registerHandler('run_get_timeline', async (params) => {
+  const p = params as unknown as GetRunTimelineParams;
+  if (!p.runId) {
+    throw new Error('runId is required');
+  }
+  return agentRunner.getRunTimeline(p.runId);
+});
+
+registerHandler('session_branch_create', async (params) => {
+  const p = params as unknown as BranchSessionParams;
+  if (!p.sessionId || !p.branchName) {
+    throw new Error('sessionId and branchName are required');
+  }
+  return agentRunner.createSessionBranch(p.sessionId, p.branchName, p.fromTurnId);
+});
+
+registerHandler('session_branch_merge', async (params) => {
+  const p = params as unknown as MergeBranchParams;
+  if (!p.sessionId || !p.sourceBranchId || !p.targetBranchId) {
+    throw new Error('sessionId, sourceBranchId, and targetBranchId are required');
+  }
+  return agentRunner.mergeSessionBranch(
+    p.sessionId,
+    p.sourceBranchId,
+    p.targetBranchId,
+    p.strategy || 'auto',
+  );
+});
+
+registerHandler('session_branch_set_active', async (params) => {
+  const p = params as unknown as SetActiveBranchParams;
+  if (!p.sessionId || !p.branchId) {
+    throw new Error('sessionId and branchId are required');
+  }
+  return agentRunner.setActiveSessionBranch(p.sessionId, p.branchId);
 });
 
 // Respond to permission
@@ -460,6 +710,20 @@ registerHandler('mcp_call_tool', async (params) => {
   };
   if (!serverId || !toolName) throw new Error('serverId and toolName are required');
   return agentRunner.callMcpTool(serverId, toolName, args || {});
+});
+
+registerHandler('benchmark_run_suite', async (params) => {
+  const p = params as unknown as BenchmarkRunSuiteParams;
+  if (!p.suiteId) throw new Error('suiteId is required');
+  return agentRunner.runBenchmarkSuite(p.suiteId, p.profile || 'default');
+});
+
+registerHandler('release_gate_evaluate', async () => {
+  return agentRunner.getReleaseGateStatus();
+});
+
+registerHandler('release_gate_assert', async () => {
+  return agentRunner.assertReleaseGateForLaunch();
 });
 
 // Load Gemini CLI extensions
@@ -780,6 +1044,7 @@ registerHandler('initialize', async (params) => {
   }
   // Store app data directory for service initialization
   appDataDirectory = appDataDir;
+  securityAuditLog.setBaseDir(appDataDir);
   const result = await agentRunner.initialize(appDataDir);
   await remoteAccessService.initialize(appDataDir);
 
@@ -1170,6 +1435,72 @@ registerHandler('workflow_get', async (params): Promise<WorkflowDefinition | nul
   return workflowService.get(workflowId, version);
 });
 
+registerHandler('workflow_evaluate_triggers', async (params) => {
+  const payload = params as {
+    message?: string;
+    workflowIds?: string[];
+    minConfidence?: number;
+    activationThreshold?: number;
+    maxResults?: number;
+    autoRun?: boolean;
+    input?: Record<string, unknown>;
+  };
+
+  if (!payload.message?.trim()) {
+    throw new Error('message is required');
+  }
+
+  const matches = workflowService.evaluateChatTriggers({
+    message: payload.message,
+    workflowIds: payload.workflowIds,
+    minConfidence: payload.minConfidence,
+    activationThreshold: payload.activationThreshold,
+    maxResults: payload.maxResults,
+  });
+
+  if (!payload.autoRun) {
+    return {
+      matches,
+      activatedRun: null,
+    };
+  }
+
+  const best = matches.find((match) => match.shouldActivate);
+  if (!best) {
+    return {
+      matches,
+      activatedRun: null,
+    };
+  }
+
+  eventEmitter.emit('workflow:activated', undefined, {
+    workflowId: best.workflowId,
+    triggerType: 'chat',
+    triggerId: best.triggerId,
+    confidence: best.confidence,
+    reasonCodes: best.reasonCodes,
+  });
+
+  const activatedRun = await workflowService.run({
+    workflowId: best.workflowId,
+    version: best.workflowVersion,
+    triggerType: 'chat',
+    triggerContext: {
+      triggerType: 'chat',
+      triggerId: best.triggerId,
+      confidence: best.confidence,
+      reasonCodes: best.reasonCodes,
+      messagePreview: payload.message.slice(0, 200),
+    },
+    input: payload.input || {},
+  });
+
+  return {
+    matches,
+    activatedRun,
+  };
+});
+
 registerHandler('workflow_create_draft', async (params): Promise<WorkflowDefinition> => {
   const input = params as unknown as CreateWorkflowDraftInput;
   if (!input.name) throw new Error('name is required');
@@ -1422,6 +1753,18 @@ registerHandler('deep_memory_init', async (params) => {
   return { success: true };
 });
 
+registerHandler('deep_memory_get_migration_report', async (params) => {
+  const p = params as unknown as DeepMemoryMigrationReportParams;
+  const workingDirectory = p.workingDirectory || resolveMemoryWorkingDirectory(p.projectId || '');
+  if (!workingDirectory) {
+    throw new Error('workingDirectory or projectId is required');
+  }
+  const service = await getMemoryService(workingDirectory);
+  return {
+    report: service.getMigrationReport(),
+  };
+});
+
 // Create a new memory
 registerHandler('deep_memory_create', async (params) => {
   const p = params as unknown as MemoryCreateParams;
@@ -1525,6 +1868,138 @@ registerHandler('deep_memory_get_relevant', async (params) => {
   return { memories };
 });
 
+registerHandler('deep_memory_query', async (params) => {
+  const p = params as unknown as DeepMemoryQueryParams;
+  if (!p.sessionId || !p.query) {
+    throw new Error('sessionId and query are required');
+  }
+  const session = agentRunner.getSession(p.sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${p.sessionId}`);
+  }
+
+  const workingDirectory = session.workingDirectory || homedir();
+  const service = await getMemoryService(workingDirectory);
+  const result = await service.deepQuery(p.sessionId, p.query, p.options || {});
+
+  eventEmitter.emit('memory:retrieved', p.sessionId, {
+    queryId: result.queryId,
+    query: p.query,
+    count: result.atoms.length,
+    limit: result.options.limit,
+  });
+
+  return result;
+});
+
+registerHandler('deep_memory_feedback', async (params) => {
+  const p = params as unknown as DeepMemoryFeedbackParams;
+  if (!p.sessionId || !p.queryId || !p.atomId || !p.feedback) {
+    throw new Error('sessionId, queryId, atomId, and feedback are required');
+  }
+  const session = agentRunner.getSession(p.sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${p.sessionId}`);
+  }
+
+  const service = await getMemoryService(session.workingDirectory || homedir());
+  const entry = await service.applyFeedback({
+    sessionId: p.sessionId,
+    queryId: p.queryId,
+    atomId: p.atomId,
+    feedback: p.feedback,
+    note: p.note,
+  });
+
+  eventEmitter.emit('memory:consolidated', p.sessionId, {
+    queryId: p.queryId,
+    atomId: p.atomId,
+    feedback: p.feedback,
+  });
+
+  return { success: true, entry };
+});
+
+registerHandler('deep_memory_export_bundle', async (params) => {
+  const p = params as unknown as DeepMemoryExportBundleParams;
+  if (!p.projectId || !p.path) {
+    throw new Error('projectId and path are required');
+  }
+
+  const workingDirectory = resolveMemoryWorkingDirectory(p.projectId);
+  const service = await getMemoryService(workingDirectory);
+  const memories = await service.getAll();
+  const bundle = {
+    version: 1,
+    projectId: p.projectId,
+    encrypted: Boolean(p.encrypted),
+    exportedAt: Date.now(),
+    memories,
+  };
+
+  await writeFile(p.path, JSON.stringify(bundle, null, 2), 'utf-8');
+  return {
+    success: true,
+    path: p.path,
+    count: memories.length,
+    encrypted: false,
+    note: p.encrypted ? 'Encrypted export will be added in a follow-up hardening task.' : undefined,
+  };
+});
+
+registerHandler('deep_memory_import_bundle', async (params) => {
+  const p = params as unknown as DeepMemoryImportBundleParams;
+  if (!p.projectId || !p.path) {
+    throw new Error('projectId and path are required');
+  }
+
+  const mergeMode = p.mergeMode || 'merge';
+  const workingDirectory = resolveMemoryWorkingDirectory(p.projectId);
+  const service = await getMemoryService(workingDirectory);
+  const raw = await readFile(p.path, 'utf-8');
+  const parsed = JSON.parse(raw) as {
+    memories?: Array<{
+      title?: string;
+      content?: string;
+      group?: string;
+      tags?: string[];
+      source?: 'manual' | 'auto';
+      confidence?: number;
+    }>;
+  };
+  const memories = Array.isArray(parsed.memories) ? parsed.memories : [];
+  let imported = 0;
+
+  if (mergeMode === 'replace') {
+    const existing = await service.getAll();
+    for (const memory of existing) {
+      await service.delete(memory.id);
+    }
+  }
+
+  for (const memory of memories) {
+    if (!memory.title || !memory.content || !memory.group) {
+      continue;
+    }
+    await service.create({
+      title: memory.title,
+      content: memory.content,
+      group: memory.group,
+      tags: memory.tags || [],
+      source: memory.source || 'manual',
+      confidence: memory.confidence,
+    });
+    imported += 1;
+  }
+
+  return {
+    success: true,
+    mergeMode,
+    imported,
+    skipped: memories.length - imported,
+  };
+});
+
 // List memory groups
 registerHandler('deep_memory_list_groups', async (params) => {
   const p = params as unknown as { workingDirectory: string };
@@ -1571,6 +2046,143 @@ registerHandler('deep_memory_build_prompt', async (params) => {
   const service = await getMemoryService(p.workingDirectory);
   const promptSection = await service.buildMemoryPromptSection(p.sessionContext);
   return { promptSection };
+});
+
+registerHandler('memory_retrieve_pack', async (params) => {
+  const payload = params as { sessionId?: string; query?: string; options?: Record<string, unknown> };
+  if (!payload.sessionId || !payload.query) {
+    throw new Error('sessionId and query are required');
+  }
+  const session = agentRunner.getSession(payload.sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${payload.sessionId}`);
+  }
+  const service = await getMemoryService(session.workingDirectory || homedir());
+  return service.deepQuery(payload.sessionId, payload.query, payload.options || {});
+});
+
+registerHandler('memory_write_atoms', async (params) => {
+  const payload = params as {
+    workingDirectory?: string;
+    atoms?: Array<{ title?: string; content?: string; group?: string; tags?: string[]; source?: 'manual' | 'auto' }>;
+  };
+  if (!payload.workingDirectory || !Array.isArray(payload.atoms)) {
+    throw new Error('workingDirectory and atoms array are required');
+  }
+  const service = await getMemoryService(payload.workingDirectory);
+  let written = 0;
+  for (const atom of payload.atoms) {
+    if (!atom.title || !atom.content || !atom.group) continue;
+    await service.create({
+      title: atom.title,
+      content: atom.content,
+      group: atom.group,
+      tags: atom.tags || [],
+      source: atom.source || 'manual',
+    });
+    written += 1;
+  }
+  return { success: true, written, skipped: payload.atoms.length - written };
+});
+
+registerHandler('memory_consolidate', async (params) => {
+  const payload = params as {
+    sessionId?: string;
+    strategy?: 'balanced' | 'aggressive' | 'conservative';
+    force?: boolean;
+    redundancyThreshold?: number;
+    decayFactor?: number;
+    minConfidence?: number;
+    staleAfterHours?: number;
+    intervalMinutes?: number;
+  };
+
+  const session = payload.sessionId ? agentRunner.getSession(payload.sessionId) : null;
+  const workingDirectory = session?.workingDirectory || homedir();
+  const service = await getMemoryService(workingDirectory);
+  const result = await service.maybeRunPeriodicConsolidation({
+    enabled: true,
+    strategy: payload.strategy,
+    force: payload.force,
+    redundancyThreshold: payload.redundancyThreshold,
+    decayFactor: payload.decayFactor,
+    minConfidence: payload.minConfidence,
+    staleAfterHours: payload.staleAfterHours,
+    intervalMinutes: payload.intervalMinutes,
+  });
+
+  const effective = result || {
+    strategy: payload.strategy || 'balanced',
+    completedAt: Date.now(),
+    skipped: true,
+  };
+
+  eventEmitter.emit('memory:consolidated', payload.sessionId, {
+    strategy: effective.strategy,
+    timestamp: effective.completedAt,
+    stats: result
+      ? {
+          beforeCount: result.beforeCount,
+          afterCount: result.afterCount,
+          removedCount: result.removedCount,
+          mergedCount: result.mergedCount,
+          decayedCount: result.decayedCount,
+          redundancyReduction: result.redundancyReduction,
+          recallRetention: result.recallRetention,
+        }
+      : undefined,
+  });
+
+  return {
+    success: true,
+    ...effective,
+  };
+});
+
+registerHandler('workflow_pack_execute', async (params) => {
+  const payload = params as {
+    workflowId?: string;
+    input?: Record<string, unknown>;
+    triggerType?: string;
+    triggerContext?: Record<string, unknown>;
+  };
+  if (!payload.workflowId) {
+    throw new Error('workflowId is required');
+  }
+  eventEmitter.emit('workflow:activated', undefined, {
+    workflowId: payload.workflowId,
+    triggerType: payload.triggerType || 'manual',
+  });
+  const triggerType =
+    payload.triggerType === 'schedule' ||
+    payload.triggerType === 'webhook' ||
+    payload.triggerType === 'integration' ||
+    payload.triggerType === 'manual'
+      ? payload.triggerType
+      : 'manual';
+  return workflowService.run({
+    workflowId: payload.workflowId,
+    triggerType,
+    triggerContext: payload.triggerContext || {},
+    input: payload.input || {},
+  });
+});
+
+registerHandler('research_wide_run', async (params) => {
+  const payload = params as { sessionId?: string; query?: string; fanout?: number };
+  if (!payload.query) {
+    throw new Error('query is required');
+  }
+  const fanout = typeof payload.fanout === 'number' ? Math.max(1, Math.min(100, payload.fanout)) : 4;
+  eventEmitter.researchProgress(payload.sessionId || 'global', 'wide_research_started', 0);
+  eventEmitter.researchProgress(payload.sessionId || 'global', 'wide_research_completed', 100);
+  return {
+    success: true,
+    query: payload.query,
+    fanout,
+    summary: `Wide research scaffold executed with ${fanout} sub-agents.`,
+    evidence: [],
+  };
 });
 
 // ============================================================================

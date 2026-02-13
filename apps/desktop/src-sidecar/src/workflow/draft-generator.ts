@@ -166,6 +166,7 @@ export function buildWorkflowDraftFromPrompt(
       workingDirectory: input.workingDirectory,
       maxRunTimeMs: 30 * 60 * 1000,
       nodeTimeoutMs: 5 * 60 * 1000,
+      retryProfile: 'balanced',
       retry: {
         maxAttempts: 3,
         backoffMs: 1000,

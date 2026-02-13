@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, useEffect, useMemo, useState } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -9,6 +9,9 @@ import {
   Image,
   File,
   ExternalLink,
+  Search,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAgentStore, type Artifact } from '../../stores/agent-store';
@@ -113,20 +116,112 @@ interface ArtifactListProps {
 }
 
 function ArtifactList({ artifacts, onSelect }: ArtifactListProps) {
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(0);
+  const pageSize = 60;
+
   // Sort by timestamp (most recent first)
-  const sortedArtifacts = [...artifacts].sort((a, b) => b.timestamp - a.timestamp);
+  const sortedArtifacts = useMemo(
+    () => [...artifacts].sort((a, b) => b.timestamp - a.timestamp),
+    [artifacts],
+  );
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredArtifacts = useMemo(() => {
+    if (!normalizedQuery) return sortedArtifacts;
+    return sortedArtifacts.filter((artifact) => {
+      const path = artifact.path.toLowerCase();
+      const filename = getFilename(artifact.path).toLowerCase();
+      const kind = artifact.type.toLowerCase();
+      return (
+        path.includes(normalizedQuery) ||
+        filename.includes(normalizedQuery) ||
+        kind.includes(normalizedQuery)
+      );
+    });
+  }, [normalizedQuery, sortedArtifacts]);
+  const pageCount = Math.max(1, Math.ceil(filteredArtifacts.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageStart = safePage * pageSize;
+  const pageEnd = pageStart + pageSize;
+  const visibleArtifacts = filteredArtifacts.slice(pageStart, pageEnd);
+
+  useEffect(() => {
+    setPage(0);
+  }, [normalizedQuery]);
+
+  useEffect(() => {
+    if (page > pageCount - 1) {
+      setPage(Math.max(0, pageCount - 1));
+    }
+  }, [page, pageCount]);
 
   return (
-    <div className="space-y-0.5">
-      <AnimatePresence mode="popLayout">
-        {sortedArtifacts.map((artifact) => (
-          <ArtifactItem
-            key={artifact.id}
-            artifact={artifact}
-            onSelect={() => onSelect(artifact)}
+    <div className="space-y-2">
+      <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/35" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search artifacts by file, path, or type…"
+            className="h-8 w-full rounded-md border border-white/[0.1] bg-[#111218] pl-8 pr-2 text-xs text-white/85 placeholder:text-white/35 focus:outline-none focus:border-[#1D4ED8]/70"
           />
-        ))}
-      </AnimatePresence>
+        </div>
+        <div className="mt-2 flex items-center justify-between text-[11px] text-white/45">
+          <span>
+            {filteredArtifacts.length} result{filteredArtifacts.length === 1 ? '' : 's'}
+          </span>
+          <span>
+            Showing {filteredArtifacts.length === 0 ? 0 : pageStart + 1}
+            -
+            {Math.min(filteredArtifacts.length, pageEnd)} of {filteredArtifacts.length}
+          </span>
+        </div>
+        {pageCount > 1 ? (
+          <div className="mt-2 flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={safePage <= 0}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/[0.12] px-2 text-[11px] text-white/75 hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </button>
+            <span className="text-[11px] text-white/50">
+              Page {safePage + 1} / {pageCount}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+              disabled={safePage >= pageCount - 1}
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-white/[0.12] px-2 text-[11px] text-white/75 hover:bg-white/[0.08] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-0.5">
+        {visibleArtifacts.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-white/[0.12] px-3 py-4 text-center text-xs text-white/45">
+            No artifacts match this search.
+          </div>
+        ) : (
+          <AnimatePresence mode="popLayout">
+            {visibleArtifacts.map((artifact) => (
+              <ArtifactItem
+                key={artifact.id}
+                artifact={artifact}
+                onSelect={() => onSelect(artifact)}
+              />
+            ))}
+          </AnimatePresence>
+        )}
+      </div>
     </div>
   );
 }

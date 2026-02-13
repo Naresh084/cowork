@@ -36,6 +36,9 @@ function createAvailability(): ExternalCliAvailabilitySnapshot {
       provider: 'codex',
       installed: true,
       binaryPath: '/usr/local/bin/codex',
+      binarySha256: '0'.repeat(64),
+      binaryTrust: 'trusted',
+      trustReason: 'trusted path',
       version: 'codex-cli test',
       authStatus: 'authenticated',
       authMessage: null,
@@ -45,6 +48,9 @@ function createAvailability(): ExternalCliAvailabilitySnapshot {
       provider: 'claude',
       installed: true,
       binaryPath: '/usr/local/bin/claude',
+      binarySha256: '1'.repeat(64),
+      binaryTrust: 'trusted',
+      trustReason: 'trusted path',
       version: 'claude-cli test',
       authStatus: 'authenticated',
       authMessage: null,
@@ -192,6 +198,47 @@ describe('external-cli run-manager working directory handling', () => {
         entry.message.includes('Bypass was requested but is disabled in settings'),
       ),
     ).toBe(true);
+
+    await manager.shutdown();
+    await rm(appDataDir, { recursive: true, force: true });
+  });
+
+  it('blocks runs when provider binary trust checks fail', async () => {
+    const appDataDir = await mkdtemp(join(tmpdir(), 'ext-cli-run-manager-untrusted-'));
+    const discovery = {
+      getAvailability: vi.fn(async () => {
+        const snapshot = createAvailability();
+        snapshot.codex.binaryTrust = 'untrusted';
+        snapshot.codex.trustReason = 'Binary path is outside trusted allowlist directories.';
+        return snapshot;
+      }),
+    } as unknown as ExternalCliDiscoveryService;
+
+    const manager = new ExternalCliRunManager({
+      appDataDir,
+      discoveryService: discovery,
+      getRuntimeConfig: () => ({
+        codex: { enabled: true, allowBypassPermissions: true },
+        claude: { enabled: true, allowBypassPermissions: true },
+      }),
+    });
+
+    await manager.initialize();
+
+    await expect(
+      manager.startRun({
+        sessionId: 'session-untrusted',
+        provider: 'codex',
+        prompt: 'test',
+        workingDirectory: resolve(tmpdir()),
+        createIfMissing: false,
+        requestedBypassPermission: false,
+        bypassPermission: false,
+        origin: { source: 'desktop' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'CLI_PROVIDER_BLOCKED',
+    });
 
     await manager.shutdown();
     await rm(appDataDir, { recursive: true, force: true });

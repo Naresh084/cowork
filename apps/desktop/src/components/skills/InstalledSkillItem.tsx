@@ -1,6 +1,8 @@
 import { Trash2, Check, X, AlertTriangle, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { SkillManifest, SkillEligibility } from '@gemini-cowork/shared';
+import { useSkillStore } from '../../stores/skill-store';
+import { SkillLifecycleBadges } from './SkillLifecycleBadges';
 
 interface InstalledSkillItemProps {
   skill: SkillManifest;
@@ -19,10 +21,12 @@ export function InstalledSkillItem({
   onUninstall,
   onSelect,
 }: InstalledSkillItemProps) {
+  const getSkillLifecycleInfo = useSkillStore((state) => state.getSkillLifecycleInfo);
   const emoji = skill.frontmatter.metadata?.emoji || '📦';
   const name = skill.frontmatter.name;
   const isEligible = !eligibility || eligibility.eligible;
   const isPlatform = skill.source.type === 'platform';
+  const lifecycleInfo = getSkillLifecycleInfo(skill.id);
 
   const getStatusBadge = () => {
     if (!isEligible) {
@@ -60,7 +64,12 @@ export function InstalledSkillItem({
       {/* Icon and Name */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <span className="text-xl">{emoji}</span>
-        <span className="font-medium text-zinc-100 truncate">{name}</span>
+        <div className="min-w-0">
+          <span className="font-medium text-zinc-100 truncate block">{name}</span>
+          <div className="mt-1">
+            <SkillLifecycleBadges info={lifecycleInfo} compact />
+          </div>
+        </div>
         {isPlatform && (
           <span className="flex items-center gap-1 text-[10px] text-violet-400 bg-violet-950/50 px-1.5 py-0.5 rounded-full flex-shrink-0">
             <FolderOpen className="w-2.5 h-2.5" />

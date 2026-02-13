@@ -8,10 +8,15 @@
 
 import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+import { CronExpressionParser } from 'cron-parser';
 import { cronService } from '../cron/index.js';
 import type { CronSchedule, PlatformType } from '@gemini-cowork/shared';
 import { workflowService } from '../workflow/index.js';
 import { WORKFLOWS_ENABLED } from '../config/feature-flags.js';
+import {
+  encodeSessionPermissionBootstrap,
+  type SessionPermissionBootstrap,
+} from '../permission-bootstrap.js';
 
 const WORKFLOW_ENGINE = WORKFLOWS_ENABLED ? 'workflow' : 'automation';
 const WORKFLOW_LABEL = WORKFLOWS_ENABLED ? 'Workflow' : 'Automation';
@@ -165,42 +170,75 @@ export type ResolveScheduledTaskDefaultNotificationTarget = (
   sessionId: string,
 ) => ScheduledTaskDefaultNotificationTarget | null;
 
+export type ResolveScheduledTaskPermissionBootstrap = (
+  sessionId: string,
+) => SessionPermissionBootstrap | null;
+
 /**
  * Convert user-friendly schedule to internal CronSchedule
  */
-function convertSchedule(userSchedule: UserSchedule): CronSchedule {
+function resolveSystemTimezone(): string {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (typeof timezone === 'string' && timezone.trim().length > 0) {
+    return timezone;
+  }
+  return 'UTC';
+}
+
+function applyDefaultTimezone(
+  userSchedule: UserSchedule,
+  defaultTimezone: string,
+): UserSchedule {
   switch (userSchedule.type) {
+    case 'daily':
+      return { ...userSchedule, timezone: userSchedule.timezone || defaultTimezone };
+    case 'weekly':
+      return { ...userSchedule, timezone: userSchedule.timezone || defaultTimezone };
+    case 'cron':
+      return { ...userSchedule, timezone: userSchedule.timezone || defaultTimezone };
+    default:
+      return userSchedule;
+  }
+}
+
+function convertSchedule(
+  userSchedule: UserSchedule,
+  defaultTimezone: string = resolveSystemTimezone(),
+): CronSchedule {
+  const schedule = applyDefaultTimezone(userSchedule, defaultTimezone);
+
+  switch (schedule.type) {
     case 'once': {
-      const timestamp = parseNaturalDatetime(userSchedule.datetime);
+      const timestamp = parseNaturalDatetime(schedule.datetime);
       return { type: 'at', timestamp };
     }
 
     case 'daily': {
-      const { hours, minutes } = parseTime(userSchedule.time);
+      const { hours, minutes } = parseTime(schedule.time);
       const expression = `${minutes} ${hours} * * *`;
-      return { type: 'cron', expression, timezone: userSchedule.timezone };
+      return { type: 'cron', expression, timezone: schedule.timezone };
     }
 
     case 'weekly': {
-      const { hours, minutes } = parseTime(userSchedule.time);
-      const dayNum = DAY_TO_CRON[userSchedule.dayOfWeek.toLowerCase()];
+      const { hours, minutes } = parseTime(schedule.time);
+      const dayNum = DAY_TO_CRON[schedule.dayOfWeek.toLowerCase()];
       if (dayNum === undefined) {
-        throw new Error(`Invalid day of week: ${userSchedule.dayOfWeek}`);
+        throw new Error(`Invalid day of week: ${schedule.dayOfWeek}`);
       }
       const expression = `${minutes} ${hours} * * ${dayNum}`;
-      return { type: 'cron', expression, timezone: userSchedule.timezone };
+      return { type: 'cron', expression, timezone: schedule.timezone };
     }
 
     case 'interval': {
-      const intervalMs = userSchedule.every * 60 * 1000;
+      const intervalMs = schedule.every * 60 * 1000;
       return { type: 'every', intervalMs };
     }
 
     case 'cron': {
       return {
         type: 'cron',
-        expression: userSchedule.expression,
-        timezone: userSchedule.timezone,
+        expression: schedule.expression,
+        timezone: schedule.timezone,
       };
     }
   }
@@ -253,6 +291,80 @@ function formatNextRun(timestamp: number | undefined): string {
   return `In ${days} day${days !== 1 ? 's' : ''}`;
 }
 
+function computeNextRunAt(schedule: CronSchedule, fromTime: number = Date.now()): number | undefined {
+  switch (schedule.type) {
+    case 'at':
+      return schedule.timestamp > fromTime ? schedule.timestamp : undefined;
+    case 'every': {
+      const startAt = schedule.startAt ?? fromTime;
+      const elapsed = fromTime - startAt;
+      const intervals = Math.floor(elapsed / schedule.intervalMs);
+      return startAt + (intervals + 1) * schedule.intervalMs;
+    }
+    case 'cron': {
+      try {
+        const parsed = CronExpressionParser.parse(schedule.expression, {
+          currentDate: new Date(fromTime),
+          tz: schedule.timezone,
+        });
+        return parsed.next().getTime();
+      } catch {
+        return undefined;
+      }
+    }
+  }
+}
+
+function formatAbsoluteTimestamp(timestamp: number, timezone: string): string {
+  const date = new Date(timestamp);
+  const iso = date.toISOString();
+  try {
+    const localized = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(date);
+    return `${iso} (${localized} ${timezone})`;
+  } catch {
+    return iso;
+  }
+}
+
+function buildTemporalGroundingInstruction(params: {
+  createdAt: number;
+  schedule: CronSchedule;
+  timezone: string;
+  nextRunAt?: number;
+}): string {
+  const lines = [
+    'Temporal execution contract for this scheduled task:',
+    `- Task created at: ${formatAbsoluteTimestamp(params.createdAt, params.timezone)}.`,
+    `- Scheduler timezone: ${params.timezone}.`,
+    `- Schedule configuration: ${formatSchedule(params.schedule)}.`,
+  ];
+
+  if (typeof params.nextRunAt === 'number') {
+    lines.push(`- Next scheduled run target: ${formatAbsoluteTimestamp(params.nextRunAt, params.timezone)}.`);
+  } else {
+    lines.push('- Next scheduled run target: not currently computable from this schedule.');
+  }
+
+  lines.push(
+    '- Preserve continuity by using prior run artifacts and workflow outputs when available.',
+    '- Runtime anchor: {{system.now}} (Unix milliseconds). Convert this to calendar dates before writing reports.',
+    '- Never use relative-only dates (for example: "today", "tomorrow", "yesterday") in final reports.',
+    '- When referencing dates or ranges, always include explicit YYYY-MM-DD and timezone.',
+    '- If relative time language appears, resolve it against the current run timestamp before responding.',
+  );
+
+  return lines.join('\n');
+}
+
 function hasExplicitNotificationInstruction(prompt: string): boolean {
   return /\bsend_notification_[a-z0-9_]+\b/i.test(prompt);
 }
@@ -302,6 +414,7 @@ function buildDefaultNotificationInstruction(
  */
 export function createScheduleTaskTool(
   resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
+  resolvePermissionBootstrap?: ResolveScheduledTaskPermissionBootstrap,
 ): ToolHandler {
   return {
     name: 'schedule_task',
@@ -317,6 +430,7 @@ Use this when the user wants to:
 The scheduled task runs in an isolated session with fresh context.
 IMPORTANT: Always create ONE task with the right schedule type. NEVER create multiple tasks for a repeating request.
 If the user says "do X every Y minutes for N times", use schedule type "interval" with maxRuns set to N.
+Always resolve relative time language into an explicit schedule and timezone.
 
 Schedule types:
 - once: { type: "once", datetime: "tomorrow at 9am" } or { type: "once", datetime: "in 30 minutes" }
@@ -372,6 +486,23 @@ Schedule types:
       const { name, prompt, schedule, workingDirectory, maxRuns, maxTurns } = parsed;
 
       try {
+        const createdAt = Date.now();
+        const defaultTimezone = resolveSystemTimezone();
+
+        // Convert user schedule to internal format first so prompt grounding can include exact schedule context.
+        const cronSchedule = convertSchedule(schedule, defaultTimezone);
+        const scheduleTimezone =
+          cronSchedule.type === 'cron'
+            ? cronSchedule.timezone || defaultTimezone
+            : defaultTimezone;
+        const computedNextRunAt = computeNextRunAt(cronSchedule, createdAt);
+        const temporalInstruction = buildTemporalGroundingInstruction({
+          createdAt,
+          schedule: cronSchedule,
+          timezone: scheduleTimezone,
+          nextRunAt: computedNextRunAt,
+        });
+
         const resolver = resolveDefaultNotificationTarget;
         const shouldApplyDefaultDelivery =
           Boolean(resolver) &&
@@ -380,12 +511,18 @@ Schedule types:
           shouldApplyDefaultDelivery && context.sessionId && resolver
             ? resolver(context.sessionId)
             : null;
-        const effectivePrompt = defaultNotificationTarget
-          ? `${prompt.trim()}\n\n${buildDefaultNotificationInstruction(defaultNotificationTarget)}`
-          : prompt;
-
-        // Convert user schedule to internal format
-        const cronSchedule = convertSchedule(schedule);
+        const promptSections = [prompt.trim(), temporalInstruction];
+        if (defaultNotificationTarget) {
+          promptSections.push(buildDefaultNotificationInstruction(defaultNotificationTarget));
+        }
+        const effectivePrompt = promptSections.filter(Boolean).join('\n\n');
+        const permissionBootstrap =
+          resolvePermissionBootstrap && context.sessionId
+            ? resolvePermissionBootstrap(context.sessionId)
+            : null;
+        const encodedPermissionsProfile = permissionBootstrap
+          ? encodeSessionPermissionBootstrap(permissionBootstrap)
+          : undefined;
 
         // Create workflow draft + publish (greenfield workflow runtime).
         const draft = workflowService.createDraft({
@@ -422,6 +559,7 @@ Schedule types:
             workingDirectory: workingDirectory || context.workingDirectory,
             maxRunTimeMs: 30 * 60 * 1000,
             nodeTimeoutMs: 5 * 60 * 1000,
+            retryProfile: 'balanced',
             retry: {
               maxAttempts: 3,
               backoffMs: 1000,
@@ -429,8 +567,17 @@ Schedule types:
               jitterRatio: 0.2,
             },
           },
+          permissionsProfile: encodedPermissionsProfile,
         });
         const published = workflowService.publish(draft.id);
+        const workflowSummary = workflowService
+          .listScheduledTasks(200, 0)
+          .find((task) => task.workflowId === published.id);
+        const nextRunAt = workflowSummary?.nextRunAt ?? computedNextRunAt;
+        const nextRunAbsolute =
+          typeof nextRunAt === 'number'
+            ? formatAbsoluteTimestamp(nextRunAt, scheduleTimezone)
+            : null;
 
         return {
           success: true,
@@ -439,6 +586,12 @@ Schedule types:
             workflowVersion: published.version,
             name: published.name,
             schedule: formatSchedule(cronSchedule),
+            timezone: scheduleTimezone,
+            createdAt,
+            createdAtIso: new Date(createdAt).toISOString(),
+            nextRunAt: nextRunAt ?? null,
+            nextRunAtIso: typeof nextRunAt === 'number' ? new Date(nextRunAt).toISOString() : null,
+            nextRunAbsolute,
             maxRuns: maxRuns ?? 'unlimited',
             defaultNotification: defaultNotificationTarget
               ? {
@@ -446,9 +599,12 @@ Schedule types:
                   chatId: defaultNotificationTarget.chatId ?? null,
                 }
               : null,
+            inheritedPermissionPolicy: Boolean(encodedPermissionsProfile),
             message:
               `Scheduled task "${name}" created successfully.` +
               `${maxRuns ? ` Will run ${maxRuns} time${maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
+              `${nextRunAbsolute ? ` Next run target: ${nextRunAbsolute}.` : ''}` +
+              `${encodedPermissionsProfile ? ' Session permission grants were inherited for this automation.' : ''}` +
               `${defaultNotificationTarget ? ` Default delivery set to ${platformDisplayName(defaultNotificationTarget.platform)}${defaultNotificationTarget.chatId ? ` (${defaultNotificationTarget.chatId})` : ''}.` : ''}` +
               ' Managed by the automation runtime.',
           },
@@ -705,9 +861,10 @@ Actions:
  */
 export function createCronTools(
   resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
+  resolvePermissionBootstrap?: ResolveScheduledTaskPermissionBootstrap,
 ): ToolHandler[] {
   return [
-    createScheduleTaskTool(resolveDefaultNotificationTarget),
+    createScheduleTaskTool(resolveDefaultNotificationTarget, resolvePermissionBootstrap),
     createManageScheduledTaskTool(),
   ];
 }

@@ -281,6 +281,29 @@ export interface MemoryExtractionResult {
   candidates?: SemanticMemoryCandidate[];
 }
 
+export interface MemoryConsolidationPolicy {
+  strategy: 'balanced' | 'aggressive' | 'conservative';
+  redundancyThreshold: number;
+  decayFactor: number;
+  minConfidence: number;
+  staleAfterHours: number;
+}
+
+export interface MemoryConsolidationResult {
+  runId: string;
+  strategy: MemoryConsolidationPolicy['strategy'];
+  startedAt: number;
+  completedAt: number;
+  beforeCount: number;
+  afterCount: number;
+  mergedCount: number;
+  removedCount: number;
+  decayedCount: number;
+  preservedPinnedCount: number;
+  redundancyReduction: number;
+  recallRetention: number;
+}
+
 export type MemoryExtractionStyle = 'conservative' | 'balanced' | 'aggressive';
 
 /**

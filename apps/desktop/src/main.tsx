@@ -9,6 +9,7 @@ import '@fontsource/jetbrains-mono/500.css';
 import { App } from './App';
 import { AppErrorBoundary } from './components/errors/AppErrorBoundary';
 import { installGlobalTerminalDiagnostics } from './lib/terminal-diagnostics';
+import './styles/design-tokens.css';
 import './styles/globals.css';
 
 installGlobalTerminalDiagnostics();

@@ -1,0 +1,86 @@
+{
+  "evaluatedAt": 1770937746689,
+  "benchmarkRunId": "manual-pass-3",
+  "status": "pass",
+  "reasons": [],
+  "scorecard": {
+    "benchmarkScore": 0.9405127624081755,
+    "featureChecklistScore": 1,
+    "finalScore": 0.9583589336857228,
+    "dimensions": [
+      {
+        "dimension": "end_to_end_completion",
+        "score": 0.9451211644614393,
+        "maxScore": 1,
+        "weight": 0.2,
+        "threshold": 0.92,
+        "passed": true
+      },
+      {
+        "dimension": "reliability_recovery",
+        "score": 1,
+        "maxScore": 1,
+        "weight": 0.15,
+        "threshold": 0.998,
+        "passed": true
+      },
+      {
+        "dimension": "memory_quality",
+        "score": 0.9115873353735514,
+        "maxScore": 1,
+        "weight": 0.15,
+        "threshold": 0.88,
+        "passed": true
+      },
+      {
+        "dimension": "workflow_skill_depth",
+        "score": 0.9282763876765682,
+        "maxScore": 1,
+        "weight": 0.1,
+        "threshold": 0.9,
+        "passed": true
+      },
+      {
+        "dimension": "research_browser_depth",
+        "score": 0.8995268691324396,
+        "maxScore": 1,
+        "weight": 0.1,
+        "threshold": 0.85,
+        "passed": true
+      },
+      {
+        "dimension": "ux_simplicity_satisfaction",
+        "score": 0.9409265958387699,
+        "maxScore": 1,
+        "weight": 0.1,
+        "threshold": 0.92,
+        "passed": true
+      },
+      {
+        "dimension": "latency_performance",
+        "score": 0.9295385396385424,
+        "maxScore": 1,
+        "weight": 0.08,
+        "threshold": 0.9,
+        "passed": true
+      },
+      {
+        "dimension": "security_trust",
+        "score": 1,
+        "maxScore": 1,
+        "weight": 0.07,
+        "threshold": 1,
+        "passed": true
+      },
+      {
+        "dimension": "extensibility_ecosystem",
+        "score": 0.8702872154798716,
+        "maxScore": 1,
+        "weight": 0.05,
+        "threshold": 0.8,
+        "passed": true
+      }
+    ],
+    "generatedAt": 1770937746689
+  }
+}

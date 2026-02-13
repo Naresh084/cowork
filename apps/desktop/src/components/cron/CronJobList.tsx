@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, ChevronRight, Calendar, Play, Pause, RotateCcw, GitBranch } from 'lucide-react';
+import { ChevronDown, ChevronRight, Calendar, Play, Pause, RotateCcw, GitBranch, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CronJobCard } from './CronJobCard';
 import { useCronStore } from '@/stores/cron-store';
@@ -132,7 +132,26 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
   const runWorkflowTask = useCronStore((state) => state.runWorkflowTask);
   const pauseWorkflowTask = useCronStore((state) => state.pauseWorkflowTask);
   const resumeWorkflowTask = useCronStore((state) => state.resumeWorkflowTask);
+  const archiveWorkflowTask = useCronStore((state) => state.archiveWorkflowTask);
   const setCurrentView = useAppStore((state) => state.setCurrentView);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isDeleting) return;
+
+    const confirmed = window.confirm(
+      `Delete automation "${task.name}"? This will archive the workflow and remove it from scheduled automations.`,
+    );
+    if (!confirmed) return;
+    try {
+      setIsDeleting(true);
+      await archiveWorkflowTask(task.workflowId);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div
@@ -163,6 +182,7 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
         </div>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => void runWorkflowTask(task.workflowId)}
             className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#60A5FA]"
             title="Run now"
@@ -170,6 +190,7 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
             <Play className="h-3.5 w-3.5" />
           </button>
           <button
+            type="button"
             onClick={() =>
               void (task.enabled
                 ? pauseWorkflowTask(task.workflowId)
@@ -180,8 +201,21 @@ function WorkflowTaskCard({ task }: { task: WorkflowScheduledTaskSummary }) {
           >
             {task.enabled ? <Pause className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
           </button>
+          <button
+            type="button"
+            onClick={(event) => void handleDelete(event)}
+            disabled={isDeleting}
+            className={cn(
+              'rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-red-300',
+              isDeleting && 'cursor-not-allowed opacity-50',
+            )}
+            title="Delete automation"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
           {WORKFLOWS_ENABLED ? (
             <button
+              type="button"
               onClick={() => setCurrentView('workflows')}
               className="rounded p-1 text-white/40 transition-colors hover:bg-white/[0.08] hover:text-[#67E8F9]"
               title="Open workflow builder"

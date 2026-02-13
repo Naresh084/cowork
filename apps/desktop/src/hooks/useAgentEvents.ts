@@ -7,12 +7,46 @@ import { useAgentStore, type Task } from '../stores/agent-store';
 import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
+import { useBenchmarkStore, type BenchmarkScorecard } from '../stores/benchmark-store';
 import { toast } from '../components/ui/Toast';
 import type { PlatformType } from '@gemini-cowork/shared';
 import { createStartupIssue } from '../lib/startup-recovery';
 
 function isRecord(val: unknown): val is Record<string, unknown> {
   return val !== null && typeof val === 'object' && !Array.isArray(val);
+}
+
+function toBenchmarkScorecard(value: unknown): BenchmarkScorecard | null {
+  if (!isRecord(value)) return null;
+
+  const runId = typeof value.runId === 'string' ? value.runId : '';
+  const suiteId = typeof value.suiteId === 'string' ? value.suiteId : '';
+  if (!runId || !suiteId) return null;
+
+  const dimensions = Array.isArray(value.dimensions)
+    ? value.dimensions
+        .filter((entry): entry is Record<string, unknown> => isRecord(entry))
+        .map((entry) => ({
+          dimension: typeof entry.dimension === 'string' ? entry.dimension : 'unknown',
+          score: typeof entry.score === 'number' ? entry.score : 0,
+          maxScore: typeof entry.maxScore === 'number' ? entry.maxScore : 1,
+          weight: typeof entry.weight === 'number' ? entry.weight : 0,
+          threshold: typeof entry.threshold === 'number' ? entry.threshold : 0,
+          passed: Boolean(entry.passed),
+        }))
+    : [];
+
+  return {
+    runId,
+    suiteId,
+    benchmarkScore: typeof value.benchmarkScore === 'number' ? value.benchmarkScore : 0,
+    featureChecklistScore:
+      typeof value.featureChecklistScore === 'number' ? value.featureChecklistScore : 0,
+    finalScore: typeof value.finalScore === 'number' ? value.finalScore : 0,
+    generatedAt: typeof value.generatedAt === 'number' ? value.generatedAt : Date.now(),
+    dimensions,
+    passed: typeof value.passed === 'boolean' ? value.passed : undefined,
+  };
 }
 
 function normalizeTodoStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
@@ -111,6 +145,7 @@ interface ReplayResponse {
 }
 
 const SESSION_RELOAD_COOLDOWN_MS = 5_000;
+const STREAM_STALL_TIMEOUT_MS = 20_000;
 
 /**
  * Hook to subscribe to agent events for the current session
@@ -124,6 +159,7 @@ export function useAgentEvents(sessionId: string | null): void {
   const sessionReloadTimerRef = useRef<number | null>(null);
   const sessionReloadAttemptRef = useRef(0);
   const lastSessionReloadAtRef = useRef(0);
+  const streamStallTimersRef = useRef<Record<string, number>>({});
 
   // Keep refs up to date
   useEffect(() => {
@@ -176,6 +212,37 @@ export function useAgentEvents(sessionId: string | null): void {
         lastSessionReloadAtRef.current = nowTs;
         void sessionStore.loadSessions({ reset: true });
       }, delayMs);
+    };
+
+    const clearStreamStallTimer = (targetSessionId: string) => {
+      const timer = streamStallTimersRef.current[targetSessionId];
+      if (typeof timer === 'number') {
+        window.clearTimeout(timer);
+      }
+      delete streamStallTimersRef.current[targetSessionId];
+    };
+
+    const scheduleStreamStallCheck = (targetSessionId: string) => {
+      clearStreamStallTimer(targetSessionId);
+      streamStallTimersRef.current[targetSessionId] = window.setTimeout(() => {
+        const chat = chatStoreRef.current;
+        const sessionState = chat.getSessionState(targetSessionId);
+        if (!sessionState.isStreaming || sessionState.streamStall.isStalled) {
+          return;
+        }
+
+        const lastActivityAt = sessionState.streamStall.lastActivityAt ?? Date.now();
+        if (Date.now() - lastActivityAt < STREAM_STALL_TIMEOUT_MS - 250) {
+          scheduleStreamStallCheck(targetSessionId);
+          return;
+        }
+
+        chat.markRunStalled(targetSessionId, {
+          reason: `No stream updates for ${Math.round(STREAM_STALL_TIMEOUT_MS / 1000)}s`,
+          recoverable: Boolean(sessionState.streamStall.runId),
+        });
+        toast.warning('Run stalled', 'No stream updates detected. Use Recover run to resume.', 7000);
+      }, STREAM_STALL_TIMEOUT_MS);
     };
 
     const handleEvent = (event: AgentEvent) => {
@@ -357,29 +424,194 @@ export function useAgentEvents(sessionId: string | null): void {
         return;
       }
 
+      if (event.type === 'benchmark:progress') {
+        useBenchmarkStore.getState().setRunProgress({
+          runId: event.runId,
+          suiteId: event.suiteId,
+          profile: event.profile,
+          progress: event.progress,
+          status: event.status,
+        });
+        return;
+      }
+
+      if (event.type === 'benchmark:score_updated') {
+        const scorecard = toBenchmarkScorecard(event.scorecard);
+        if (scorecard) {
+          useBenchmarkStore.getState().setScorecard(scorecard);
+        }
+        return;
+      }
+
+      if (event.type === 'run:health') {
+        useBenchmarkStore.getState().setRunHealth({
+          sessionId: event.sessionId,
+          health: event.health,
+          reliabilityScore: event.reliabilityScore,
+          counters: event.counters,
+          timestamp: event.timestamp,
+        });
+        return;
+      }
+
+      if (event.type === 'release_gate:status') {
+        useBenchmarkStore.getState().setReleaseGateStatus({
+          status: event.status,
+          reasons: Array.isArray(event.reasons) ? event.reasons : [],
+          scorecard: toBenchmarkScorecard(event.scorecard ?? null) ?? undefined,
+          evaluatedAt: typeof event.evaluatedAt === 'number' ? event.evaluatedAt : Date.now(),
+        });
+        return;
+      }
+
       if (!eventSessionId) return;
       chat.ensureSession(eventSessionId);
       agent.ensureSession(eventSessionId);
+
+      const appendMemoryTimelineItem = (
+        eventType: 'memory:retrieved' | 'memory:consolidated' | 'memory:conflict_detected',
+        content: string,
+        metadata: Record<string, unknown>,
+      ) => {
+        const sessionSnapshot = chat.getSessionState(eventSessionId);
+        let turnId = sessionSnapshot.activeTurnId;
+        if (!turnId) {
+          for (let index = sessionSnapshot.chatItems.length - 1; index >= 0; index -= 1) {
+            const item = sessionSnapshot.chatItems[index];
+            if (item.kind === 'user_message') {
+              turnId = item.turnId || item.id;
+              break;
+            }
+          }
+        }
+
+        chat.appendChatItem(eventSessionId, {
+          id: `memory-${eventType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind: 'system_message',
+          content,
+          metadata: {
+            timelineCategory: 'memory',
+            eventType,
+            ...metadata,
+          },
+          turnId,
+          timestamp: Date.now(),
+        } as import('@gemini-cowork/shared').ChatItem);
+      };
 
       switch (event.type) {
         // Streaming events
         case 'stream:start':
           chat.setStreaming(eventSessionId, true);
+          chat.markStreamActivity(eventSessionId);
+          chat.clearRunStalled(eventSessionId);
           chat.setThinking(eventSessionId, true);
           chat.clearStreamingContent(eventSessionId);
           agent.setRunning(eventSessionId, true);
+          scheduleStreamStallCheck(eventSessionId);
           break;
 
         case 'stream:chunk':
           // Assistant text now comes from persisted chat:item/chat:update events.
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
           break;
 
         case 'stream:done':
           chat.setStreaming(eventSessionId, false);
+          chat.clearRunStalled(eventSessionId);
           chat.setThinking(eventSessionId, false);
           chat.clearStreamingContent(eventSessionId);
           chat.clearThinkingContent(eventSessionId);
           agent.setRunning(eventSessionId, false);
+          clearStreamStallTimer(eventSessionId);
+          break;
+
+        case 'run:stalled':
+          chat.markRunStalled(eventSessionId, {
+            runId: event.runId,
+            reason: event.reason,
+            stalledAt: event.stalledAt,
+            recoverable: true,
+          });
+          toast.warning('Run stalled', 'A recovery point is available. Click Recover run.', 7000);
+          break;
+
+        case 'run:recovered':
+          chat.clearRunStalled(eventSessionId);
+          chat.markStreamActivity(eventSessionId);
+          scheduleStreamStallCheck(eventSessionId);
+          toast.success('Run recovered', 'Execution resumed from the latest checkpoint.', 4000);
+          break;
+
+        case 'branch:created':
+          useSessionStore.getState().upsertBranch(
+            eventSessionId,
+            {
+              id: event.branchId,
+              sessionId: eventSessionId,
+              name: event.name,
+              status: 'active',
+              fromTurnId: event.fromTurnId,
+              parentBranchId: event.parentBranchId,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+            true,
+          );
+          toast.success('Branch created', `${event.name} is now active.`, 2500);
+          break;
+
+        case 'branch:merged':
+          useSessionStore.getState().applyBranchMerge(eventSessionId, {
+            mergeId: event.mergeId,
+            sourceBranchId: event.sourceBranchId,
+            targetBranchId: event.targetBranchId,
+            strategy:
+              event.strategy === 'ours' ||
+              event.strategy === 'theirs' ||
+              event.strategy === 'manual'
+                ? event.strategy
+                : 'auto',
+            status: event.status,
+            conflictCount: 0,
+            conflicts: [],
+            mergedAt: Date.now(),
+            activeBranchId: event.activeBranchId,
+          });
+          if (event.status === 'merged') {
+            toast.success('Branch merged', 'Branch merge completed successfully.', 2500);
+          } else if (event.status === 'conflict') {
+            toast.warning('Merge conflict', 'Branch merge requires conflict resolution.', 3500);
+          } else {
+            toast.error('Merge failed', 'Unable to merge the selected branch.', 3500);
+          }
+          break;
+
+        case 'memory:retrieved':
+          appendMemoryTimelineItem('memory:retrieved', 'Retrieved relevant memory evidence.', {
+            queryId: event.queryId,
+            query: event.query,
+            count: event.count,
+            limit: event.limit,
+          });
+          break;
+
+        case 'memory:consolidated':
+          appendMemoryTimelineItem('memory:consolidated', 'Memory consolidation pass completed.', {
+            strategy: event.strategy,
+            queryId: event.queryId,
+            atomId: event.atomId,
+            feedback: event.feedback,
+            consolidatedAt: event.timestamp ?? Date.now(),
+          });
+          break;
+
+        case 'memory:conflict_detected':
+          appendMemoryTimelineItem('memory:conflict_detected', 'Potential memory conflict detected.', {
+            atomId: event.atomId,
+            reason: event.reason,
+          });
           break;
 
         // Thinking events (agent's internal reasoning)
@@ -408,6 +640,29 @@ export function useAgentEvents(sessionId: string | null): void {
             startedAt: Date.now(),
             parentToolId,
           });
+          if (event.toolCall.name.toLowerCase() === 'computer_use') {
+            const goal =
+              typeof event.toolCall.args.goal === 'string' ? event.toolCall.args.goal : null;
+            const maxStepsRaw = Number(event.toolCall.args.maxSteps ?? 15);
+            const maxSteps = Number.isFinite(maxStepsRaw) && maxStepsRaw > 0 ? Math.round(maxStepsRaw) : 15;
+            chat.updateBrowserRunState(eventSessionId, {
+              status: 'running',
+              goal,
+              step: 0,
+              maxSteps,
+              blockedReason: null,
+              recoverable: false,
+            });
+            chat.appendBrowserRunEvent(eventSessionId, {
+              id: `browser-start-${event.toolCall.id}`,
+              type: 'progress',
+              status: 'running',
+              step: 0,
+              maxSteps,
+              detail: 'Browser automation started.',
+              timestamp: Date.now(),
+            });
+          }
           chat.setThinking(eventSessionId, false);
           break;
         }
@@ -433,6 +688,51 @@ export function useAgentEvents(sessionId: string | null): void {
               if (todos && todos.length > 0) {
                 agent.setTasks(eventSessionId, mapTodosToTasks(eventSessionId, todos));
               }
+            }
+
+            if (lower === 'computer_use') {
+              const data = result.result as {
+                completed?: boolean;
+                blocked?: boolean;
+                blockedReason?: string;
+                finalUrl?: string;
+                steps?: number;
+                maxSteps?: number;
+                checkpointPath?: string;
+                resumedFromCheckpoint?: boolean;
+              } | undefined;
+              const steps = Number(data?.steps ?? 0);
+              const maxSteps = Number(data?.maxSteps ?? 0);
+              const status = data?.blocked
+                ? 'blocked'
+                : data?.completed
+                  ? 'completed'
+                  : 'error';
+              chat.updateBrowserRunState(eventSessionId, {
+                status,
+                step: Number.isFinite(steps) ? steps : 0,
+                maxSteps: Number.isFinite(maxSteps) ? maxSteps : 0,
+                lastUrl: data?.finalUrl ?? null,
+                blockedReason: data?.blockedReason ?? null,
+                checkpointPath: data?.checkpointPath ?? null,
+                recoverable: Boolean(data?.checkpointPath),
+              });
+              chat.appendBrowserRunEvent(eventSessionId, {
+                id: `browser-result-${toolCallId || Date.now()}`,
+                type: data?.blocked ? 'blocked' : 'completed',
+                status,
+                step: Number.isFinite(steps) ? steps : 0,
+                maxSteps: Number.isFinite(maxSteps) ? maxSteps : 0,
+                url: data?.finalUrl,
+                checkpointPath: data?.checkpointPath,
+                detail:
+                  data?.blocked
+                    ? data.blockedReason || 'Browser run blocked.'
+                    : data?.resumedFromCheckpoint
+                      ? 'Browser run resumed from checkpoint and completed.'
+                      : 'Browser run completed.',
+                timestamp: Date.now(),
+              });
             }
           }
 
@@ -520,9 +820,88 @@ export function useAgentEvents(sessionId: string | null): void {
           agent.setResearchProgress(eventSessionId, { status: event.status, progress: event.progress });
           break;
 
+        case 'research:evidence':
+          chat.appendChatItem(eventSessionId, {
+            id: `research-evidence-${event.timestamp}-${Math.max(0, event.totalSources)}`,
+            kind: 'system_message',
+            content:
+              event.totalSources > 0
+                ? `Research evidence updated: ${event.totalSources} sources ranked (avg confidence ${Math.round(event.avgConfidence * 100)}%).`
+                : 'Research evidence updated: no sources detected.',
+            timestamp: event.timestamp,
+          } as import('@gemini-cowork/shared').ChatItem);
+          break;
+
+        case 'browser:progress':
+          chat.updateBrowserRunState(eventSessionId, {
+            status: event.status === 'running' ? 'running' : event.status,
+            step: event.step,
+            maxSteps: event.maxSteps,
+            lastUrl: event.url ?? null,
+          });
+          chat.appendBrowserRunEvent(eventSessionId, {
+            id: `browser-progress-${event.timestamp}-${event.step}`,
+            type: event.status === 'recovered' ? 'recovered' : 'progress',
+            status: event.status,
+            step: event.step,
+            maxSteps: event.maxSteps,
+            url: event.url,
+            detail: event.detail,
+            lastAction: event.lastAction,
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case 'browser:checkpoint':
+          chat.updateBrowserRunState(eventSessionId, {
+            step: event.step,
+            maxSteps: event.maxSteps,
+            lastUrl: event.url ?? null,
+            checkpointPath: event.checkpointPath,
+            recoverable: event.recoverable,
+          });
+          chat.appendBrowserRunEvent(eventSessionId, {
+            id: `browser-checkpoint-${event.timestamp}-${event.step}`,
+            type: 'checkpoint',
+            status: 'running',
+            step: event.step,
+            maxSteps: event.maxSteps,
+            url: event.url,
+            checkpointPath: event.checkpointPath,
+            detail: 'Checkpoint saved.',
+            timestamp: event.timestamp,
+          });
+          break;
+
+        case 'browser:blocker':
+          chat.updateBrowserRunState(eventSessionId, {
+            status: 'blocked',
+            step: event.step,
+            maxSteps: event.maxSteps,
+            lastUrl: event.url ?? null,
+            blockedReason: event.reason,
+            checkpointPath: event.checkpointPath ?? null,
+            recoverable: Boolean(event.checkpointPath),
+          });
+          chat.appendBrowserRunEvent(eventSessionId, {
+            id: `browser-blocked-${event.timestamp}-${event.step}`,
+            type: 'blocked',
+            status: 'blocked',
+            step: event.step,
+            maxSteps: event.maxSteps,
+            url: event.url,
+            checkpointPath: event.checkpointPath,
+            detail: event.reason,
+            timestamp: event.timestamp,
+          });
+          toast.warning('Browser run blocked', event.reason, 6000);
+          break;
+
         // Error events
         case 'error': {
+          clearStreamStallTimer(eventSessionId);
           chat.setStreaming(eventSessionId, false);
+          chat.clearRunStalled(eventSessionId);
           chat.setThinking(eventSessionId, false);
           agent.setRunning(eventSessionId, false);
 
@@ -591,7 +970,9 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'agent:stopped':
+          clearStreamStallTimer(eventSessionId);
           agent.setRunning(eventSessionId, false);
+          chat.clearRunStalled(eventSessionId);
           if (activeId) {
             chat.setStreaming(activeId, false);
             chat.setThinking(activeId, false);
@@ -709,6 +1090,10 @@ export function useAgentEvents(sessionId: string | null): void {
 
     return () => {
       disposed = true;
+      Object.values(streamStallTimersRef.current).forEach((timer) => {
+        window.clearTimeout(timer);
+      });
+      streamStallTimersRef.current = {};
       if (sessionReloadTimerRef.current !== null) {
         window.clearTimeout(sessionReloadTimerRef.current);
         sessionReloadTimerRef.current = null;

@@ -674,7 +674,287 @@ function renderToolSpecificResult(execution: ToolExecution): ToolView | null {
     };
   }
 
+  if (name === 'deep_research') {
+    const research = extractResearchResult(execution.result);
+    if (research) {
+      return {
+        hideRaw: true,
+        node: <ResearchResultView result={research} />,
+      };
+    }
+  }
+
+  if (name === 'computer_use') {
+    const browser = extractBrowserRunResult(execution.result);
+    if (browser) {
+      return {
+        hideRaw: true,
+        node: <BrowserRunResultView result={browser} />,
+      };
+    }
+  }
+
   return null;
+}
+
+interface ResearchEvidenceSummary {
+  totalSources: number;
+  avgConfidence: number;
+  highConfidenceSources: number;
+}
+
+interface ResearchEvidenceItem {
+  rank?: number;
+  title: string;
+  url: string;
+  confidence?: number;
+  sourceType?: string;
+}
+
+interface ResearchResultData {
+  status: string;
+  partial: boolean;
+  interactionId?: string;
+  pollAttempts?: number;
+  retryAttempts?: number;
+  reportPath?: string;
+  evidence: ResearchEvidenceItem[];
+  evidenceSummary?: ResearchEvidenceSummary;
+  resumeToken?: {
+    interactionId?: string;
+    lastStatus?: string;
+    lastProgress?: number;
+  };
+}
+
+interface BrowserRunResultData {
+  completed: boolean;
+  blocked: boolean;
+  blockedReason?: string;
+  steps?: number;
+  maxSteps?: number;
+  finalUrl?: string;
+  checkpointPath?: string;
+  resumedFromCheckpoint?: boolean;
+  actions: string[];
+}
+
+function extractResearchResult(result: unknown): ResearchResultData | null {
+  if (!result || typeof result !== 'object') return null;
+  const value = result as {
+    status?: unknown;
+    partial?: unknown;
+    interactionId?: unknown;
+    pollAttempts?: unknown;
+    retryAttempts?: unknown;
+    reportPath?: unknown;
+    evidence?: unknown;
+    evidenceSummary?: unknown;
+    resumeToken?: unknown;
+  };
+
+  if (!('status' in value) && !('evidence' in value) && !('reportPath' in value)) {
+    return null;
+  }
+
+  const evidence = Array.isArray(value.evidence)
+    ? value.evidence
+        .filter((item): item is ResearchEvidenceItem => !!item && typeof item === 'object')
+        .map((item) => ({
+          rank: typeof item.rank === 'number' ? item.rank : undefined,
+          title: typeof item.title === 'string' ? item.title : 'Untitled source',
+          url: typeof item.url === 'string' ? item.url : '',
+          confidence: typeof item.confidence === 'number' ? item.confidence : undefined,
+          sourceType: typeof item.sourceType === 'string' ? item.sourceType : undefined,
+        }))
+    : [];
+
+  return {
+    status: typeof value.status === 'string' ? value.status : 'unknown',
+    partial: Boolean(value.partial),
+    interactionId: typeof value.interactionId === 'string' ? value.interactionId : undefined,
+    pollAttempts: typeof value.pollAttempts === 'number' ? value.pollAttempts : undefined,
+    retryAttempts: typeof value.retryAttempts === 'number' ? value.retryAttempts : undefined,
+    reportPath: typeof value.reportPath === 'string' ? value.reportPath : undefined,
+    evidence,
+    evidenceSummary:
+      value.evidenceSummary && typeof value.evidenceSummary === 'object'
+        ? {
+            totalSources: Number((value.evidenceSummary as { totalSources?: unknown }).totalSources) || evidence.length,
+            avgConfidence:
+              Number((value.evidenceSummary as { avgConfidence?: unknown }).avgConfidence) || 0,
+            highConfidenceSources:
+              Number((value.evidenceSummary as { highConfidenceSources?: unknown }).highConfidenceSources) || 0,
+          }
+        : undefined,
+    resumeToken:
+      value.resumeToken && typeof value.resumeToken === 'object'
+        ? {
+            interactionId:
+              typeof (value.resumeToken as { interactionId?: unknown }).interactionId === 'string'
+                ? String((value.resumeToken as { interactionId?: unknown }).interactionId)
+                : undefined,
+            lastStatus:
+              typeof (value.resumeToken as { lastStatus?: unknown }).lastStatus === 'string'
+                ? String((value.resumeToken as { lastStatus?: unknown }).lastStatus)
+                : undefined,
+            lastProgress:
+              typeof (value.resumeToken as { lastProgress?: unknown }).lastProgress === 'number'
+                ? Number((value.resumeToken as { lastProgress?: unknown }).lastProgress)
+                : undefined,
+          }
+        : undefined,
+  };
+}
+
+function extractBrowserRunResult(result: unknown): BrowserRunResultData | null {
+  if (!result || typeof result !== 'object') return null;
+  const value = result as {
+    completed?: unknown;
+    blocked?: unknown;
+    blockedReason?: unknown;
+    steps?: unknown;
+    maxSteps?: unknown;
+    finalUrl?: unknown;
+    checkpointPath?: unknown;
+    resumedFromCheckpoint?: unknown;
+    actions?: unknown;
+  };
+  if (!('blocked' in value) && !('actions' in value) && !('finalUrl' in value)) {
+    return null;
+  }
+  const actions = Array.isArray(value.actions)
+    ? value.actions.map((item) => String(item || '')).filter(Boolean)
+    : [];
+  return {
+    completed: Boolean(value.completed),
+    blocked: Boolean(value.blocked),
+    blockedReason: typeof value.blockedReason === 'string' ? value.blockedReason : undefined,
+    steps: typeof value.steps === 'number' ? value.steps : undefined,
+    maxSteps: typeof value.maxSteps === 'number' ? value.maxSteps : undefined,
+    finalUrl: typeof value.finalUrl === 'string' ? value.finalUrl : undefined,
+    checkpointPath: typeof value.checkpointPath === 'string' ? value.checkpointPath : undefined,
+    resumedFromCheckpoint: Boolean(value.resumedFromCheckpoint),
+    actions,
+  };
+}
+
+function ResearchResultView({ result }: { result: ResearchResultData }) {
+  const topSources = result.evidence.slice(0, 5);
+  const avgConfidence = Math.round((result.evidenceSummary?.avgConfidence || 0) * 100);
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-[#101722] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-wide text-[#93C5FD]">Research Depth</div>
+        <div className="text-[11px] text-white/50">
+          status: <span className="text-white/80">{result.status}</span>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-[11px]">
+        <div className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5">
+          <div className="text-white/40">sources</div>
+          <div className="text-white/85">
+            {result.evidenceSummary?.totalSources ?? result.evidence.length}
+          </div>
+        </div>
+        <div className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5">
+          <div className="text-white/40">avg confidence</div>
+          <div className="text-white/85">{avgConfidence}%</div>
+        </div>
+        <div className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1.5">
+          <div className="text-white/40">retries</div>
+          <div className="text-white/85">{result.retryAttempts ?? 0}</div>
+        </div>
+      </div>
+      {topSources.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">Top Evidence</div>
+          {topSources.map((source, index) => (
+            <a
+              key={`${source.url}-${index}`}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-md border border-white/[0.08] bg-[#0B101A] px-2 py-1.5 hover:bg-[#0D1320]"
+            >
+              <div className="text-xs text-white/80 truncate">{source.title}</div>
+              <div className="text-[10px] text-white/45 truncate">{source.url}</div>
+            </a>
+          ))}
+        </div>
+      )}
+      {result.resumeToken?.interactionId && result.partial && (
+        <div className="rounded-md border border-[#F59E0B]/35 bg-[#2A200D] px-2 py-1.5 text-[11px] text-[#FDE68A]">
+          Partial output available. Resume token preserved for continuation.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BrowserRunResultView({ result }: { result: BrowserRunResultData }) {
+  const replay = result.actions.slice(-6);
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-[#101722] p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-wide text-[#93C5FD]">Browser Run Replay</div>
+        <div
+          className={cn(
+            'text-[11px]',
+            result.blocked ? 'text-[#FCA5A5]' : result.completed ? 'text-[#86EFAC]' : 'text-white/60',
+          )}
+        >
+          {result.blocked ? 'blocked' : result.completed ? 'completed' : 'incomplete'}
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-[11px] text-white/60">
+        <span>
+          steps: {result.steps ?? 0}
+          {typeof result.maxSteps === 'number' ? ` / ${result.maxSteps}` : ''}
+        </span>
+        {result.resumedFromCheckpoint && (
+          <span className="px-1.5 py-0.5 rounded-full border border-[#3B82F6]/40 bg-[#1D4ED8]/20 text-[#BFDBFE]">
+            resumed
+          </span>
+        )}
+      </div>
+      {result.blocked && (
+        <div className="rounded-md border border-[#EF4444]/35 bg-[#3B1313] px-2 py-1.5 text-[11px] text-[#FECACA]">
+          Failure explanation: {result.blockedReason || 'Safety or blocker policy interrupted this run.'}
+        </div>
+      )}
+      {result.checkpointPath && (
+        <div className="rounded-md border border-[#3B82F6]/35 bg-[#0E1C35] px-2 py-1.5 text-[11px] text-[#BFDBFE] break-all">
+          Recovery checkpoint: {result.checkpointPath}
+        </div>
+      )}
+      {result.finalUrl && (
+        <a
+          href={result.finalUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-[11px] text-[#93C5FD] hover:text-white truncate"
+        >
+          Final URL: {result.finalUrl}
+        </a>
+      )}
+      {replay.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[11px] uppercase tracking-wide text-white/45">Recent Actions</div>
+          <div className="max-h-28 overflow-y-auto space-y-1">
+            {replay.map((action, index) => (
+              <div
+                key={`${action}-${index}`}
+                className="rounded-md border border-white/[0.08] bg-white/[0.02] px-2 py-1 text-[11px] text-white/70 font-mono break-all"
+              >
+                {action}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type ExternalCliProvider = 'codex' | 'claude' | 'shared';

@@ -10,6 +10,7 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 import {
   ConnectorManifestSchema,
   type ConnectorManifest,
@@ -56,6 +57,19 @@ const __dirname = dirname(__filename);
 
 // Default paths - connectors at project root level (same level as skills)
 const DEFAULT_BUNDLED_DIR = join(__dirname, '..', '..', '..', '..', '..', 'connectors'); // Project root connectors/
+const PACK_SIGNATURE_FILE = 'SIGNATURE.json';
+const MANIFEST_FILE = 'connector.json';
+const PACK_SIGNATURE_VERSION = 1;
+const ALLOW_UNSIGNED_MANAGED_PACKS = process.env.COWORK_ALLOW_UNSIGNED_MANAGED_PACKS === 'true';
+
+interface PackSignature {
+  version: number;
+  algorithm: 'sha256';
+  digest: string;
+  subject: string;
+  signer: string;
+  signedAt: number;
+}
 
 /**
  * Connector Service for managing connectors across multiple sources
@@ -203,6 +217,17 @@ export class ConnectorService {
           const content = await readFile(connectorJsonPath, 'utf-8');
           const rawManifest = JSON.parse(content);
 
+          if (this.shouldEnforcePackSignature(sourceType)) {
+            const subject =
+              typeof rawManifest?.name === 'string' && rawManifest.name.trim()
+                ? rawManifest.name
+                : entry.name;
+            const isSignatureValid = await this.validatePackSignature(connectorDir, subject);
+            if (!isSignatureValid) {
+              continue;
+            }
+          }
+
           // Add source information
           const source: ConnectorSource = {
             type: sourceType,
@@ -294,6 +319,7 @@ export class ConnectorService {
 
     // Copy connector directory
     await cp(connector.source.path, targetDir, { recursive: true });
+    await this.writePackSignature(targetDir, connector.name);
 
     // Clear cache to force re-discovery
     this.connectorCache.clear();
@@ -371,6 +397,7 @@ export class ConnectorService {
     // Write connector.json
     const connectorJsonPath = join(connectorDir, 'connector.json');
     await writeFile(connectorJsonPath, JSON.stringify(connectorJson, null, 2), 'utf-8');
+    await this.writePackSignature(connectorDir, params.name);
 
     // Clear cache and re-discover
     this.connectorCache.clear();
@@ -455,6 +482,64 @@ export class ConnectorService {
    */
   clearCache(): void {
     this.connectorCache.clear();
+  }
+
+  private shouldEnforcePackSignature(sourceType: ConnectorSourceType): boolean {
+    if (ALLOW_UNSIGNED_MANAGED_PACKS) {
+      return false;
+    }
+    return sourceType === 'managed';
+  }
+
+  private async computePackDigest(connectorDir: string): Promise<string> {
+    const manifestPath = join(connectorDir, MANIFEST_FILE);
+    const manifestContent = await readFile(manifestPath, 'utf-8');
+    return createHash('sha256').update(manifestContent).digest('hex');
+  }
+
+  private async writePackSignature(connectorDir: string, subject: string): Promise<void> {
+    const digest = await this.computePackDigest(connectorDir);
+    const signature: PackSignature = {
+      version: PACK_SIGNATURE_VERSION,
+      algorithm: 'sha256',
+      digest,
+      subject,
+      signer: 'local-managed-installer',
+      signedAt: Date.now(),
+    };
+    await writeFile(
+      join(connectorDir, PACK_SIGNATURE_FILE),
+      JSON.stringify(signature, null, 2),
+      'utf-8',
+    );
+  }
+
+  private async validatePackSignature(connectorDir: string, expectedSubject: string): Promise<boolean> {
+    const signaturePath = join(connectorDir, PACK_SIGNATURE_FILE);
+    if (!existsSync(signaturePath)) {
+      return false;
+    }
+
+    try {
+      const signatureRaw = await readFile(signaturePath, 'utf-8');
+      const signature = JSON.parse(signatureRaw) as Partial<PackSignature>;
+      if (
+        signature.version !== PACK_SIGNATURE_VERSION ||
+        signature.algorithm !== 'sha256' ||
+        typeof signature.digest !== 'string' ||
+        typeof signature.subject !== 'string'
+      ) {
+        return false;
+      }
+      if (signature.subject !== expectedSubject) {
+        return false;
+      }
+
+      const computedDigest = await this.computePackDigest(connectorDir);
+      return computedDigest === signature.digest;
+    } catch {
+      return false;
+    }
   }
 
   /**

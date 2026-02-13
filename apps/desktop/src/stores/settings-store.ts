@@ -94,6 +94,7 @@ export type ApprovalMode = 'auto' | 'read_only' | 'full';
 export type Theme = 'light' | 'dark' | 'system';
 export type FontSize = 'small' | 'medium' | 'large';
 export type ViewMode = 'chat' | 'cowork' | 'code';
+export type UxProfile = 'simple' | 'pro';
 
 export interface SpecializedModels {
   imageGeneration: string;
@@ -386,6 +387,7 @@ interface SettingsState {
 
   // General
   defaultWorkingDirectory: string;
+  uxProfile: UxProfile;
   theme: Theme;
   fontSize: FontSize;
   showLineNumbers: boolean;
@@ -464,6 +466,7 @@ interface SettingsActions {
     key: K,
     value: SettingsState[K]
   ) => void;
+  setUxProfile: (profile: UxProfile) => void;
   resetSettings: () => void;
   fetchModels: (apiKey: string) => Promise<void>;
   fetchProviderModels: (provider?: ProviderId) => Promise<void>;
@@ -659,6 +662,7 @@ const initialState: SettingsState = {
 
   // General
   defaultWorkingDirectory: '',
+  uxProfile: 'simple',
   theme: 'dark',
   fontSize: 'medium',
   showLineNumbers: true,
@@ -822,6 +826,10 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }
 
         set({ [key]: value } as Pick<SettingsState, typeof key>);
+      },
+
+      setUxProfile: (profile) => {
+        set({ uxProfile: profile });
       },
 
       resetSettings: () => {
@@ -1809,6 +1817,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         userName: state.userName,
         activeProvider: state.activeProvider,
         defaultWorkingDirectory: state.defaultWorkingDirectory,
+        uxProfile: state.uxProfile,
         theme: state.theme,
         fontSize: state.fontSize,
         showLineNumbers: state.showLineNumbers,
@@ -1870,6 +1879,11 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         const validMode = persistedMode === 'auto' || persistedMode === 'read_only' || persistedMode === 'full'
           ? persistedMode
           : initialState.approvalMode;
+        const persistedUxProfile = persisted?.uxProfile;
+        const validUxProfile: UxProfile =
+          persistedUxProfile === 'pro' || persistedUxProfile === 'simple'
+            ? persistedUxProfile
+            : initialState.uxProfile;
         const mergedPermissionDefaults: PermissionDefaults = {
           ...defaultPermissions,
           ...(persisted?.permissionDefaults || {}),
@@ -2010,6 +2024,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           ...currentState,
           ...persisted,
           activeProvider: validActiveProvider,
+          uxProfile: validUxProfile,
           approvalMode: validMode,
           selectedModel: activeSelectedModel,
           selectedModelByProvider,
@@ -2086,6 +2101,8 @@ export const useInstalledConnectorConfigs = () =>
   useSettingsStore((state) => state.installedConnectorConfigs);
 export const useActiveProvider = () =>
   useSettingsStore((state) => state.activeProvider);
+export const useUxProfile = () =>
+  useSettingsStore((state) => state.uxProfile);
 export const useMediaRoutingSettings = () =>
   useSettingsStore((state) => state.mediaRouting);
 export const useSpecializedModelsV2 = () =>

@@ -11,6 +11,83 @@ import type {
 import { WorkflowRunPanel } from './WorkflowRunPanel';
 import { WorkflowInspector } from './WorkflowInspector';
 
+interface WorkflowPackTemplate {
+  id: string;
+  name: string;
+  description: string;
+  triggerPhrases: string[];
+  scheduleIntervalMinutes?: number;
+  steps: Array<{
+    name: string;
+    promptTemplate: string;
+  }>;
+}
+
+const WORKFLOW_PACK_TEMPLATES: WorkflowPackTemplate[] = [
+  {
+    id: 'pack_repo_triage',
+    name: 'Repo Triage Pack',
+    description: 'Scans git diff, groups risks, and drafts action items.',
+    triggerPhrases: ['triage repository changes', 'review recent code changes'],
+    scheduleIntervalMinutes: 120,
+    steps: [
+      {
+        name: 'Collect Change Summary',
+        promptTemplate: 'Summarize all meaningful code changes from the current workspace in bullet form.',
+      },
+      {
+        name: 'Risk Classification',
+        promptTemplate: 'Classify detected changes by risk level and identify missing tests or migration issues.',
+      },
+      {
+        name: 'Action Plan Draft',
+        promptTemplate: 'Produce a prioritized remediation checklist with concrete next actions.',
+      },
+    ],
+  },
+  {
+    id: 'pack_incident_response',
+    name: 'Incident Response Pack',
+    description: 'Performs incident triage, mitigation plan, and stakeholder update draft.',
+    triggerPhrases: ['triage production incident', 'open incident response workflow'],
+    steps: [
+      {
+        name: 'Incident Snapshot',
+        promptTemplate: 'Collect incident context, impact, suspected blast radius, and confidence.',
+      },
+      {
+        name: 'Mitigation Plan',
+        promptTemplate: 'Draft immediate mitigations with rollback-safe execution steps.',
+      },
+      {
+        name: 'Status Communication',
+        promptTemplate: 'Draft concise stakeholder update with ETA assumptions and risk disclaimers.',
+      },
+    ],
+  },
+  {
+    id: 'pack_release_readiness',
+    name: 'Release Readiness Pack',
+    description: 'Runs release checks, validates gates, and prepares launch brief.',
+    triggerPhrases: ['run release readiness workflow', 'evaluate release candidate'],
+    scheduleIntervalMinutes: 1440,
+    steps: [
+      {
+        name: 'Gate Validation',
+        promptTemplate: 'Validate release gates, benchmark deltas, and unresolved high-severity issues.',
+      },
+      {
+        name: 'Regression Sweep',
+        promptTemplate: 'Identify likely regressions by comparing previous baseline and current branch behavior.',
+      },
+      {
+        name: 'Launch Brief',
+        promptTemplate: 'Prepare launch/no-launch recommendation with evidence and unresolved risks.',
+      },
+    ],
+  },
+];
+
 function createDefaultWorkflowInput(name: string, workingDirectory?: string): CreateWorkflowDraftInput {
   return {
     name,
@@ -37,6 +114,71 @@ function createDefaultWorkflowInput(name: string, workingDirectory?: string): Cr
       workingDirectory,
       maxRunTimeMs: 30 * 60 * 1000,
       nodeTimeoutMs: 5 * 60 * 1000,
+      retryProfile: 'balanced',
+      retry: {
+        maxAttempts: 3,
+        backoffMs: 1000,
+        maxBackoffMs: 20000,
+        jitterRatio: 0.2,
+      },
+    },
+  };
+}
+
+function createWorkflowInputFromTemplate(
+  template: WorkflowPackTemplate,
+  workingDirectory?: string,
+): CreateWorkflowDraftInput {
+  const nodes: WorkflowNode[] = [
+    { id: 'start', type: 'start', name: 'Start', config: {} },
+    ...template.steps.map((step, index) => ({
+      id: `agent_step_${index + 1}`,
+      type: 'agent_step' as const,
+      name: step.name,
+      config: {
+        promptTemplate: step.promptTemplate,
+        workingDirectory,
+        maxTurns: 24,
+      },
+    })),
+    { id: 'end', type: 'end', name: 'End', config: {} },
+  ];
+
+  const triggers: WorkflowTrigger[] = [
+    { id: 'manual_default', type: 'manual', enabled: true },
+    {
+      id: `chat_${template.id}`,
+      type: 'chat',
+      enabled: true,
+      strictMatch: false,
+      phrases: template.triggerPhrases,
+    },
+  ];
+
+  if (template.scheduleIntervalMinutes) {
+    triggers.push({
+      id: `schedule_${template.id}`,
+      type: 'schedule',
+      enabled: false,
+      schedule: {
+        type: 'every',
+        intervalMs: template.scheduleIntervalMinutes * 60 * 1000,
+      },
+    });
+  }
+
+  return {
+    name: template.name,
+    description: template.description,
+    tags: ['pack', 'template'],
+    triggers,
+    nodes,
+    edges: rebuildLinearEdges(nodes),
+    defaults: {
+      workingDirectory,
+      maxRunTimeMs: 30 * 60 * 1000,
+      nodeTimeoutMs: 5 * 60 * 1000,
+      retryProfile: 'balanced',
       retry: {
         maxAttempts: 3,
         backoffMs: 1000,
@@ -126,6 +268,7 @@ export function WorkflowBuilder() {
   const [promptSpec, setPromptSpec] = useState('');
   const [editing, setEditing] = useState<WorkflowDefinition | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     void loadWorkflows();
@@ -183,6 +326,20 @@ export function WorkflowBuilder() {
     setSelectedWorkflow(created.id);
     setPromptName('');
     setPromptSpec('');
+  };
+
+  const handleCreateFromTemplate = async (templateId: string) => {
+    const template = WORKFLOW_PACK_TEMPLATES.find((item) => item.id === templateId);
+    if (!template) return;
+    setActiveTemplateId(templateId);
+    try {
+      const created = await createDraft(
+        createWorkflowInputFromTemplate(template, defaultWorkingDirectory || undefined),
+      );
+      setSelectedWorkflow(created.id);
+    } finally {
+      setActiveTemplateId(null);
+    }
   };
 
   const handleRun = async (workflow: WorkflowDefinition) => {
@@ -433,6 +590,35 @@ export function WorkflowBuilder() {
             >
               Generate + Publish
             </button>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-white/[0.1] bg-white/[0.03] p-3">
+          <div className="text-xs font-semibold text-white/85">Workflow Pack Templates</div>
+          <p className="mt-1 text-[11px] text-white/55">
+            Start from curated templates with chat triggers and default step chains.
+          </p>
+
+          <div className="mt-2 space-y-2">
+            {WORKFLOW_PACK_TEMPLATES.map((template) => (
+              <div key={template.id} className="rounded border border-white/[0.08] bg-black/20 p-2">
+                <div className="text-xs font-medium text-white/85">{template.name}</div>
+                <div className="mt-0.5 text-[11px] text-white/55">{template.description}</div>
+                <div className="mt-1 text-[10px] text-white/45">
+                  {template.steps.length} step(s)
+                  {template.scheduleIntervalMinutes
+                    ? ` · schedule every ${template.scheduleIntervalMinutes}m`
+                    : ''}
+                </div>
+                <button
+                  onClick={() => void handleCreateFromTemplate(template.id)}
+                  disabled={activeTemplateId === template.id}
+                  className="mt-2 rounded border border-[#1D4ED8]/45 px-2 py-1 text-[11px] text-[#BFDBFE] disabled:opacity-60"
+                >
+                  {activeTemplateId === template.id ? 'Creating...' : 'Use Template'}
+                </button>
+              </div>
+            ))}
           </div>
         </div>
 

@@ -145,12 +145,20 @@ export const WorkflowRetryPolicySchema = z.object({
 });
 export type WorkflowRetryPolicy = z.infer<typeof WorkflowRetryPolicySchema>;
 
+export const WorkflowRetryProfileSchema = z.enum([
+  'fast_safe',
+  'balanced',
+  'strict_enterprise',
+]);
+export type WorkflowRetryProfile = z.infer<typeof WorkflowRetryProfileSchema>;
+
 export const WorkflowNodeSchema = z.object({
   id: z.string(),
   type: WorkflowNodeTypeSchema,
   name: z.string(),
   config: z.record(z.unknown()).default({}),
   timeoutMs: z.number().int().positive().optional(),
+  retryProfile: WorkflowRetryProfileSchema.optional(),
   retry: WorkflowRetryPolicySchema.optional(),
 });
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
@@ -171,6 +179,7 @@ export const WorkflowDefaultsSchema = z.object({
   model: z.string().optional(),
   maxRunTimeMs: z.number().int().positive().default(30 * 60 * 1000),
   nodeTimeoutMs: z.number().int().positive().default(5 * 60 * 1000),
+  retryProfile: WorkflowRetryProfileSchema.optional(),
   retry: WorkflowRetryPolicySchema.default({
     maxAttempts: 3,
     backoffMs: 1000,

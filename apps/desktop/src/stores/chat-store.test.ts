@@ -1,10 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useChatStore } from './chat-store';
+import {
+  useChatStore,
+  buildDurableSessionSnapshot,
+  hydrateSessionFromSnapshot,
+  mergePersistedChatState,
+  deriveTurnActivitiesFromItems,
+} from './chat-store';
 import { setMockInvokeResponse, clearMockInvokeResponses } from '../test/mocks/tauri-core';
 import { invoke } from '@tauri-apps/api/core';
 
 describe('chat-store', () => {
   beforeEach(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem('chat-runtime-state-v1');
+    }
     useChatStore.setState({
       sessions: {},
       error: null,
@@ -146,6 +155,44 @@ describe('chat-store', () => {
     });
   });
 
+  describe('deriveTurnActivitiesFromItems', () => {
+    it('should include memory lifecycle system messages in turn activities', () => {
+      const turnId = 'turn-memory-1';
+      const now = Date.now();
+      const activities = deriveTurnActivitiesFromItems(
+        [
+          {
+            id: turnId,
+            kind: 'user_message',
+            content: 'remember this',
+            turnId,
+            timestamp: now,
+          } as any,
+          {
+            id: 'memory-event-1',
+            kind: 'system_message',
+            content: 'Retrieved relevant memory evidence.',
+            metadata: {
+              eventType: 'memory:retrieved',
+              query: 'remember',
+              count: 4,
+              limit: 8,
+            },
+            turnId,
+            timestamp: now + 5,
+          } as any,
+        ],
+        [],
+        [],
+      );
+
+      const memoryActivity = activities[turnId]?.find((activity) => activity.type === 'memory');
+      expect(memoryActivity).toBeDefined();
+      expect(memoryActivity?.memory?.eventType).toBe('memory:retrieved');
+      expect(memoryActivity?.memory?.summary).toContain('Retrieved');
+    });
+  });
+
   describe('permission handling', () => {
     it('should add permission requests', () => {
       const permission = {
@@ -214,6 +261,141 @@ describe('chat-store', () => {
 
       const state = useChatStore.getState().getSessionState('session-1');
       expect(state.pendingQuestions).toHaveLength(0);
+    });
+  });
+
+  describe('stream stall recovery', () => {
+    it('should mark a run as stalled with recoverable metadata', () => {
+      useChatStore.getState().ensureSession('session-1');
+
+      useChatStore.getState().markRunStalled('session-1', {
+        runId: 'run-123',
+        reason: 'No stream updates for 20s',
+        stalledAt: Date.now(),
+        recoverable: true,
+      });
+
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.streamStall.isStalled).toBe(true);
+      expect(state.streamStall.runId).toBe('run-123');
+      expect(state.streamStall.reason).toContain('No stream updates');
+      expect(state.streamStall.recoverable).toBe(true);
+    });
+
+    it('should recover stalled runs with one command', async () => {
+      useChatStore.getState().ensureSession('session-1');
+      useChatStore.getState().markRunStalled('session-1', {
+        runId: 'run-123',
+        reason: 'stalled',
+        recoverable: true,
+      });
+
+      setMockInvokeResponse('agent_resume_run', { ok: true });
+
+      const recovered = await useChatStore.getState().recoverStalledRun('session-1');
+
+      expect(recovered).toBe(true);
+      expect(invoke).toHaveBeenCalledWith('agent_resume_run', {
+        sessionId: 'session-1',
+        runId: 'run-123',
+      });
+
+      const state = useChatStore.getState().getSessionState('session-1');
+      expect(state.streamStall.isStalled).toBe(false);
+      expect(state.streamStall.reason).toBeNull();
+      expect(state.isStreaming).toBe(true);
+      expect(state.isThinking).toBe(true);
+    });
+
+    it('should fail recovery when no stalled run id exists', async () => {
+      useChatStore.getState().ensureSession('session-1');
+
+      const recovered = await useChatStore.getState().recoverStalledRun('session-1');
+
+      expect(recovered).toBe(false);
+      expect(useChatStore.getState().getSessionState('session-1').error).toContain(
+        'No recoverable stalled run',
+      );
+    });
+  });
+
+  describe('durable pending-work persistence', () => {
+    it('should build and hydrate a durable snapshot preserving queue and pending items', () => {
+      useChatStore.getState().ensureSession('session-1');
+      const now = Date.now();
+
+      useChatStore.getState().addPermissionRequest('session-1', {
+        id: 'perm-1',
+        sessionId: 'session-1',
+        type: 'file_read',
+        resource: '/tmp/a',
+        reason: 'check file',
+        createdAt: now,
+      } as any);
+      useChatStore.getState().addQuestion('session-1', {
+        id: 'q-1',
+        sessionId: 'session-1',
+        question: 'Proceed?',
+        options: [{ label: 'Yes' }, { label: 'No' }],
+        createdAt: now,
+      });
+      useChatStore
+        .getState()
+        .updateMessageQueue('session-1', [{ id: 'mq-1', content: 'queued', queuedAt: now }]);
+      useChatStore.getState().markRunStalled('session-1', {
+        runId: 'run-1',
+        reason: 'stalled',
+        recoverable: true,
+      });
+
+      const session = useChatStore.getState().getSessionState('session-1');
+      const snapshot = buildDurableSessionSnapshot(session);
+      const hydrated = hydrateSessionFromSnapshot(snapshot);
+
+      expect(hydrated.pendingPermissions).toHaveLength(1);
+      expect(hydrated.pendingQuestions).toHaveLength(1);
+      expect(hydrated.messageQueue).toHaveLength(1);
+      expect(hydrated.streamStall.runId).toBe('run-1');
+      expect(hydrated.streamStall.isStalled).toBe(true);
+    });
+
+    it('should merge persisted durable sessions into current state defaults', () => {
+      const merged = mergePersistedChatState(
+        {
+          sessions: {
+            'session-restore': {
+              pendingPermissions: [
+                {
+                  id: 'perm-restore',
+                  sessionId: 'session-restore',
+                  type: 'file_write',
+                  resource: '/tmp/r',
+                  createdAt: Date.now(),
+                },
+              ],
+              pendingQuestions: [],
+              messageQueue: [{ id: 'q-restore', content: 'queued', queuedAt: Date.now() }],
+              streamStall: {
+                isStalled: true,
+                stalledAt: Date.now(),
+                runId: 'run-restore',
+                reason: 'restore',
+                recoverable: true,
+                lastActivityAt: Date.now(),
+              },
+              lastUpdatedAt: Date.now(),
+            },
+          },
+        },
+        useChatStore.getState(),
+      );
+
+      expect(merged.sessions['session-restore']).toBeDefined();
+      expect(merged.sessions['session-restore']?.pendingPermissions).toHaveLength(1);
+      expect(merged.sessions['session-restore']?.messageQueue).toHaveLength(1);
+      expect(merged.sessions['session-restore']?.streamStall.runId).toBe('run-restore');
+      expect(merged.sessions['session-restore']?.isStreaming).toBe(false);
+      expect(merged.sessions['session-restore']?.chatItems).toEqual([]);
     });
   });
 

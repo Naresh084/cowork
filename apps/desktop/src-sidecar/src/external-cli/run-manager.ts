@@ -130,6 +130,14 @@ export class ExternalCliRunManager extends EventEmitter {
       );
     }
 
+    if (availabilityEntry.binaryTrust === 'untrusted') {
+      throw new ExternalCliError(
+        'CLI_PROVIDER_BLOCKED',
+        availabilityEntry.trustReason
+          || `${input.provider} CLI binary failed trust policy checks.`,
+      );
+    }
+
     if (!providerConfig.enabled) {
       throw new ExternalCliError(
         'CLI_DISABLED_IN_SETTINGS',

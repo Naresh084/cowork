@@ -128,6 +128,14 @@ const PROFILES: Record<ToolProfile, { allow: string[]; deny: string[] }> = {
     allow: ['group:network', 'group:fs', 'group:memory', 'group:agents_md', 'deep_research', 'web_search', 'google_grounded_search', 'web_fetch'],
     deny: ['group:shell', 'group:media', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'deep_memory_delete', 'deep_memory_create', 'deep_memory_update'],  // Research is read-only for memories
   },
+  enterprise_balanced: {
+    allow: ['group:fs', 'group:network', 'group:tasks', 'group:memory', 'web_search', 'web_fetch', 'group:agents_md'],
+    deny: ['group:media', 'group:computer', 'delete_file', 'deep_memory_delete'],
+  },
+  enterprise_strict: {
+    allow: ['read_file', 'Read', 'glob', 'Glob', 'ls', 'LS', 'grep', 'Grep', 'web_search'],
+    deny: ['group:shell', 'group:network', 'group:media', 'group:computer', 'write_file', 'Write', 'edit_file', 'Edit', 'delete_file', 'deep_research'],
+  },
   full: {
     allow: ['*'],
     deny: [],
@@ -282,6 +290,7 @@ export class ToolPolicyService {
         allowed: false,
         action: 'deny',
         reason: `Tool "${toolName}" is globally denied`,
+        reasonCode: 'global_deny',
       };
     }
 
@@ -291,6 +300,7 @@ export class ToolPolicyService {
         allowed: true,
         action: 'allow',
         reason: `Tool "${toolName}" is globally allowed`,
+        reasonCode: 'global_allow',
       };
     }
 
@@ -302,6 +312,7 @@ export class ToolPolicyService {
           allowed: false,
           action: 'deny',
           reason: `MCP provider "${provider}" is disabled`,
+          reasonCode: 'provider_disabled',
         };
       }
       if (settings.deniedTools?.includes(toolName)) {
@@ -309,6 +320,7 @@ export class ToolPolicyService {
           allowed: false,
           action: 'deny',
           reason: `Tool "${toolName}" is denied for provider "${provider}"`,
+          reasonCode: 'provider_tool_denied',
         };
       }
       if (settings.allowedTools && !settings.allowedTools.includes(toolName)) {
@@ -316,6 +328,7 @@ export class ToolPolicyService {
           allowed: false,
           action: 'deny',
           reason: `Tool "${toolName}" is not in allowed list for provider "${provider}"`,
+          reasonCode: 'provider_allowlist_miss',
         };
       }
     }
@@ -327,11 +340,13 @@ export class ToolPolicyService {
       if (this.ruleMatchesTool(rule, toolName)) {
         const conditionResult = this.evaluateConditions(rule, context);
         if (conditionResult.matches) {
+          const reasonCode = rule.action === 'allow' ? 'rule_allow' : rule.action === 'deny' ? 'rule_deny' : undefined;
           return {
             allowed: rule.action === 'allow',
             action: rule.action,
             matchedRule: rule,
             reason: conditionResult.reason,
+            reasonCode,
           };
         }
       }
@@ -345,6 +360,7 @@ export class ToolPolicyService {
           allowed: false,
           action: 'deny',
           reason: `Tool "${toolName}" denied by profile "${this.policy.profile}"`,
+          reasonCode: 'profile_deny',
         };
       }
       if (this.matchesToolList(toolName, profileDefaults.allow)) {
@@ -352,6 +368,7 @@ export class ToolPolicyService {
           allowed: true,
           action: 'allow',
           reason: `Tool "${toolName}" allowed by profile "${this.policy.profile}"`,
+          reasonCode: 'profile_allow',
         };
       }
     }
@@ -361,6 +378,7 @@ export class ToolPolicyService {
       allowed: false,
       action: 'ask',
       reason: `No policy rule found for tool "${toolName}"`,
+      reasonCode: 'default_ask',
     };
   }
 
@@ -402,7 +420,7 @@ export class ToolPolicyService {
   private evaluateConditions(
     rule: ToolRule,
     context: ToolCallContext
-  ): { matches: boolean; reason: string } {
+  ): { matches: boolean; reason: string; reasonCode?: string } {
     const conditions = rule.conditions;
     if (!conditions) {
       return { matches: true, reason: `Rule matches tool "${context.toolName}"` };
@@ -411,7 +429,11 @@ export class ToolPolicyService {
     // Check session type
     if (conditions.sessionTypes && conditions.sessionTypes.length > 0) {
       if (!conditions.sessionTypes.includes(context.sessionType)) {
-        return { matches: false, reason: 'Session type mismatch' };
+        return {
+          matches: false,
+          reason: 'Session type mismatch',
+          reasonCode: 'condition_session_mismatch',
+        };
       }
     }
 
@@ -424,6 +446,7 @@ export class ToolPolicyService {
             return {
               matches: true,
               reason: `Path "${pathArg}" matches exclude pattern "${pattern}"`,
+              reasonCode: 'condition_path_excluded',
             };
           }
         }
@@ -433,7 +456,11 @@ export class ToolPolicyService {
           micromatch.isMatch(pathArg, pattern)
         );
         if (!matchesPath) {
-          return { matches: false, reason: 'Path does not match allowed patterns' };
+          return {
+            matches: false,
+            reason: 'Path does not match allowed patterns',
+            reasonCode: 'condition_path_not_allowed',
+          };
         }
       }
     }
@@ -447,6 +474,7 @@ export class ToolPolicyService {
             return {
               matches: true,
               reason: `Command matches denied pattern "${pattern}"`,
+              reasonCode: 'condition_command_denied',
             };
           }
         }
@@ -456,7 +484,11 @@ export class ToolPolicyService {
           this.commandMatches(commandArg, pattern)
         );
         if (!matchesCommand) {
-          return { matches: false, reason: 'Command does not match allowed patterns' };
+          return {
+            matches: false,
+            reason: 'Command does not match allowed patterns',
+            reasonCode: 'condition_command_not_allowed',
+          };
         }
       }
     }
@@ -464,7 +496,11 @@ export class ToolPolicyService {
     // Check provider
     if (conditions.providers && conditions.providers.length > 0) {
       if (!context.provider || !conditions.providers.includes(context.provider)) {
-        return { matches: false, reason: 'Provider mismatch' };
+        return {
+          matches: false,
+          reason: 'Provider mismatch',
+          reasonCode: 'condition_provider_mismatch',
+        };
       }
     }
 

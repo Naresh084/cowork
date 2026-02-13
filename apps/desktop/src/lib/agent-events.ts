@@ -40,6 +40,61 @@ function parseTauriEvent(
           : never) ?? null,
       };
 
+    case 'run:checkpoint':
+      return {
+        type: 'run:checkpoint',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        checkpointIndex: (data.checkpointIndex as number) ?? 0,
+        stage: (data.stage as string) ?? 'unknown',
+      };
+
+    case 'run:recovered':
+      return {
+        type: 'run:recovered',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        checkpointCount: data.checkpointCount as number | undefined,
+      };
+
+    case 'run:fallback_applied':
+      return {
+        type: 'run:fallback_applied',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        fallback: (data.fallback as string) ?? 'unknown',
+        reason: data.reason as string | undefined,
+      };
+
+    case 'run:stalled':
+      return {
+        type: 'run:stalled',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        reason: data.reason as string | undefined,
+        stalledAt: data.stalledAt as number | undefined,
+      };
+
+    case 'run:health':
+      return {
+        type: 'run:health',
+        sessionId,
+        health: ((data.health as 'healthy' | 'degraded' | 'unhealthy') ?? 'degraded'),
+        reliabilityScore: (data.reliabilityScore as number) ?? 0,
+        counters: {
+          streamStarts: ((data.counters as { streamStarts?: number } | undefined)?.streamStarts as number) ?? 0,
+          streamDone: ((data.counters as { streamDone?: number } | undefined)?.streamDone as number) ?? 0,
+          checkpoints: ((data.counters as { checkpoints?: number } | undefined)?.checkpoints as number) ?? 0,
+          runRecovered: ((data.counters as { runRecovered?: number } | undefined)?.runRecovered as number) ?? 0,
+          runStalled: ((data.counters as { runStalled?: number } | undefined)?.runStalled as number) ?? 0,
+          fallbackApplied: ((data.counters as { fallbackApplied?: number } | undefined)?.fallbackApplied as number) ?? 0,
+          errors: ((data.counters as { errors?: number } | undefined)?.errors as number) ?? 0,
+          toolErrors: ((data.counters as { toolErrors?: number } | undefined)?.toolErrors as number) ?? 0,
+          lastUpdatedAt: ((data.counters as { lastUpdatedAt?: number } | undefined)?.lastUpdatedAt as number) ?? Date.now(),
+        },
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
     case 'tool:start':
       return {
         type: 'tool:start',
@@ -61,6 +116,104 @@ function parseTauriEvent(
         }
           ? R
           : never,
+      };
+
+    case 'branch:created':
+      return {
+        type: 'branch:created',
+        sessionId,
+        branchId: (data.branchId as string) ?? '',
+        name: (data.name as string) ?? 'Branch',
+        fromTurnId: data.fromTurnId as string | undefined,
+        parentBranchId: data.parentBranchId as string | undefined,
+        activeBranchId: data.activeBranchId as string | undefined,
+      };
+
+    case 'branch:merged':
+      return {
+        type: 'branch:merged',
+        sessionId,
+        mergeId: (data.mergeId as string) ?? '',
+        sourceBranchId: (data.sourceBranchId as string) ?? '',
+        targetBranchId: (data.targetBranchId as string) ?? '',
+        strategy: (data.strategy as string) ?? 'auto',
+        status: ((data.status as 'merged' | 'conflict' | 'failed') ?? 'failed'),
+        activeBranchId: data.activeBranchId as string | undefined,
+      };
+
+    case 'workflow:activated':
+      return {
+        type: 'workflow:activated',
+        sessionId,
+        workflowId: (data.workflowId as string) ?? '',
+        triggerType: data.triggerType as string | undefined,
+      };
+
+    case 'workflow:fallback':
+      return {
+        type: 'workflow:fallback',
+        sessionId,
+        workflowId: (data.workflowId as string) ?? '',
+        reason: data.reason as string | undefined,
+      };
+
+    case 'memory:retrieved':
+      return {
+        type: 'memory:retrieved',
+        sessionId,
+        queryId: (data.queryId as string) ?? '',
+        query: (data.query as string) ?? '',
+        count: (data.count as number) ?? 0,
+        limit: (data.limit as number) ?? 0,
+      };
+
+    case 'memory:consolidated':
+      return {
+        type: 'memory:consolidated',
+        sessionId,
+        strategy: data.strategy as string | undefined,
+        queryId: data.queryId as string | undefined,
+        atomId: data.atomId as string | undefined,
+        feedback: data.feedback as string | undefined,
+        timestamp: data.timestamp as number | undefined,
+      };
+
+    case 'memory:conflict_detected':
+      return {
+        type: 'memory:conflict_detected',
+        sessionId,
+        atomId: (data.atomId as string) ?? '',
+        reason: (data.reason as string) ?? 'unknown',
+      };
+
+    case 'benchmark:progress':
+      return {
+        type: 'benchmark:progress',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        suiteId: (data.suiteId as string) ?? '',
+        profile: (data.profile as string) ?? 'default',
+        progress: (data.progress as number) ?? 0,
+        status: (data.status as string) ?? 'running',
+      };
+
+    case 'benchmark:score_updated':
+      return {
+        type: 'benchmark:score_updated',
+        sessionId,
+        runId: (data.runId as string) ?? '',
+        suiteId: (data.suiteId as string) ?? '',
+        scorecard: (data.scorecard as Record<string, unknown>) ?? {},
+      };
+
+    case 'release_gate:status':
+      return {
+        type: 'release_gate:status',
+        sessionId,
+        status: ((data.status as 'pass' | 'fail' | 'warning') ?? 'warning'),
+        reasons: (data.reasons as string[]) ?? [],
+        scorecard: data.scorecard as Record<string, unknown> | undefined,
+        evaluatedAt: (data.evaluatedAt as number) ?? Date.now(),
       };
 
     case 'permission:request':
@@ -186,6 +339,66 @@ function parseTauriEvent(
         sessionId,
         status: (data.status as string) ?? 'running',
         progress: (data.progress as number) ?? 0,
+      };
+
+    case 'research:evidence':
+      return {
+        type: 'research:evidence',
+        sessionId,
+        query: (data.query as string) ?? '',
+        totalSources: (data.totalSources as number) ?? 0,
+        avgConfidence: (data.avgConfidence as number) ?? 0,
+        topSources:
+          (data.topSources as Array<{
+            title?: string;
+            url?: string;
+            confidence?: number;
+            rank?: number;
+          }> | undefined)?.map((source, index) => ({
+            title: typeof source?.title === 'string' ? source.title : `Source ${index + 1}`,
+            url: typeof source?.url === 'string' ? source.url : '',
+            confidence: typeof source?.confidence === 'number' ? source.confidence : 0,
+            rank: typeof source?.rank === 'number' ? source.rank : index + 1,
+          })) ?? [],
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'browser:progress':
+      return {
+        type: 'browser:progress',
+        sessionId,
+        step: (data.step as number) ?? 0,
+        maxSteps: (data.maxSteps as number) ?? 0,
+        status:
+          ((data.status as 'running' | 'blocked' | 'completed' | 'recovered' | undefined) ?? 'running'),
+        url: data.url as string | undefined,
+        detail: data.detail as string | undefined,
+        lastAction: data.lastAction as string | undefined,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'browser:checkpoint':
+      return {
+        type: 'browser:checkpoint',
+        sessionId,
+        checkpointPath: (data.checkpointPath as string) ?? '',
+        step: (data.step as number) ?? 0,
+        maxSteps: (data.maxSteps as number) ?? 0,
+        url: data.url as string | undefined,
+        recoverable: (data.recoverable as boolean) ?? true,
+        timestamp: (data.timestamp as number) ?? Date.now(),
+      };
+
+    case 'browser:blocker':
+      return {
+        type: 'browser:blocker',
+        sessionId,
+        reason: (data.reason as string) ?? 'Browser automation blocked',
+        step: (data.step as number) ?? 0,
+        maxSteps: (data.maxSteps as number) ?? 0,
+        url: data.url as string | undefined,
+        checkpointPath: data.checkpointPath as string | undefined,
+        timestamp: (data.timestamp as number) ?? Date.now(),
       };
 
     case 'error':
@@ -432,11 +645,26 @@ export function subscribeToAgentEvents(
     'agent:stream:start',
     'agent:stream:chunk',
     'agent:stream:done',
+    'agent:run:checkpoint',
+    'agent:run:recovered',
+    'agent:run:fallback_applied',
+    'agent:run:stalled',
+    'agent:run:health',
     'agent:thinking:start',
     'agent:thinking:chunk',
     'agent:thinking:done',
     'agent:tool:start',
     'agent:tool:result',
+    'agent:branch:created',
+    'agent:branch:merged',
+    'agent:workflow:activated',
+    'agent:workflow:fallback',
+    'agent:memory:retrieved',
+    'agent:memory:consolidated',
+    'agent:memory:conflict_detected',
+    'agent:benchmark:progress',
+    'agent:benchmark:score_updated',
+    'agent:release_gate:status',
     'agent:permission:request',
     'agent:permission:resolved',
     'agent:question:ask',
@@ -451,6 +679,10 @@ export function subscribeToAgentEvents(
     'agent:context:update',
     'agent:context:usage',
     'agent:research:progress',
+    'agent:research:evidence',
+    'agent:browser:progress',
+    'agent:browser:checkpoint',
+    'agent:browser:blocker',
     'agent:error',
     'agent:session:updated',
     'agent:started',
@@ -520,11 +752,26 @@ export function subscribeToAllEvents(handler: AgentEventHandler): () => void {
     'agent:stream:start',
     'agent:stream:chunk',
     'agent:stream:done',
+    'agent:run:checkpoint',
+    'agent:run:recovered',
+    'agent:run:fallback_applied',
+    'agent:run:stalled',
+    'agent:run:health',
     'agent:thinking:start',
     'agent:thinking:chunk',
     'agent:thinking:done',
     'agent:tool:start',
     'agent:tool:result',
+    'agent:branch:created',
+    'agent:branch:merged',
+    'agent:workflow:activated',
+    'agent:workflow:fallback',
+    'agent:memory:retrieved',
+    'agent:memory:consolidated',
+    'agent:memory:conflict_detected',
+    'agent:benchmark:progress',
+    'agent:benchmark:score_updated',
+    'agent:release_gate:status',
     'agent:permission:request',
     'agent:permission:resolved',
     'agent:question:ask',

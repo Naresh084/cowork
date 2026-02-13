@@ -47,3 +47,6 @@ export {
 } from './Card';
 export { Spinner, SpinnerOverlay, LoadingDots } from './Spinner';
 export { ScrollArea } from './ScrollArea';
+export { TimelineBadge, type TimelineBadgeTone } from './TimelineBadge';
+export { ReliabilityLabel, type ReliabilityTone } from './ReliabilityLabel';
+export { PolicyPill, type PolicyActionTone } from './PolicyPill';

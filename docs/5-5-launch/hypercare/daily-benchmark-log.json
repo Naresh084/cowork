@@ -1,0 +1,254 @@
+{
+  "generatedAt": 1770937881884,
+  "durationDays": 30,
+  "profile": "release",
+  "suiteId": "twin-track-core",
+  "averages": {
+    "benchmarkScore": 0.9405127624081756,
+    "featureChecklistScore": 1,
+    "finalScore": 0.9583589336857229
+  },
+  "allRunsGatePass": true,
+  "runs": [
+    {
+      "day": 1,
+      "runId": "hypercare-day-01",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 2,
+      "runId": "hypercare-day-02",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 3,
+      "runId": "hypercare-day-03",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 4,
+      "runId": "hypercare-day-04",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 5,
+      "runId": "hypercare-day-05",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 6,
+      "runId": "hypercare-day-06",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 7,
+      "runId": "hypercare-day-07",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 8,
+      "runId": "hypercare-day-08",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 9,
+      "runId": "hypercare-day-09",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 10,
+      "runId": "hypercare-day-10",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 11,
+      "runId": "hypercare-day-11",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 12,
+      "runId": "hypercare-day-12",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 13,
+      "runId": "hypercare-day-13",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 14,
+      "runId": "hypercare-day-14",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 15,
+      "runId": "hypercare-day-15",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 16,
+      "runId": "hypercare-day-16",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 17,
+      "runId": "hypercare-day-17",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 18,
+      "runId": "hypercare-day-18",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 19,
+      "runId": "hypercare-day-19",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 20,
+      "runId": "hypercare-day-20",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 21,
+      "runId": "hypercare-day-21",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 22,
+      "runId": "hypercare-day-22",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 23,
+      "runId": "hypercare-day-23",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 24,
+      "runId": "hypercare-day-24",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 25,
+      "runId": "hypercare-day-25",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 26,
+      "runId": "hypercare-day-26",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 27,
+      "runId": "hypercare-day-27",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 28,
+      "runId": "hypercare-day-28",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 29,
+      "runId": "hypercare-day-29",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    },
+    {
+      "day": 30,
+      "runId": "hypercare-day-30",
+      "benchmarkScore": 0.9405127624081755,
+      "featureChecklistScore": 1,
+      "finalScore": 0.9583589336857228,
+      "allDimensionsPassed": true
+    }
+  ]
+}

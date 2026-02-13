@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, useCallback } from 'react';
+import React, { useState, useEffect, Suspense, useCallback, useMemo, useRef } from 'react';
 import {
   X,
   ZoomIn,
@@ -71,6 +71,9 @@ interface PreviewPanelProps {
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
 }
+
+const VIRTUALIZED_CONTENT_LINE_THRESHOLD = 1200;
+const VIRTUALIZED_CONTENT_CHAR_THRESHOLD = 200_000;
 
 // Detect file type from name/mime
 function detectFileType(file: PreviewFile): FileType {
@@ -274,9 +277,11 @@ export function PreviewPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        <Suspense fallback={<PreviewLoading />}>
-          <PreviewContent file={file} fileType={fileType} />
-        </Suspense>
+        <PreviewErrorBoundary fileKey={file.id}>
+          <Suspense fallback={<PreviewLoading />}>
+            <PreviewContent file={file} fileType={fileType} />
+          </Suspense>
+        </PreviewErrorBoundary>
       </div>
     </div>
   );
@@ -291,6 +296,77 @@ function PreviewLoading() {
       </div>
     </div>
   );
+}
+
+interface PreviewErrorBoundaryProps {
+  fileKey: string;
+  children: React.ReactNode;
+}
+
+interface PreviewErrorBoundaryState {
+  hasError: boolean;
+  message: string | null;
+}
+
+class PreviewErrorBoundary extends React.Component<
+  PreviewErrorBoundaryProps,
+  PreviewErrorBoundaryState
+> {
+  state: PreviewErrorBoundaryState = {
+    hasError: false,
+    message: null,
+  };
+
+  static getDerivedStateFromError(error: unknown): PreviewErrorBoundaryState {
+    return {
+      hasError: true,
+      message: error instanceof Error ? error.message : 'Preview rendering failed.',
+    };
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.error('[PreviewPanel] Preview render crashed', error);
+  }
+
+  componentDidUpdate(prevProps: PreviewErrorBoundaryProps): void {
+    if (prevProps.fileKey !== this.props.fileKey && this.state.hasError) {
+      this.setState({
+        hasError: false,
+        message: null,
+      });
+    }
+  }
+
+  handleReset = () => {
+    this.setState({
+      hasError: false,
+      message: null,
+    });
+  };
+
+  render(): React.ReactNode {
+    if (!this.state.hasError) {
+      return this.props.children;
+    }
+
+    return (
+      <div className="h-full flex items-center justify-center px-6">
+        <div className="max-w-md rounded-xl border border-[#FF5449]/30 bg-[#FF5449]/10 p-4 text-center">
+          <p className="text-sm font-medium text-[#FECACA]">Preview failed to render</p>
+          <p className="mt-1 text-xs text-white/70 break-words">
+            {this.state.message || 'Unexpected rendering error.'}
+          </p>
+          <button
+            type="button"
+            onClick={this.handleReset}
+            className="mt-3 h-8 rounded-md border border-white/[0.15] bg-white/[0.06] px-3 text-xs text-white/85 hover:bg-white/[0.1]"
+          >
+            Retry preview
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 interface PreviewContentProps {
@@ -518,6 +594,65 @@ function PDFPreview({ file }: { file: PreviewFile }) {
 // ============================================
 // SPREADSHEET PREVIEW (CSV, XLSX)
 // ============================================
+function base64ToBytes(base64: string): Uint8Array {
+  const normalized = base64.includes(',') ? base64.split(',')[1] || '' : base64;
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function parseDelimitedContent(content: string, delimiter: string): string[][] {
+  const text = content.replace(/^\uFEFF/, '');
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = index + 1 < text.length ? text[index + 1] : '';
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && char === delimiter) {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+
+    if (!inQuotes && (char === '\n' || char === '\r')) {
+      if (char === '\r' && next === '\n') {
+        index += 1;
+      }
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 function SpreadsheetPreview({ file }: { file: PreviewFile }) {
   const [data, setData] = useState<string[][]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -527,29 +662,60 @@ function SpreadsheetPreview({ file }: { file: PreviewFile }) {
     const loadSpreadsheet = async () => {
       try {
         setLoading(true);
-        const XLSX = await import('xlsx');
+        const extension = file.name.split('.').pop()?.toLowerCase() || '';
 
-        let workbook;
-        if (file.content) {
-          // Base64 or text content
-          if (file.name.endsWith('.csv')) {
-            workbook = XLSX.read(file.content, { type: 'string' });
-          } else {
-            workbook = XLSX.read(file.content, { type: 'base64' });
+        if (extension === 'csv' || extension === 'tsv') {
+          let textContent = file.content || '';
+          if (!textContent && (file.url || file.path)) {
+            const response = await fetch(file.url || file.path || '');
+            if (!response.ok) {
+              throw new Error(`Failed to fetch spreadsheet: ${response.status}`);
+            }
+            textContent = await response.text();
           }
-        } else if (file.url || file.path) {
-          const response = await fetch(file.url || file.path || '');
-          const arrayBuffer = await response.arrayBuffer();
-          workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        } else {
-          throw new Error('No content to display');
+          if (!textContent) {
+            throw new Error('No content to display');
+          }
+
+          const delimiter = extension === 'tsv' ? '\t' : ',';
+          setData(parseDelimitedContent(textContent, delimiter));
+          setError(null);
+          return;
         }
 
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json<string[]>(firstSheet, {
-          header: 1,
-        });
-        setData(jsonData);
+        if (extension === 'xlsx') {
+          const readXlsxModule = await import('read-excel-file');
+          const readXlsxFile = readXlsxModule.default;
+
+          let blob: Blob;
+          if (file.content) {
+            const bytes = base64ToBytes(file.content);
+            const arrayBuffer = Uint8Array.from(bytes).buffer as ArrayBuffer;
+            blob = new Blob([arrayBuffer], {
+              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            });
+          } else if (file.url || file.path) {
+            const response = await fetch(file.url || file.path || '');
+            if (!response.ok) {
+              throw new Error(`Failed to fetch spreadsheet: ${response.status}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            blob = new Blob([arrayBuffer], {
+              type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            });
+          } else {
+            throw new Error('No content to display');
+          }
+
+          const rows = await readXlsxFile(blob);
+          setData(rows.map((row) => row.map((cell) => (cell == null ? '' : String(cell)))));
+          setError(null);
+          return;
+        }
+
+        throw new Error(
+          'Spreadsheet preview currently supports .csv, .tsv, and .xlsx files.',
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load spreadsheet');
       } finally {
@@ -727,6 +893,10 @@ function CodePreview({ file }: { file: PreviewFile }) {
   const [copied, setCopied] = useState(false);
   const content = file.content || '';
   const language = getLanguage(file.name);
+  const lines = useMemo(() => content.split('\n'), [content]);
+  const useVirtualizedView =
+    lines.length >= VIRTUALIZED_CONTENT_LINE_THRESHOLD ||
+    content.length >= VIRTUALIZED_CONTENT_CHAR_THRESHOLD;
 
   const handleCopy = async () => {
     try {
@@ -769,7 +939,16 @@ function CodePreview({ file }: { file: PreviewFile }) {
 
       {/* Code */}
       <div className="flex-1 overflow-auto">
-        <CodeBlock code={content} language={language} showLineNumbers />
+        {useVirtualizedView ? (
+          <div className="h-full flex flex-col">
+            <div className="px-3 py-1.5 border-b border-white/[0.06] bg-[#111218] text-[11px] text-white/55">
+              Large file mode enabled. Rendering a virtualized text view.
+            </div>
+            <VirtualizedTextViewer lines={lines} showLineNumbers />
+          </div>
+        ) : (
+          <CodeBlock code={content} language={language} showLineNumbers />
+        )}
       </div>
     </div>
   );
@@ -780,12 +959,86 @@ function CodePreview({ file }: { file: PreviewFile }) {
 // ============================================
 function TextPreview({ file }: { file: PreviewFile }) {
   const content = file.content || '';
+  const lines = useMemo(() => content.split('\n'), [content]);
+  const useVirtualizedView =
+    lines.length >= VIRTUALIZED_CONTENT_LINE_THRESHOLD ||
+    content.length >= VIRTUALIZED_CONTENT_CHAR_THRESHOLD;
+
+  if (useVirtualizedView) {
+    return <VirtualizedTextViewer lines={lines} showLineNumbers={false} />;
+  }
 
   return (
     <div className="h-full overflow-auto p-4">
       <pre className="text-sm text-white/70 whitespace-pre-wrap font-mono">
         {content}
       </pre>
+    </div>
+  );
+}
+
+interface VirtualizedTextViewerProps {
+  lines: string[];
+  showLineNumbers?: boolean;
+}
+
+function VirtualizedTextViewer({
+  lines,
+  showLineNumbers = true,
+}: VirtualizedTextViewerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
+  const lineHeight = 20;
+  const overscan = 10;
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateHeight = () => {
+      setContainerHeight(container.clientHeight);
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const visibleLineCount = Math.max(1, Math.ceil(containerHeight / lineHeight));
+  const startLine = Math.max(0, Math.floor(scrollTop / lineHeight) - overscan);
+  const endLine = Math.min(lines.length, startLine + visibleLineCount + overscan * 2);
+  const visibleLines = lines.slice(startLine, endLine);
+
+  return (
+    <div
+      ref={containerRef}
+      className="h-full overflow-auto bg-[#0D0D0F] font-mono text-[12px] text-white/75"
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+    >
+      <div style={{ height: `${lines.length * lineHeight}px`, position: 'relative' }}>
+        <div style={{ transform: `translateY(${startLine * lineHeight}px)` }}>
+          {visibleLines.map((line, index) => {
+            const lineNumber = startLine + index + 1;
+            return (
+              <div
+                key={`line-${lineNumber}`}
+                className="flex min-w-max items-start border-b border-white/[0.02] leading-5"
+                style={{ height: `${lineHeight}px` }}
+              >
+                {showLineNumbers ? (
+                  <span className="w-14 shrink-0 select-none border-r border-white/[0.06] px-2 text-right text-[10px] text-white/35">
+                    {lineNumber}
+                  </span>
+                ) : null}
+                <span className="px-3 whitespace-pre">{line || ' '}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

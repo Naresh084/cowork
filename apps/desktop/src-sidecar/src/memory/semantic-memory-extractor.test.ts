@@ -112,4 +112,92 @@ describe('SemanticMemoryExtractor', () => {
     expect(result.memories[0].group).toBe('context');
     expect(result.memories[0].content).toContain('pnpm');
   });
+
+  it('filters contradictory candidates by keeping the highest-confidence polarity', async () => {
+    const extractor = createSemanticMemoryExtractor({
+      style: 'aggressive',
+      invokeModel: async () =>
+        JSON.stringify({
+          candidates: [
+            {
+              group: 'preferences',
+              content: 'User prefers verbose explanations for implementation details.',
+              confidence: 0.92,
+              stable: true,
+              scope: 'user',
+              sensitive: false,
+            },
+            {
+              group: 'preferences',
+              content: 'User does not prefer verbose explanations for implementation details.',
+              confidence: 0.75,
+              stable: true,
+              scope: 'user',
+              sensitive: false,
+            },
+          ],
+        }),
+    });
+
+    const result = await extractor.extract([
+      message('user', 'Please keep implementation explanations detailed.'),
+    ]);
+
+    expect(result.memories).toHaveLength(1);
+    expect(result.memories[0].content.toLowerCase()).toContain('prefers verbose');
+  });
+
+  it('filters sensitive candidates based on heuristic patterns even when model marks non-sensitive', async () => {
+    const extractor = createSemanticMemoryExtractor({
+      style: 'aggressive',
+      invokeModel: async () =>
+        JSON.stringify({
+          candidates: [
+            {
+              group: 'instructions',
+              content: 'API key is sk-abc1234567890123456789 and should be reused for tests.',
+              confidence: 0.95,
+              stable: true,
+              scope: 'project',
+              sensitive: false,
+            },
+          ],
+        }),
+    });
+
+    const result = await extractor.extract([
+      message('user', 'Store this key for future runs.'),
+    ]);
+
+    expect(result.memories).toHaveLength(0);
+  });
+
+  it('keeps benign candidates with <1% false-positive sensitivity filtering', async () => {
+    const benignCandidates = Array.from({ length: 120 }, (_, index) => ({
+      group: 'context',
+      content: `topic${index} workflow preference keeps command output concise and structured for repo track ${index}.`,
+      confidence: 0.93,
+      stable: true,
+      scope: 'project',
+      sensitive: false,
+    }));
+
+    const extractor = createSemanticMemoryExtractor({
+      style: 'aggressive',
+      maxPerConversation: 200,
+      maxAcceptedPerTurn: 200,
+      confidenceThreshold: 0.5,
+      invokeModel: async () =>
+        JSON.stringify({
+          candidates: benignCandidates,
+        }),
+    });
+
+    const result = await extractor.extract([
+      message('user', 'Please remember standard workflow notes for this repository.'),
+    ]);
+
+    const falsePositiveRate = (benignCandidates.length - result.memories.length) / benignCandidates.length;
+    expect(falsePositiveRate).toBeLessThan(0.01);
+  });
 });

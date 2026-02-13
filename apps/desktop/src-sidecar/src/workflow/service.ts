@@ -20,8 +20,16 @@ import { generateId } from '@gemini-cowork/shared';
 import type { AgentRunner } from '../agent-runner.js';
 import { compileWorkflowDefinition, validateWorkflowDefinition } from './compiler.js';
 import { WorkflowEngine } from './engine.js';
-import { WorkflowTriggerRouter } from './trigger-router.js';
+import {
+  WorkflowTriggerRouter,
+  type ChatTriggerCandidate,
+  type TriggerActivationResult,
+} from './trigger-router.js';
 import { buildWorkflowDraftFromPrompt } from './draft-generator.js';
+import {
+  decodeSessionPermissionBootstrap,
+  type SessionPermissionBootstrap,
+} from '../permission-bootstrap.js';
 
 interface ScheduleTriggerRow {
   id: string;
@@ -36,6 +44,10 @@ export interface WorkflowRunWithDetails {
   run: WorkflowRun;
   nodeRuns: ReturnType<WorkflowRunRepository['getNodeRuns']>;
   events: WorkflowEvent[];
+}
+
+export interface WorkflowTriggerMatchResult extends TriggerActivationResult {
+  workflowName: string;
 }
 
 export class WorkflowService extends EventEmitter {
@@ -116,7 +128,18 @@ export class WorkflowService extends EventEmitter {
     const workingDirectory = options?.workingDirectory || process.cwd();
     const model = options?.model || null;
     const title = options?.runId ? `[workflow:${options.runId}] step` : '[workflow] step';
-    const session = await this.agentRunner!.createSession(workingDirectory, model, title, 'isolated');
+    const permissionBootstrap = options?.runId
+      ? this.getRunPermissionBootstrap(options.runId)
+      : null;
+    const session = await this.agentRunner!.createSession(
+      workingDirectory,
+      model,
+      title,
+      'isolated',
+      undefined,
+      'execute',
+      permissionBootstrap ?? undefined,
+    );
 
     const before = this.agentRunner!.getSession(session.id);
     const itemCountBefore = (before as { chatItems?: unknown[] })?.chatItems?.length ?? 0;
@@ -145,9 +168,67 @@ export class WorkflowService extends EventEmitter {
     return { content };
   }
 
+  private getRunPermissionBootstrap(runId: string): SessionPermissionBootstrap | null {
+    this.ensureInitialized();
+    const run = this.runRepository!.getById(runId);
+    if (!run) return null;
+    const definition = this.workflowRepository!.getByVersion(run.workflowId, run.workflowVersion);
+    if (!definition?.permissionsProfile) return null;
+    return decodeSessionPermissionBootstrap(definition.permissionsProfile);
+  }
+
   list(limit = 100, offset = 0): WorkflowDefinition[] {
     this.ensureInitialized();
     return this.workflowRepository!.listLatest(limit, offset);
+  }
+
+  evaluateChatTriggers(input: {
+    message: string;
+    workflowIds?: string[];
+    minConfidence?: number;
+    activationThreshold?: number;
+    maxResults?: number;
+  }): WorkflowTriggerMatchResult[] {
+    this.ensureInitialized();
+
+    const workflowFilter = new Set((input.workflowIds || []).filter(Boolean));
+    const workflows = this.workflowRepository!
+      .listLatest(1000, 0)
+      .filter((workflow) => workflow.status === 'published')
+      .filter((workflow) => workflowFilter.size === 0 || workflowFilter.has(workflow.id));
+
+    const candidates: ChatTriggerCandidate[] = [];
+    const workflowNameByTrigger = new Map<string, string>();
+
+    for (const workflow of workflows) {
+      for (const trigger of workflow.triggers) {
+        if (trigger.type !== 'chat' || !trigger.enabled) continue;
+        candidates.push({
+          workflowId: workflow.id,
+          workflowVersion: workflow.version,
+          triggerId: trigger.id,
+          phrases: trigger.phrases,
+          strictMatch: trigger.strictMatch,
+          enabled: trigger.enabled,
+        });
+        workflowNameByTrigger.set(`${workflow.id}:${trigger.id}`, workflow.name);
+      }
+    }
+
+    return this.triggerRouter
+      .evaluateChatTriggers({
+        message: input.message,
+        candidates,
+        minConfidence: input.minConfidence,
+        activationThreshold: input.activationThreshold,
+        maxResults: input.maxResults,
+      })
+      .map((result) => ({
+        ...result,
+        workflowName:
+          workflowNameByTrigger.get(`${result.workflowId}:${result.triggerId}`)
+          || result.workflowId,
+      }));
   }
 
   get(workflowId: string, version?: number): WorkflowDefinition | null {

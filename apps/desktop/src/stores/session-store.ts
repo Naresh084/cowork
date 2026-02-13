@@ -41,6 +41,29 @@ export interface SessionInfo {
   lastAccessedAt: number;
 }
 
+export interface SessionBranch {
+  id: string;
+  sessionId: string;
+  name: string;
+  status: 'active' | 'merged' | 'abandoned';
+  fromTurnId?: string;
+  parentBranchId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SessionBranchMergeResult {
+  mergeId: string;
+  sourceBranchId: string;
+  targetBranchId: string;
+  strategy: 'auto' | 'ours' | 'theirs' | 'manual';
+  status: 'merged' | 'conflict' | 'failed';
+  conflictCount: number;
+  conflicts: Array<{ id: string; path: string; reason: string; resolution?: 'ours' | 'theirs' | 'manual' }>;
+  mergedAt: number;
+  activeBranchId?: string;
+}
+
 interface SessionListPageResult {
   sessions: SessionSummary[];
   total: number;
@@ -69,6 +92,8 @@ interface SessionState {
   sessionsOffset: number;
   sessionsQuery: string;
   bootstrapEventCursor: number;
+  branchesBySession: Record<string, SessionBranch[]>;
+  activeBranchBySession: Record<string, string | null>;
 }
 
 interface SessionActions {
@@ -86,6 +111,18 @@ interface SessionActions {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
   setSessionExecutionMode: (sessionId: string, mode: ExecutionMode) => Promise<void>;
+  createBranch: (sessionId: string, branchName: string, fromTurnId?: string) => Promise<SessionBranch>;
+  mergeBranch: (
+    sessionId: string,
+    sourceBranchId: string,
+    targetBranchId: string,
+    strategy?: 'auto' | 'ours' | 'theirs' | 'manual'
+  ) => Promise<SessionBranchMergeResult>;
+  upsertBranch: (sessionId: string, branch: SessionBranch, makeActive?: boolean) => void;
+  applyBranchMerge: (sessionId: string, merge: SessionBranchMergeResult) => void;
+  getSessionBranches: (sessionId: string | null) => SessionBranch[];
+  getActiveBranchId: (sessionId: string | null) => string | null;
+  setActiveBranch: (sessionId: string, branchId: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
   clearError: () => void;
   waitForBackend: () => Promise<void>;
@@ -100,6 +137,8 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       sessionsQuery: '',
       bootstrapEventCursor: 0,
       sessions: [],
+      branchesBySession: {},
+      activeBranchBySession: {},
       activeSessionId: null,
       isLoading: false,
       hasLoaded: false,
@@ -439,6 +478,12 @@ export const useSessionStore = create<SessionState & SessionActions>()(
 
         set((state) => ({
           sessions: state.sessions.filter((s) => s.id !== sessionId),
+          branchesBySession: Object.fromEntries(
+            Object.entries(state.branchesBySession).filter(([id]) => id !== sessionId),
+          ),
+          activeBranchBySession: Object.fromEntries(
+            Object.entries(state.activeBranchBySession).filter(([id]) => id !== sessionId),
+          ),
           activeSessionId:
             state.activeSessionId === sessionId ? null : state.activeSessionId,
           sessionsTotal: Math.max(0, state.sessionsTotal - 1),
@@ -577,6 +622,153 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }
       },
 
+      createBranch: async (sessionId: string, branchName: string, fromTurnId?: string) => {
+        try {
+          const branch = await invoke<SessionBranch>('agent_branch_session', {
+            sessionId,
+            fromTurnId,
+            branchName,
+          });
+
+          const normalizedBranch: SessionBranch = {
+            ...branch,
+            sessionId: branch.sessionId || sessionId,
+            status:
+              branch.status === 'active' || branch.status === 'merged' || branch.status === 'abandoned'
+                ? branch.status
+                : 'active',
+            createdAt: branch.createdAt || Date.now(),
+            updatedAt: branch.updatedAt || Date.now(),
+          };
+          get().upsertBranch(sessionId, normalizedBranch, true);
+          return normalizedBranch;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to create branch', errorMessage);
+          throw error;
+        }
+      },
+
+      mergeBranch: async (
+        sessionId: string,
+        sourceBranchId: string,
+        targetBranchId: string,
+        strategy: 'auto' | 'ours' | 'theirs' | 'manual' = 'auto',
+      ) => {
+        try {
+          const result = await invoke<SessionBranchMergeResult>('agent_merge_branch', {
+            sessionId,
+            sourceBranchId,
+            targetBranchId,
+            strategy,
+          });
+          get().applyBranchMerge(sessionId, result);
+          return result;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to merge branch', errorMessage);
+          throw error;
+        }
+      },
+
+      upsertBranch: (sessionId: string, branch: SessionBranch, makeActive = false) => {
+        set((state) => {
+          const existing = state.branchesBySession[sessionId] || [];
+          const next = existing.some((entry) => entry.id === branch.id)
+            ? existing.map((entry) => (entry.id === branch.id ? { ...entry, ...branch } : entry))
+            : [...existing, branch];
+          const sorted = [...next].sort((a, b) => a.createdAt - b.createdAt);
+          return {
+            branchesBySession: {
+              ...state.branchesBySession,
+              [sessionId]: sorted,
+            },
+            activeBranchBySession: {
+              ...state.activeBranchBySession,
+              [sessionId]:
+                makeActive || branch.status === 'active'
+                  ? branch.id
+                  : state.activeBranchBySession[sessionId] ?? null,
+            },
+          };
+        });
+      },
+
+      applyBranchMerge: (sessionId: string, merge: SessionBranchMergeResult) => {
+        set((state) => {
+          const branches = state.branchesBySession[sessionId] || [];
+          const nowTs = Date.now();
+          const nextBranches = branches.map((branch) => {
+            if (branch.id !== merge.sourceBranchId) return branch;
+            if (merge.status !== 'merged') return branch;
+            return {
+              ...branch,
+              status: 'merged' as const,
+              updatedAt: nowTs,
+            };
+          });
+          const previousActive = state.activeBranchBySession[sessionId] ?? null;
+          const nextActive =
+            merge.activeBranchId ||
+            (previousActive === merge.sourceBranchId && merge.status === 'merged'
+              ? merge.targetBranchId
+              : previousActive);
+          return {
+            branchesBySession: {
+              ...state.branchesBySession,
+              [sessionId]: nextBranches,
+            },
+            activeBranchBySession: {
+              ...state.activeBranchBySession,
+              [sessionId]: nextActive,
+            },
+          };
+        });
+      },
+
+      getSessionBranches: (sessionId: string | null) => {
+        if (!sessionId) return [];
+        return get().branchesBySession[sessionId] || [];
+      },
+
+      getActiveBranchId: (sessionId: string | null) => {
+        if (!sessionId) return null;
+        return get().activeBranchBySession[sessionId] ?? null;
+      },
+
+      setActiveBranch: async (sessionId: string, branchId: string) => {
+        const previousActive = get().activeBranchBySession[sessionId] ?? null;
+        set((state) => ({
+          activeBranchBySession: {
+            ...state.activeBranchBySession,
+            [sessionId]: branchId,
+          },
+        }));
+        try {
+          const result = await invoke<{ activeBranchId?: string }>('agent_set_active_branch', {
+            sessionId,
+            branchId,
+          });
+          const confirmedActive = result?.activeBranchId || branchId;
+          set((state) => ({
+            activeBranchBySession: {
+              ...state.activeBranchBySession,
+              [sessionId]: confirmedActive,
+            },
+          }));
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to switch branch', errorMessage);
+          set((state) => ({
+            activeBranchBySession: {
+              ...state.activeBranchBySession,
+              [sessionId]: previousActive,
+            },
+          }));
+          throw error;
+        }
+      },
+
       setActiveSession: (sessionId: string | null) => {
         set({ activeSessionId: sessionId });
       },
@@ -603,6 +795,8 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           updatedAt: s.updatedAt,
           lastAccessedAt: s.lastAccessedAt,
         })),
+        branchesBySession: state.branchesBySession,
+        activeBranchBySession: state.activeBranchBySession,
       }),
     }
   )

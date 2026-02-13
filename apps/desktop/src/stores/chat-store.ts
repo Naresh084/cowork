@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Message,
@@ -67,9 +68,44 @@ export interface BrowserViewScreenshot {
   timestamp: number;   // when captured (Date.now())
 }
 
+export interface BrowserRunEvent {
+  id: string;
+  type: 'progress' | 'checkpoint' | 'blocked' | 'completed' | 'recovered';
+  step: number;
+  maxSteps: number;
+  status: 'running' | 'blocked' | 'completed' | 'recovered' | 'error';
+  detail?: string;
+  lastAction?: string;
+  url?: string;
+  checkpointPath?: string;
+  timestamp: number;
+}
+
+export interface BrowserRunState {
+  status: 'idle' | 'running' | 'blocked' | 'completed' | 'recovered' | 'error';
+  goal: string | null;
+  step: number;
+  maxSteps: number;
+  lastUrl: string | null;
+  blockedReason: string | null;
+  checkpointPath: string | null;
+  recoverable: boolean;
+  events: BrowserRunEvent[];
+  lastUpdatedAt: number | null;
+}
+
+export interface StreamStallState {
+  isStalled: boolean;
+  stalledAt: number | null;
+  runId: string | null;
+  reason: string | null;
+  recoverable: boolean;
+  lastActivityAt: number | null;
+}
+
 export interface TurnActivityItem {
   id: string;
-  type: 'thinking' | 'tool' | 'permission' | 'question' | 'media' | 'report' | 'design' | 'assistant';
+  type: 'thinking' | 'tool' | 'permission' | 'question' | 'media' | 'report' | 'design' | 'memory' | 'assistant';
   status?: 'active' | 'done';
   toolId?: string;
   permissionId?: string;
@@ -78,7 +114,14 @@ export interface TurnActivityItem {
   mediaItems?: MediaActivityItem[];
   report?: ReportActivityItem;
   design?: DesignActivityItem;
+  memory?: MemoryActivityItem;
   createdAt: number;
+}
+
+export interface MemoryActivityItem {
+  eventType: 'memory:retrieved' | 'memory:consolidated' | 'memory:conflict_detected' | string;
+  summary: string;
+  detail?: string;
 }
 
 export interface ExtendedPermissionRequest extends BasePermissionRequest {
@@ -125,6 +168,7 @@ export interface SessionChatState {
   streamingContent: string;
   activeTurnId?: string;
   currentTool: ToolExecution | null;
+  streamStall: StreamStallState;
 
   // ============================================================================
   // Interactive State (permissions, questions)
@@ -151,6 +195,7 @@ export interface SessionChatState {
     attachments?: Attachment[];
   };
   browserViewScreenshot: BrowserViewScreenshot | null;
+  browserRun: BrowserRunState;
 }
 
 interface ChatState {
@@ -182,6 +227,13 @@ interface ChatActions {
 
   // Internal actions for event handling
   appendStreamChunk: (sessionId: string, chunk: string) => void;
+  markStreamActivity: (sessionId: string, activityAt?: number) => void;
+  markRunStalled: (
+    sessionId: string,
+    input: { runId?: string; reason?: string; stalledAt?: number; recoverable?: boolean },
+  ) => void;
+  clearRunStalled: (sessionId: string) => void;
+  recoverStalledRun: (sessionId: string) => Promise<boolean>;
   setStreamingTool: (sessionId: string, tool: ToolExecution | null) => void;
   addPermissionRequest: (sessionId: string, request: ExtendedPermissionRequest) => void;
   removePermissionRequest: (sessionId: string, id: string) => void;
@@ -214,6 +266,9 @@ interface ChatActions {
   isComputerUseRunning: (sessionId: string | null) => boolean;
   updateBrowserScreenshot: (sessionId: string, screenshot: BrowserViewScreenshot) => void;
   clearBrowserScreenshot: (sessionId: string) => void;
+  updateBrowserRunState: (sessionId: string, update: Partial<BrowserRunState>) => void;
+  appendBrowserRunEvent: (sessionId: string, event: BrowserRunEvent) => void;
+  clearBrowserRunState: (sessionId: string) => void;
   hydrateRuntimeSnapshot: (sessionId: string, runtime: SessionRuntimeSnapshot) => void;
 }
 
@@ -232,7 +287,20 @@ export interface SessionDetails {
 
 export interface SessionRuntimeSnapshot {
   version: 1;
-  runState: 'idle' | 'running' | 'stopping' | 'errored';
+  runState:
+    | 'idle'
+    | 'queued'
+    | 'running'
+    | 'waiting_permission'
+    | 'waiting_question'
+    | 'retrying'
+    | 'paused'
+    | 'recovered'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'stopping'
+    | 'errored';
   isStreaming: boolean;
   isThinking: boolean;
   activeTurnId?: string;
@@ -268,6 +336,14 @@ const createSessionState = (): SessionChatState => ({
   streamingContent: '',
   activeTurnId: undefined,
   currentTool: null,
+  streamStall: {
+    isStalled: false,
+    stalledAt: null,
+    runId: null,
+    reason: null,
+    recoverable: false,
+    lastActivityAt: null,
+  },
 
   // Interactive state
   pendingPermissions: [],
@@ -285,7 +361,105 @@ const createSessionState = (): SessionChatState => ({
   oldestLoadedSequence: null,
   lastUserMessage: undefined,
   browserViewScreenshot: null,
+  browserRun: {
+    status: 'idle',
+    goal: null,
+    step: 0,
+    maxSteps: 0,
+    lastUrl: null,
+    blockedReason: null,
+    checkpointPath: null,
+    recoverable: false,
+    events: [],
+    lastUpdatedAt: null,
+  },
 });
+
+export interface DurableSessionSnapshot {
+  activeTurnId?: string;
+  pendingPermissions: ExtendedPermissionRequest[];
+  pendingQuestions: UserQuestion[];
+  messageQueue: Array<{ id: string; content: string; queuedAt: number }>;
+  streamStall: StreamStallState;
+  browserRun: BrowserRunState;
+  lastUpdatedAt: number;
+}
+
+export interface DurableChatStateSnapshot {
+  sessions: Record<string, DurableSessionSnapshot>;
+}
+
+export function buildDurableSessionSnapshot(session: SessionChatState): DurableSessionSnapshot {
+  return {
+    activeTurnId: session.activeTurnId,
+    pendingPermissions: session.pendingPermissions,
+    pendingQuestions: session.pendingQuestions,
+    messageQueue: session.messageQueue,
+    streamStall: session.streamStall,
+    browserRun: session.browserRun,
+    lastUpdatedAt: session.lastUpdatedAt,
+  };
+}
+
+export function hydrateSessionFromSnapshot(
+  snapshot?: Partial<DurableSessionSnapshot> | null,
+): SessionChatState {
+  const base = createSessionState();
+  if (!snapshot) return base;
+
+  return {
+    ...base,
+    activeTurnId: typeof snapshot.activeTurnId === 'string' ? snapshot.activeTurnId : undefined,
+    pendingPermissions: Array.isArray(snapshot.pendingPermissions) ? snapshot.pendingPermissions : [],
+    pendingQuestions: Array.isArray(snapshot.pendingQuestions) ? snapshot.pendingQuestions : [],
+    messageQueue: Array.isArray(snapshot.messageQueue) ? snapshot.messageQueue : [],
+    streamStall: {
+      ...base.streamStall,
+      ...(snapshot.streamStall || {}),
+    },
+    browserRun:
+      snapshot.browserRun && typeof snapshot.browserRun === 'object'
+        ? {
+            ...base.browserRun,
+            ...(snapshot.browserRun as Partial<BrowserRunState>),
+            events: Array.isArray((snapshot.browserRun as Partial<BrowserRunState>).events)
+              ? ((snapshot.browserRun as Partial<BrowserRunState>).events as BrowserRunEvent[])
+              : [],
+          }
+        : base.browserRun,
+    lastUpdatedAt:
+      typeof snapshot.lastUpdatedAt === 'number' ? snapshot.lastUpdatedAt : base.lastUpdatedAt,
+  };
+}
+
+export function mergePersistedChatState(
+  persisted: unknown,
+  current: ChatState & ChatActions,
+): ChatState & ChatActions {
+  const persistedRecord =
+    persisted && typeof persisted === 'object'
+      ? (persisted as Partial<DurableChatStateSnapshot>)
+      : undefined;
+  const persistedSessionsRaw = persistedRecord?.sessions;
+  const persistedSessions =
+    persistedSessionsRaw && typeof persistedSessionsRaw === 'object'
+      ? (persistedSessionsRaw as Record<string, Partial<DurableSessionSnapshot>>)
+      : {};
+
+  const hydratedSessions: Record<string, SessionChatState> = {};
+  for (const [sessionId, snapshot] of Object.entries(persistedSessions)) {
+    hydratedSessions[sessionId] = hydrateSessionFromSnapshot(snapshot);
+  }
+
+  return {
+    ...current,
+    sessions: {
+      ...current.sessions,
+      ...hydratedSessions,
+    },
+    error: null,
+  };
+}
 
 const EMPTY_SESSION_STATE = createSessionState();
 
@@ -601,6 +775,52 @@ export function deriveTurnActivitiesFromItems(
         });
         break;
       }
+      case 'system_message': {
+        const metadata =
+          item.metadata && typeof item.metadata === 'object'
+            ? (item.metadata as Record<string, unknown>)
+            : null;
+        const eventTypeRaw =
+          typeof metadata?.eventType === 'string'
+            ? metadata.eventType
+            : typeof metadata?.type === 'string'
+              ? metadata.type
+              : '';
+        if (!eventTypeRaw.startsWith('memory:')) {
+          break;
+        }
+
+        let summary = 'Memory updated';
+        let detail: string | undefined;
+        if (eventTypeRaw === 'memory:retrieved') {
+          const count = Number(metadata?.count ?? 0);
+          const limit = Number(metadata?.limit ?? 0);
+          const query = typeof metadata?.query === 'string' ? metadata.query.trim() : '';
+          summary = `Retrieved ${count}${limit > 0 ? `/${limit}` : ''} memory matches`;
+          detail = query ? `Query: ${query}` : undefined;
+        } else if (eventTypeRaw === 'memory:consolidated') {
+          const strategy = typeof metadata?.strategy === 'string' ? metadata.strategy.trim() : '';
+          summary = 'Consolidated memory atoms';
+          detail = strategy ? `Strategy: ${strategy}` : undefined;
+        } else if (eventTypeRaw === 'memory:conflict_detected') {
+          const atomId = typeof metadata?.atomId === 'string' ? metadata.atomId.trim() : '';
+          summary = 'Detected memory conflict';
+          detail = atomId ? `Atom: ${atomId}` : undefined;
+        }
+
+        activities.push({
+          id: `act-memory-${item.id}`,
+          type: 'memory',
+          status: 'done',
+          memory: {
+            eventType: eventTypeRaw,
+            summary,
+            detail,
+          },
+          createdAt: item.timestamp,
+        });
+        break;
+      }
       case 'permission': {
         // Only show if still pending
         if (item.status === 'pending' || pendingPermissionIds.has(item.permissionId)) {
@@ -644,7 +864,9 @@ export function deriveTurnActivitiesFromItems(
   return turnActivities;
 }
 
-export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
+export const useChatStore = create<ChatState & ChatActions>()(
+  persist(
+    (set, get) => ({
   sessions: {},
   error: null,
 
@@ -789,6 +1011,10 @@ export const useChatStore = create<ChatState & ChatActions>((set, get) => ({
 
         if (session.artifacts) {
           agentStore.setArtifacts(sessionId, session.artifacts);
+        }
+
+        if (session.runtime) {
+          get().hydrateRuntimeSnapshot(sessionId, session.runtime);
         }
 
         // Restore context usage from persisted data
@@ -1078,6 +1304,14 @@ ${attachment.data}`,
         ...session,
         isStreaming: false,
         isThinking: false,
+        streamStall: {
+          ...session.streamStall,
+          isStalled: false,
+          stalledAt: null,
+          runId: null,
+          reason: null,
+          recoverable: false,
+        },
       })));
     } catch (error) {
       set((state) => updateSession(state, sessionId, (session) => ({
@@ -1093,11 +1327,102 @@ ${attachment.data}`,
 
   appendStreamChunk: (sessionId: string, chunk: string) => {
     if (!sessionId) return;
+    const activityAt = Date.now();
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
       streamingContent: session.streamingContent + chunk,
       isThinking: false,
+      streamStall: {
+        ...session.streamStall,
+        lastActivityAt: activityAt,
+        isStalled: false,
+        stalledAt: null,
+        reason: null,
+      },
     })));
+  },
+
+  markStreamActivity: (sessionId: string, activityAt = Date.now()) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      streamStall: {
+        ...session.streamStall,
+        lastActivityAt: activityAt,
+      },
+    })));
+  },
+
+  markRunStalled: (sessionId: string, input) => {
+    if (!sessionId) return;
+    const stalledAt = input.stalledAt ?? Date.now();
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      streamStall: {
+        ...session.streamStall,
+        isStalled: true,
+        stalledAt,
+        runId: input.runId ?? session.streamStall.runId,
+        reason: input.reason ?? session.streamStall.reason ?? 'Streaming stalled',
+        recoverable: input.recoverable ?? Boolean(input.runId),
+      },
+    })));
+  },
+
+  clearRunStalled: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      streamStall: {
+        ...session.streamStall,
+        isStalled: false,
+        stalledAt: null,
+        reason: null,
+        runId: null,
+        recoverable: false,
+      },
+    })));
+  },
+
+  recoverStalledRun: async (sessionId: string) => {
+    if (!sessionId) return false;
+
+    const session = get().sessions[sessionId];
+    const stalledRunId = session?.streamStall.runId;
+    if (!stalledRunId) {
+      set((state) => updateSession(state, sessionId, (existing) => ({
+        ...existing,
+        error: 'No recoverable stalled run found for this session.',
+      })));
+      return false;
+    }
+
+    try {
+      await invoke('agent_resume_run', {
+        sessionId,
+        runId: stalledRunId,
+      });
+      set((state) => updateSession(state, sessionId, (existing) => ({
+        ...existing,
+        isStreaming: true,
+        isThinking: true,
+        streamStall: {
+          ...existing.streamStall,
+          isStalled: false,
+          stalledAt: null,
+          reason: null,
+          recoverable: false,
+          lastActivityAt: Date.now(),
+        },
+      })));
+      return true;
+    } catch (error) {
+      set((state) => updateSession(state, sessionId, (existing) => ({
+        ...existing,
+        error: error instanceof Error ? error.message : String(error),
+      })));
+      return false;
+    }
   },
 
   setStreamingTool: (sessionId: string, tool: ToolExecution | null) => {
@@ -1166,9 +1491,26 @@ ${attachment.data}`,
 
   setStreaming: (sessionId: string, streaming: boolean) => {
     if (!sessionId) return;
+    const activityAt = Date.now();
     set((state) => updateSession(state, sessionId, (session) => ({
       ...session,
       isStreaming: streaming,
+      streamStall: streaming
+        ? {
+            ...session.streamStall,
+            lastActivityAt: activityAt,
+            isStalled: false,
+            stalledAt: null,
+            reason: null,
+          }
+        : {
+            ...session.streamStall,
+            isStalled: false,
+            stalledAt: null,
+            runId: null,
+            reason: null,
+            recoverable: false,
+          },
     })));
   },
 
@@ -1338,6 +1680,52 @@ ${attachment.data}`,
     })));
   },
 
+  updateBrowserRunState: (sessionId: string, update: Partial<BrowserRunState>) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      browserRun: {
+        ...session.browserRun,
+        ...update,
+        lastUpdatedAt: Date.now(),
+      },
+    })));
+  },
+
+  appendBrowserRunEvent: (sessionId: string, event: BrowserRunEvent) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => {
+      const nextEvents = [...session.browserRun.events, event];
+      return {
+        ...session,
+        browserRun: {
+          ...session.browserRun,
+          events: nextEvents.slice(-120),
+          lastUpdatedAt: Date.now(),
+        },
+      };
+    }));
+  },
+
+  clearBrowserRunState: (sessionId: string) => {
+    if (!sessionId) return;
+    set((state) => updateSession(state, sessionId, (session) => ({
+      ...session,
+      browserRun: {
+        status: 'idle',
+        goal: null,
+        step: 0,
+        maxSteps: 0,
+        lastUrl: null,
+        blockedReason: null,
+        checkpointPath: null,
+        recoverable: false,
+        events: [],
+        lastUpdatedAt: Date.now(),
+      },
+    })));
+  },
+
   hydrateRuntimeSnapshot: (sessionId: string, runtime: SessionRuntimeSnapshot) => {
     if (!sessionId) return;
     set((state) => updateSession(state, sessionId, (session) => {
@@ -1383,6 +1771,18 @@ ${attachment.data}`,
               parentToolId: activeTool?.parentToolId,
             }
           : null,
+        streamStall:
+          runtime.runState === 'recovered' || runtime.runState === 'running'
+            ? {
+                ...session.streamStall,
+                isStalled: false,
+                stalledAt: null,
+                runId: null,
+                reason: null,
+                recoverable: false,
+                lastActivityAt: runtime.updatedAt || Date.now(),
+              }
+            : session.streamStall,
         error:
           runtime.runState === 'errored'
             ? runtime.lastError?.message || session.error
@@ -1390,4 +1790,19 @@ ${attachment.data}`,
       };
     }));
   },
-}));
+    }),
+    {
+      name: 'chat-runtime-state-v1',
+      partialize: (state): DurableChatStateSnapshot => ({
+        sessions: Object.fromEntries(
+          Object.entries(state.sessions).map(([sessionId, session]) => [
+            sessionId,
+            buildDurableSessionSnapshot(session),
+          ]),
+        ),
+      }),
+      merge: (persistedState, currentState) =>
+        mergePersistedChatState(persistedState, currentState as ChatState & ChatActions),
+    },
+  ),
+);

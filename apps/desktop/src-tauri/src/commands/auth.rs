@@ -36,6 +36,22 @@ pub struct LogoutCleanupResult {
     pub cleared_credential_accounts: usize,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityPostureStatus {
+    pub credential_backend: String,
+    pub secure_seed_available: bool,
+    pub credentials_vault_present: bool,
+    pub connector_vault_present: bool,
+    pub plaintext_credentials_present: bool,
+    pub plaintext_connector_secrets_present: bool,
+    pub migration_status: String,
+    pub provider_keys_configured: usize,
+    pub auxiliary_keys_configured: usize,
+    pub audit_log_present: bool,
+    pub audit_log_size_bytes: u64,
+}
+
 fn normalize_provider_id(provider_id: &str) -> Result<String, String> {
     let normalized = provider_id.trim().to_lowercase();
     let mapped = if normalized == "gemini" {
@@ -761,6 +777,77 @@ pub async fn auth_logout_and_cleanup() -> Result<LogoutCleanupResult, String> {
         removed_data_dir,
         data_dir_path,
         cleared_credential_accounts: accounts_to_clear.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn auth_get_security_posture() -> Result<SecurityPostureStatus, String> {
+    let config_root = dirs::config_dir().ok_or("Could not determine config directory".to_string())?;
+    let current_config_dir = config_root.join("cowork");
+    let legacy_config_dir = config_root.join("gemini-cowork");
+
+    let credentials_vault_present = current_config_dir.join("credentials.vault.json").exists();
+    let connector_vault_present = current_config_dir.join("secrets.vault.json").exists();
+    let plaintext_credentials_present = current_config_dir.join("credentials.json").exists()
+        || legacy_config_dir.join("credentials.json").exists();
+    let plaintext_connector_secrets_present = current_config_dir.join("secrets.json").exists()
+        || legacy_config_dir.join("secrets.json").exists();
+    let migration_status = if plaintext_credentials_present || plaintext_connector_secrets_present {
+        "legacy_plaintext_detected".to_string()
+    } else {
+        "clean".to_string()
+    };
+
+    let mut provider_keys_configured = 0usize;
+    for provider_id in PROVIDER_IDS {
+        let account = provider_api_key_account(provider_id)?;
+        if credentials::credentials_get(API_KEY_SERVICE.to_string(), account)
+            .await?
+            .is_some()
+        {
+            provider_keys_configured += 1;
+        }
+    }
+
+    let auxiliary_accounts = [
+        GOOGLE_API_KEY_ACCOUNT,
+        OPENAI_API_KEY_ACCOUNT,
+        FAL_API_KEY_ACCOUNT,
+        EXA_API_KEY_ACCOUNT,
+        TAVILY_API_KEY_ACCOUNT,
+        STITCH_API_KEY_ACCOUNT,
+    ];
+    let mut auxiliary_keys_configured = 0usize;
+    for account in auxiliary_accounts {
+        if credentials::credentials_get(API_KEY_SERVICE.to_string(), account.to_string())
+            .await?
+            .is_some()
+        {
+            auxiliary_keys_configured += 1;
+        }
+    }
+
+    let secure_seed_available = credentials::get_or_create_sidecar_connector_seed().is_ok();
+
+    let home_dir = dirs::home_dir().ok_or("Could not determine home directory".to_string())?;
+    let audit_log_path = home_dir.join(".cowork").join("security").join("audit.log");
+    let (audit_log_present, audit_log_size_bytes) = match fs::metadata(&audit_log_path) {
+        Ok(metadata) => (true, metadata.len()),
+        Err(_) => (false, 0),
+    };
+
+    Ok(SecurityPostureStatus {
+        credential_backend: "keychain_with_encrypted_fallback".to_string(),
+        secure_seed_available,
+        credentials_vault_present,
+        connector_vault_present,
+        plaintext_credentials_present,
+        plaintext_connector_secrets_present,
+        migration_status,
+        provider_keys_configured,
+        auxiliary_keys_configured,
+        audit_log_present,
+        audit_log_size_bytes,
     })
 }
 

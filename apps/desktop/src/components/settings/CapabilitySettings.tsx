@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/Toast';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { useToolPolicyStore } from '@/stores/tool-policy-store';
+import { ToolPolicySettings } from './ToolPolicySettings';
 import type { ToolRule } from '@gemini-cowork/shared';
 
 export function CapabilitySettings() {
@@ -98,6 +99,8 @@ export function CapabilitySettings() {
           Review capability availability and change the permission policy for each tool in one place.
         </p>
       </div>
+
+      <ToolPolicySettings />
 
       <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
         <div className="flex items-center justify-between gap-2">

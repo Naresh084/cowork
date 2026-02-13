@@ -106,6 +106,52 @@ pub struct SessionListPage {
     pub next_offset: Option<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchSessionResult {
+    pub id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub from_turn_id: Option<String>,
+    #[serde(default)]
+    pub parent_branch_id: Option<String>,
+    pub name: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchMergeConflictResult {
+    pub id: String,
+    pub path: String,
+    pub reason: String,
+    #[serde(default)]
+    pub resolution: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchMergeResultPayload {
+    pub merge_id: String,
+    pub source_branch_id: String,
+    pub target_branch_id: String,
+    pub strategy: String,
+    pub status: String,
+    pub conflict_count: usize,
+    #[serde(default)]
+    pub conflicts: Vec<BranchMergeConflictResult>,
+    pub merged_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveBranchSelectionResult {
+    pub session_id: String,
+    pub active_branch_id: String,
+}
+
 fn default_provider() -> String {
     "google".to_string()
 }
@@ -489,6 +535,183 @@ pub async fn agent_send_message(
 
     manager.send_command("send_message", params).await?;
     Ok(())
+}
+
+/// Send a message through the v2 run pipeline with run options.
+#[tauri::command]
+pub async fn agent_send_message_v2(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    message: String,
+    run_options: Option<serde_json::Value>,
+    attachments: Option<Vec<Attachment>>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "message": message,
+        "runOptions": run_options.unwrap_or(serde_json::json!({})),
+        "attachments": attachments,
+    });
+
+    manager.send_command("run_start_v2", params).await
+}
+
+#[tauri::command]
+pub async fn agent_resume_run(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    run_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "run_resume_from_checkpoint",
+            serde_json::json!({
+                "sessionId": session_id,
+                "runId": run_id,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_branch_session(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    from_turn_id: Option<String>,
+    branch_name: String,
+) -> Result<BranchSessionResult, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let value = manager
+        .send_command(
+            "session_branch_create",
+            serde_json::json!({
+                "sessionId": session_id,
+                "fromTurnId": from_turn_id,
+                "branchName": branch_name,
+            }),
+        )
+        .await?;
+    serde_json::from_value(value)
+        .map_err(|error| format!("Failed to parse branch session result: {}", error))
+}
+
+#[tauri::command]
+pub async fn agent_merge_branch(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    source_branch_id: String,
+    target_branch_id: String,
+    strategy: Option<String>,
+) -> Result<BranchMergeResultPayload, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let value = manager
+        .send_command(
+            "session_branch_merge",
+            serde_json::json!({
+                "sessionId": session_id,
+                "sourceBranchId": source_branch_id,
+                "targetBranchId": target_branch_id,
+                "strategy": strategy.unwrap_or_else(|| "auto".to_string()),
+            }),
+        )
+        .await?;
+    serde_json::from_value(value)
+        .map_err(|error| format!("Failed to parse branch merge result: {}", error))
+}
+
+#[tauri::command]
+pub async fn agent_set_active_branch(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    branch_id: String,
+) -> Result<ActiveBranchSelectionResult, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    let value = manager
+        .send_command(
+            "session_branch_set_active",
+            serde_json::json!({
+                "sessionId": session_id,
+                "branchId": branch_id,
+            }),
+        )
+        .await?;
+    serde_json::from_value(value)
+        .map_err(|error| format!("Failed to parse active branch result: {}", error))
+}
+
+#[tauri::command]
+pub async fn agent_get_run_timeline(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    run_id: String,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "run_get_timeline",
+            serde_json::json!({
+                "runId": run_id,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_run_benchmark(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    suite_id: String,
+    profile: Option<String>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command(
+            "benchmark_run_suite",
+            serde_json::json!({
+                "suiteId": suite_id,
+                "profile": profile.unwrap_or_else(|| "default".to_string()),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_get_release_gate_status(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command("release_gate_evaluate", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn agent_assert_release_gate(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started(&app, &state).await?;
+    let manager = &state.manager;
+    manager
+        .send_command("release_gate_assert", serde_json::json!({}))
+        .await
 }
 
 /// Respond to a permission request

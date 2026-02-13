@@ -1,65 +1,61 @@
-import { useState, useEffect } from 'react';
-import { RefreshCw, ExternalLink, Globe, X, Eye } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  ExternalLink,
+  Eye,
+  Globe,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  ShieldAlert,
+  X,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '../../lib/utils';
 import { useChatStore } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
+import { toast } from '../ui/Toast';
 
-/**
- * Live Browser View panel - displays real-time screenshots from computer_use tool.
- * Shows in the right panel of the split-screen layout.
- *
- * Features:
- * - Header with title, status indicator, and close button
- * - URL bar showing current browser URL
- * - Screenshot display with smooth transitions
- * - Footer with activity status and last update time
- * - Escape key to close
- */
+function formatRelative(ts?: number | null): string {
+  if (!ts) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (seconds < 5) return 'Just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
 export function LiveBrowserView() {
   const { activeSessionId } = useSessionStore();
   const { closeLiveView } = useSettingsStore();
+  const recoverStalledRun = useChatStore((state) => state.recoverStalledRun);
+  const sendMessage = useChatStore((state) => state.sendMessage);
 
-  // Get screenshot from chat store
   const screenshot = useChatStore((state) => {
-    const session = activeSessionId ? state.sessions[activeSessionId] : null;
-    return session?.browserViewScreenshot ?? null;
+    if (!activeSessionId) return null;
+    return state.sessions[activeSessionId]?.browserViewScreenshot ?? null;
+  });
+  const browserRun = useChatStore((state) => {
+    if (!activeSessionId) return null;
+    return state.sessions[activeSessionId]?.browserRun ?? null;
   });
 
-  // Check if computer_use is still running (V2: derive from chatItems)
-  const isRunning = useChatStore((state) => {
-    if (!activeSessionId) return false;
-    const session = state.sessions[activeSessionId];
-    if (!session) return false;
-    return session.chatItems.some(
-      (ci) => ci.kind === 'tool_start' && ci.name.toLowerCase() === 'computer_use' && ci.status === 'running'
-    );
-  });
+  const isRunning = browserRun?.status === 'running';
+  const [lastUpdate, setLastUpdate] = useState('');
+  const [recoveringRun, setRecoveringRun] = useState(false);
+  const [resumingCheckpoint, setResumingCheckpoint] = useState(false);
 
-  // Relative time display
-  const [lastUpdate, setLastUpdate] = useState<string>('');
-
-  // Update relative time display
   useEffect(() => {
     if (!screenshot?.timestamp) {
       setLastUpdate('');
       return;
     }
-
-    const updateTime = () => {
-      const seconds = Math.floor((Date.now() - screenshot.timestamp) / 1000);
-      if (seconds < 5) setLastUpdate('Just now');
-      else if (seconds < 60) setLastUpdate(`${seconds}s ago`);
-      else setLastUpdate(`${Math.floor(seconds / 60)}m ago`);
-    };
-
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
+    const update = () => setLastUpdate(formatRelative(screenshot.timestamp));
+    update();
+    const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [screenshot?.timestamp]);
 
-  // Escape key handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -70,16 +66,56 @@ export function LiveBrowserView() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [closeLiveView]);
 
+  const progressPercent = useMemo(() => {
+    const step = Math.max(0, browserRun?.step || 0);
+    const max = Math.max(0, browserRun?.maxSteps || 0);
+    if (max <= 0) return 0;
+    return Math.min(100, Math.round((step / max) * 100));
+  }, [browserRun?.step, browserRun?.maxSteps]);
+
+  const events = useMemo(
+    () => (browserRun?.events || []).slice(-8).reverse(),
+    [browserRun?.events],
+  );
+
+  const handleRecoverRun = async () => {
+    if (!activeSessionId || recoveringRun) return;
+    setRecoveringRun(true);
+    try {
+      const ok = await recoverStalledRun(activeSessionId);
+      if (!ok) {
+        toast.warning('Recovery unavailable', 'No stalled run checkpoint was found.');
+      }
+    } finally {
+      setRecoveringRun(false);
+    }
+  };
+
+  const handleResumeFromCheckpoint = async () => {
+    if (!activeSessionId || resumingCheckpoint) return;
+    setResumingCheckpoint(true);
+    try {
+      const goalFragment = browserRun?.goal ? ` for this goal: "${browserRun.goal}"` : '';
+      await sendMessage(
+        activeSessionId,
+        `Resume the browser automation${goalFragment}. Use computer_use with {"resumeFromCheckpoint": true} and continue safely from the last checkpoint.`,
+      );
+      toast.success('Resume requested', 'Continuation request queued.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error('Resume failed', message);
+    } finally {
+      setResumingCheckpoint(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-[#0A0B0E] overflow-hidden">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] bg-[#0D0E12]">
         <div className="flex items-center gap-2">
           <Eye className="w-4 h-4 text-[#93C5FD]" />
           <span className="text-sm font-medium text-white/80">Live Browser View</span>
-          {isRunning && (
-            <span className="w-2 h-2 rounded-full bg-[#1D4ED8] animate-pulse" />
-          )}
+          {isRunning && <span className="w-2 h-2 rounded-full bg-[#1D4ED8] animate-pulse" />}
         </div>
         <button
           onClick={closeLiveView}
@@ -90,11 +126,9 @@ export function LiveBrowserView() {
         </button>
       </div>
 
-      {/* Content */}
       {!screenshot ? (
-        /* Loading state - waiting for first screenshot */
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
+          <div className="text-center px-6">
             <div className="w-16 h-16 rounded-full bg-white/[0.04] flex items-center justify-center mx-auto mb-4">
               <Globe className="w-8 h-8 text-white/20" />
             </div>
@@ -102,50 +136,83 @@ export function LiveBrowserView() {
               <RefreshCw className="w-4 h-4 text-[#1D4ED8] animate-spin" />
               <p className="text-white/60">Waiting for browser screenshot...</p>
             </div>
-            <p className="text-sm text-white/30">
-              The agent is connecting to the browser
-            </p>
+            <p className="text-sm text-white/30">The agent is connecting to the browser.</p>
           </div>
         </div>
       ) : (
-        /* Screenshot display */
-        <div className="flex-1 flex flex-col p-4 overflow-hidden">
-          {/* URL Bar */}
-          <div className="flex items-center gap-2 px-3 py-2 mb-4 rounded-lg bg-[#12131A] border border-white/[0.06]">
-            {/* Connection status dot */}
-            <div
-              className={cn(
-                'w-3 h-3 rounded-full flex-shrink-0',
-                isRunning ? 'bg-[#50956A]' : 'bg-white/20'
+        <div className="flex-1 flex flex-col p-4 overflow-hidden gap-3">
+          <div className="px-3 py-2 rounded-lg bg-[#12131A] border border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'w-3 h-3 rounded-full flex-shrink-0',
+                  isRunning ? 'bg-[#50956A]' : browserRun?.status === 'blocked' ? 'bg-[#F97316]' : 'bg-white/20',
+                )}
+              />
+              <span className="flex-1 text-sm text-white/60 font-mono truncate">
+                {screenshot.url || 'about:blank'}
+              </span>
+              {screenshot.url && (
+                <a
+                  href={screenshot.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"
+                  title="Open in browser"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </a>
               )}
-            />
+            </div>
 
-            {/* URL */}
-            <span className="flex-1 text-sm text-white/60 font-mono truncate">
-              {screenshot.url || 'about:blank'}
-            </span>
-
-            {/* External link button */}
-            {screenshot.url && (
-              <a
-                href={screenshot.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-1 text-white/30 hover:text-white/60 transition-colors flex-shrink-0"
-                title="Open in browser"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </a>
+            {browserRun && browserRun.maxSteps > 0 && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-[11px] text-white/45 mb-1">
+                  <span>
+                    Step {browserRun.step} / {browserRun.maxSteps}
+                  </span>
+                  <span>{progressPercent}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full transition-all duration-300',
+                      browserRun.status === 'blocked' ? 'bg-[#F97316]' : 'bg-[#3B82F6]',
+                    )}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Screenshot Image */}
+          {browserRun?.status === 'blocked' && (
+            <div className="rounded-lg border border-[#F97316]/35 bg-[#451A03]/50 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-[#FDBA74] mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#FDBA74]">
+                    Blocker Detected
+                  </p>
+                  <p className="text-sm text-[#FED7AA] mt-1 break-words">
+                    {browserRun.blockedReason || 'The browser run was blocked by a safety guard.'}
+                  </p>
+                  {browserRun.checkpointPath && (
+                    <p className="text-[11px] text-[#FDBA74]/80 mt-2 break-all">
+                      Checkpoint: {browserRun.checkpointPath}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <motion.div
             key={screenshot.timestamp}
             initial={{ opacity: 0.8 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.15 }}
-            className="flex-1 rounded-xl overflow-hidden border border-white/[0.08] bg-black relative"
+            className="flex-1 rounded-xl overflow-hidden border border-white/[0.08] bg-black relative min-h-[200px]"
           >
             <img
               src={`data:${screenshot.mimeType};base64,${screenshot.data}`}
@@ -154,15 +221,74 @@ export function LiveBrowserView() {
             />
           </motion.div>
 
-          {/* Footer with status */}
-          <div className="flex items-center justify-between mt-3 text-xs text-white/40">
+          <div className="rounded-lg border border-white/[0.08] bg-[#101118] p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-white/45">
+                Run Timeline
+              </span>
+              <span className="text-[11px] text-white/30">{events.length} events</span>
+            </div>
+            <div className="max-h-32 overflow-y-auto space-y-1.5 pr-1">
+              {events.length === 0 ? (
+                <p className="text-xs text-white/35">No browser timeline events yet.</p>
+              ) : (
+                events.map((event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="text-white/70 truncate">
+                        {event.detail || event.type}
+                      </span>
+                      <span className="text-white/35">
+                        {event.step}/{event.maxSteps}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-white/35 mt-0.5 flex items-center justify-between gap-2">
+                      <span className="truncate">{event.url || 'No URL snapshot'}</span>
+                      <span>{formatRelative(event.timestamp)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-2 text-xs text-white/40">
             <span className="flex items-center gap-2">
               <span className={isRunning ? 'text-[#93C5FD]' : ''}>
-                {isRunning ? 'Browser active' : 'Session ended'}
+                {isRunning ? 'Browser active' : browserRun?.status === 'blocked' ? 'Blocked' : 'Session idle'}
               </span>
               <span className="text-white/20">•</span>
               {lastUpdate}
             </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRecoverRun}
+                disabled={!activeSessionId || recoveringRun}
+                className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.14] px-2 py-1 text-white/70 hover:text-white disabled:opacity-50"
+              >
+                {recoveringRun ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-3.5 h-3.5" />
+                )}
+                Recover Run
+              </button>
+              <button
+                onClick={handleResumeFromCheckpoint}
+                disabled={!activeSessionId || !browserRun?.checkpointPath || resumingCheckpoint}
+                className="inline-flex items-center gap-1.5 rounded-md border border-[#2563EB]/35 px-2 py-1 text-[#BFDBFE] hover:text-white disabled:opacity-50"
+              >
+                {resumingCheckpoint ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                )}
+                Resume Checkpoint
+              </button>
+            </div>
           </div>
         </div>
       )}

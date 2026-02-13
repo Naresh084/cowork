@@ -134,6 +134,91 @@ function canonicalContent(value: string): string {
     .trim();
 }
 
+const SENSITIVE_PATTERNS: RegExp[] = [
+  /\b(?:api[_-\s]?key|access[_-\s]?token|refresh[_-\s]?token|secret|password|passcode)\b/i,
+  /\bsk-[a-z0-9]{16,}\b/i,
+  /\bAIza[0-9A-Za-z\-_]{20,}\b/,
+  /\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b/,
+  /\b\d{3}-\d{2}-\d{4}\b/,
+  /\b(?:\d[ -]*?){13,16}\b/,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+];
+
+const NEGATION_TOKENS = new Set([
+  'no',
+  'not',
+  'never',
+  'without',
+  'avoid',
+  'dont',
+  "don't",
+  'cannot',
+  "can't",
+]);
+
+const CONTRADICTION_STOP_TOKENS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'but',
+  'for',
+  'with',
+  'from',
+  'this',
+  'that',
+  'these',
+  'those',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'do',
+  'does',
+  'did',
+  'user',
+  'users',
+]);
+
+function looksSensitiveContent(value: string): boolean {
+  const text = normalizeWhitespace(value);
+  if (!text) return false;
+  return SENSITIVE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function stemToken(token: string): string {
+  if (token.length > 5 && token.endsWith('ing')) return token.slice(0, -3);
+  if (token.length > 4 && token.endsWith('ed')) return token.slice(0, -2);
+  if (token.length > 4 && token.endsWith('es')) return token.slice(0, -2);
+  if (token.length > 3 && token.endsWith('s')) return token.slice(0, -1);
+  return token;
+}
+
+function contradictionKey(value: string): string {
+  const normalized = canonicalContent(value);
+  if (!normalized) return '';
+  const tokens = normalized
+    .split(' ')
+    .filter((token) => token.length > 2)
+    .filter((token) => !NEGATION_TOKENS.has(token))
+    .filter((token) => !CONTRADICTION_STOP_TOKENS.has(token));
+  return tokens
+    .map((token) => stemToken(token))
+    .slice(0, 14)
+    .join(' ');
+}
+
+function hasNegation(value: string): boolean {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .some((token) => NEGATION_TOKENS.has(token));
+}
+
 function buildPrompt(messages: Message[]): SemanticMemoryExtractorInvocation {
   const recent = messages
     .filter((msg) => msg.role === 'user' || msg.role === 'assistant')
@@ -235,7 +320,7 @@ export class SemanticMemoryExtractor {
 
       if (!content || content.length < 16) continue;
       if (!stable) continue;
-      if (sensitive) continue;
+      if (sensitive || looksSensitiveContent(content)) continue;
       if (confidence < this.config.confidenceThreshold) continue;
 
       const canonical = canonicalContent(content);
@@ -261,7 +346,26 @@ export class SemanticMemoryExtractor {
     }
 
     const sorted = [...candidates].sort((a, b) => b.confidence - a.confidence);
-    const accepted = sorted.slice(0, this.config.maxAcceptedPerTurn);
+    const accepted: SemanticMemoryCandidate[] = [];
+    const polarityByKey = new Map<string, boolean>();
+
+    for (const candidate of sorted) {
+      const key = contradictionKey(candidate.content);
+      const negated = hasNegation(candidate.content);
+
+      if (key) {
+        const seenPolarity = polarityByKey.get(key);
+        if (typeof seenPolarity === 'boolean' && seenPolarity !== negated) {
+          continue;
+        }
+        polarityByKey.set(key, negated);
+      }
+
+      accepted.push(candidate);
+      if (accepted.length >= this.config.maxAcceptedPerTurn) {
+        break;
+      }
+    }
 
     const memories: ExtractedMemory[] = accepted.map((candidate) => ({
       title: candidate.title && candidate.title.length > 3

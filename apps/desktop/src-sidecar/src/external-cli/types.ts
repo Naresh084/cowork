@@ -40,6 +40,9 @@ export interface ExternalCliAvailabilityEntry {
   provider: ExternalCliProvider;
   installed: boolean;
   binaryPath: string | null;
+  binarySha256: string | null;
+  binaryTrust: 'trusted' | 'untrusted' | 'unknown';
+  trustReason: string | null;
   version: string | null;
   authStatus: ExternalCliAuthStatus;
   authMessage: string | null;

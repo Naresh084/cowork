@@ -68,6 +68,18 @@ const PROFILES: {
     color: 'bg-indigo-500',
   },
   {
+    id: 'enterprise_balanced',
+    name: 'Enterprise Balanced',
+    description: 'Auditable defaults with controlled execution breadth',
+    color: 'bg-sky-500',
+  },
+  {
+    id: 'enterprise_strict',
+    name: 'Enterprise Strict',
+    description: 'Locked-down profile for high-control environments',
+    color: 'bg-red-500',
+  },
+  {
     id: 'full',
     name: 'Full Access',
     description: 'All tools enabled',

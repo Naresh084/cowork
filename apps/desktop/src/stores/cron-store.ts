@@ -7,6 +7,7 @@ import type {
   CreateCronJobInput,
   UpdateCronJobInput,
   CronServiceStatus,
+  WorkflowDefinition,
   WorkflowScheduledTaskSummary,
 } from '@gemini-cowork/shared';
 
@@ -54,6 +55,7 @@ interface CronActions {
   runWorkflowTask: (workflowId: string) => Promise<void>;
   pauseWorkflowTask: (workflowId: string) => Promise<void>;
   resumeWorkflowTask: (workflowId: string) => Promise<void>;
+  archiveWorkflowTask: (workflowId: string) => Promise<void>;
 
   // UI actions
   openModal: () => void;
@@ -327,6 +329,11 @@ export const useCronStore = create<CronState & CronActions>((set, get) => ({
 
   resumeWorkflowTask: async (workflowId: string) => {
     await invoke('workflow_resume_scheduled', { workflowId });
+    await get().loadWorkflowTasks();
+  },
+
+  archiveWorkflowTask: async (workflowId: string) => {
+    await invoke<WorkflowDefinition>('workflow_archive', { workflowId });
     await get().loadWorkflowTasks();
   },
 

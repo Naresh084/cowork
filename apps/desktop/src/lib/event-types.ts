@@ -77,6 +77,28 @@ export type AgentEvent =
       sessionId: string;
       message: Message | null;
     }
+  | { type: 'run:checkpoint'; sessionId: string; runId: string; checkpointIndex: number; stage: string }
+  | { type: 'run:recovered'; sessionId: string; runId: string; checkpointCount?: number }
+  | { type: 'run:fallback_applied'; sessionId: string; runId: string; fallback: string; reason?: string }
+  | { type: 'run:stalled'; sessionId: string; runId: string; reason?: string; stalledAt?: number }
+  | {
+      type: 'run:health';
+      sessionId: string;
+      health: 'healthy' | 'degraded' | 'unhealthy';
+      reliabilityScore: number;
+      counters: {
+        streamStarts: number;
+        streamDone: number;
+        checkpoints: number;
+        runRecovered: number;
+        runStalled: number;
+        fallbackApplied: number;
+        errors: number;
+        toolErrors: number;
+        lastUpdatedAt: number;
+      };
+      timestamp: number;
+    }
   // Thinking events (agent's internal reasoning)
   | { type: 'thinking:start'; sessionId: string }
   | { type: 'thinking:chunk'; sessionId: string; content: string }
@@ -89,6 +111,65 @@ export type AgentEvent =
       toolCallId: string;
       result: ToolResult;
       parentToolId?: string;
+    }
+  // Branch and workflow lifecycle events
+  | {
+      type: 'branch:created';
+      sessionId: string;
+      branchId: string;
+      name: string;
+      fromTurnId?: string;
+      parentBranchId?: string;
+      activeBranchId?: string;
+    }
+  | {
+      type: 'branch:merged';
+      sessionId: string;
+      mergeId: string;
+      sourceBranchId: string;
+      targetBranchId: string;
+      strategy: string;
+      status: 'merged' | 'conflict' | 'failed';
+      activeBranchId?: string;
+    }
+  | { type: 'workflow:activated'; sessionId: string; workflowId: string; triggerType?: string }
+  | { type: 'workflow:fallback'; sessionId: string; workflowId: string; reason?: string }
+  // Memory lifecycle events
+  | { type: 'memory:retrieved'; sessionId: string; queryId: string; query: string; count: number; limit: number }
+  | {
+      type: 'memory:consolidated';
+      sessionId: string;
+      strategy?: string;
+      queryId?: string;
+      atomId?: string;
+      feedback?: string;
+      timestamp?: number;
+    }
+  | { type: 'memory:conflict_detected'; sessionId: string; atomId: string; reason: string }
+  // Benchmark and release gate events
+  | {
+      type: 'benchmark:progress';
+      sessionId: string;
+      runId: string;
+      suiteId: string;
+      profile: string;
+      progress: number;
+      status: string;
+    }
+  | {
+      type: 'benchmark:score_updated';
+      sessionId: string;
+      runId: string;
+      suiteId: string;
+      scorecard: Record<string, unknown>;
+    }
+  | {
+      type: 'release_gate:status';
+      sessionId: string;
+      status: 'pass' | 'fail' | 'warning';
+      reasons: string[];
+      scorecard?: Record<string, unknown>;
+      evaluatedAt: number;
     }
   // Permission events
   | {
@@ -135,6 +216,51 @@ export type AgentEvent =
       sessionId: string;
       status: string;
       progress: number;
+    }
+  | {
+      type: 'research:evidence';
+      sessionId: string;
+      query: string;
+      totalSources: number;
+      avgConfidence: number;
+      topSources: Array<{
+        title: string;
+        url: string;
+        confidence: number;
+        rank: number;
+      }>;
+      timestamp: number;
+    }
+  | {
+      type: 'browser:progress';
+      sessionId: string;
+      step: number;
+      maxSteps: number;
+      status: 'running' | 'blocked' | 'completed' | 'recovered';
+      url?: string;
+      detail?: string;
+      lastAction?: string;
+      timestamp: number;
+    }
+  | {
+      type: 'browser:checkpoint';
+      sessionId: string;
+      checkpointPath: string;
+      step: number;
+      maxSteps: number;
+      url?: string;
+      recoverable: boolean;
+      timestamp: number;
+    }
+  | {
+      type: 'browser:blocker';
+      sessionId: string;
+      reason: string;
+      step: number;
+      maxSteps: number;
+      url?: string;
+      checkpointPath?: string;
+      timestamp: number;
     }
   // Error events
   | {
@@ -268,11 +394,26 @@ export const TAURI_EVENT_NAMES = [
   'agent:stream:start',
   'agent:stream:chunk',
   'agent:stream:done',
+  'agent:run:checkpoint',
+  'agent:run:recovered',
+  'agent:run:fallback_applied',
+  'agent:run:stalled',
+  'agent:run:health',
   'agent:thinking:start',
   'agent:thinking:chunk',
   'agent:thinking:done',
   'agent:tool:start',
   'agent:tool:result',
+  'agent:branch:created',
+  'agent:branch:merged',
+  'agent:workflow:activated',
+  'agent:workflow:fallback',
+  'agent:memory:retrieved',
+  'agent:memory:consolidated',
+  'agent:memory:conflict_detected',
+  'agent:benchmark:progress',
+  'agent:benchmark:score_updated',
+  'agent:release_gate:status',
   'agent:permission:request',
   'agent:permission:resolved',
   'agent:question:ask',
@@ -287,6 +428,10 @@ export const TAURI_EVENT_NAMES = [
   'agent:context:update',
   'agent:context:usage',
   'agent:research:progress',
+  'agent:research:evidence',
+  'agent:browser:progress',
+  'agent:browser:checkpoint',
+  'agent:browser:blocker',
   'agent:error',
   'agent:session:updated',
   'agent:started',

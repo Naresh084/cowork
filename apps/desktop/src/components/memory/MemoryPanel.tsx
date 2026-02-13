@@ -33,6 +33,7 @@ import {
   type Memory,
 } from '../../stores/memory-store';
 import { useSessionStore } from '../../stores/session-store';
+import { MemoryInspector } from './MemoryInspector';
 
 // Group icons mapping
 const GROUP_ICONS: Record<MemoryGroup, React.ComponentType<{ className?: string }>> = {
@@ -96,6 +97,9 @@ export function MemoryPanel({ onCreateMemory, onEditMemory }: MemoryPanelProps) 
   }, [workingDirectory, loadMemories, loadGroups]);
 
   const filteredMemories = getFilteredMemories();
+  const selectedMemory = selectedMemoryId
+    ? memories.find((entry) => entry.id === selectedMemoryId) || null
+    : null;
 
   const handleDeleteMemory = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -327,6 +331,8 @@ export function MemoryPanel({ onCreateMemory, onEditMemory }: MemoryPanelProps) 
           </div>
         )}
       </div>
+
+      <MemoryInspector memory={selectedMemory} sessionId={activeSessionId} />
     </div>
   );
 }
@@ -349,7 +355,7 @@ function MemoryItem({ memory, isSelected, onSelect, onEdit, onDelete }: MemoryIt
       onClick={onSelect}
       whileHover={{ backgroundColor: 'rgba(255, 255, 255, 0.04)' }}
       className={cn(
-        'w-full flex items-start gap-3 px-3 py-2.5 text-left',
+        'group w-full flex items-start gap-3 px-3 py-2.5 text-left',
         'transition-colors',
         isSelected && 'bg-[#1D4ED8]/10'
       )}

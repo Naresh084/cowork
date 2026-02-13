@@ -67,6 +67,15 @@ export async function createMiddlewareStack(
   options?: {
     maxMemoriesInPrompt?: number;
     autoExtract?: boolean;
+    consolidation?: {
+      enabled?: boolean;
+      intervalMinutes?: number;
+      redundancyThreshold?: number;
+      decayFactor?: number;
+      minConfidence?: number;
+      staleAfterHours?: number;
+      strategy?: 'balanced' | 'aggressive' | 'conservative';
+    };
   },
 ): Promise<{
   beforeInvoke: (context: MiddlewareContext) => Promise<MiddlewareResult>;
@@ -152,6 +161,16 @@ export async function createMiddlewareStack(
           }
         }
       }
+
+      await memoryService.maybeRunPeriodicConsolidation({
+        enabled: options?.consolidation?.enabled,
+        intervalMinutes: options?.consolidation?.intervalMinutes,
+        redundancyThreshold: options?.consolidation?.redundancyThreshold,
+        decayFactor: options?.consolidation?.decayFactor,
+        minConfidence: options?.consolidation?.minConfidence,
+        staleAfterHours: options?.consolidation?.staleAfterHours,
+        strategy: options?.consolidation?.strategy,
+      });
     },
   };
 }

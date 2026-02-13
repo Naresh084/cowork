@@ -487,3 +487,34 @@ pub async fn workflow_resume_scheduled(
         )
         .await
 }
+
+#[tauri::command]
+pub async fn workflow_evaluate_triggers(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    message: String,
+    workflow_ids: Option<Vec<String>>,
+    min_confidence: Option<f64>,
+    activation_threshold: Option<f64>,
+    max_results: Option<u32>,
+    auto_run: Option<bool>,
+    input: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar_started_public(&app, &state).await?;
+
+    state
+        .manager
+        .send_command(
+            "workflow_evaluate_triggers",
+            serde_json::json!({
+                "message": message,
+                "workflowIds": workflow_ids,
+                "minConfidence": min_confidence,
+                "activationThreshold": activation_threshold,
+                "maxResults": max_results,
+                "autoRun": auto_run.unwrap_or(false),
+                "input": input.unwrap_or_else(|| serde_json::json!({})),
+            }),
+        )
+        .await
+}
