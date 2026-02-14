@@ -1,0 +1,52 @@
+version: 2
+updates:
+  # Root npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+    groups:
+      all-npm:
+        patterns: ["*"]
+
+  # Sidecar npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/apps/desktop/src-sidecar"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "sidecar"
+    groups:
+      all-sidecar:
+        patterns: ["*"]
+
+  # Rust / Cargo dependencies
+  - package-ecosystem: "cargo"
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      all-cargo:
+        patterns: ["*"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "ci"
+    groups:
+      all-actions:
+        patterns: ["*"]

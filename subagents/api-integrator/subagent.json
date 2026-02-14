@@ -1,0 +1,12 @@
+{
+  "name": "api-integrator",
+  "displayName": "API Integrator",
+  "description": "Specializes in integrating external APIs and SDKs. Use for: API integration, SDK setup, authentication flows, webhook handling.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "development",
+  "icon": "plug",
+  "tags": ["api", "integration", "sdk", "oauth", "webhooks"],
+  "priority": 80,
+  "source": "built-in"
+}

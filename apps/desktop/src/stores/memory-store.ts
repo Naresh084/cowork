@@ -1,0 +1,697 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+/**
+ * Memory Store - Deep Agents Long-term Memory System
+ *
+ * Manages persistent memories stored in .cowork/memories/
+ * Replaces the legacy GEMINI.md system
+ */
+
+import { create } from 'zustand';
+import { invoke } from '@tauri-apps/api/core';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/**
+ * Memory group (folder) type
+ */
+export type MemoryGroup = 'preferences' | 'learnings' | 'context' | 'instructions';
+
+/**
+ * Memory source - how was the memory created
+ */
+export type MemorySource = 'auto' | 'manual';
+
+/**
+ * Memory entry
+ */
+export interface Memory {
+  id: string;
+  title: string;
+  content: string;
+  group: MemoryGroup;
+  tags: string[];
+  source: MemorySource;
+  confidence?: number;  // For auto-extracted memories (0-1)
+  createdAt: string;
+  updatedAt: string;
+  accessCount: number;
+  lastAccessedAt: string;
+  relatedSessionIds: string[];
+  relatedMemoryIds: string[];
+}
+
+/**
+ * Scored memory for relevance queries
+ */
+export interface ScoredMemory extends Memory {
+  relevanceScore: number;
+}
+
+/**
+ * Create memory input
+ */
+export interface CreateMemoryInput {
+  title: string;
+  content: string;
+  group: MemoryGroup;
+  tags?: string[];
+  source?: MemorySource;
+  confidence?: number;
+}
+
+/**
+ * Update memory input
+ */
+export interface UpdateMemoryInput {
+  title?: string;
+  content?: string;
+  group?: MemoryGroup;
+  tags?: string[];
+}
+
+export type DeepMemoryFeedbackType =
+  | 'positive'
+  | 'negative'
+  | 'pin'
+  | 'unpin'
+  | 'hide'
+  | 'report_conflict';
+
+export interface DeepMemoryQueryOptions {
+  limit?: number;
+  includeSensitive?: boolean;
+  includeGraphExpansion?: boolean;
+  lexicalWeight?: number;
+  denseWeight?: number;
+  graphWeight?: number;
+  rerankWeight?: number;
+}
+
+export interface DeepMemoryQueryEvidence {
+  atomId: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface DeepMemoryAtom {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  runId?: string;
+  atomType: 'instructions' | 'semantic' | 'episodic' | 'procedural' | 'preference' | 'context';
+  content: string;
+  summary?: string;
+  keywords?: string[];
+  confidence: number;
+  sensitivity?: 'normal' | 'sensitive' | 'restricted';
+  pinned?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeepMemoryQueryResult {
+  queryId: string;
+  sessionId?: string;
+  query: string;
+  options: DeepMemoryQueryOptions;
+  evidence: DeepMemoryQueryEvidence[];
+  atoms: DeepMemoryAtom[];
+  totalCandidates: number;
+  latencyMs: number;
+  createdAt: number;
+}
+
+export interface DeepMemoryFeedback {
+  id: string;
+  sessionId: string;
+  queryId: string;
+  atomId: string;
+  feedback: DeepMemoryFeedbackType;
+  note?: string;
+  createdAt: number;
+}
+
+export interface DeepMemoryAtomView extends DeepMemoryAtom {
+  rank: number;
+  queryScore: number;
+  confidenceScore: number;
+  explanations: string[];
+}
+
+interface MemoryStoreState {
+  // Data
+  memories: Memory[];
+  groups: MemoryGroup[];
+  deepQueryResult: DeepMemoryQueryResult | null;
+  deepQueryAtoms: DeepMemoryAtomView[];
+  feedbackLog: DeepMemoryFeedback[];
+  lastFeedback: DeepMemoryFeedback | null;
+
+  // UI state
+  isLoading: boolean;
+  isCreating: boolean;
+  isDeleting: Set<string>;
+  isDeepQuerying: boolean;
+  isSubmittingFeedback: boolean;
+
+  // Current working directory
+  workingDirectory: string | null;
+
+  // Filter state
+  selectedGroup: MemoryGroup | 'all';
+  searchQuery: string;
+
+  // Selected memory for editing
+  selectedMemoryId: string | null;
+
+  // Error state
+  error: string | null;
+
+  // Query diagnostics
+  lastDeepQueryAt: number | null;
+}
+
+interface MemoryStoreActions {
+  // Loading
+  loadMemories: (workingDirectory: string) => Promise<void>;
+  loadGroups: (workingDirectory: string) => Promise<void>;
+
+  // CRUD
+  createMemory: (input: CreateMemoryInput) => Promise<Memory | null>;
+  updateMemory: (id: string, updates: UpdateMemoryInput) => Promise<Memory | null>;
+  deleteMemory: (id: string) => Promise<boolean>;
+
+  // Groups
+  createGroup: (name: string) => Promise<void>;
+  deleteGroup: (name: string) => Promise<void>;
+
+  // Search
+  searchMemories: (query: string) => Promise<Memory[]>;
+  getRelevantMemories: (context: string, limit?: number) => Promise<ScoredMemory[]>;
+  runDeepQuery: (
+    sessionId: string,
+    query: string,
+    options?: DeepMemoryQueryOptions,
+  ) => Promise<DeepMemoryAtomView[]>;
+  submitDeepFeedback: (
+    sessionId: string,
+    queryId: string,
+    atomId: string,
+    feedback: DeepMemoryFeedbackType,
+    note?: string,
+  ) => Promise<DeepMemoryFeedback | null>;
+  clearDeepQueryState: () => void;
+
+  // UI Actions
+  setSelectedGroup: (group: MemoryGroup | 'all') => void;
+  setSearchQuery: (query: string) => void;
+  selectMemory: (id: string | null) => void;
+
+  // Selectors
+  getFilteredMemories: () => Memory[];
+  getMemoryById: (id: string) => Memory | undefined;
+  getMemoriesByGroup: (group: MemoryGroup) => Memory[];
+
+  // Utilities
+  clearError: () => void;
+  reset: () => void;
+}
+
+// ============================================================================
+// Initial State
+// ============================================================================
+
+const DEFAULT_GROUPS: MemoryGroup[] = ['preferences', 'learnings', 'context', 'instructions'];
+
+const initialState: MemoryStoreState = {
+  memories: [],
+  groups: DEFAULT_GROUPS,
+  deepQueryResult: null,
+  deepQueryAtoms: [],
+  feedbackLog: [],
+  lastFeedback: null,
+  isLoading: false,
+  isCreating: false,
+  isDeleting: new Set(),
+  isDeepQuerying: false,
+  isSubmittingFeedback: false,
+  workingDirectory: null,
+  selectedGroup: 'all',
+  searchQuery: '',
+  selectedMemoryId: null,
+  error: null,
+  lastDeepQueryAt: null,
+};
+
+// ============================================================================
+// Store
+// ============================================================================
+
+export const useMemoryStore = create<MemoryStoreState & MemoryStoreActions>()(
+  (set, get) => ({
+    ...initialState,
+
+    // ========================================================================
+    // Loading
+    // ========================================================================
+
+    loadMemories: async (workingDirectory) => {
+      set({ isLoading: true, error: null, workingDirectory });
+
+      try {
+        const memories = await invoke<Memory[]>('deep_memory_list', {
+          workingDirectory,
+        });
+
+        set({ memories, isLoading: false });
+      } catch (error) {
+        set({
+          memories: [],
+          isLoading: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+
+    loadGroups: async (workingDirectory) => {
+      try {
+        const groups = await invoke<MemoryGroup[]>('deep_memory_list_groups', {
+          workingDirectory,
+        });
+
+        set({ groups: groups.length > 0 ? groups : DEFAULT_GROUPS });
+      } catch (error) {
+        console.warn('[MemoryStore] Failed to load groups:', error);
+        set({ groups: DEFAULT_GROUPS });
+      }
+    },
+
+    // ========================================================================
+    // CRUD
+    // ========================================================================
+
+    createMemory: async (input) => {
+      const { workingDirectory } = get();
+      if (!workingDirectory) {
+        set({ error: 'No working directory set' });
+        return null;
+      }
+
+      set({ isCreating: true, error: null });
+
+      try {
+        const memory = await invoke<Memory>('deep_memory_create', {
+          workingDirectory,
+          input: {
+            title: input.title,
+            content: input.content,
+            group: input.group,
+            tags: input.tags || [],
+            source: input.source || 'manual',
+          },
+        });
+
+        set((state) => ({
+          memories: [...state.memories, memory],
+          isCreating: false,
+        }));
+
+        return memory;
+      } catch (error) {
+        set({
+          isCreating: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    },
+
+    updateMemory: async (id, updates) => {
+      const { workingDirectory } = get();
+      if (!workingDirectory) {
+        set({ error: 'No working directory set' });
+        return null;
+      }
+
+      try {
+        const memory = await invoke<Memory>('deep_memory_update', {
+          workingDirectory,
+          id,
+          updates,
+        });
+
+        set((state) => ({
+          memories: state.memories.map((m) => (m.id === id ? memory : m)),
+        }));
+
+        return memory;
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+        return null;
+      }
+    },
+
+    deleteMemory: async (id) => {
+      const { workingDirectory } = get();
+      if (!workingDirectory) {
+        set({ error: 'No working directory set' });
+        return false;
+      }
+
+      set((state) => ({
+        isDeleting: new Set([...state.isDeleting, id]),
+        error: null,
+      }));
+
+      try {
+        await invoke('deep_memory_delete', {
+          workingDirectory,
+          id,
+        });
+
+        set((state) => {
+          const newDeleting = new Set(state.isDeleting);
+          newDeleting.delete(id);
+          return {
+            memories: state.memories.filter((m) => m.id !== id),
+            isDeleting: newDeleting,
+            selectedMemoryId: state.selectedMemoryId === id ? null : state.selectedMemoryId,
+          };
+        });
+
+        return true;
+      } catch (error) {
+        set((state) => {
+          const newDeleting = new Set(state.isDeleting);
+          newDeleting.delete(id);
+          return {
+            isDeleting: newDeleting,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        });
+        return false;
+      }
+    },
+
+    // ========================================================================
+    // Groups
+    // ========================================================================
+
+    createGroup: async (name) => {
+      const { workingDirectory, groups } = get();
+      if (!workingDirectory) {
+        set({ error: 'No working directory set' });
+        return;
+      }
+
+      try {
+        await invoke('deep_memory_create_group', {
+          workingDirectory,
+          name,
+          groupName: name,
+        });
+
+        set({ groups: [...groups, name as MemoryGroup] });
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+
+    deleteGroup: async (name) => {
+      const { workingDirectory, groups } = get();
+      if (!workingDirectory) {
+        set({ error: 'No working directory set' });
+        return;
+      }
+
+      try {
+        await invoke('deep_memory_delete_group', {
+          workingDirectory,
+          name,
+          groupName: name,
+        });
+
+        set({
+          groups: groups.filter((g) => g !== name),
+          selectedGroup: get().selectedGroup === name ? 'all' : get().selectedGroup,
+        });
+      } catch (error) {
+        set({ error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+
+    // ========================================================================
+    // Search
+    // ========================================================================
+
+    searchMemories: async (query) => {
+      const { workingDirectory } = get();
+      if (!workingDirectory) return [];
+
+      try {
+        const memories = await invoke<Memory[]>('deep_memory_search', {
+          workingDirectory,
+          query,
+        });
+
+        return memories;
+      } catch (error) {
+        console.warn('[MemoryStore] Search failed:', error);
+        return [];
+      }
+    },
+
+    getRelevantMemories: async (context, limit = 5) => {
+      const { workingDirectory } = get();
+      if (!workingDirectory) return [];
+
+      try {
+        const memories = await invoke<ScoredMemory[]>('deep_memory_get_relevant', {
+          workingDirectory,
+          context,
+          limit,
+        });
+
+        return memories;
+      } catch (error) {
+        console.warn('[MemoryStore] Get relevant failed:', error);
+        return [];
+      }
+    },
+
+    runDeepQuery: async (sessionId, query, options = {}) => {
+      if (!sessionId.trim() || !query.trim()) {
+        set({ error: 'Session ID and query are required for deep query' });
+        return [];
+      }
+
+      set({ isDeepQuerying: true, error: null });
+
+      try {
+        const result = await invoke<DeepMemoryQueryResult>('deep_memory_query', {
+          sessionId,
+          query,
+          options,
+        });
+
+        const evidenceByAtomId = new Map(
+          result.evidence.map((item, index) => [
+            item.atomId,
+            { score: item.score, reasons: item.reasons || [], rank: index + 1 },
+          ]),
+        );
+
+        const atoms: DeepMemoryAtomView[] = result.atoms
+          .map((atom, index) => {
+            const evidence = evidenceByAtomId.get(atom.id);
+            return {
+              ...atom,
+              rank: evidence?.rank ?? result.evidence.length + index + 1,
+              queryScore: evidence?.score ?? 0,
+              confidenceScore: atom.confidence ?? 0,
+              explanations: evidence?.reasons ?? [],
+            };
+          })
+          .sort((a, b) => {
+            if (a.rank !== b.rank) return a.rank - b.rank;
+            return b.queryScore - a.queryScore;
+          });
+
+        set({
+          deepQueryResult: result,
+          deepQueryAtoms: atoms,
+          isDeepQuerying: false,
+          lastDeepQueryAt: Date.now(),
+        });
+
+        return atoms;
+      } catch (error) {
+        set({
+          isDeepQuerying: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+      }
+    },
+
+    submitDeepFeedback: async (sessionId, queryId, atomId, feedback, note) => {
+      if (!sessionId.trim() || !queryId.trim() || !atomId.trim()) {
+        set({ error: 'Session ID, query ID, and atom ID are required for feedback' });
+        return null;
+      }
+
+      set({ isSubmittingFeedback: true, error: null });
+
+      try {
+        const result = await invoke<DeepMemoryFeedback>('deep_memory_feedback', {
+          sessionId,
+          queryId,
+          atomId,
+          feedback,
+          note,
+        });
+
+        set((state) => ({
+          isSubmittingFeedback: false,
+          lastFeedback: result,
+          feedbackLog: [result, ...state.feedbackLog].slice(0, 200),
+        }));
+
+        return result;
+      } catch (error) {
+        set({
+          isSubmittingFeedback: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    },
+
+    clearDeepQueryState: () => {
+      set({
+        deepQueryResult: null,
+        deepQueryAtoms: [],
+        lastFeedback: null,
+      });
+    },
+
+    // ========================================================================
+    // UI Actions
+    // ========================================================================
+
+    setSelectedGroup: (group) => {
+      set({ selectedGroup: group });
+    },
+
+    setSearchQuery: (query) => {
+      set({ searchQuery: query });
+    },
+
+    selectMemory: (id) => {
+      set({ selectedMemoryId: id });
+    },
+
+    // ========================================================================
+    // Selectors
+    // ========================================================================
+
+    getFilteredMemories: () => {
+      const { memories, selectedGroup, searchQuery } = get();
+
+      let filtered = memories;
+
+      // Filter by group
+      if (selectedGroup !== 'all') {
+        filtered = filtered.filter((m) => m.group === selectedGroup);
+      }
+
+      // Filter by search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        filtered = filtered.filter(
+          (m) =>
+            m.title.toLowerCase().includes(query) ||
+            m.content.toLowerCase().includes(query) ||
+            m.tags.some((t) => t.toLowerCase().includes(query))
+        );
+      }
+
+      // Sort by updated date (most recent first)
+      return filtered.sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    },
+
+    getMemoryById: (id) => {
+      return get().memories.find((m) => m.id === id);
+    },
+
+    getMemoriesByGroup: (group) => {
+      return get().memories.filter((m) => m.group === group);
+    },
+
+    // ========================================================================
+    // Utilities
+    // ========================================================================
+
+    clearError: () => {
+      set({ error: null });
+    },
+
+    reset: () => {
+      set(initialState);
+    },
+  })
+);
+
+// ============================================================================
+// Selector Hooks
+// ============================================================================
+
+export const useMemories = () => useMemoryStore((state) => state.memories);
+export const useMemoryGroups = () => useMemoryStore((state) => state.groups);
+export const useIsLoadingMemory = () => useMemoryStore((state) => state.isLoading);
+export const useIsCreatingMemory = () => useMemoryStore((state) => state.isCreating);
+export const useIsDeletingMemory = (id: string) =>
+  useMemoryStore((state) => state.isDeleting.has(id));
+export const useSelectedGroup = () => useMemoryStore((state) => state.selectedGroup);
+export const useMemorySearchQuery = () => useMemoryStore((state) => state.searchQuery);
+export const useSelectedMemoryId = () => useMemoryStore((state) => state.selectedMemoryId);
+export const useMemoryError = () => useMemoryStore((state) => state.error);
+export const useDeepQueryResult = () => useMemoryStore((state) => state.deepQueryResult);
+export const useDeepQueryAtoms = () => useMemoryStore((state) => state.deepQueryAtoms);
+export const useDeepQueryLoading = () => useMemoryStore((state) => state.isDeepQuerying);
+export const useDeepFeedbackLog = () => useMemoryStore((state) => state.feedbackLog);
+export const useDeepFeedbackSubmitting = () =>
+  useMemoryStore((state) => state.isSubmittingFeedback);
+export const useLastDeepFeedback = () => useMemoryStore((state) => state.lastFeedback);
+export const useLastDeepQueryAt = () => useMemoryStore((state) => state.lastDeepQueryAt);
+
+// ============================================================================
+// Legacy Compatibility
+// ============================================================================
+
+// Re-export with legacy names for backward compatibility
+export type MemoryEntry = Memory;
+
+export const useMemoryEntries = () => useMemoryStore((state) => state.memories);
+
+export const useMemoryEntriesByCategory = (category: string) =>
+  useMemoryStore((state) => {
+    // Map legacy categories to groups
+    const groupMap: Record<string, MemoryGroup> = {
+      project: 'context',
+      preference: 'preferences',
+      pattern: 'learnings',
+      context: 'context',
+      custom: 'instructions',
+    };
+    const group = groupMap[category] || (category as MemoryGroup);
+    return state.memories.filter((m) => m.group === group);
+  });
+
+export const useIsMemoryDirty = () => false; // New system auto-saves

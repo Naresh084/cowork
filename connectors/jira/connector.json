@@ -1,0 +1,26 @@
+{
+  "id": "jira",
+  "name": "jira",
+  "displayName": "Jira",
+  "description": "Create, update, and manage issues, projects, and sprints in Jira and Confluence",
+  "version": "1.0.0",
+  "icon": "Bug",
+  "category": "developer",
+  "tags": ["issues", "project-management", "agile", "sprint", "atlassian", "confluence"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://www.atlassian.com/platform/remote-mcp-server",
+    "homepage": "https://www.atlassian.com/platform/remote-mcp-server"
+  }
+}

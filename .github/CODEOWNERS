@@ -1,0 +1,17 @@
+# Default owner for everything
+* @Naresh084
+
+# Frontend
+apps/desktop/src/ @Naresh084
+
+# Rust backend
+apps/desktop/src-tauri/ @Naresh084
+
+# Sidecar / Agent
+apps/desktop/src-sidecar/ @Naresh084
+
+# Packages
+packages/ @Naresh084
+
+# CI/CD
+.github/ @Naresh084

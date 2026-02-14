@@ -1,0 +1,35 @@
+{
+  "id": "exa",
+  "name": "exa",
+  "displayName": "Exa",
+  "description": "Search the web using Exa's neural search API for semantic search results",
+  "version": "1.0.0",
+  "icon": "Search",
+  "category": "ai-search",
+  "tags": ["search", "web", "ai", "semantic", "neural"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "exa-mcp-server"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "EXA_API_KEY",
+        "description": "Exa API Key",
+        "required": true,
+        "placeholder": "...",
+        "link": "https://exa.ai/"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/exa-labs/exa-mcp-server#setup",
+    "homepage": "https://github.com/exa-labs/exa-mcp-server"
+  }
+}

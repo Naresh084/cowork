@@ -1,0 +1,93 @@
+/* Copyright (c) 2026 Naresh. All rights reserved.
+ * Licensed under the MIT License. See LICENSE file for details. */
+
+:root {
+  /* Typography */
+  --font-sans-ui: 'Sora', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-mono-ui: 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace;
+  --type-display-size: 2rem;
+  --type-display-line: 2.4rem;
+  --type-title-size: 1.125rem;
+  --type-title-line: 1.5rem;
+  --type-body-size: 0.9375rem;
+  --type-body-line: 1.375rem;
+  --type-caption-size: 0.75rem;
+  --type-caption-line: 1rem;
+
+  /* Spacing + Shape */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  /* Motion */
+  --motion-fast: 120ms;
+  --motion-standard: 200ms;
+  --motion-slow: 320ms;
+  --motion-emphasis: 480ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --easing-expressive: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Semantic surface aliases */
+  --surface-0: rgb(var(--bg-primary));
+  --surface-1: rgb(var(--bg-secondary));
+  --surface-2: rgb(var(--bg-tertiary));
+  --surface-elevated: rgb(var(--bg-elevated));
+  --surface-on: rgb(var(--foreground) / var(--foreground-opacity));
+  --surface-on-muted: rgb(var(--foreground-secondary) / var(--foreground-secondary-opacity));
+}
+
+html,
+body {
+  font-family: var(--font-sans-ui);
+}
+
+.type-display {
+  font-size: var(--type-display-size);
+  line-height: var(--type-display-line);
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+.type-title {
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+.type-body {
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 400;
+}
+
+.type-caption {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-line);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.type-mono {
+  font-family: var(--font-mono-ui);
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
+}
+
+.motion-standard {
+  transition-duration: var(--motion-standard);
+  transition-timing-function: var(--easing-standard);
+}
+
+.motion-expressive {
+  transition-duration: var(--motion-slow);
+  transition-timing-function: var(--easing-expressive);
+}

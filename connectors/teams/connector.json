@@ -1,0 +1,34 @@
+{
+  "id": "teams",
+  "name": "teams",
+  "displayName": "Microsoft Teams",
+  "description": "Send messages, manage channels, teams, and conversations in Microsoft Teams",
+  "version": "1.0.0",
+  "icon": "Users",
+  "category": "microsoft",
+  "tags": ["messaging", "teams", "channels", "microsoft", "chat", "collaboration"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@floriscornel/teams-mcp"]
+  },
+  "auth": {
+    "type": "oauth",
+    "provider": "microsoft",
+    "flow": "device_code",
+    "scopes": [
+      "Team.ReadBasic.All",
+      "Channel.ReadBasic.All",
+      "Chat.ReadWrite",
+      "ChannelMessage.Send"
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/floriscornel/teams-mcp#setup",
+    "homepage": "https://github.com/floriscornel/teams-mcp"
+  }
+}

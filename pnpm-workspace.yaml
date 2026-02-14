@@ -1,0 +1,5 @@
+packages:
+  - "apps/*"
+  - "apps/desktop/src-sidecar"
+  - "packages/*"
+  - "gems/*"

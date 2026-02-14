@@ -1,0 +1,85 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+/**
+ * /help Command Handler
+ *
+ * Shows available commands and their usage
+ */
+
+import type { CommandHandler, CommandResult } from '../../apps/desktop/src-sidecar/src/commands/types.js';
+
+// Import will be resolved at runtime through the service
+// This handler receives the command service through context
+
+export const handler: CommandHandler = async (ctx): Promise<CommandResult> => {
+  try {
+    const { args } = ctx;
+    const specificCommand = (args._positional as string[])?.[0] || args.command as string;
+
+    // Get all commands from the registry (passed via emit/context)
+    // For now, return a static help message
+    // In production, this would query the command service
+
+    if (specificCommand) {
+      // Show help for specific command
+      return {
+        success: true,
+        message: `Help for /${specificCommand}:\n\nUse "/${specificCommand}" to execute the command.\nRun "/help" to see all available commands.`,
+        data: {
+          command: specificCommand,
+        },
+      };
+    }
+
+    // Show all commands
+    const helpText = `
+# Available Commands
+
+## Setup
+- **/init** - Generate AGENTS.md with project context
+  - \`--force\` - Overwrite existing file
+
+## Memory
+- **/memory** - Manage long-term memories
+  - \`/memory list\` - List all memories
+  - \`/memory add <title>\` - Add a new memory
+  - \`/memory search <query>\` - Search memories
+  - \`/memory remove <id>\` - Remove a memory
+
+## Utility
+- **/help** - Show this help message
+  - \`/help <command>\` - Show help for specific command
+- **/clear** - Clear conversation (preserves memories)
+
+## Workflow + Automations
+- Use normal chat prompts to build workflows (example: "create a workflow to review repo changes every hour and post summary")
+- Open **Workflows** from the sidebar for visual editing and run timelines
+- Open **Automations** to manage schedules (legacy cron + workflow schedules)
+
+## Tips
+- Type \`/\` to see command suggestions
+- Commands can be aliased (e.g., \`/?\` = \`/help\`)
+- Custom commands can be added in \`.cowork/commands/\`
+`.trim();
+
+    return {
+      success: true,
+      message: helpText,
+      data: {
+        categories: ['setup', 'memory', 'utility'],
+        commandCount: 4,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: 'HELP_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+};
+
+export default handler;

@@ -1,0 +1,37 @@
+{
+  "name": "@cowork/providers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "refresh:catalogs": "node scripts/refresh-catalogs.mjs"
+  },
+  "dependencies": {
+    "@cowork/shared": "workspace:*",
+    "@cowork/auth": "workspace:*",
+    "@google/generative-ai": "^0.21.0",
+    "@google/genai": "^1.33.0",
+    "playwright": "^1.40.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^1.6.1"
+  }
+}

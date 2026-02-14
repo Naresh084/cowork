@@ -1,0 +1,2 @@
+session_id,date,participant_type,flow1_success,flow1_time_seconds,flow2_success,flow3_success,flow4_success,flow5_success,recovery_clicks,overall_satisfaction,clarity_score,reliability_confidence,notes
+example-001,2026-02-12,power_developer,true,155,true,true,true,true,2,4.7,4.6,4.8,Template row - replace with real session data.

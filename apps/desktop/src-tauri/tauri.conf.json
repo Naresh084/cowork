@@ -1,0 +1,94 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cowork",
+  "version": "0.1.0",
+  "identifier": "com.cowork.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm icon:sync && pnpm dev:vite",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm icon:sync && pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Cowork",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true,
+        "decorations": true,
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; media-src 'self' data: blob: asset: http://asset.localhost https://asset.localhost; font-src 'self' data:; connect-src 'self' https://generativelanguage.googleapis.com https://aistudio.google.com",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/.cowork/**", "$HOME/**", "**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": ["binaries/sidecar", "binaries/cowork-agentd"],
+    "resources": ["binaries/*"],
+    "icon": [
+      "icons/icon.png",
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "entitlements": "./Cowork.entitlements",
+      "frameworks": []
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-2"
+        ],
+        "files": {}
+      },
+      "rpm": {
+        "depends": [
+          "webkit2gtk4.1",
+          "libappindicator-gtk3"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1MEJFODcwNzAyRUQ0REIKUldUYjFDNXdjT2dMVlZzOWNmSnlxMXRvUXZuWi9wYkltM3dLeTVqUUdNTXY3UjE4Wk16U0xmRXcK",
+      "endpoints": [
+        "https://github.com/Naresh084/cowork/releases/latest/download/latest.json"
+      ],
+      "dialog": true
+    }
+  }
+}

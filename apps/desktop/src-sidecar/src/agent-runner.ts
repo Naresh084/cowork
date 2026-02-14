@@ -1,0 +1,10389 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { ToolHandler, ToolContext } from '@cowork/core';
+import {
+  createProvider,
+  getModelContextWindow,
+  setModelContextWindows,
+} from '@cowork/providers';
+import type {
+  Message,
+  PermissionRequest,
+  PermissionDecision,
+  MessageContentPart,
+  SessionType,
+  PlatformType,
+  ToolEvaluationResult,
+  SkillGenerationDraft,
+  SkillGenerationRequest,
+  SkillGenerationResult,
+  SkillBinding,
+} from '@cowork/shared';
+import {
+  SUPPORTED_PLATFORM_TYPES,
+  generateId,
+  generateMessageId,
+  now,
+  generateChatItemId,
+  sanitizeProviderErrorMessage,
+} from '@cowork/shared';
+import type {
+  ChatItem,
+  UserMessageItem,
+  AssistantMessageItem,
+  ThinkingItem,
+  ToolStartItem,
+  ToolResultItem,
+  PermissionItem,
+  QuestionItem,
+  MediaItem,
+  ReportItem,
+  DesignItem,
+  ErrorItem,
+} from '@cowork/shared';
+import { createDeepAgent, FilesystemBackend, CompositeBackend } from 'deepagents';
+import { createMiddleware } from 'langchain';
+import { DynamicStructuredTool } from '@langchain/core/tools';
+import { ToolMessage } from '@langchain/core/messages';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
+import {
+  evaluatePolicy as evaluateSandboxPolicy,
+  isOsSandboxAvailable,
+  isReadOnlySafeCommand,
+  type CommandSandboxSettings,
+} from '@cowork/sandbox';
+import { z } from 'zod';
+import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises';
+import { existsSync } from 'fs';
+import { basename, extname, join, isAbsolute, resolve, sep } from 'path';
+import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
+import { eventEmitter } from './event-emitter.js';
+import {
+  createResearchTools,
+  createComputerUseTools,
+  createMediaTools,
+  createGroundingTools,
+  createCronTools,
+  createExternalCliTools,
+  createWorkflowTools,
+  createConversationSkillTools,
+} from './tools/index.js';
+import { createNotificationTools } from './tools/notification-tools.js';
+import { connectorBridge } from './connector-bridge.js';
+import { CoworkBackend } from './deepagents-backend.js';
+import { skillService } from './skill-service.js';
+import { toolPolicyService } from './tool-policy.js';
+import { cronService } from './cron/index.js';
+import { workflowService } from './workflow/index.js';
+// Deep Agents middleware integration
+import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middleware-stack.js';
+import { createMemoryService, type MemoryService } from './memory/memory-service.js';
+import { createMemoryExtractor, type MemoryExtractor } from './memory/memory-extractor.js';
+import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-md-service.js';
+import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@cowork/mcp';
+import type { AgentsMdConfig } from './agents-md/types.js';
+import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
+import { createSubagentService } from './subagents/index.js';
+import { SystemPromptBuilder } from './prompts/system-prompt-builder.js';
+import type { ToolCallContext } from '@cowork/shared';
+import type {
+  PromptBuildContext,
+  PromptBuildDiagnostics,
+  PromptSystemInfo,
+  PromptTemplateSection,
+} from './prompts/types.js';
+import type {
+  SessionInfo,
+  SessionDetails,
+  SessionListPage,
+  SessionRuntimeState,
+  RuntimeBootstrapState,
+  RuntimeToolSnapshot,
+  Attachment,
+  Task,
+  Artifact,
+  ExtendedPermissionRequest,
+  QuestionRequest,
+  QuestionOption,
+  SkillConfig,
+  ProviderId,
+  ExecutionMode,
+  RuntimeConfig,
+  RuntimeSoulProfile,
+  RuntimeConfigUpdateResult,
+  ExternalCliRuntimeConfig,
+} from './types.js';
+import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
+import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { ChatOpenAI } from '@langchain/openai';
+import { ExternalCliDiscoveryService } from './external-cli/discovery-service.js';
+import { ExternalCliRunManager } from './external-cli/run-manager.js';
+import {
+  DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG,
+  type ExternalCliPendingInteraction,
+  type ExternalCliRunOrigin,
+} from './external-cli/types.js';
+import { WORKFLOWS_ENABLED } from './config/feature-flags.js';
+import { integrationBridge } from './integrations/index.js';
+import { BenchmarkRunner } from './benchmark/runner.js';
+import { BENCHMARK_SUITES } from './benchmark/suites/index.js';
+import {
+  type SessionPermissionBootstrap,
+} from './permission-bootstrap.js';
+import { SkillGenerationService } from './skill-generation-service.js';
+import {
+  BenchmarkRepository,
+  DatabaseConnection,
+  RunCheckpointRepository,
+  SessionBranchRepository,
+} from '@cowork/storage';
+
+const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
+
+// ============================================================================
+// Session Manager
+// ============================================================================
+
+type DeepAgentInstance = {
+  invoke: (input: unknown, options?: unknown) => Promise<unknown>;
+  streamEvents?: (input: unknown, options?: unknown) => AsyncIterable<unknown>;
+  stop?: () => void;
+  abort?: () => void;
+  cancel?: () => void;
+};
+
+type ApprovalMode = 'auto' | 'read_only' | 'full';
+
+interface QueuedMessage {
+  id: string;
+  content: string;
+  attachments?: Attachment[];
+  queuedAt: number;
+}
+
+interface PendingPlanProposal {
+  id: string;
+  planMarkdown: string;
+  createdAt: number;
+  sourceTurnId?: string;
+  status: 'pending' | 'resolved' | 'cancelled';
+}
+
+interface IntegrationMessageOrigin {
+  platform: PlatformType;
+  chatId: string;
+  senderName: string;
+  senderId?: string;
+  timestamp: number;
+}
+
+interface ActiveSession {
+  id: string;
+  type: SessionType;
+  provider: ProviderId;
+  executionMode: ExecutionMode;
+  workingDirectory: string;
+  baseUrlSnapshot?: string;
+  model: string;
+  title: string | null;
+  approvalMode: ApprovalMode;
+  baseSystemPrompt?: string;
+  agent: DeepAgentInstance;
+  abortController?: AbortController;
+  stopRequested?: boolean;
+  /** Unified chat items array - sole source of truth */
+  chatItems: ChatItem[];
+  /** Current turn ID for associating items with user message */
+  currentTurnId?: string;
+  tasks: Task[];
+  lastTodosSignature?: string;
+  artifacts: Artifact[];
+  permissionCache: Map<string, PermissionDecision>;
+  permissionScopes: Map<string, Set<string>>;
+  toolStartTimes: Map<string, number>;
+  activeTools: Map<string, RuntimeToolSnapshot>;
+  pendingPermissions: Map<string, {
+    request: ExtendedPermissionRequest;
+    resolve: (decision: PermissionDecision) => void;
+  }>;
+  pendingQuestions: Map<string, {
+    request: QuestionRequest;
+    resolve: (answer: string | string[]) => void;
+  }>;
+  /** Currently executing parent task tool ID - sub-tools will inherit this */
+  activeParentToolId?: string;
+  /** In-flight permission requests by cache key - for deduplication */
+  inFlightPermissions: Map<string, {
+    permissionId: string;
+    promise: Promise<PermissionDecision>;
+    resolvers: Array<(decision: PermissionDecision) => void>;
+  }>;
+  /** Pending multimodal content to inject into next message */
+  pendingMultimodalContent?: Array<{
+    type: 'image' | 'video' | 'audio' | 'file';
+    mimeType: string;
+    data: string;
+    path?: string;
+  }>;
+  /** Last known prompt tokens from API response (for accurate context tracking) */
+  lastKnownPromptTokens: number;
+  /** Monotonic sequence counter for chat item ordering */
+  nextSequence: number;
+  /** Active assistant streaming segment item ID for the current turn */
+  activeAssistantSegmentItemId?: string;
+  /** Active assistant streaming segment content buffer */
+  activeAssistantSegmentText: string;
+  /** Last raw chunk observed from stream extraction (for delta normalization). */
+  lastRawAssistantChunkText: string;
+  /** Current assistant segment index in this turn */
+  assistantSegmentIndex: number;
+  /** Last completed assistant segment text (for final dedupe) */
+  lastCompletedAssistantSegmentText?: string;
+  /** Whether any assistant text has been emitted in this turn */
+  hasAssistantTextThisTurn: boolean;
+  /** Indicates the runtime is actively retrying after a transient execution failure/fallback. */
+  isRetrying: boolean;
+  /** Live runtime flags used for reconnect hydration */
+  isStreaming: boolean;
+  isThinking: boolean;
+  lastError: {
+    message: string;
+    code?: string;
+    timestamp: number;
+  } | null;
+  /** Thread ID for checkpointer (same as session ID) */
+  threadId: string;
+  /** Message queue for messages sent while agent is busy */
+  messageQueue: QueuedMessage[];
+  /** Pending plan review generated in plan mode */
+  pendingPlanProposal?: PendingPlanProposal;
+  /** Next inbound integration origin to apply for upcoming turn */
+  pendingIntegrationOrigin?: IntegrationMessageOrigin;
+  /** Active origin context for currently executing turn */
+  activeTurnIntegrationOrigin?: IntegrationMessageOrigin;
+  /** Per-turn guardrail state for todo enforcement in execute mode */
+  hasTodoStateThisTurn: boolean;
+  /** Non-todo tool call count since last todo update */
+  nonTodoToolCallsSinceTodoUpdate: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Last time the session was accessed/selected by the user */
+  lastAccessedAt: number;
+}
+
+interface ManagedRunTimelineEvent {
+  id: string;
+  type: string;
+  timestamp: number;
+  data?: Record<string, unknown>;
+}
+
+interface ManagedRun {
+  id: string;
+  sessionId: string;
+  branchId?: string;
+  status: 'queued' | 'running' | 'recovered' | 'completed' | 'failed' | 'cancelled';
+  runOptions: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+  checkpointCount: number;
+  timeline: ManagedRunTimelineEvent[];
+}
+
+interface ManagedBranch {
+  id: string;
+  sessionId: string;
+  name: string;
+  fromTurnId?: string;
+  parentBranchId?: string;
+  status: 'active' | 'merged' | 'abandoned';
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface SpecializedModelsV2Local {
+  google: {
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  };
+  openai: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
+  fal: {
+    imageGeneration: string;
+    videoGeneration: string;
+  };
+}
+
+interface MediaRoutingSettingsLocal {
+  imageBackend: 'google' | 'openai' | 'fal';
+  videoBackend: 'google' | 'openai' | 'fal';
+}
+
+interface RuntimeConfigState {
+  activeProvider: ProviderId;
+  providerApiKeys: Partial<Record<ProviderId, string>>;
+  providerBaseUrls: Partial<Record<ProviderId, string>>;
+  googleApiKey: string | null;
+  openaiApiKey: string | null;
+  falApiKey: string | null;
+  exaApiKey: string | null;
+  tavilyApiKey: string | null;
+  externalSearchProvider: 'google' | 'exa' | 'tavily';
+  mediaRouting: MediaRoutingSettingsLocal;
+  specializedModels: SpecializedModelsV2Local;
+  sandbox: CommandSandboxSettings;
+  externalCli: ExternalCliRuntimeConfig;
+  toolOutputTokenLimit: number;
+  activeSoul: RuntimeSoulProfile | null;
+  memory: {
+    enabled: boolean;
+    autoExtract: boolean;
+    maxInPrompt: number;
+    style: 'conservative' | 'balanced' | 'aggressive';
+    consolidation: {
+      enabled: boolean;
+      intervalMinutes: number;
+      redundancyThreshold: number;
+      decayFactor: number;
+      minConfidence: number;
+      staleAfterHours: number;
+      strategy: 'balanced' | 'aggressive' | 'conservative';
+    };
+  };
+}
+
+interface SoulCatalogResult {
+  presets: RuntimeSoulProfile[];
+  customSouls: RuntimeSoulProfile[];
+  defaultSoulId: string;
+  projectSoulsDir: string;
+  userSoulsDir: string;
+}
+
+const DEFAULT_SOUL_ID = 'preset:professional';
+const FALLBACK_SOUL_PROFILE: RuntimeSoulProfile = {
+  id: DEFAULT_SOUL_ID,
+  title: 'Professional',
+  source: 'preset',
+  content: [
+    '# Professional Soul',
+    '',
+    '## Voice',
+    '- Clear, factual, and respectful.',
+    '- Avoid hype and filler.',
+    '',
+    '## Behavior',
+    '- Prioritize correctness and direct execution.',
+    '- Surface assumptions and constraints explicitly.',
+    '- Keep responses concise unless detail is requested.',
+  ].join('\n'),
+};
+
+const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
+  google: {
+    imageGeneration: 'imagen-4.0-generate-001',
+    videoGeneration: 'veo-3.1-generate-preview',
+    computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+    deepResearchAgent: 'deep-research-pro-preview-12-2025',
+  },
+  openai: {
+    imageGeneration: 'gpt-image-1',
+    videoGeneration: 'sora',
+  },
+  fal: {
+    imageGeneration: 'fal-ai/flux/schnell',
+    videoGeneration: 'fal-ai/kling-video/v1.6/standard/text-to-video',
+  },
+};
+
+const DEFAULT_MEDIA_ROUTING: MediaRoutingSettingsLocal = {
+  imageBackend: 'google',
+  videoBackend: 'google',
+};
+
+const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
+  mode: 'workspace-write',
+  allowNetwork: false,
+  allowProcessSpawn: true,
+  allowedPaths: [],
+  deniedPaths: ['/etc', '/System', '/usr'],
+  trustedCommands: ['ls', 'pwd', 'git status', 'git diff'],
+  maxExecutionTimeMs: 30000,
+  maxOutputBytes: 1024 * 1024,
+};
+const DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 32000;
+const MIN_TOOL_OUTPUT_TOKEN_LIMIT = 1024;
+const MAX_TOOL_OUTPUT_TOKEN_LIMIT = 262144;
+const TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN = 4;
+type ExternalCliStartToolName = 'start_codex_cli_run' | 'start_claude_cli_run';
+const EXTERNAL_CLI_START_TOOLS = new Set<ExternalCliStartToolName>([
+  'start_codex_cli_run',
+  'start_claude_cli_run',
+]);
+const EXTERNAL_CLI_INTENT_PATTERNS: Record<ExternalCliStartToolName, RegExp[]> = {
+  start_codex_cli_run: [
+    /\bstart_codex_cli_run\b/i,
+    /\b(use|run|start|launch|open|execute)\b.{0,30}\bcodex(?:\s+cli)?\b/i,
+    /\bcodex(?:\s+cli)?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
+  ],
+  start_claude_cli_run: [
+    /\bstart_claude_cli_run\b/i,
+    /\b(use|run|start|launch|open|execute)\b.{0,30}\bclaude(?:\s+(?:cli|code))?\b/i,
+    /\bclaude(?:\s+(?:cli|code))?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
+  ],
+};
+
+const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
+  enabled: true,
+  autoExtract: true,
+  maxInPrompt: 5,
+  style: 'balanced',
+  consolidation: {
+    enabled: true,
+    intervalMinutes: 60,
+    redundancyThreshold: 0.9,
+    decayFactor: 0.92,
+    minConfidence: 0.15,
+    staleAfterHours: 24 * 14,
+    strategy: 'balanced',
+  },
+};
+
+function normalizeToolOutputTokenLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT;
+  }
+  return Math.max(
+    MIN_TOOL_OUTPUT_TOKEN_LIMIT,
+    Math.min(MAX_TOOL_OUTPUT_TOKEN_LIMIT, Math.floor(value)),
+  );
+}
+
+function normalizeCommandSandboxSettings(
+  value?: Partial<CommandSandboxSettings> | null,
+): CommandSandboxSettings {
+  const mode = value?.mode;
+  return {
+    mode:
+      mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access'
+        ? mode
+        : DEFAULT_COMMAND_SANDBOX.mode,
+    allowNetwork:
+      typeof value?.allowNetwork === 'boolean'
+        ? value.allowNetwork
+        : DEFAULT_COMMAND_SANDBOX.allowNetwork,
+    allowProcessSpawn:
+      typeof value?.allowProcessSpawn === 'boolean'
+        ? value.allowProcessSpawn
+        : DEFAULT_COMMAND_SANDBOX.allowProcessSpawn,
+    allowedPaths: Array.isArray(value?.allowedPaths)
+      ? value.allowedPaths
+      : DEFAULT_COMMAND_SANDBOX.allowedPaths,
+    deniedPaths: Array.isArray(value?.deniedPaths)
+      ? value.deniedPaths
+      : DEFAULT_COMMAND_SANDBOX.deniedPaths,
+    trustedCommands: Array.isArray(value?.trustedCommands)
+      ? value.trustedCommands
+      : DEFAULT_COMMAND_SANDBOX.trustedCommands,
+    maxExecutionTimeMs:
+      typeof value?.maxExecutionTimeMs === 'number' && value.maxExecutionTimeMs > 0
+        ? value.maxExecutionTimeMs
+        : DEFAULT_COMMAND_SANDBOX.maxExecutionTimeMs,
+    maxOutputBytes:
+      typeof value?.maxOutputBytes === 'number' && value.maxOutputBytes > 0
+        ? value.maxOutputBytes
+        : DEFAULT_COMMAND_SANDBOX.maxOutputBytes,
+  };
+}
+
+function normalizeRuntimeMemorySettings(
+  value?:
+    | (Partial<RuntimeConfigState['memory']> & {
+        consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
+      })
+    | null,
+): RuntimeConfigState['memory'] {
+  const style = value?.style;
+  const consolidation = value?.consolidation;
+  const consolidationStrategy = consolidation?.strategy;
+  return {
+    enabled:
+      typeof value?.enabled === 'boolean' ? value.enabled : DEFAULT_RUNTIME_MEMORY_SETTINGS.enabled,
+    autoExtract:
+      typeof value?.autoExtract === 'boolean'
+        ? value.autoExtract
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.autoExtract,
+    maxInPrompt:
+      typeof value?.maxInPrompt === 'number' && Number.isFinite(value.maxInPrompt)
+        ? Math.max(1, Math.min(20, Math.floor(value.maxInPrompt)))
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.maxInPrompt,
+    style:
+      style === 'conservative' || style === 'balanced' || style === 'aggressive'
+        ? style
+        : DEFAULT_RUNTIME_MEMORY_SETTINGS.style,
+    consolidation: {
+      enabled:
+        typeof consolidation?.enabled === 'boolean'
+          ? consolidation.enabled
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.enabled,
+      intervalMinutes:
+        typeof consolidation?.intervalMinutes === 'number' && consolidation.intervalMinutes > 0
+          ? Math.min(24 * 60, Math.max(1, Math.floor(consolidation.intervalMinutes)))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.intervalMinutes,
+      redundancyThreshold:
+        typeof consolidation?.redundancyThreshold === 'number'
+          ? Math.max(0.6, Math.min(0.99, consolidation.redundancyThreshold))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.redundancyThreshold,
+      decayFactor:
+        typeof consolidation?.decayFactor === 'number'
+          ? Math.max(0.5, Math.min(0.999, consolidation.decayFactor))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.decayFactor,
+      minConfidence:
+        typeof consolidation?.minConfidence === 'number'
+          ? Math.max(0.05, Math.min(0.95, consolidation.minConfidence))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.minConfidence,
+      staleAfterHours:
+        typeof consolidation?.staleAfterHours === 'number' && consolidation.staleAfterHours > 0
+          ? Math.min(24 * 365, Math.max(1, Math.floor(consolidation.staleAfterHours)))
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.staleAfterHours,
+      strategy:
+        consolidationStrategy === 'balanced' ||
+        consolidationStrategy === 'aggressive' ||
+        consolidationStrategy === 'conservative'
+          ? consolidationStrategy
+          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.strategy,
+    },
+  };
+}
+
+const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ProviderId, string>> = {
+  google: 'https://generativelanguage.googleapis.com',
+  openai: 'https://api.openai.com',
+  anthropic: 'https://api.anthropic.com',
+  openrouter: 'https://openrouter.ai/api',
+  moonshot: 'https://api.moonshot.ai',
+  glm: 'https://open.bigmodel.cn/api/paas',
+  deepseek: 'https://api.deepseek.com',
+  lmstudio: 'http://127.0.0.1:1234',
+};
+
+function normalizeProvider(provider: ProviderId | string): ProviderId {
+  if (provider === 'gemini') return 'google';
+  switch (provider) {
+    case 'google':
+    case 'openai':
+    case 'anthropic':
+    case 'openrouter':
+    case 'moonshot':
+    case 'glm':
+    case 'deepseek':
+    case 'lmstudio':
+      return provider;
+    default:
+      return 'google';
+  }
+}
+
+function normalizeRuntimeSoulProfile(
+  value?: RuntimeSoulProfile | null,
+): RuntimeSoulProfile | null {
+  if (!value) return null;
+
+  const id = value.id?.trim() || '';
+  const title = value.title?.trim() || '';
+  const content = value.content?.trim() || '';
+  const source: RuntimeSoulProfile['source'] =
+    value.source === 'custom' ? 'custom' : 'preset';
+  const path = value.path?.trim() || undefined;
+
+  if (!id || !title || !content) return null;
+
+  return {
+    id,
+    title,
+    content,
+    source,
+    path,
+  };
+}
+
+function runtimeSoulEquals(
+  left: RuntimeSoulProfile | null,
+  right: RuntimeSoulProfile | null,
+): boolean {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.title === right.title &&
+    left.content === right.content &&
+    left.source === right.source &&
+    (left.path || '') === (right.path || '')
+  );
+}
+
+interface MCPServerConfigInput {
+  id: string;
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled?: boolean;
+  prompt?: string;
+  contextFileName?: string;
+  transport?: 'stdio' | 'http';
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+interface ManagedMCPServerState {
+  configId: string;
+  displayName: string;
+  internalServerId?: string;
+  enabled: boolean;
+  connected: boolean;
+  skippedReason?: string;
+  error?: string;
+}
+
+interface ManagedMCPToolMeta {
+  toolName: string;
+  serverConfigId: string;
+  internalServerId: string;
+  serverDisplayName: string;
+  description?: string;
+}
+
+interface ToolCapabilityContext {
+  googleCapabilityKey: string | null;
+  openAICapabilityKey: string | null;
+  falCapabilityKey: string | null;
+  mediaRouting: MediaRoutingSettingsLocal;
+  externalSearchProvider: 'google' | 'exa' | 'tavily';
+  hasConfiguredExternalSearch: boolean;
+  providerSupportsNativeSearch: boolean;
+  hasNativeSearchKey: boolean;
+  hasResearchKey: boolean;
+  hasImageMediaKey: boolean;
+  hasVideoMediaKey: boolean;
+  hasAnalyzeVideoKey: boolean;
+  hasComputerUseKey: boolean;
+  hasWebSearch: boolean;
+  hasWebFetch: boolean;
+}
+
+interface CapabilityToolAccessEntry {
+  toolName: string;
+  enabled: boolean;
+  reason: string;
+  policyAction: 'allow' | 'ask' | 'deny';
+}
+
+interface CapabilityIntegrationAccessEntry {
+  integrationName: string;
+  enabled: boolean;
+  reason: string;
+}
+
+interface CapabilitySnapshot {
+  provider: ProviderId;
+  executionMode: ExecutionMode;
+  mediaRouting: MediaRoutingSettingsLocal;
+  sandbox: {
+    mode: CommandSandboxSettings['mode'];
+    osEnforced: boolean;
+    networkAllowed: boolean;
+    effectiveAllowedRoots: string[];
+  };
+  keyStatus: {
+    providerKeyConfigured: boolean;
+    googleKeyConfigured: boolean;
+    openaiKeyConfigured: boolean;
+    falKeyConfigured: boolean;
+    exaKeyConfigured: boolean;
+    tavilyKeyConfigured: boolean;
+    stitchKeyConfigured: boolean;
+  };
+  toolAccess: CapabilityToolAccessEntry[];
+  integrationAccess: CapabilityIntegrationAccessEntry[];
+  policyProfile: string;
+  notes: string[];
+}
+
+export class AgentRunner {
+  private sessions: Map<string, ActiveSession> = new Map();
+  private runtimeConfig: RuntimeConfigState = {
+    activeProvider: 'google',
+    providerApiKeys: {},
+    providerBaseUrls: {},
+    googleApiKey: null,
+    openaiApiKey: null,
+    falApiKey: null,
+    exaApiKey: null,
+    tavilyApiKey: null,
+    externalSearchProvider: 'google',
+    mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
+    sandbox: { ...DEFAULT_COMMAND_SANDBOX },
+    externalCli: {
+      codex: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.codex },
+      claude: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.claude },
+    },
+    toolOutputTokenLimit: DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
+    activeSoul: { ...FALLBACK_SOUL_PROFILE },
+    memory: { ...DEFAULT_RUNTIME_MEMORY_SETTINGS },
+    specializedModels: {
+      google: { ...DEFAULT_SPECIALIZED_MODELS.google },
+      openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
+      fal: { ...DEFAULT_SPECIALIZED_MODELS.fal },
+    },
+  };
+  private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
+  private skills: SkillConfig[] = [];
+  private enabledSkillIds: Set<string> = new Set();
+  private persistence: SessionPersistence | null = null;
+  private currentTurnInfo: Map<string, { turnMessageId: string; toolIds: string[] }> = new Map();
+  private isInitialized = false;
+  private stitchApiKey: string | null = null;
+  private mcpManager: MCPClientManager = new MCPClientManager();
+  private mcpServerConfigs: MCPServerConfigInput[] = [];
+  private mcpServerStates: Map<string, ManagedMCPServerState> = new Map();
+  private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
+  private externalCliDiscoveryService: ExternalCliDiscoveryService = new ExternalCliDiscoveryService();
+  private externalCliRunManager: ExternalCliRunManager | null = null;
+  private externalCliQuestionMap: Map<string, { sessionId: string; questionId: string }> = new Map();
+  private appDataDir: string | null = null;
+  private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
+  private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
+  private initializePromise: Promise<{ sessionsRestored: number }> | null = null;
+  // Deep Agents services (per-session instances stored in map)
+  private memoryServices: Map<string, MemoryService> = new Map();
+  private memoryExtractors: Map<string, MemoryExtractor> = new Map();
+  private agentsMdServices: Map<string, AgentsMdService> = new Map();
+  private agentsMdConfigs: Map<string, AgentsMdConfig | null> = new Map();
+  private storageDb: DatabaseConnection | null = null;
+  private runCheckpointRepository: RunCheckpointRepository | null = null;
+  private sessionBranchRepository: SessionBranchRepository | null = null;
+  private benchmarkRepository: BenchmarkRepository | null = null;
+  private benchmarkRunner: BenchmarkRunner = new BenchmarkRunner(BENCHMARK_SUITES);
+  private runs: Map<string, ManagedRun> = new Map();
+  private activeRunBySession: Map<string, string> = new Map();
+  private sessionBranches: Map<string, ManagedBranch[]> = new Map();
+  private activeBranchBySession: Map<string, string> = new Map();
+  private latestReleaseGateStatus: {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard?: Record<string, unknown>;
+    evaluatedAt: number;
+  } = {
+    status: 'warning',
+    reasons: ['No benchmark suite has been executed yet.'],
+    evaluatedAt: Date.now(),
+  };
+  private skillGenerationService: SkillGenerationService;
+
+  constructor() {
+    // Session-based Chrome instances are created on-demand by ChromeCDPDriver.forSession()
+    this.skillGenerationService = new SkillGenerationService((sessionId) => {
+      const session = this.sessions.get(sessionId);
+      if (!session) return null;
+      return {
+        sessionId: session.id,
+        workingDirectory: session.workingDirectory,
+        chatItems: [...session.chatItems],
+      };
+    });
+  }
+
+  /**
+   * Initialize persistence with app data directory.
+   * Called after sidecar starts with path from Rust backend.
+   */
+  async initialize(appDataDir: string): Promise<{ sessionsRestored: number }> {
+    if (this.isInitialized && this.appDataDir === appDataDir) {
+      return { sessionsRestored: this.sessions.size };
+    }
+
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
+
+    this.initializePromise = (async () => {
+      if (this.isInitialized && this.appDataDir === appDataDir) {
+        return { sessionsRestored: this.sessions.size };
+      }
+
+      this.appDataDir = appDataDir;
+      this.storageDb = new DatabaseConnection({ path: join(appDataDir, 'data.db') });
+      this.runCheckpointRepository = new RunCheckpointRepository(this.storageDb);
+      this.sessionBranchRepository = new SessionBranchRepository(this.storageDb);
+      this.benchmarkRepository = new BenchmarkRepository(this.storageDb);
+      const nowTs = Date.now();
+      for (const suite of this.benchmarkRunner.listSuites()) {
+        this.benchmarkRepository.upsertSuite({
+          id: suite.id,
+          name: suite.name,
+          description: suite.description,
+          version: suite.version,
+          config: { scenarioCount: suite.scenarios.length },
+          createdAt: nowTs,
+          updatedAt: nowTs,
+        });
+      }
+      setCheckpointerDataDir(appDataDir);
+      this.persistence = new SessionPersistence(appDataDir);
+      await this.persistence.initialize();
+      try {
+        await skillService.ensureDefaultManagedSkillInstalled('skill-creator');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[skills] Failed to ensure default skill-creator install: ${reason}`);
+      }
+      this.externalCliRunManager = new ExternalCliRunManager({
+        appDataDir,
+        discoveryService: this.externalCliDiscoveryService,
+        getRuntimeConfig: () => this.runtimeConfig.externalCli,
+      });
+      this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
+        void this.handleExternalCliInteraction(interaction);
+      });
+      this.externalCliRunManager.on(
+        'interaction_resolved',
+        (payload: { interactionId: string; sessionId: string }) => {
+          this.handleExternalCliInteractionResolved(payload.interactionId, payload.sessionId);
+        },
+      );
+      await this.externalCliRunManager.initialize();
+      void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
+
+      // Initialize tool policy service
+      await toolPolicyService.initialize();
+
+      // Initialize and start cron service
+      cronService.initialize(this);
+      await cronService.start();
+      await workflowService.initialize(appDataDir, this);
+
+      const count = await this.restoreSessionsFromDisk();
+      this.isInitialized = true;
+      return { sessionsRestored: count };
+    })().finally(() => {
+      this.initializePromise = null;
+    });
+
+    return this.initializePromise;
+  }
+
+  /**
+   * Get initialization status for frontend coordination.
+   */
+  getInitializationStatus(): { initialized: boolean; sessionCount: number } {
+    return {
+      initialized: this.isInitialized,
+      sessionCount: this.sessions.size,
+    };
+  }
+
+  // ============================================================================
+  // Deep Agents Service Management
+  // ============================================================================
+
+  /**
+   * Get or create MemoryService for a session's working directory.
+   */
+  private async getMemoryService(workingDirectory: string): Promise<MemoryService> {
+    const dir = workingDirectory || homedir();
+    let service = this.memoryServices.get(dir);
+    if (!service) {
+      service = createMemoryService(dir, { appDataDir: this.appDataDir || undefined });
+      await service.initialize();
+      this.memoryServices.set(dir, service);
+    }
+    return service;
+  }
+
+  /**
+   * Get or create MemoryExtractor for a session.
+   */
+  private getMemoryExtractor(sessionId: string): MemoryExtractor {
+    let extractor = this.memoryExtractors.get(sessionId);
+    if (!extractor) {
+      const memorySettings = this.runtimeConfig.memory || DEFAULT_RUNTIME_MEMORY_SETTINGS;
+      extractor = createMemoryExtractor({
+        enabled: memorySettings.autoExtract && memorySettings.enabled,
+        confidenceThreshold: memorySettings.style === 'conservative'
+          ? 0.78
+          : memorySettings.style === 'aggressive'
+            ? 0.58
+            : 0.68,
+        maxPerConversation: 5,
+        style: memorySettings.style,
+        maxAcceptedPerTurn:
+          memorySettings.style === 'conservative'
+            ? 1
+            : memorySettings.style === 'aggressive'
+              ? 4
+              : 2,
+      });
+      this.memoryExtractors.set(sessionId, extractor);
+    }
+    return extractor;
+  }
+
+  private shouldUseLongTermMemory(session: ActiveSession): boolean {
+    if (!this.runtimeConfig.memory.enabled) {
+      return false;
+    }
+    return session.type === 'main' || session.type === 'integration';
+  }
+
+  /**
+   * Get or create AgentsMdService for a session's working directory.
+   */
+  private getAgentsMdService(workingDirectory: string): AgentsMdService {
+    let service = this.agentsMdServices.get(workingDirectory);
+    if (!service) {
+      service = createAgentsMdService();
+      this.agentsMdServices.set(workingDirectory, service);
+    }
+    return service;
+  }
+
+  /**
+   * Load AGENTS.md config for a session, caching the result.
+   */
+  private async loadAgentsMdConfig(workingDirectory: string): Promise<AgentsMdConfig | null> {
+    if (this.agentsMdConfigs.has(workingDirectory)) {
+      return this.agentsMdConfigs.get(workingDirectory) || null;
+    }
+    const service = this.getAgentsMdService(workingDirectory);
+    const config = await service.parse(workingDirectory);
+    this.agentsMdConfigs.set(workingDirectory, config);
+    return config;
+  }
+
+  /**
+   * Clear Deep Agents services for a session (on session delete).
+   */
+  private clearSessionServices(sessionId: string, workingDirectory: string): void {
+    this.memoryExtractors.delete(sessionId);
+    // Note: memory service and agents.md service are shared per working directory
+    // Only clean them up if no other session uses this working directory
+    const otherSessionsWithSameDir = Array.from(this.sessions.values())
+      .filter(s => s.id !== sessionId && s.workingDirectory === workingDirectory);
+    if (otherSessionsWithSameDir.length === 0) {
+      this.memoryServices.delete(workingDirectory);
+      this.agentsMdServices.delete(workingDirectory);
+      this.agentsMdConfigs.delete(workingDirectory);
+    }
+  }
+
+  /**
+   * Verify persistence health by checking each session can be read from disk.
+   */
+  async verifyPersistence(): Promise<{
+    healthy: boolean;
+    initialized: boolean;
+    sessionCount: number;
+    persistedCount: number;
+    issues: string[];
+  }> {
+    if (!this.persistence) {
+      return {
+        healthy: false,
+        initialized: false,
+        sessionCount: 0,
+        persistedCount: 0,
+        issues: ['Persistence not initialized'],
+      };
+    }
+
+    const status = this.getInitializationStatus();
+    const sessions = this.listSessions();
+    const issues: string[] = [];
+
+    // Verify each session can be read from disk
+    for (const session of sessions) {
+      try {
+        const persisted = await this.persistence.loadSession(session.id);
+        if (!persisted) {
+          issues.push(`Session ${session.id} not found on disk`);
+        }
+      } catch (error) {
+        issues.push(`Session ${session.id} read error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return {
+      healthy: issues.length === 0,
+      initialized: status.initialized,
+      sessionCount: status.sessionCount,
+      persistedCount: sessions.length,
+      issues,
+    };
+  }
+
+  /**
+   * Restore sessions from disk on startup.
+   * Returns the count of successfully restored sessions.
+   */
+  private async restoreSessionsFromDisk(): Promise<number> {
+    if (!this.persistence) {
+      return 0;
+    }
+
+    const persistedSessions = await this.persistence.loadAllSessions();
+
+    let restoredCount = 0;
+    for (const [sessionId, data] of persistedSessions) {
+      try {
+        const session = await this.recreateSession(data);
+        this.sessions.set(sessionId, session);
+
+        // Subscribe to agent events for restored sessions (same as in createSession)
+        this.subscribeToAgentEvents(session);
+
+        restoredCount++;
+      } catch {
+        // Failed to recreate session - skip it
+      }
+    }
+
+    return restoredCount;
+  }
+
+  /**
+   * Recreate an ActiveSession from persisted V2 data.
+   * Agent will be recreated lazily on first message.
+   */
+  private async recreateSession(data: PersistedSessionDataV2): Promise<ActiveSession> {
+    const maxSequence = data.chatItems.reduce((max, item) => {
+      const seq = typeof item.sequence === 'number' ? item.sequence : -1;
+      return seq > max ? seq : max;
+    }, -1);
+
+    const session: ActiveSession = {
+      id: data.metadata.id,
+      type: (data.metadata as { type?: SessionType }).type || 'main',
+      provider: (data.metadata as { provider?: ProviderId }).provider || 'google',
+      executionMode: (data.metadata as { executionMode?: ExecutionMode }).executionMode || 'execute',
+      workingDirectory: data.metadata.workingDirectory,
+      baseUrlSnapshot: this.getProviderBaseUrl(
+        ((data.metadata as { provider?: ProviderId }).provider || 'google') as ProviderId,
+      ),
+      model: data.metadata.model,
+      title: data.metadata.title,
+      approvalMode: data.metadata.approvalMode,
+      baseSystemPrompt: undefined,
+      agent: {} as DeepAgentInstance, // Will be recreated on first message
+      chatItems: data.chatItems,
+      currentTurnId: undefined,
+      tasks: data.tasks,
+      lastTodosSignature: undefined,
+      artifacts: data.artifacts,
+      permissionCache: new Map(),
+      permissionScopes: new Map(),
+      toolStartTimes: new Map(),
+      activeTools: new Map(),
+      pendingPermissions: new Map(),
+      pendingQuestions: new Map(),
+      activeParentToolId: undefined,
+      inFlightPermissions: new Map(),
+      lastKnownPromptTokens: data.contextUsage?.usedTokens ?? 0,
+      nextSequence: maxSequence + 1,
+      activeAssistantSegmentItemId: undefined,
+      activeAssistantSegmentText: '',
+      lastRawAssistantChunkText: '',
+      assistantSegmentIndex: 0,
+      lastCompletedAssistantSegmentText: undefined,
+      hasAssistantTextThisTurn: false,
+      isRetrying: false,
+      isStreaming: false,
+      isThinking: false,
+      lastError: data.runtime?.lastError || null,
+      threadId: data.metadata.id,
+      messageQueue: [],
+      pendingPlanProposal: undefined,
+      pendingIntegrationOrigin: undefined,
+      activeTurnIntegrationOrigin: undefined,
+      hasTodoStateThisTurn: false,
+      nonTodoToolCallsSinceTodoUpdate: 0,
+      createdAt: data.metadata.createdAt,
+      updatedAt: data.metadata.updatedAt,
+      lastAccessedAt: data.metadata.lastAccessedAt,
+    };
+
+    if (data.runtime) {
+      session.isStreaming = Boolean(data.runtime.isStreaming);
+      session.isThinking = Boolean(data.runtime.isThinking);
+      session.isRetrying = data.runtime.runState === 'retrying';
+      session.currentTurnId = data.runtime.activeTurnId;
+      session.messageQueue = [...data.runtime.messageQueue];
+      if (Array.isArray(data.runtime.activeTools)) {
+        for (const tool of data.runtime.activeTools) {
+          session.activeTools.set(tool.id, { ...tool });
+        }
+      } else {
+        for (const toolId of data.runtime.activeToolIds || []) {
+          session.activeTools.set(toolId, { id: toolId, name: 'tool' });
+        }
+      }
+      for (const pending of data.runtime.pendingPermissions || []) {
+        session.pendingPermissions.set(pending.id, {
+          request: pending,
+          resolve: () => {},
+        });
+      }
+      for (const question of data.runtime.pendingQuestions || []) {
+        session.pendingQuestions.set(question.id, {
+          request: question,
+          resolve: () => {},
+        });
+      }
+      if (data.runtime.permissionScopes) {
+        for (const [permissionType, rawPaths] of Object.entries(data.runtime.permissionScopes)) {
+          if (!Array.isArray(rawPaths) || rawPaths.length === 0) continue;
+          const scopeSet = session.permissionScopes.get(permissionType) ?? new Set<string>();
+          for (const rawPath of rawPaths) {
+            const normalized = this.normalizePermissionPath(session, String(rawPath));
+            if (normalized) {
+              scopeSet.add(normalized);
+            }
+          }
+          if (scopeSet.size > 0) {
+            session.permissionScopes.set(permissionType, scopeSet);
+          }
+        }
+      }
+      if (data.runtime.permissionCache) {
+        for (const [cacheKey, decision] of Object.entries(data.runtime.permissionCache)) {
+          if (decision === 'allow_session') {
+            session.permissionCache.set(cacheKey, decision);
+          }
+        }
+      }
+    }
+
+    return session;
+  }
+
+  /**
+   * Derive Message[] from ChatItems for LLM prompt building and API responses.
+   */
+  private deriveMessagesFromChatItems(chatItems: ChatItem[]): Message[] {
+    const messages: Message[] = [];
+    for (const item of chatItems) {
+      if (item.kind === 'user_message') {
+        messages.push({
+          id: item.turnId || item.id.replace('ci-', ''),
+          role: 'user',
+          content: item.content as Message['content'],
+          createdAt: item.timestamp,
+        });
+      } else if (item.kind === 'assistant_message') {
+        messages.push({
+          id: item.id.replace('ci-', ''),
+          role: 'assistant',
+          content: item.content as Message['content'],
+          createdAt: item.timestamp,
+          metadata: item.metadata,
+        });
+      } else if (item.kind === 'system_message') {
+        messages.push({
+          id: item.id.replace('ci-', ''),
+          role: 'system',
+          content: item.content,
+          createdAt: item.timestamp,
+          metadata: item.metadata,
+        });
+      }
+    }
+    return messages;
+  }
+
+  private getNextSequence(session: ActiveSession): number {
+    const sequence = session.nextSequence;
+    session.nextSequence += 1;
+    return sequence;
+  }
+
+  private appendChatItem(session: ActiveSession, item: ChatItem): ChatItem {
+    const withSequence = {
+      ...item,
+      sequence: typeof item.sequence === 'number' ? item.sequence : this.getNextSequence(session),
+    } as ChatItem;
+    session.chatItems.push(withSequence);
+    eventEmitter.chatItem(session.id, withSequence);
+    this.persistence?.appendChatItem(session.id, withSequence).catch(() => {});
+    return withSequence;
+  }
+
+  private updateChatItem(
+    session: ActiveSession,
+    itemId: string,
+    updates: Partial<ChatItem>,
+  ): void {
+    const index = session.chatItems.findIndex((item) => item.id === itemId);
+    if (index < 0) return;
+
+    const existing = session.chatItems[index]!;
+    const merged = {
+      ...existing,
+      ...updates,
+      sequence:
+        typeof existing.sequence === 'number'
+          ? existing.sequence
+          : this.getNextSequence(session),
+    } as ChatItem;
+    session.chatItems[index] = merged;
+    eventEmitter.chatItemUpdate(session.id, itemId, updates);
+    this.persistence?.updateChatItem(session.id, itemId, updates).catch(() => {});
+  }
+
+  private resetAssistantStreamingState(session: ActiveSession): void {
+    session.activeAssistantSegmentItemId = undefined;
+    session.activeAssistantSegmentText = '';
+    session.lastRawAssistantChunkText = '';
+    session.assistantSegmentIndex = 0;
+    session.lastCompletedAssistantSegmentText = undefined;
+    session.hasAssistantTextThisTurn = false;
+  }
+
+  private getTextFromMessageContent(content: Message['content']): string {
+    if (typeof content === 'string') return content;
+    return content
+      .filter((part): part is MessageContentPart & { type: 'text'; text: string } => {
+        return typeof part === 'object' && part !== null && part.type === 'text' && typeof part.text === 'string';
+      })
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+  }
+
+  /**
+   * Convert our MessageContentPart[] to LangChain-compatible content format.
+   * For non-Google providers, only pass content types supported by OpenAI-compatible chat paths.
+   * For parts with filePath but no data, reads the file back from disk.
+   */
+  private async toLangChainContentParts(
+    parts: MessageContentPart[],
+    provider: ProviderId,
+  ): Promise<any[]> {
+    const result: any[] = [];
+    const notes: string[] = [];
+    const supportsBinaryMediaParts = provider === 'google';
+
+    const readPartData = async (
+      candidate: { data?: string; filePath?: string },
+    ): Promise<string | undefined> => {
+      if (candidate.data) return candidate.data;
+      if (candidate.filePath && this.persistence) {
+        return this.persistence.readAttachmentAsBase64(candidate.filePath);
+      }
+      return undefined;
+    };
+
+    for (const part of parts) {
+      switch (part.type) {
+        case 'text':
+          result.push({ type: 'text', text: part.text });
+          break;
+        case 'image': {
+          const data = await readPartData(part);
+          if (data) {
+            result.push({
+              type: 'image_url',
+              image_url: { url: `data:${part.mimeType};base64,${data}` },
+            });
+          }
+          break;
+        }
+        case 'audio': {
+          const data = await readPartData(part);
+          if (data) {
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[Audio attachment captured (${part.mimeType}). Inline audio parts are not supported for ${provider} chat in this path.]`,
+              );
+            }
+          }
+          break;
+        }
+        case 'video': {
+          const data = await readPartData(part);
+          if (data) {
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[Video attachment captured (${part.mimeType}). Use the analyze_video tool for detailed video analysis.]`,
+              );
+            }
+          }
+          break;
+        }
+        case 'file': {
+          const data = await readPartData(part);
+          if (data && part.mimeType) {
+            if (supportsBinaryMediaParts) {
+              result.push({ type: 'media', mimeType: part.mimeType, data });
+            } else {
+              notes.push(
+                `[File attachment captured (${part.name}${part.mimeType ? `, ${part.mimeType}` : ''}). Inline binary file parts are not supported for ${provider} chat in this path.]`,
+              );
+            }
+          } else {
+            result.push({ type: 'text', text: `File: ${part.name}` });
+          }
+          break;
+        }
+        default:
+          result.push({ type: 'text', text: JSON.stringify(part) });
+          break;
+      }
+    }
+
+    if (notes.length > 0) {
+      result.push({ type: 'text', text: notes.join('\n') });
+    }
+
+    return result;
+  }
+
+  private appendAssistantSegmentChunk(session: ActiveSession, chunkText: string): void {
+    if (!chunkText) return;
+
+    const nextContent = `${session.activeAssistantSegmentText}${chunkText}`;
+    session.activeAssistantSegmentText = nextContent;
+    session.hasAssistantTextThisTurn = true;
+
+    if (!session.activeAssistantSegmentItemId) {
+      const assistantItem: AssistantMessageItem = {
+        id: generateChatItemId(),
+        kind: 'assistant_message',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        content: nextContent,
+        stream: {
+          phase: 'intermediate',
+          status: 'streaming',
+          segmentIndex: session.assistantSegmentIndex,
+        },
+      };
+      const appended = this.appendChatItem(session, assistantItem) as AssistantMessageItem;
+      session.activeAssistantSegmentItemId = appended.id;
+      return;
+    }
+
+    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
+      content: nextContent,
+      stream: {
+        phase: 'intermediate',
+        status: 'streaming',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    });
+  }
+
+  private finalizeAssistantSegment(session: ActiveSession): void {
+    if (!session.activeAssistantSegmentItemId) return;
+
+    const finalText = session.activeAssistantSegmentText.trim();
+    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
+      stream: {
+        phase: 'intermediate',
+        status: 'done',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    });
+
+    session.lastCompletedAssistantSegmentText = finalText;
+    session.activeAssistantSegmentItemId = undefined;
+    session.activeAssistantSegmentText = '';
+    session.assistantSegmentIndex += 1;
+  }
+
+  private emitFinalAssistantSegment(session: ActiveSession, assistantMessage: Message): boolean {
+    const content = assistantMessage.content;
+    const finalText = this.getTextFromMessageContent(content);
+    const normalizedFinal = finalText.trim();
+    const normalizedLast = (session.lastCompletedAssistantSegmentText || '').trim();
+
+    if (normalizedFinal && normalizedFinal === normalizedLast) {
+      return false;
+    }
+
+    const hasContent =
+      typeof content === 'string' ? content.trim().length > 0 : content.length > 0;
+    if (!hasContent) {
+      return false;
+    }
+
+    session.hasAssistantTextThisTurn = true;
+
+    const assistantItem: AssistantMessageItem = {
+      id: generateChatItemId(),
+      kind: 'assistant_message',
+      timestamp: assistantMessage.createdAt || Date.now(),
+      turnId: session.currentTurnId,
+      content,
+      metadata: assistantMessage.metadata,
+      stream: {
+        phase: 'final',
+        status: 'done',
+        segmentIndex: session.assistantSegmentIndex,
+      },
+    };
+
+    this.appendChatItem(session, assistantItem);
+    session.lastCompletedAssistantSegmentText = normalizedFinal || normalizedLast;
+    session.assistantSegmentIndex += 1;
+    return false;
+  }
+
+  private resolveAssistantTurnText(
+    session: ActiveSession,
+    assistantMessage: Message | null,
+    streamedText: string,
+  ): string {
+    if (assistantMessage) {
+      return this.getTextFromMessageContent(assistantMessage.content);
+    }
+    const completed = (session.lastCompletedAssistantSegmentText || '').trim();
+    if (completed) return completed;
+    return streamedText;
+  }
+
+  private extractLastProposedPlan(text: string): string | null {
+    const pattern = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
+    let match: RegExpExecArray | null = null;
+    let latest: string | null = null;
+    do {
+      match = pattern.exec(text);
+      if (match?.[1]) {
+        latest = match[1].trim();
+      }
+    } while (match);
+    return latest;
+  }
+
+  private enqueueSessionMessage(
+    session: ActiveSession,
+    content: string,
+    toFront = false,
+  ): void {
+    const queuedMsg: QueuedMessage = {
+      id: generateId('qmsg'),
+      content,
+      queuedAt: Date.now(),
+    };
+    if (toFront) {
+      session.messageQueue.unshift(queuedMsg);
+    } else {
+      session.messageQueue.push(queuedMsg);
+    }
+    eventEmitter.queueUpdate(session.id, session.messageQueue.map((m) => ({
+      id: m.id,
+      content: m.content,
+      queuedAt: m.queuedAt,
+    })));
+    this.persistRuntimeSnapshot(session);
+  }
+
+  private normalizePlanDecision(answer: string | string[]): {
+    accept: boolean;
+    feedback?: string;
+  } {
+    if (Array.isArray(answer)) {
+      const normalizedEntries = answer.map((entry) => String(entry).trim().toLowerCase());
+      if (normalizedEntries.includes('accept_execute')) {
+        return { accept: true };
+      }
+      if (normalizedEntries.length === 1 && normalizedEntries[0] === 'reject_revise') {
+        return { accept: false };
+      }
+      const joined = answer.join('\n').trim();
+      const accepts = answer.some((entry) =>
+        /accept|execute|approve/i.test(String(entry))
+      );
+      return {
+        accept: accepts,
+        feedback: accepts ? undefined : joined || undefined,
+      };
+    }
+
+    const normalized = String(answer || '').trim();
+    const normalizedLower = normalized.toLowerCase();
+    if (normalizedLower === 'accept_execute') {
+      return { accept: true };
+    }
+    if (normalizedLower === 'reject_revise') {
+      return { accept: false };
+    }
+    const accepts = /accept|execute|approve/i.test(normalized);
+    return {
+      accept: accepts,
+      feedback: accepts ? undefined : normalized || undefined,
+    };
+  }
+
+  private async handlePlanProposalFlow(
+    session: ActiveSession,
+    assistantText: string,
+  ): Promise<void> {
+    const extractedPlan = this.extractLastProposedPlan(assistantText);
+    const planMarkdown = (extractedPlan || assistantText).trim();
+    if (!planMarkdown) return;
+
+    const proposal: PendingPlanProposal = {
+      id: generateId('plan'),
+      planMarkdown,
+      createdAt: Date.now(),
+      sourceTurnId: session.currentTurnId,
+      status: 'pending',
+    };
+    session.pendingPlanProposal = proposal;
+
+    const answer = await this.askQuestion(
+      session.id,
+      'Review the proposed plan. Accept to execute now, or reject to request a revised plan.',
+      [
+        {
+          label: 'Accept and Execute',
+          value: 'accept_execute',
+          description: 'Switches this session to execute mode and starts implementation immediately.',
+        },
+        {
+          label: 'Reject and Revise',
+          value: 'reject_revise',
+          description: 'Keeps plan mode and asks for a revised plan. You can also provide custom feedback.',
+        },
+      ],
+      false,
+      'Plan Approval',
+      true,
+    );
+
+    if (session.pendingPlanProposal?.id !== proposal.id) {
+      return;
+    }
+    if (session.pendingPlanProposal.status !== 'pending') {
+      session.pendingPlanProposal = undefined;
+      return;
+    }
+    if (
+      (typeof answer === 'string' && answer === '__cancelled__') ||
+      (Array.isArray(answer) && answer.includes('__cancelled__'))
+    ) {
+      session.pendingPlanProposal.status = 'cancelled';
+      session.pendingPlanProposal = undefined;
+      return;
+    }
+
+    const decision = this.normalizePlanDecision(answer);
+    session.pendingPlanProposal.status = 'resolved';
+
+    if (decision.accept) {
+      await this.setExecutionMode(session.id, 'execute');
+      this.enqueueSessionMessage(
+        session,
+        `Approved plan:\n\n${planMarkdown}\n\nImplement this plan now. Start by calling write_todos with a detailed step list, then execute and keep todo statuses continuously updated as each step completes.`,
+        true,
+      );
+    } else {
+      const feedback = decision.feedback?.trim();
+      this.enqueueSessionMessage(
+        session,
+        feedback
+          ? `Revise the plan based on this feedback:\n${feedback}\n\nReturn one updated <proposed_plan> block.`
+          : 'Revise the plan for clearer implementation steps, risks, and validation. Return one updated <proposed_plan> block.',
+        true,
+      );
+    }
+
+    session.pendingPlanProposal = undefined;
+  }
+
+  private extractMediaDescriptorsFromResult(result: unknown): Array<{
+    mediaType: 'image' | 'video';
+    path?: string;
+    url?: string;
+    mimeType?: string;
+    data?: string;
+  }> {
+    const resultAny = result as
+      | {
+          data?: {
+            images?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+            videos?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+          };
+          images?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+          videos?: Array<{ path?: string; url?: string; mimeType?: string; data?: string }>;
+        }
+      | null;
+
+    const images = resultAny?.data?.images || resultAny?.images || [];
+    const videos = resultAny?.data?.videos || resultAny?.videos || [];
+    const descriptors: Array<{
+      mediaType: 'image' | 'video';
+      path?: string;
+      url?: string;
+      mimeType?: string;
+      data?: string;
+    }> = [];
+
+    for (const image of images) {
+      if (!image?.path && !image?.url && !image?.data) continue;
+      descriptors.push({
+        mediaType: 'image',
+        path: image.path,
+        url: image.url,
+        mimeType: image.mimeType,
+        data: image.data,
+      });
+    }
+
+    for (const video of videos) {
+      if (!video?.path && !video?.url && !video?.data) continue;
+      descriptors.push({
+        mediaType: 'video',
+        path: video.path,
+        url: video.url,
+        mimeType: video.mimeType,
+        data: video.data,
+      });
+    }
+
+    return descriptors;
+  }
+
+  private emitMediaChatItemsForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    const lowerTool = toolName.toLowerCase();
+    if (
+      lowerTool !== 'generate_image' &&
+      lowerTool !== 'edit_image' &&
+      lowerTool !== 'generate_video'
+    ) {
+      return;
+    }
+
+    const descriptors = this.extractMediaDescriptorsFromResult(result);
+    if (descriptors.length === 0) return;
+
+    for (const descriptor of descriptors) {
+      const mediaItem: MediaItem = {
+        id: generateChatItemId(),
+        kind: 'media',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        mediaType: descriptor.mediaType,
+        path: descriptor.path,
+        url: descriptor.url,
+        mimeType: descriptor.mimeType,
+        data: descriptor.data,
+        toolId,
+      };
+      this.appendChatItem(session, mediaItem);
+    }
+  }
+
+  private emitReportChatItemForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    if (toolName.toLowerCase() !== 'deep_research') {
+      return;
+    }
+
+    const resultAny = result as
+      | {
+          report?: string;
+          reportPath?: string;
+        }
+      | null;
+    if (!resultAny?.reportPath && !resultAny?.report) {
+      return;
+    }
+
+    const snippet = resultAny.report
+      ? `${resultAny.report.slice(0, 240)}${resultAny.report.length > 240 ? '…' : ''}`
+      : undefined;
+
+    const reportItem: ReportItem = {
+      id: generateChatItemId(),
+      kind: 'report',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      title: 'Deep research report',
+      path: resultAny.reportPath,
+      snippet,
+      toolId,
+    };
+    this.appendChatItem(session, reportItem);
+  }
+
+  private buildDesignPreview(result: unknown, toolName: string): DesignItem['preview'] | undefined {
+    if (!result || typeof result !== 'object') return undefined;
+    const resultAny = result as Record<string, unknown>;
+    const design = resultAny.design as Record<string, unknown> | undefined;
+    const code = resultAny.code as Record<string, unknown> | undefined;
+
+    const html = (resultAny.html || design?.html || code?.html) as string | undefined;
+    const css = (resultAny.css || design?.css || code?.css) as string | undefined;
+    const svg = (resultAny.svg || design?.svg) as string | undefined;
+    const previewUrl =
+      (resultAny.previewUrl as string | undefined) ||
+      (resultAny.preview as { url?: string } | undefined)?.url;
+
+    const safeName =
+      toolName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 40) ||
+      'design';
+
+    if (previewUrl) {
+      return {
+        name: `${safeName}-preview.html`,
+        content: `<html><body style=\"margin:0;\"><iframe src=\"${previewUrl}\" style=\"border:0;width:100%;height:100vh;\"></iframe></body></html>`,
+      };
+    }
+
+    if (html || css) {
+      const htmlContent = html
+        ? html
+        : `<html><head>${css ? `<style>${css}</style>` : ''}</head><body></body></html>`;
+      const combined = css && html && !html.includes('<style')
+        ? htmlContent.replace(/<head>/i, `<head><style>${css}</style>`)
+        : htmlContent;
+      return {
+        name: `${safeName}-design.html`,
+        content: combined,
+      };
+    }
+
+    if (svg) {
+      return {
+        name: `${safeName}-design.svg.html`,
+        content: `<html><body style=\"margin:0;display:flex;align-items:center;justify-content:center;background:#fff;\">${svg}</body></html>`,
+      };
+    }
+
+    const files = resultAny.files as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(files)) {
+      const file = files.find((entry) => entry && (entry.content || entry.data || entry.url));
+      if (!file) return undefined;
+
+      const content =
+        typeof file.content === 'string'
+          ? file.content
+          : typeof file.data === 'string'
+            ? file.data
+            : undefined;
+      const url = typeof file.url === 'string' ? file.url : undefined;
+
+      return {
+        name: String(file.path || file.name || file.filename || `${safeName}-output.html`),
+        content: content || (url ? `<html><body style=\"margin:0;\"><iframe src=\"${url}\" style=\"border:0;width:100%;height:100vh;\"></iframe></body></html>` : undefined),
+        url,
+      };
+    }
+
+    return undefined;
+  }
+
+  private emitDesignChatItemForToolResult(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    const lowerTool = toolName.toLowerCase();
+    if (!(lowerTool.includes('stitch') || lowerTool.startsWith('mcp_'))) {
+      return;
+    }
+
+    const preview = this.buildDesignPreview(result, toolName);
+    if (!preview) return;
+
+    const designItem: DesignItem = {
+      id: generateChatItemId(),
+      kind: 'design',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      title: 'Design preview',
+      preview,
+      toolId,
+    };
+    this.appendChatItem(session, designItem);
+  }
+
+  private emitSupplementalToolResultItems(
+    session: ActiveSession,
+    toolName: string,
+    toolId: string,
+    result: unknown,
+  ): void {
+    this.emitMediaChatItemsForToolResult(session, toolName, toolId, result);
+    this.emitReportChatItemForToolResult(session, toolName, toolId, result);
+    this.emitDesignChatItemForToolResult(session, toolName, toolId, result);
+  }
+
+
+  /**
+   * Backward-compatible API key setter.
+   * Sets the Google provider key and activates Google.
+   */
+  setApiKey(apiKey: string): void {
+    const normalized = apiKey.trim();
+    this.runtimeConfig.activeProvider = 'google';
+    this.runtimeConfig.providerApiKeys.google = normalized;
+    this.runtimeConfig.googleApiKey = normalized;
+  }
+
+  setRuntimeConfig(config: RuntimeConfig): RuntimeConfigUpdateResult {
+    const reasons: string[] = [];
+    const affectedSessionIds: string[] = [];
+    const prevProvider = this.runtimeConfig.activeProvider;
+    const nextProvider = normalizeProvider(config.activeProvider || prevProvider);
+
+    const nextProviderApiKeys = {
+      ...this.runtimeConfig.providerApiKeys,
+      ...(config.providerApiKeys || {}),
+    };
+    const nextProviderBaseUrls = {
+      ...this.runtimeConfig.providerBaseUrls,
+      ...(config.providerBaseUrls || {}),
+    };
+
+    const nextMediaRouting: MediaRoutingSettingsLocal = {
+      ...this.runtimeConfig.mediaRouting,
+      ...(config.mediaRouting || {}),
+    };
+
+    const nextSpecializedModels: SpecializedModelsV2Local = {
+      google: {
+        ...this.runtimeConfig.specializedModels.google,
+        ...(config.specializedModels?.google || {}),
+      },
+      openai: {
+        ...this.runtimeConfig.specializedModels.openai,
+        ...(config.specializedModels?.openai || {}),
+      },
+      fal: {
+        ...this.runtimeConfig.specializedModels.fal,
+        ...(config.specializedModels?.fal || {}),
+      },
+    };
+    const nextSandbox = normalizeCommandSandboxSettings({
+      ...this.runtimeConfig.sandbox,
+      ...(config.sandbox || {}),
+    });
+    const nextExternalCli: ExternalCliRuntimeConfig = {
+      codex: {
+        ...this.runtimeConfig.externalCli.codex,
+        ...(config.externalCli?.codex || {}),
+      },
+      claude: {
+        ...this.runtimeConfig.externalCli.claude,
+        ...(config.externalCli?.claude || {}),
+      },
+    };
+    const nextToolOutputTokenLimit = normalizeToolOutputTokenLimit(
+      config.toolOutputTokenLimit ?? this.runtimeConfig.toolOutputTokenLimit,
+    );
+    const mergedMemory: Partial<RuntimeConfigState['memory']> & {
+      consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
+    } = {
+      ...this.runtimeConfig.memory,
+      ...(config.memory || {}),
+      consolidation: {
+        ...this.runtimeConfig.memory.consolidation,
+        ...(config.memory?.consolidation || {}),
+      },
+    };
+    const nextMemory = normalizeRuntimeMemorySettings(mergedMemory);
+    const nextActiveSoul = normalizeRuntimeSoulProfile(
+      config.activeSoul === undefined ? this.runtimeConfig.activeSoul : config.activeSoul,
+    );
+
+    const providerChanged = prevProvider !== nextProvider;
+    if (providerChanged) {
+      reasons.push('provider_changed');
+    }
+
+    const activeProviderBaseChanged =
+      (nextProviderBaseUrls[nextProvider] || '') !==
+      (this.runtimeConfig.providerBaseUrls[nextProvider] || '');
+    if (activeProviderBaseChanged) {
+      reasons.push('base_url_changed');
+    }
+
+    const previousSoul = this.runtimeConfig.activeSoul;
+
+    this.runtimeConfig = {
+      activeProvider: nextProvider,
+      providerApiKeys: nextProviderApiKeys,
+      providerBaseUrls: nextProviderBaseUrls,
+      googleApiKey: config.googleApiKey ?? this.runtimeConfig.googleApiKey,
+      openaiApiKey: config.openaiApiKey ?? this.runtimeConfig.openaiApiKey,
+      falApiKey: config.falApiKey ?? this.runtimeConfig.falApiKey,
+      exaApiKey: config.exaApiKey ?? this.runtimeConfig.exaApiKey,
+      tavilyApiKey: config.tavilyApiKey ?? this.runtimeConfig.tavilyApiKey,
+      externalSearchProvider:
+        config.externalSearchProvider ?? this.runtimeConfig.externalSearchProvider,
+      mediaRouting: nextMediaRouting,
+      sandbox: nextSandbox,
+      externalCli: nextExternalCli,
+      toolOutputTokenLimit: nextToolOutputTokenLimit,
+      activeSoul: nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
+      memory: nextMemory,
+      specializedModels: nextSpecializedModels,
+    };
+
+    const soulChanged = !runtimeSoulEquals(
+      previousSoul || { ...FALLBACK_SOUL_PROFILE },
+      nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
+    );
+    if (soulChanged && reasons.length === 0) {
+      // Prompt-only change, hot-applied via in-place rebuild.
+    }
+
+    if (providerChanged || activeProviderBaseChanged) {
+      for (const session of this.sessions.values()) {
+        if (session.provider !== nextProvider || activeProviderBaseChanged) {
+          affectedSessionIds.push(session.id);
+        }
+      }
+    }
+
+    // Hot-apply key/capability changes by rebuilding agents in-place when
+    // no provider/base-url compatibility boundary is crossed.
+    if (reasons.length === 0) {
+      void this.rebuildAllSessionAgents();
+    }
+
+    return {
+      appliedImmediately: reasons.length === 0,
+      requiresNewSession: reasons.length > 0,
+      reasons,
+      affectedSessionIds,
+    };
+  }
+
+  async getExternalCliAvailability(forceRefresh = false): Promise<unknown> {
+    return this.externalCliDiscoveryService.getAvailability(forceRefresh);
+  }
+
+  async tryHandleIntegrationExternalCliResponse(
+    sessionId: string,
+    platform: PlatformType,
+    chatId: string,
+    text: string,
+  ): Promise<boolean> {
+    if (!this.externalCliRunManager) {
+      return false;
+    }
+
+    return this.externalCliRunManager.tryRespondFromIntegration(sessionId, platform, chatId, text);
+  }
+
+  private getExternalCliOrigin(sessionId: string): ExternalCliRunOrigin {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { source: 'desktop' };
+    }
+
+    const currentOrigin = this.getCurrentIntegrationOrigin(session);
+    if (!currentOrigin) {
+      return { source: 'desktop' };
+    }
+
+    return {
+      source: 'integration',
+      platform: currentOrigin.platform,
+      chatId: currentOrigin.chatId,
+      senderName: currentOrigin.senderName,
+    };
+  }
+
+  private async handleExternalCliInteraction(interaction: ExternalCliPendingInteraction): Promise<void> {
+    if (!this.externalCliRunManager) {
+      return;
+    }
+
+    const session = this.sessions.get(interaction.sessionId);
+    if (!session) {
+      return;
+    }
+
+    const questionId = generateId('q');
+    this.externalCliQuestionMap.set(interaction.interactionId, {
+      sessionId: interaction.sessionId,
+      questionId,
+    });
+
+    try {
+      const options =
+        interaction.options?.map((option) => ({
+          label: option,
+          description: '',
+        })) || [];
+
+      const answer = await this.askQuestion(
+        interaction.sessionId,
+        interaction.prompt,
+        options.length > 0 ? options : undefined,
+        false,
+        `${interaction.provider.toUpperCase()} CLI`,
+        true,
+        {
+          externalCliInteraction: true,
+          runId: interaction.runId,
+          interactionId: interaction.interactionId,
+          provider: interaction.provider,
+          origin: interaction.origin,
+        },
+        questionId,
+      );
+
+      const answerText = Array.isArray(answer) ? answer.join(', ') : answer;
+      if (answerText === '__external_cli_resolved__') {
+        return;
+      }
+      if (!answerText || answerText === '__cancelled__') {
+        await this.externalCliRunManager.respond(interaction.runId, 'cancel');
+        return;
+      }
+
+      await this.externalCliRunManager.respond(interaction.runId, answerText);
+    } catch (error) {
+      eventEmitter.error(
+        session.id,
+        `Failed to resolve external CLI interaction: ${error instanceof Error ? error.message : String(error)}`,
+        'CLI_PROTOCOL_ERROR',
+      );
+    } finally {
+      this.externalCliQuestionMap.delete(interaction.interactionId);
+    }
+  }
+
+  private handleExternalCliInteractionResolved(interactionId: string, sessionId: string): void {
+    const mapped = this.externalCliQuestionMap.get(interactionId);
+    if (!mapped) {
+      return;
+    }
+
+    if (mapped.sessionId !== sessionId) {
+      return;
+    }
+
+    try {
+      this.respondToQuestion(sessionId, mapped.questionId, '__external_cli_resolved__');
+    } catch {
+      // Question may already be answered by user.
+    } finally {
+      this.externalCliQuestionMap.delete(interactionId);
+    }
+  }
+
+  async setStitchApiKey(apiKey: string | null): Promise<void> {
+    const normalized = typeof apiKey === 'string' ? apiKey.trim() : '';
+    this.stitchApiKey = normalized || null;
+
+    if (this.mcpServerConfigs.length > 0) {
+      await this.setMcpServers(this.mcpServerConfigs);
+    }
+  }
+
+  private getProjectSoulsDir(): string {
+    const candidates = [
+      resolve(process.cwd(), 'souls'),
+      resolve(process.cwd(), '..', 'souls'),
+      resolve(process.cwd(), '..', '..', 'souls'),
+      resolve(process.cwd(), '..', '..', '..', 'souls'),
+    ];
+    const existing = candidates.find((candidate) => existsSync(candidate));
+    return existing || candidates[candidates.length - 1];
+  }
+
+  private getUserSoulsDir(): string {
+    return join(homedir(), '.cowork', 'souls');
+  }
+
+  private extractSoulTitle(content: string, fallback: string): string {
+    const match = content.match(/^#\s+(.+)$/m);
+    const heading = match?.[1]?.trim();
+    if (heading) return heading;
+
+    const firstLine = content
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+    if (firstLine) return firstLine.slice(0, 80);
+    return fallback;
+  }
+
+  private slugifySoulTitle(title: string): string {
+    const slug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return slug || `soul-${Date.now()}`;
+  }
+
+  private async readSoulProfilesFromDirectory(
+    directory: string,
+    source: RuntimeSoulProfile['source'],
+  ): Promise<RuntimeSoulProfile[]> {
+    if (!existsSync(directory)) return [];
+
+    const entries = await readdir(directory, { withFileTypes: true });
+    const souls: RuntimeSoulProfile[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (extname(entry.name).toLowerCase() !== '.md') continue;
+
+      const filePath = join(directory, entry.name);
+      const content = await readFile(filePath, 'utf8');
+      const stem = basename(entry.name, '.md');
+      const title = this.extractSoulTitle(content, stem);
+
+      souls.push({
+        id: `${source}:${stem}`,
+        title,
+        content: content.trim(),
+        source,
+        path: filePath,
+      });
+    }
+
+    souls.sort((a, b) => a.title.localeCompare(b.title));
+    return souls;
+  }
+
+  private async buildSoulCatalog(): Promise<SoulCatalogResult> {
+    const projectSoulsDir = this.getProjectSoulsDir();
+    const userSoulsDir = this.getUserSoulsDir();
+
+    let presets = await this.readSoulProfilesFromDirectory(projectSoulsDir, 'preset');
+    const customSouls = await this.readSoulProfilesFromDirectory(userSoulsDir, 'custom');
+
+    if (presets.length === 0) {
+      presets = [{ ...FALLBACK_SOUL_PROFILE }];
+    }
+
+    const defaultSoulId =
+      presets.find((soul) => soul.id === DEFAULT_SOUL_ID)?.id ||
+      presets[0]?.id ||
+      customSouls[0]?.id ||
+      FALLBACK_SOUL_PROFILE.id;
+
+    return {
+      presets,
+      customSouls,
+      defaultSoulId,
+      projectSoulsDir,
+      userSoulsDir,
+    };
+  }
+
+  async listSoulProfiles(): Promise<SoulCatalogResult> {
+    return this.buildSoulCatalog();
+  }
+
+  async saveCustomSoul(
+    title: string,
+    content: string,
+    existingSoulId?: string,
+  ): Promise<{ soul: RuntimeSoulProfile; catalog: SoulCatalogResult }> {
+    const normalizedTitle = title.trim();
+    const normalizedContent = content.trim();
+    if (!normalizedTitle) {
+      throw new Error('Soul title is required');
+    }
+    if (!normalizedContent) {
+      throw new Error('Soul content is required');
+    }
+
+    const userSoulsDir = this.getUserSoulsDir();
+    await mkdir(userSoulsDir, { recursive: true });
+
+    const previousSlug =
+      typeof existingSoulId === 'string' && existingSoulId.startsWith('custom:')
+        ? existingSoulId.replace(/^custom:/, '').trim()
+        : '';
+    const nextSlug = this.slugifySoulTitle(normalizedTitle);
+    const nextPath = join(userSoulsDir, `${nextSlug}.md`);
+
+    if (previousSlug && previousSlug !== nextSlug) {
+      const previousPath = join(userSoulsDir, `${previousSlug}.md`);
+      try {
+        await unlink(previousPath);
+      } catch {
+        // ignore missing previous file
+      }
+    }
+
+    const contentWithHeading = normalizedContent.startsWith('#')
+      ? normalizedContent
+      : `# ${normalizedTitle}\n\n${normalizedContent}`;
+    await writeFile(nextPath, `${contentWithHeading.trim()}\n`, 'utf8');
+
+    const soul: RuntimeSoulProfile = {
+      id: `custom:${nextSlug}`,
+      title: this.extractSoulTitle(contentWithHeading, normalizedTitle),
+      content: contentWithHeading.trim(),
+      source: 'custom',
+      path: nextPath,
+    };
+
+    const catalog = await this.buildSoulCatalog();
+    return { soul, catalog };
+  }
+
+  async deleteCustomSoul(id: string): Promise<{ success: boolean; catalog: SoulCatalogResult }> {
+    if (!id.startsWith('custom:')) {
+      throw new Error('Only custom souls can be deleted');
+    }
+
+    const slug = id.replace(/^custom:/, '').trim();
+    if (!slug) {
+      throw new Error('Invalid soul id');
+    }
+
+    const filePath = join(this.getUserSoulsDir(), `${slug}.md`);
+    try {
+      await unlink(filePath);
+    } catch {
+      // file may already be missing
+    }
+
+    const catalog = await this.buildSoulCatalog();
+    return { success: true, catalog };
+  }
+
+  private buildSoulPromptSection(): string {
+    const soul = this.runtimeConfig.activeSoul || FALLBACK_SOUL_PROFILE;
+    return [
+      '## Active Soul',
+      `- ID: ${soul.id}`,
+      `- Title: ${soul.title}`,
+      `- Source: ${soul.source}`,
+      '',
+      soul.content.trim(),
+    ].join('\n');
+  }
+
+  private sanitizeMcpName(value: string): string {
+    const normalized = value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return normalized || 'tool';
+  }
+
+  private isStitchServerConfig(config: MCPServerConfigInput): boolean {
+    const haystack = [
+      config.id,
+      config.name,
+      config.command || '',
+      ...(config.args || []),
+      config.url || '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes('stitch');
+  }
+
+  private toRuntimeMcpConfig(config: MCPServerConfigInput): RuntimeMCPServerConfig {
+    const transport = config.transport ?? (config.url ? 'http' : 'stdio');
+    const env: Record<string, string> = { ...(config.env || {}) };
+
+    if (this.isStitchServerConfig(config) && this.stitchApiKey) {
+      env.STITCH_API_KEY = env.STITCH_API_KEY || this.stitchApiKey;
+      env.GEMINI_API_KEY = env.GEMINI_API_KEY || this.stitchApiKey;
+      env.GOOGLE_API_KEY = env.GOOGLE_API_KEY || this.stitchApiKey;
+    }
+
+    if (transport === 'http') {
+      return {
+        name: config.name,
+        enabled: config.enabled !== false,
+        transport: 'http',
+        url: config.url,
+        headers: config.headers,
+        prompt: config.prompt,
+        contextFileName: config.contextFileName,
+      };
+    }
+
+    return {
+      name: config.name,
+      enabled: config.enabled !== false,
+      transport: 'stdio',
+      command: config.command,
+      args: config.args,
+      env: Object.keys(env).length > 0 ? env : undefined,
+      prompt: config.prompt,
+      contextFileName: config.contextFileName,
+    };
+  }
+
+  private async rebuildAllSessionAgents(): Promise<void> {
+    if (!this.isReady()) return;
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  /**
+   * Refresh tool availability for active sessions after integration topology changes.
+   */
+  async refreshIntegrationCapabilities(reason = 'integration-state-change'): Promise<void> {
+    if (!this.isReady()) return;
+
+    for (const session of this.sessions.values()) {
+      // Avoid rebuilding model/tool graph mid-stream.
+      if (session.isStreaming) {
+        continue;
+      }
+      // Restored sessions keep a placeholder agent until first use.
+      if (typeof session.agent?.invoke !== 'function') {
+        continue;
+      }
+      try {
+        const toolHandlers = this.buildToolHandlers(session);
+        session.agent = await this.createDeepAgent(session, toolHandlers);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[agent-runner] integration capability refresh skipped for session=${session.id}: ${message}\n`,
+        );
+      }
+    }
+
+    process.stderr.write(`[agent-runner] integration capability refresh complete (${reason})\n`);
+  }
+
+  async setMcpServers(servers: MCPServerConfigInput[]): Promise<void> {
+    this.mcpServerConfigs = Array.isArray(servers) ? [...servers] : [];
+
+    await this.mcpManager.disconnectAll().catch(() => {});
+    this.mcpManager = new MCPClientManager();
+    this.mcpServerStates.clear();
+    this.mcpToolRegistry.clear();
+
+    for (const config of this.mcpServerConfigs) {
+      const state: ManagedMCPServerState = {
+        configId: config.id,
+        displayName: config.name,
+        enabled: config.enabled !== false,
+        connected: false,
+      };
+
+      this.mcpServerStates.set(config.id, state);
+
+      if (!state.enabled) {
+        state.skippedReason = 'disabled';
+        continue;
+      }
+
+      if (this.isStitchServerConfig(config) && !this.stitchApiKey) {
+        state.skippedReason = 'missing_stitch_api_key';
+        continue;
+      }
+
+      try {
+        const runtimeConfig = this.toRuntimeMcpConfig(config);
+        const internalServerId = this.mcpManager.addServer(runtimeConfig);
+        state.internalServerId = internalServerId;
+        await this.mcpManager.connect(internalServerId);
+        state.connected = true;
+
+        const connectedState = this.mcpManager.getServerState(internalServerId);
+        for (const tool of connectedState?.tools || []) {
+          const baseName = `mcp_${this.sanitizeMcpName(config.id || config.name)}_${this.sanitizeMcpName(tool.name)}`;
+          let generatedName = baseName;
+          let suffix = 2;
+          while (this.mcpToolRegistry.has(generatedName)) {
+            generatedName = `${baseName}_${suffix}`;
+            suffix += 1;
+          }
+
+          this.mcpToolRegistry.set(generatedName, {
+            toolName: tool.name,
+            serverConfigId: config.id,
+            internalServerId,
+            serverDisplayName: config.name,
+            description: tool.description,
+          });
+        }
+      } catch (error) {
+        state.error = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    toolPolicyService.registerMcpTools(Array.from(this.mcpToolRegistry.keys()));
+    await this.rebuildAllSessionAgents();
+  }
+
+  async callMcpTool(
+    serverConfigId: string,
+    toolName: string,
+    args: Record<string, unknown> = {},
+  ): Promise<unknown> {
+    const direct = this.mcpServerStates.get(serverConfigId);
+    const fallback = Array.from(this.mcpServerStates.values()).find(
+      (state) => state.internalServerId === serverConfigId,
+    );
+    const state = direct || fallback;
+
+    if (!state?.internalServerId || !state.connected) {
+      const reason = state?.skippedReason ? ` (${state.skippedReason})` : '';
+      throw new Error(`MCP server not connected: ${serverConfigId}${reason}`);
+    }
+
+    return this.mcpManager.callTool(state.internalServerId, toolName, args);
+  }
+
+  private createMcpTools(): ToolHandler[] {
+    const handlers: ToolHandler[] = [];
+
+    for (const [generatedName, meta] of this.mcpToolRegistry.entries()) {
+      handlers.push({
+        name: generatedName,
+        description: `[MCP:${meta.serverDisplayName}] ${meta.description || meta.toolName}`,
+        parameters: z.record(z.unknown()),
+        requiresPermission: () => ({
+          type: 'network_request',
+          resource: `mcp://${meta.serverDisplayName}/${meta.toolName}`,
+          reason: `Run MCP tool ${meta.toolName} on ${meta.serverDisplayName}`,
+          toolName: generatedName,
+        }),
+        execute: async (args: unknown) => {
+          try {
+            const result = await this.mcpManager.callTool(
+              meta.internalServerId,
+              meta.toolName,
+              ((args as Record<string, unknown>) || {}),
+            );
+            return { success: true, data: result };
+          } catch (error) {
+            return {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        },
+      });
+    }
+
+    return handlers;
+  }
+
+  setModelCatalog(models: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }>): void {
+    setModelContextWindows(models);
+    this.modelCatalog = models;
+
+    for (const session of this.sessions.values()) {
+      this.emitContextUsage(session);
+    }
+  }
+
+  /**
+   * Set specialized models for image/video generation and computer use.
+   * Backward-compatible (Google fields only).
+   */
+  setSpecializedModels(models: Partial<{
+    imageGeneration: string;
+    videoGeneration: string;
+    computerUse: string;
+    deepResearchAgent: string;
+  }>): void {
+    this.runtimeConfig.specializedModels.google = {
+      ...this.runtimeConfig.specializedModels.google,
+      ...models,
+    };
+  }
+
+  /**
+   * Get the image generation model.
+   */
+  getImageGenerationModel(): string {
+    const backend = this.runtimeConfig.mediaRouting.imageBackend;
+    if (backend === 'openai') {
+      return this.runtimeConfig.specializedModels.openai.imageGeneration;
+    }
+    if (backend === 'fal') {
+      return this.runtimeConfig.specializedModels.fal.imageGeneration;
+    }
+    return this.runtimeConfig.specializedModels.google.imageGeneration;
+  }
+
+  /**
+   * Get the video generation model.
+   */
+  getVideoGenerationModel(): string {
+    const backend = this.runtimeConfig.mediaRouting.videoBackend;
+    if (backend === 'openai') {
+      return this.runtimeConfig.specializedModels.openai.videoGeneration;
+    }
+    if (backend === 'fal') {
+      return this.runtimeConfig.specializedModels.fal.videoGeneration;
+    }
+    return this.runtimeConfig.specializedModels.google.videoGeneration;
+  }
+
+  /**
+   * Get the computer use model.
+   */
+  getComputerUseModel(): string {
+    return this.runtimeConfig.specializedModels.google.computerUse;
+  }
+
+  getDeepResearchModel(): string {
+    return this.runtimeConfig.specializedModels.google.deepResearchAgent;
+  }
+
+  getMediaRoutingSettings(): MediaRoutingSettingsLocal {
+    return { ...this.runtimeConfig.mediaRouting };
+  }
+
+  getProviderApiKey(provider: ProviderId): string | null {
+    const key = this.runtimeConfig.providerApiKeys[provider];
+    return key && key.trim() ? key.trim() : null;
+  }
+
+  getProviderBaseUrl(provider: ProviderId): string | undefined {
+    const configured = this.runtimeConfig.providerBaseUrls[provider]?.trim();
+    if (configured) return configured;
+    return PROVIDER_DEFAULT_BASE_URLS[provider];
+  }
+
+  private toOpenAICompatibleBaseUrl(
+    provider: ProviderId,
+    baseUrl?: string,
+  ): string | undefined {
+    if (!baseUrl) return undefined;
+    const trimmed = baseUrl.trim().replace(/\/+$/, '');
+    if (!trimmed) return undefined;
+
+    if (provider === 'openrouter') {
+      if (trimmed.endsWith('/v1') || trimmed.endsWith('/api/v1')) return trimmed;
+      return `${trimmed}/v1`;
+    }
+
+    if (
+      provider === 'openai' ||
+      provider === 'moonshot' ||
+      provider === 'glm' ||
+      provider === 'deepseek' ||
+      provider === 'lmstudio'
+    ) {
+      return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+    }
+
+    // Anthropic does not have OpenAI-compatible chat endpoints by default.
+    // Keep user-configured URL untouched for custom compatibility proxies.
+    return trimmed;
+  }
+
+  getGoogleApiKey(): string | null {
+    return this.runtimeConfig.googleApiKey?.trim() || this.getProviderApiKey('google');
+  }
+
+  getOpenAIApiKey(): string | null {
+    return this.runtimeConfig.openaiApiKey?.trim() || this.getProviderApiKey('openai');
+  }
+
+  getFalApiKey(): string | null {
+    const key = this.runtimeConfig.falApiKey?.trim();
+    return key || null;
+  }
+
+  getExaApiKey(): string | null {
+    const key = this.runtimeConfig.exaApiKey?.trim();
+    return key || null;
+  }
+
+  getTavilyApiKey(): string | null {
+    const key = this.runtimeConfig.tavilyApiKey?.trim();
+    return key || null;
+  }
+
+  getExternalSearchProvider(): 'google' | 'exa' | 'tavily' {
+    return this.runtimeConfig.externalSearchProvider || 'google';
+  }
+
+  private getToolCapabilityContext(provider: ProviderId): ToolCapabilityContext {
+    const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
+    const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
+    const falCapabilityKey = this.getFalApiKey();
+    const mediaRouting = this.getMediaRoutingSettings();
+    const externalSearchProvider = this.getExternalSearchProvider();
+    const hasConfiguredExternalSearch =
+      (externalSearchProvider === 'exa' && Boolean(this.getExaApiKey())) ||
+      (externalSearchProvider === 'tavily' && Boolean(this.getTavilyApiKey()));
+
+    const providersWithNativeWebSearch = new Set<ProviderId>([
+      'google',
+      'openai',
+      'anthropic',
+      'moonshot',
+      'glm',
+    ]);
+    const providerSupportsNativeSearch = providersWithNativeWebSearch.has(provider);
+    const hasNativeSearchKey =
+      providerSupportsNativeSearch &&
+      (provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : Boolean(this.getProviderApiKey(provider)));
+
+    const hasResearchKey = Boolean(googleCapabilityKey);
+    const hasImageMediaKey =
+      mediaRouting.imageBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : mediaRouting.imageBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
+    const hasVideoMediaKey =
+      mediaRouting.videoBackend === 'google'
+        ? Boolean(googleCapabilityKey)
+        : mediaRouting.videoBackend === 'openai'
+          ? Boolean(openAICapabilityKey)
+          : Boolean(falCapabilityKey);
+    const hasAnalyzeVideoKey = Boolean(openAICapabilityKey) || Boolean(googleCapabilityKey);
+
+    const hasComputerUseKey =
+      provider === 'google'
+        ? Boolean(googleCapabilityKey)
+        : provider === 'openai'
+          ? Boolean(this.getProviderApiKey('openai'))
+          : provider === 'anthropic'
+            ? Boolean(this.getProviderApiKey('anthropic'))
+            : Boolean(googleCapabilityKey);
+
+    const hasWebSearch = hasNativeSearchKey || hasConfiguredExternalSearch || Boolean(googleCapabilityKey);
+    const hasWebFetch =
+      provider === 'anthropic'
+        ? Boolean(this.getProviderApiKey('anthropic'))
+        : provider === 'glm'
+          ? Boolean(this.getProviderApiKey('glm')) || Boolean(googleCapabilityKey)
+          : Boolean(googleCapabilityKey);
+
+    return {
+      googleCapabilityKey,
+      openAICapabilityKey,
+      falCapabilityKey,
+      mediaRouting,
+      externalSearchProvider,
+      hasConfiguredExternalSearch,
+      providerSupportsNativeSearch,
+      hasNativeSearchKey,
+      hasResearchKey,
+      hasImageMediaKey,
+      hasVideoMediaKey,
+      hasAnalyzeVideoKey,
+      hasComputerUseKey,
+      hasWebSearch,
+      hasWebFetch,
+    };
+  }
+
+  private getIntegrationStatusesForSnapshot(): Array<{
+    platform: PlatformType;
+    connected: boolean;
+    displayName?: string;
+  }> {
+    const statuses = integrationBridge.getStatuses();
+    if (!Array.isArray(statuses)) return [];
+    return statuses.map((status) => ({
+      platform: status.platform,
+      connected: Boolean(status.connected),
+      displayName: typeof status.displayName === 'string' ? status.displayName : undefined,
+    }));
+  }
+
+  private evaluatePolicyForSnapshot(
+    toolName: string,
+    provider: ProviderId,
+  ): { action: 'allow' | 'ask' | 'deny'; reason: string } {
+    const policyResult = toolPolicyService.evaluate({
+      toolName,
+      arguments: {},
+      sessionId: 'capability-snapshot',
+      sessionType: 'main',
+      provider,
+    });
+    return {
+      action: policyResult.action,
+      reason: policyResult.reason || 'No policy rule matched',
+    };
+  }
+
+  private pushSnapshotToolAccess(
+    output: CapabilityToolAccessEntry[],
+    provider: ProviderId,
+    toolName: string,
+    enabled: boolean,
+    reason: string,
+  ): void {
+    const policy = this.evaluatePolicyForSnapshot(toolName, provider);
+    const policyDenies = policy.action === 'deny';
+
+    output.push({
+      toolName,
+      enabled: enabled && !policyDenies,
+      reason: policyDenies ? `Disabled by policy: ${policy.reason}` : reason,
+      policyAction: policy.action,
+    });
+  }
+
+  getCapabilitySnapshot(sessionId?: string): CapabilitySnapshot {
+    const session = sessionId ? this.sessions.get(sessionId) : undefined;
+    const provider = session?.provider || this.runtimeConfig.activeProvider;
+    const executionMode = session?.executionMode || 'execute';
+    const activeSandbox = session
+      ? this.getSessionSandboxSettings(session)
+      : {
+          ...this.runtimeConfig.sandbox,
+          allowedPaths: Array.from(
+            new Set([
+              resolve(process.cwd()),
+              ...this.runtimeConfig.sandbox.allowedPaths.map((path) => resolve(path)),
+            ]),
+          ),
+        };
+    const context = this.getToolCapabilityContext(provider);
+    const toolAccess: CapabilityToolAccessEntry[] = [];
+    const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
+    const policy = toolPolicyService.getPolicy();
+
+    const providerKeyConfigured =
+      provider === 'lmstudio' ? true : Boolean(this.getProviderApiKey(provider));
+    const googleKeyConfigured = Boolean(this.getGoogleApiKey());
+    const openaiKeyConfigured = Boolean(this.getOpenAIApiKey());
+    const falKeyConfigured = Boolean(this.getFalApiKey());
+    const exaKeyConfigured = Boolean(this.getExaApiKey());
+    const tavilyKeyConfigured = Boolean(this.getTavilyApiKey());
+    const stitchKeyConfigured = Boolean(this.stitchApiKey);
+
+    this.pushSnapshotToolAccess(toolAccess, provider, 'read_any_file', true, 'Available for local file inspection.');
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'deep_research',
+      context.hasResearchKey,
+      context.hasResearchKey ? 'Google capability key configured.' : 'Google capability key is missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'computer_use',
+      context.hasComputerUseKey,
+      context.hasComputerUseKey
+        ? 'Provider credentials are ready for browser automation.'
+        : 'Computer-use provider credentials are missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'generate_image',
+      context.hasImageMediaKey,
+      context.hasImageMediaKey
+        ? `Image backend "${context.mediaRouting.imageBackend}" is configured.`
+        : `Missing key for image backend "${context.mediaRouting.imageBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'edit_image',
+      context.hasImageMediaKey,
+      context.hasImageMediaKey
+        ? `Image backend "${context.mediaRouting.imageBackend}" is configured.`
+        : `Missing key for image backend "${context.mediaRouting.imageBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'generate_video',
+      context.hasVideoMediaKey,
+      context.hasVideoMediaKey
+        ? `Video backend "${context.mediaRouting.videoBackend}" is configured.`
+        : `Missing key for video backend "${context.mediaRouting.videoBackend}".`,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'analyze_video',
+      context.hasAnalyzeVideoKey,
+      context.hasAnalyzeVideoKey ? 'Google or OpenAI capability key is configured.' : 'Google/OpenAI key is missing.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'web_search',
+      context.hasWebSearch,
+      context.hasWebSearch
+        ? 'Native or fallback web search path is available.'
+        : 'No native search key and no configured external fallback.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'google_grounded_search',
+      context.hasWebSearch,
+      context.hasWebSearch
+        ? 'Native or fallback web search path is available.'
+        : 'No native search key and no configured external fallback.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'web_fetch',
+      context.hasWebFetch,
+      context.hasWebFetch ? 'Fetch capability key path is configured.' : 'Missing provider key for web fetch.',
+    );
+
+    for (const generatedName of this.mcpToolRegistry.keys()) {
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        generatedName,
+        true,
+        'MCP tool is connected and registered.',
+      );
+    }
+
+    const connectorTools = connectorBridge.getTools();
+    for (const tool of connectorTools) {
+      const toolName = `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+      const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
+      const requiresStitch = haystack.includes('stitch');
+      const enabled = !requiresStitch || stitchKeyConfigured;
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        toolName,
+        enabled,
+        enabled ? 'Connector tool is connected.' : 'Stitch API key is required for this connector tool.',
+      );
+    }
+
+    const integrationStatuses = this.getIntegrationStatusesForSnapshot();
+    const statusByPlatform = new Map(
+      integrationStatuses.map((status) => [status.platform.toLowerCase(), status.connected] as const),
+    );
+
+    for (const platform of SUPPORTED_PLATFORM_TYPES) {
+      const connected = Boolean(statusByPlatform.get(platform));
+      this.pushSnapshotToolAccess(
+        toolAccess,
+        provider,
+        `send_notification_${platform}`,
+        connected,
+        connected ? `${platform} integration is connected.` : `${platform} integration is not connected.`,
+      );
+      integrationAccess.push({
+        integrationName: platform,
+        enabled: connected,
+        reason: connected ? 'Connected and ready.' : 'Not connected.',
+      });
+    }
+
+    const connectorIds = new Set(connectorTools.map((tool) => tool.connectorId));
+    integrationAccess.push({
+      integrationName: 'connectors',
+      enabled: connectorIds.size > 0,
+      reason:
+        connectorIds.size > 0
+          ? `${connectorIds.size} connector(s) currently expose tools.`
+          : 'No connected connectors currently expose tools.',
+    });
+
+    const scheduleToolsEnabled =
+      session?.type !== 'isolated' &&
+      session?.type !== 'cron';
+    const scheduleReason = scheduleToolsEnabled
+      ? 'Available in non-isolated sessions.'
+      : 'Unavailable in isolated/cron sessions.';
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'schedule_task',
+      scheduleToolsEnabled,
+      scheduleReason,
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'manage_scheduled_task',
+      scheduleToolsEnabled,
+      scheduleReason,
+    );
+
+    const externalAvailability = this.externalCliDiscoveryService.getCachedAvailability();
+    const codexInstalled = Boolean(externalAvailability?.codex.installed);
+    const claudeInstalled = Boolean(externalAvailability?.claude.installed);
+    const codexEnabled = codexInstalled && this.runtimeConfig.externalCli.codex.enabled;
+    const claudeEnabled = claudeInstalled && this.runtimeConfig.externalCli.claude.enabled;
+    const sharedExternalToolsEnabled = codexEnabled || claudeEnabled;
+
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'start_codex_cli_run',
+      codexEnabled,
+      codexInstalled
+        ? this.runtimeConfig.externalCli.codex.enabled
+          ? 'Codex CLI is installed and enabled in settings.'
+          : 'Codex CLI is installed but disabled in settings.'
+        : 'Codex CLI is not installed.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'start_claude_cli_run',
+      claudeEnabled,
+      claudeInstalled
+        ? this.runtimeConfig.externalCli.claude.enabled
+          ? 'Claude CLI is installed and enabled in settings.'
+          : 'Claude CLI is installed but disabled in settings.'
+        : 'Claude CLI is not installed.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_get_progress',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_respond',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+    this.pushSnapshotToolAccess(
+      toolAccess,
+      provider,
+      'external_cli_cancel_run',
+      sharedExternalToolsEnabled,
+      sharedExternalToolsEnabled
+        ? 'At least one external CLI provider is active.'
+        : 'No external CLI provider is currently active.',
+    );
+
+    const notes: string[] = [];
+    if (!providerKeyConfigured && provider !== 'lmstudio') {
+      notes.push(`Active provider "${provider}" is missing its API key.`);
+    }
+    if (context.externalSearchProvider === 'exa' && !exaKeyConfigured) {
+      notes.push('External search provider is Exa but Exa API key is missing.');
+    }
+    if (context.externalSearchProvider === 'tavily' && !tavilyKeyConfigured) {
+      notes.push('External search provider is Tavily but Tavily API key is missing.');
+    }
+    if (!stitchKeyConfigured) {
+      notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
+    }
+    if (externalAvailability?.codex.installed && externalAvailability.codex.authStatus === 'unauthenticated') {
+      notes.push('Codex CLI is installed but not authenticated. Run `codex login`.');
+    }
+    if (externalAvailability?.claude.installed && externalAvailability.claude.authStatus === 'unauthenticated') {
+      notes.push('Claude CLI is installed but not authenticated. Run `claude /login`.');
+    }
+    if (!isOsSandboxAvailable() && activeSandbox.mode !== 'danger-full-access') {
+      notes.push('OS-level sandbox is unavailable. Validator policy enforcement is active.');
+    }
+    if (session && (session.type === 'isolated' || session.type === 'cron')) {
+      notes.push('Scheduling tools are disabled in isolated/cron sessions.');
+    }
+
+    if (executionMode === 'plan') {
+      const allowedPlanTools = new Set([
+        'read_any_file',
+        'read_file',
+        'read',
+        'ls',
+        'glob',
+        'grep',
+        'web_search',
+        'google_grounded_search',
+        'web_fetch',
+      ]);
+      for (const entry of toolAccess) {
+        if (!allowedPlanTools.has(entry.toolName.toLowerCase())) {
+          entry.enabled = false;
+          entry.reason = 'Disabled by Plan mode.';
+        }
+      }
+      notes.push('Plan mode is active: side-effect tools are disabled until you switch back to execute mode.');
+    }
+
+    return {
+      provider,
+      executionMode,
+      mediaRouting: { ...context.mediaRouting },
+      sandbox: {
+        mode: activeSandbox.mode,
+        osEnforced: activeSandbox.mode !== 'danger-full-access' && isOsSandboxAvailable(),
+        networkAllowed: activeSandbox.allowNetwork,
+        effectiveAllowedRoots: [...activeSandbox.allowedPaths],
+      },
+      keyStatus: {
+        providerKeyConfigured,
+        googleKeyConfigured,
+        openaiKeyConfigured,
+        falKeyConfigured,
+        exaKeyConfigured,
+        tavilyKeyConfigured,
+        stitchKeyConfigured,
+      },
+      toolAccess,
+      integrationAccess,
+      policyProfile: policy.profile,
+      notes,
+    };
+  }
+
+  async previewSystemPrompt(sessionId?: string): Promise<{
+    sessionId: string;
+    provider: ProviderId;
+    executionMode: ExecutionMode;
+    usingLegacyFallback: boolean;
+    diagnostics: PromptBuildDiagnostics;
+    prompt: string;
+  }> {
+    let session: ActiveSession | undefined;
+    if (sessionId) {
+      session = this.sessions.get(sessionId);
+    } else {
+      session = Array.from(this.sessions.values()).sort((a, b) => b.lastAccessedAt - a.lastAccessedAt)[0];
+    }
+
+    if (!session) {
+      throw new Error('No session available for prompt preview.');
+    }
+
+    const toolHandlers = this.buildToolHandlers(session);
+    const built = await this.buildSystemPromptForSession(session, toolHandlers);
+
+    return {
+      sessionId: session.id,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      usingLegacyFallback: built.diagnostics.usingLegacyFallback,
+      diagnostics: built.diagnostics,
+      prompt: built.prompt,
+    };
+  }
+
+  private getSessionProviderKey(session: ActiveSession): string | null {
+    if (session.provider === 'lmstudio') {
+      return this.getProviderApiKey('lmstudio') || 'lm-studio';
+    }
+    return this.getProviderApiKey(session.provider);
+  }
+
+  /**
+   * Check if provider is ready.
+   */
+  isReady(): boolean {
+    if (this.runtimeConfig.activeProvider === 'lmstudio') {
+      return true;
+    }
+    return Boolean(this.getProviderApiKey(this.runtimeConfig.activeProvider));
+  }
+
+  /**
+   * Update skills and refresh tools for all sessions.
+   * Supports both legacy SkillConfig format and new skill IDs.
+   */
+  async setSkills(skills: SkillConfig[]): Promise<void> {
+    this.skills = skills.map((skill) => ({
+      ...skill,
+      enabled: skill.enabled ?? true,
+    }));
+
+    // Also update enabledSkillIds for new skill service integration
+    this.enabledSkillIds = new Set(
+      skills.filter((s) => s.enabled !== false).map((s) => s.id)
+    );
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  /**
+   * Set enabled skill IDs directly (for new marketplace skills)
+   */
+  async setEnabledSkillIds(skillIds: string[]): Promise<void> {
+    this.enabledSkillIds = new Set(skillIds);
+
+    for (const session of this.sessions.values()) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+    }
+  }
+
+  async ensureDefaultSkillCreatorInstalled(): Promise<{
+    skillId: string;
+    installed: boolean;
+  }> {
+    return skillService.ensureDefaultManagedSkillInstalled('skill-creator');
+  }
+
+  async draftSkillFromSession(input: {
+    sessionId: string;
+    goal?: string;
+    purpose?: SkillGenerationRequest['purpose'];
+    workingDirectory?: string;
+    maxSkills?: number;
+  }): Promise<SkillGenerationDraft> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    return this.skillGenerationService.draftFromSession({
+      sessionId: input.sessionId,
+      purpose: input.purpose || 'manual_skill',
+      goal: input.goal,
+      workingDirectory: input.workingDirectory || session.workingDirectory,
+      mode: 'draft',
+      maxSkills: input.maxSkills ?? 3,
+    });
+  }
+
+  async createSkillFromSession(input: {
+    sessionId: string;
+    goal?: string;
+    purpose?: SkillGenerationRequest['purpose'];
+    workingDirectory?: string;
+    maxSkills?: number;
+  }): Promise<SkillGenerationResult> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    const result = await this.skillGenerationService.createFromSession({
+      sessionId: input.sessionId,
+      purpose: input.purpose || 'manual_skill',
+      goal: input.goal,
+      workingDirectory: input.workingDirectory || session.workingDirectory,
+      mode: 'create',
+      maxSkills: input.maxSkills ?? 3,
+    });
+
+    if (result.createdSkills.length > 0) {
+      for (const binding of result.createdSkills) {
+        this.enabledSkillIds.add(binding.skillId);
+      }
+    }
+
+    return result;
+  }
+
+  private async createScheduledTaskSkillBindings(input: {
+    sessionId: string;
+    prompt: string;
+    taskName: string;
+    maxSkills?: number;
+  }): Promise<SkillBinding[]> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    const goal = [
+      `Scheduled task name: ${input.taskName}`,
+      `Execution objective: ${input.prompt}`,
+      'Generate detailed reusable skills for this recurring automation and enforce their usage.',
+    ].join('\n');
+
+    const created = await this.createSkillFromSession({
+      sessionId: input.sessionId,
+      purpose: 'scheduled_task',
+      goal,
+      workingDirectory: session.workingDirectory,
+      maxSkills: input.maxSkills,
+    });
+
+    return created.createdSkills;
+  }
+
+  /**
+   * Update approval mode for a session.
+   */
+  setApprovalMode(sessionId: string, mode: ApprovalMode): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    session.approvalMode = mode;
+  }
+
+  /**
+   * Update execution mode for a session.
+   */
+  async setExecutionMode(sessionId: string, mode: ExecutionMode): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.executionMode === mode) {
+      return;
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      session.pendingPlanProposal.status = 'cancelled';
+      for (const [questionId, pending] of session.pendingQuestions.entries()) {
+        pending.resolve('__cancelled__');
+        session.pendingQuestions.delete(questionId);
+        this.updateQuestionStatus(session, questionId, 'answered', '__cancelled__');
+        eventEmitter.questionAnswered(sessionId, questionId, '__cancelled__');
+      }
+    }
+
+    session.executionMode = mode;
+    session.updatedAt = Date.now();
+    session.pendingPlanProposal = undefined;
+    session.hasTodoStateThisTurn = false;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
+
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = await this.createDeepAgent(session, toolHandlers);
+    this.subscribeToAgentEvents(session);
+
+    await this.persistSessionSnapshot(session);
+
+    eventEmitter.sessionUpdated({
+      id: session.id,
+      type: session.type,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage: this.getFirstMessagePreview(session),
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
+      messageCount: session.chatItems.filter(
+        (ci) => ci.kind === 'user_message' || ci.kind === 'assistant_message'
+      ).length,
+    } as SessionInfo);
+  }
+
+  /**
+   * Set per-turn integration origin context for shared integration sessions.
+   * This context is consumed on the next sendMessage execution for the session.
+   */
+  setIntegrationMessageOrigin(
+    sessionId: string,
+    origin: {
+      platform: PlatformType;
+      chatId: string;
+      senderName: string;
+      senderId?: string;
+      timestamp?: number;
+    },
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return;
+    }
+
+    if (session.type !== 'integration') {
+      return;
+    }
+
+    const chatId = origin.chatId?.trim();
+    if (!chatId) {
+      return;
+    }
+
+    session.pendingIntegrationOrigin = {
+      platform: origin.platform,
+      chatId,
+      senderName: origin.senderName?.trim() || 'Unknown Sender',
+      senderId: origin.senderId?.trim() || undefined,
+      timestamp:
+        typeof origin.timestamp === 'number' && Number.isFinite(origin.timestamp)
+          ? origin.timestamp
+          : Date.now(),
+    };
+  }
+
+  /**
+   * Create a new session.
+   */
+  async createSession(
+    workingDirectory: string,
+    model?: string | null,
+    title?: string,
+    type: SessionType = 'main',
+    provider?: ProviderId | null,
+    executionMode: ExecutionMode = 'execute',
+    permissionBootstrap?: SessionPermissionBootstrap,
+  ): Promise<SessionInfo> {
+    const normalizedWorkingDirectory = resolve(
+      (typeof workingDirectory === 'string' && workingDirectory.trim())
+        ? workingDirectory.trim()
+        : process.cwd(),
+    );
+
+    const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
+    const providerKey = this.getProviderApiKey(selectedProvider);
+    const requiresProviderKey = type !== 'integration';
+    if (requiresProviderKey && !providerKey && selectedProvider !== 'lmstudio') {
+      throw new Error(`Provider "${selectedProvider}" not initialized. Set API key first.`);
+    }
+
+    const providerFallbackModel: Partial<Record<ProviderId, string>> = {
+      google: 'gemini-3-flash-preview',
+      openai: 'gpt-5.2',
+      anthropic: 'claude-opus-4-6',
+      openrouter: 'openai/gpt-5.2',
+      moonshot: 'kimi-k2-thinking',
+      glm: 'glm-4.7',
+      deepseek: 'deepseek-chat',
+      lmstudio: 'local-model',
+    };
+
+    // Use provided model or fall back to default
+    // This handles both undefined and null cases (null comes from Rust's Option::None)
+    const actualModel =
+      model ||
+      this.modelCatalog[0]?.id ||
+      providerFallbackModel[selectedProvider] ||
+      'gemini-3-flash-preview';
+    if (!actualModel) {
+      throw new Error('No models available. Configure the API key and fetch models first.');
+    }
+
+    const sessionId = generateId('sess');
+    const now = Date.now();
+
+    // Create session
+    const session: ActiveSession = {
+      id: sessionId,
+      type,
+      provider: selectedProvider,
+      executionMode,
+      workingDirectory: normalizedWorkingDirectory,
+      baseUrlSnapshot: this.getProviderBaseUrl(selectedProvider),
+      model: actualModel,
+      title: title || null,
+      approvalMode: 'auto',
+      baseSystemPrompt: undefined,
+      agent: {} as DeepAgentInstance,
+      chatItems: [],
+      currentTurnId: undefined,
+      tasks: [],
+      lastTodosSignature: undefined,
+      artifacts: [],
+      permissionCache: new Map(),
+      permissionScopes: new Map(),
+      toolStartTimes: new Map(),
+      activeTools: new Map(),
+      pendingPermissions: new Map(),
+      pendingQuestions: new Map(),
+      activeParentToolId: undefined,
+      inFlightPermissions: new Map(),
+      lastKnownPromptTokens: 0,
+      nextSequence: 0,
+      activeAssistantSegmentItemId: undefined,
+      activeAssistantSegmentText: '',
+      lastRawAssistantChunkText: '',
+      assistantSegmentIndex: 0,
+      lastCompletedAssistantSegmentText: undefined,
+      hasAssistantTextThisTurn: false,
+      isRetrying: false,
+      isStreaming: false,
+      isThinking: false,
+      lastError: null,
+      threadId: sessionId,
+      messageQueue: [],
+      pendingPlanProposal: undefined,
+      pendingIntegrationOrigin: undefined,
+      activeTurnIntegrationOrigin: undefined,
+      hasTodoStateThisTurn: false,
+      nonTodoToolCallsSinceTodoUpdate: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastAccessedAt: now,
+    };
+
+    this.applySessionPermissionBootstrap(session, permissionBootstrap);
+
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = await this.createDeepAgent(session, toolHandlers);
+
+    this.sessions.set(sessionId, session);
+    this.persistRuntimeSnapshot(session);
+
+    // Subscribe to agent events
+    this.subscribeToAgentEvents(session);
+
+    const sessionInfo: SessionInfo = {
+      id: sessionId,
+      type,
+      provider: selectedProvider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage: null,
+      workingDirectory: normalizedWorkingDirectory,
+      model: actualModel,
+      createdAt: now,
+      updatedAt: now,
+      lastAccessedAt: now,
+      messageCount: 0,
+    };
+
+    eventEmitter.sessionUpdated(sessionInfo);
+
+    return sessionInfo;
+  }
+
+  /**
+   * Send a message to a session. If the agent is currently busy,
+   * the message is queued and auto-sent when the current turn completes.
+   */
+  async sendMessage(
+    sessionId: string,
+    content: string,
+    attachments?: Attachment[],
+    maxTurns?: number
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      const queuedMsg: QueuedMessage = {
+        id: generateId('qmsg'),
+        content,
+        attachments,
+        queuedAt: Date.now(),
+      };
+      session.messageQueue.push(queuedMsg);
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      this.persistRuntimeSnapshot(session);
+      return;
+    }
+
+    // If agent is currently busy (has active abort controller), queue the message
+    if (session.abortController && !session.abortController.signal.aborted) {
+      const queuedMsg: QueuedMessage = {
+        id: generateId('qmsg'),
+        content,
+        attachments,
+        queuedAt: Date.now(),
+      };
+      session.messageQueue.push(queuedMsg);
+      // Emit queue update event to frontend
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      this.persistRuntimeSnapshot(session);
+      return;
+    }
+
+    // Execute immediately
+    await this.executeMessage(sessionId, content, attachments, maxTurns);
+
+    // After execution completes, process any queued messages
+    await this.processMessageQueue(sessionId);
+  }
+
+  async runStartV2(
+    sessionId: string,
+    message: string,
+    runOptions?: Record<string, unknown>,
+    attachments?: Attachment[],
+  ): Promise<{ runId: string; sessionId: string; status: ManagedRun['status'] }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const runId = generateId('run');
+    const startedAt = Date.now();
+    const branchId = this.getActiveBranchIdForSession(sessionId);
+    const run: ManagedRun = {
+      id: runId,
+      sessionId,
+      branchId,
+      status: 'running',
+      runOptions: runOptions || {},
+      createdAt: startedAt,
+      updatedAt: startedAt,
+      checkpointCount: 0,
+      timeline: [],
+    };
+
+    this.runs.set(runId, run);
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+    const maxTurns = this.resolveRunMaxTurns(run.runOptions);
+    this.appendRunTimelineEvent(run, 'run:start', {
+      messageLength: message.length,
+      hasAttachments,
+    });
+    this.activeRunBySession.set(sessionId, runId);
+    this.writeRunCheckpoint(
+      run,
+      'before_send',
+      {
+        messageLength: message.length,
+        hasAttachments,
+        dispatch: this.createCheckpointDispatchState(message, attachments),
+      },
+      {
+        publicState: {
+          messageLength: message.length,
+          hasAttachments,
+        },
+        branchId: run.branchId,
+      },
+    );
+
+    try {
+      await this.sendMessage(sessionId, message, attachments, maxTurns);
+      run.status = 'completed';
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'after_send',
+        {
+          runState: 'completed',
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:completed');
+      return { runId, sessionId, status: run.status };
+    } catch (error) {
+      run.status = 'failed';
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'failed',
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      if (this.activeRunBySession.get(sessionId) === runId) {
+        this.activeRunBySession.delete(sessionId);
+      }
+    }
+  }
+
+  async resumeRunFromCheckpoint(
+    sessionId: string,
+    runId: string,
+  ): Promise<{ runId: string; sessionId: string; status: ManagedRun['status'] }> {
+    const run = this.runs.get(runId) || this.hydrateRunFromCheckpointStore(runId);
+    if (!run || run.sessionId !== sessionId) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const conflictingRunId = this.activeRunBySession.get(sessionId);
+    if (conflictingRunId && conflictingRunId !== runId) {
+      throw new Error(`Session already has an active run: ${conflictingRunId}`);
+    }
+
+    const latestCheckpoint = this.runCheckpointRepository?.getLatestForRun(runId) || null;
+    if (latestCheckpoint && latestCheckpoint.sessionId !== sessionId) {
+      throw new Error(`Run checkpoint belongs to a different session: ${runId}`);
+    }
+    if (latestCheckpoint?.branchId) {
+      run.branchId = latestCheckpoint.branchId;
+    }
+    const latestStatus = this.normalizeManagedRunStatus(
+      latestCheckpoint?.state?.runStatus,
+      run.status,
+    );
+    if (latestStatus === 'completed' || latestStatus === 'cancelled') {
+      run.status = latestStatus;
+      run.updatedAt = Date.now();
+      this.writeRunCheckpoint(
+        run,
+        'resume_noop',
+        {
+          reason: 'terminal_state',
+          resumeFromStage: latestCheckpoint?.stage,
+          resumeFromCheckpoint: latestCheckpoint?.id,
+        },
+        {
+          publicState: {
+            reason: 'terminal_state',
+            resumeFromStage: latestCheckpoint?.stage,
+          },
+          branchId: run.branchId,
+        },
+      );
+      this.appendRunTimelineEvent(run, 'run:resume_skipped', {
+        reason: 'terminal_state',
+        runStatus: latestStatus,
+        checkpointStage: latestCheckpoint?.stage,
+      });
+      this.runs.set(runId, run);
+      return { runId: run.id, sessionId: run.sessionId, status: run.status };
+    }
+
+    const resumePayload = this.resolveRunResumePayload(session, latestCheckpoint);
+    if (!resumePayload) {
+      throw new Error(
+        `Run ${runId} cannot be resumed because no replay payload was found in checkpoints or session history.`,
+      );
+    }
+
+    this.runs.set(runId, run);
+    run.status = 'recovered';
+    run.updatedAt = Date.now();
+    this.appendRunTimelineEvent(run, 'run:recovered', {
+      checkpointCount: run.checkpointCount,
+      resumeSource: resumePayload.source,
+      resumeFromStage: latestCheckpoint?.stage,
+    });
+    this.writeRunCheckpoint(
+      run,
+      'resume',
+      {
+        checkpointCount: run.checkpointCount,
+        resumeSource: resumePayload.source,
+        resumeFromCheckpoint: latestCheckpoint?.id,
+        resumeFromStage: latestCheckpoint?.stage,
+      },
+      {
+        publicState: {
+          checkpointCount: run.checkpointCount,
+          resumeSource: resumePayload.source,
+          resumeFromStage: latestCheckpoint?.stage,
+        },
+        branchId: run.branchId,
+      },
+    );
+    eventEmitter.emit('run:recovered', sessionId, {
+      runId,
+      checkpointCount: run.checkpointCount,
+      resumeSource: resumePayload.source,
+      checkpointStage: latestCheckpoint?.stage,
+    });
+
+    run.status = 'running';
+    run.updatedAt = Date.now();
+    const maxTurns = this.resolveRunMaxTurns(run.runOptions);
+    this.activeRunBySession.set(sessionId, runId);
+
+    try {
+      await this.executeMessage(
+        sessionId,
+        resumePayload.payload.message,
+        resumePayload.payload.attachments,
+        maxTurns,
+      );
+      await this.processMessageQueue(sessionId);
+      run.status = session.lastError ? 'failed' : 'completed';
+      run.updatedAt = Date.now();
+      if (run.status === 'failed') {
+        this.writeRunCheckpoint(
+          run,
+          'failed',
+          {
+            error: session.lastError?.message || 'Unknown error during resumed execution',
+            resumed: true,
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:failed', {
+          error: session.lastError?.message || 'Unknown error during resumed execution',
+          resumed: true,
+        });
+        throw new Error(session.lastError?.message || 'Unknown error during resumed execution');
+      }
+      this.writeRunCheckpoint(
+        run,
+        'after_send',
+        {
+          runState: 'completed',
+          resumed: true,
+        },
+        { branchId: run.branchId },
+      );
+      this.appendRunTimelineEvent(run, 'run:completed', { resumed: true });
+      return { runId: run.id, sessionId: run.sessionId, status: run.status };
+    } catch (error) {
+      if (run.status !== 'failed') {
+        run.status = 'failed';
+        run.updatedAt = Date.now();
+        this.writeRunCheckpoint(
+          run,
+          'failed',
+          {
+            error: error instanceof Error ? error.message : String(error),
+            resumed: true,
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:failed', {
+          error: error instanceof Error ? error.message : String(error),
+          resumed: true,
+        });
+      }
+      throw error;
+    } finally {
+      if (this.activeRunBySession.get(sessionId) === runId) {
+        this.activeRunBySession.delete(sessionId);
+      }
+    }
+  }
+
+  private resolveRunMaxTurns(runOptions: Record<string, unknown>): number | undefined {
+    const candidate = runOptions.maxTurns;
+    if (typeof candidate !== 'number' || !Number.isFinite(candidate) || candidate <= 0) {
+      return undefined;
+    }
+    return Math.floor(candidate);
+  }
+
+  private createCheckpointDispatchState(
+    message: string,
+    attachments?: Attachment[],
+  ): { message: string; attachments?: Attachment[] } {
+    return {
+      message,
+      attachments:
+        Array.isArray(attachments) && attachments.length > 0
+          ? attachments.map((attachment) => ({ ...attachment }))
+          : undefined,
+    };
+  }
+
+  private normalizeManagedRunStatus(
+    value: unknown,
+    fallback: ManagedRun['status'] = 'recovered',
+  ): ManagedRun['status'] {
+    return value === 'queued' ||
+      value === 'running' ||
+      value === 'recovered' ||
+      value === 'completed' ||
+      value === 'failed' ||
+      value === 'cancelled'
+      ? value
+      : fallback;
+  }
+
+  private resolveRunResumePayload(
+    session: ActiveSession,
+    latestCheckpoint: { state: Record<string, unknown>; id: string; stage: string } | null,
+  ):
+    | {
+        payload: { message: string; attachments?: Attachment[] };
+        source: 'checkpoint' | 'latest_user_message';
+      }
+    | null {
+    if (latestCheckpoint) {
+      const checkpointPayload = this.parseCheckpointDispatchPayload(latestCheckpoint.state.dispatch);
+      if (checkpointPayload) {
+        return { payload: checkpointPayload, source: 'checkpoint' };
+      }
+    }
+
+    const fallbackMessage = this.getLatestUserMessageText(session);
+    if (fallbackMessage) {
+      return {
+        payload: { message: fallbackMessage },
+        source: 'latest_user_message',
+      };
+    }
+
+    return null;
+  }
+
+  private parseCheckpointDispatchPayload(
+    value: unknown,
+  ): { message: string; attachments?: Attachment[] } | null {
+    if (!value || typeof value !== 'object') return null;
+    const payload = value as Record<string, unknown>;
+    if (typeof payload.message !== 'string') return null;
+
+    const attachments = this.normalizeCheckpointAttachments(payload.attachments);
+    return {
+      message: payload.message,
+      attachments,
+    };
+  }
+
+  private normalizeCheckpointAttachments(value: unknown): Attachment[] | undefined {
+    if (!Array.isArray(value)) return undefined;
+
+    const normalized: Attachment[] = [];
+    for (const candidate of value) {
+      if (!candidate || typeof candidate !== 'object') continue;
+      const raw = candidate as Record<string, unknown>;
+      const type = raw.type;
+      if (
+        type !== 'image' &&
+        type !== 'pdf' &&
+        type !== 'audio' &&
+        type !== 'video' &&
+        type !== 'text' &&
+        type !== 'file' &&
+        type !== 'other'
+      ) {
+        continue;
+      }
+      if (
+        typeof raw.mimeType !== 'string' ||
+        typeof raw.data !== 'string' ||
+        typeof raw.name !== 'string'
+      ) {
+        continue;
+      }
+      normalized.push({
+        type,
+        mimeType: raw.mimeType,
+        data: raw.data,
+        name: raw.name,
+      });
+    }
+
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private getLatestUserMessageText(session: ActiveSession): string | null {
+    const latestUserItem = [...session.chatItems]
+      .reverse()
+      .find((item): item is UserMessageItem => item.kind === 'user_message');
+    if (!latestUserItem) return null;
+
+    const text = this.getTextFromMessageContent(latestUserItem.content as Message['content']);
+    return text.trim().length > 0 ? text : null;
+  }
+
+  private getOrLoadSessionBranches(sessionId: string): ManagedBranch[] {
+    const existing = this.sessionBranches.get(sessionId);
+    if (existing) return existing;
+
+    const loaded =
+      (this.sessionBranchRepository?.listBranchesForSession(sessionId).map((row) => ({
+        id: row.id,
+        sessionId: row.sessionId,
+        fromTurnId: row.fromTurnId,
+        parentBranchId: row.parentBranchId,
+        name: row.name,
+        status: row.status,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      })) as ManagedBranch[] | undefined) || [];
+    this.sessionBranches.set(sessionId, loaded);
+    return loaded;
+  }
+
+  private getActiveBranchIdForSession(sessionId: string): string | undefined {
+    const cached = this.activeBranchBySession.get(sessionId);
+    if (cached) return cached;
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    for (let idx = branches.length - 1; idx >= 0; idx -= 1) {
+      const branch = branches[idx];
+      if (branch?.status === 'active') {
+        this.activeBranchBySession.set(sessionId, branch.id);
+        return branch.id;
+      }
+    }
+    return undefined;
+  }
+
+  getRunTimeline(runId: string): {
+    runId: string;
+    sessionId: string;
+    branchId?: string;
+    status: ManagedRun['status'];
+    checkpointCount: number;
+    timeline: ManagedRunTimelineEvent[];
+  } {
+    const run = this.runs.get(runId) || this.hydrateRunFromCheckpointStore(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+    this.runs.set(runId, run);
+    return {
+      runId: run.id,
+      sessionId: run.sessionId,
+      branchId: run.branchId,
+      status: run.status,
+      checkpointCount: run.checkpointCount,
+      timeline: [...run.timeline],
+    };
+  }
+
+  createSessionBranch(
+    sessionId: string,
+    branchName: string,
+    fromTurnId?: string,
+  ): {
+    id: string;
+    sessionId: string;
+    fromTurnId?: string;
+    parentBranchId?: string;
+    name: string;
+    status: 'active' | 'merged' | 'abandoned';
+    createdAt: number;
+    updatedAt: number;
+  } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const nowTs = Date.now();
+    const parentBranchId = this.getActiveBranchIdForSession(sessionId);
+    const branch: ManagedBranch = {
+      id: generateId('branch'),
+      sessionId,
+      name: branchName,
+      fromTurnId,
+      parentBranchId,
+      status: 'active',
+      createdAt: nowTs,
+      updatedAt: nowTs,
+    };
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    branches.push(branch);
+    this.sessionBranches.set(sessionId, branches);
+    this.activeBranchBySession.set(sessionId, branch.id);
+    this.sessionBranchRepository?.createBranch({
+      id: branch.id,
+      sessionId: branch.sessionId,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      name: branch.name,
+      status: branch.status,
+      createdAt: branch.createdAt,
+      updatedAt: branch.updatedAt,
+    });
+    eventEmitter.emit('branch:created', sessionId, {
+      branchId: branch.id,
+      name: branch.name,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      activeBranchId: branch.id,
+    });
+
+    return {
+      id: branch.id,
+      sessionId: branch.sessionId,
+      fromTurnId: branch.fromTurnId,
+      parentBranchId: branch.parentBranchId,
+      name: branch.name,
+      status: branch.status,
+      createdAt: branch.createdAt,
+      updatedAt: branch.updatedAt,
+    };
+  }
+
+  mergeSessionBranch(
+    sessionId: string,
+    sourceBranchId: string,
+    targetBranchId: string,
+    strategy: 'auto' | 'ours' | 'theirs' | 'manual',
+  ): {
+    mergeId: string;
+    sourceBranchId: string;
+    targetBranchId: string;
+    strategy: 'auto' | 'ours' | 'theirs' | 'manual';
+    status: 'merged' | 'conflict' | 'failed';
+    conflictCount: number;
+    conflicts: Array<{ id: string; path: string; reason: string; resolution?: 'ours' | 'theirs' | 'manual' }>;
+    mergedAt: number;
+  } {
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    this.sessionBranches.set(sessionId, branches);
+    const source = branches.find((branch) => branch.id === sourceBranchId);
+    const target = branches.find((branch) => branch.id === targetBranchId);
+    if (!source || !target) {
+      return {
+        mergeId: generateId('merge'),
+        sourceBranchId,
+        targetBranchId,
+        strategy,
+        status: 'failed',
+        conflictCount: 0,
+        conflicts: [],
+        mergedAt: Date.now(),
+      };
+    }
+
+    const parentDiverged =
+      typeof source.parentBranchId === 'string' && source.parentBranchId.length > 0
+        ? source.parentBranchId !== targetBranchId
+        : false;
+    const conflictEntry = parentDiverged
+      ? {
+          id: `conflict:${sourceBranchId}:${targetBranchId}`,
+          path: 'branch_context',
+          reason: `Source branch parent (${source.parentBranchId}) differs from merge target (${targetBranchId}).`,
+          resolution: strategy === 'ours' || strategy === 'theirs' ? strategy : undefined,
+        }
+      : null;
+
+    const shouldReturnConflict = Boolean(parentDiverged && (strategy === 'auto' || strategy === 'manual'));
+    const result = {
+      mergeId: generateId('merge'),
+      sourceBranchId,
+      targetBranchId,
+      strategy,
+      status: (shouldReturnConflict ? 'conflict' : 'merged') as 'merged' | 'conflict',
+      conflictCount: conflictEntry ? 1 : 0,
+      conflicts: conflictEntry ? [conflictEntry] : [],
+      mergedAt: Date.now(),
+    };
+
+    if (result.status === 'merged') {
+      source.status = 'merged';
+      source.updatedAt = Date.now();
+      this.sessionBranchRepository?.updateBranchStatus(sourceBranchId, 'merged');
+      if (this.activeBranchBySession.get(sessionId) === sourceBranchId) {
+        this.activeBranchBySession.set(sessionId, targetBranchId);
+      }
+    }
+
+    this.sessionBranchRepository?.recordMerge(result);
+
+    eventEmitter.emit('branch:merged', sessionId, {
+      mergeId: result.mergeId,
+      sourceBranchId,
+      targetBranchId,
+      strategy,
+      status: result.status,
+      activeBranchId: this.getActiveBranchIdForSession(sessionId),
+    });
+
+    return result;
+  }
+
+  setActiveSessionBranch(
+    sessionId: string,
+    branchId: string,
+  ): { sessionId: string; activeBranchId: string } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const branches = this.getOrLoadSessionBranches(sessionId);
+    const target = branches.find((branch) => branch.id === branchId);
+    if (!target) {
+      throw new Error(`Branch not found: ${branchId}`);
+    }
+    if (target.status !== 'active') {
+      throw new Error(`Branch is not active and cannot be selected: ${branchId}`);
+    }
+
+    this.activeBranchBySession.set(sessionId, branchId);
+    return {
+      sessionId,
+      activeBranchId: branchId,
+    };
+  }
+
+  async runBenchmarkSuite(
+    suiteId: string,
+    profile: string,
+  ): Promise<{
+    runId: string;
+    suiteId: string;
+    profile: string;
+    status: 'completed';
+    scorecard: Record<string, unknown>;
+  }> {
+    const runId = generateId('bench');
+    const startedAt = Date.now();
+    this.benchmarkRepository?.createRun({
+      id: runId,
+      suiteId,
+      profile,
+      status: 'running',
+      startedAt,
+    });
+    eventEmitter.emit('benchmark:progress', undefined, {
+      runId,
+      suiteId,
+      profile,
+      progress: 0,
+      status: 'running',
+    });
+
+    try {
+      const result = await this.benchmarkRunner.runSuite(runId, suiteId, profile);
+      const scorecard = {
+        runId,
+        suiteId,
+        benchmarkScore: result.scorecard.benchmarkScore,
+        featureChecklistScore: result.scorecard.featureChecklistScore,
+        finalScore: result.scorecard.finalScore,
+        generatedAt: result.scorecard.generatedAt,
+        dimensions: result.scorecard.dimensions,
+        passed:
+          result.scorecard.finalScore >= 0.9 &&
+          result.scorecard.dimensions.every((dimension) => dimension.passed),
+      };
+
+      const completedAt = Date.now();
+      this.benchmarkRepository?.writeResults(
+        result.metrics.map((metric) => ({
+          id: generateId('bres'),
+          runId,
+          scenarioId: metric.scenarioId,
+          dimension: metric.dimension,
+          score: metric.score,
+          maxScore: metric.maxScore,
+          details: { weight: metric.weight },
+          createdAt: completedAt,
+        })),
+      );
+      this.benchmarkRepository?.updateRun(runId, {
+        status: 'completed',
+        completedAt,
+        scorecard,
+      });
+
+      const failedDimensions = scorecard.dimensions.filter((dimension) => !dimension.passed);
+      this.latestReleaseGateStatus = this.evaluateReleaseGateFromScorecard(scorecard, failedDimensions);
+
+      this.benchmarkRepository?.createReleaseGateSnapshot({
+        id: generateId('gate'),
+        benchmarkRunId: runId,
+        status: this.latestReleaseGateStatus.status,
+        scorecard: scorecard,
+        gates: { reasons: this.latestReleaseGateStatus.reasons },
+        createdAt: this.latestReleaseGateStatus.evaluatedAt,
+      });
+
+      eventEmitter.emit('benchmark:progress', undefined, {
+        runId,
+        suiteId,
+        profile,
+        progress: 100,
+        status: 'completed',
+      });
+      eventEmitter.emit('benchmark:score_updated', undefined, {
+        runId,
+        suiteId,
+        scorecard,
+      });
+
+      return {
+        runId,
+        suiteId,
+        profile,
+        status: 'completed',
+        scorecard,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.benchmarkRepository?.updateRun(runId, {
+        status: 'failed',
+        completedAt: Date.now(),
+        error: message,
+      });
+      this.latestReleaseGateStatus = {
+        status: 'fail',
+        reasons: [`Benchmark execution failed: ${message}`],
+        evaluatedAt: Date.now(),
+      };
+      this.benchmarkRepository?.createReleaseGateSnapshot({
+        id: generateId('gate'),
+        benchmarkRunId: runId,
+        status: 'fail',
+        gates: { reasons: this.latestReleaseGateStatus.reasons },
+        createdAt: this.latestReleaseGateStatus.evaluatedAt,
+      });
+      eventEmitter.emit('benchmark:progress', undefined, {
+        runId,
+        suiteId,
+        profile,
+        progress: 100,
+        status: 'failed',
+      });
+      throw error;
+    }
+  }
+
+  getReleaseGateStatus(): {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard?: Record<string, unknown>;
+    evaluatedAt: number;
+  } {
+    const persisted = this.benchmarkRepository?.getLatestReleaseGateStatus();
+    if (persisted) {
+      this.latestReleaseGateStatus = {
+        status: persisted.status,
+        reasons: persisted.reasons,
+        scorecard: persisted.scorecard as unknown as Record<string, unknown> | undefined,
+        evaluatedAt: persisted.evaluatedAt,
+      };
+    }
+    eventEmitter.emit('release_gate:status', undefined, this.latestReleaseGateStatus);
+    return this.latestReleaseGateStatus;
+  }
+
+  assertReleaseGateForLaunch(): {
+    allowed: true;
+    status: 'pass' | 'warning';
+    reasons: string[];
+    evaluatedAt: number;
+  } {
+    const gate = this.getReleaseGateStatus();
+    if (gate.status === 'fail') {
+      throw new Error(
+        `Release gate failed: ${gate.reasons.length > 0 ? gate.reasons.join(' | ') : 'unknown failure'}`,
+      );
+    }
+
+    return {
+      allowed: true,
+      status: gate.status,
+      reasons: gate.reasons,
+      evaluatedAt: gate.evaluatedAt,
+    };
+  }
+
+  private evaluateReleaseGateFromScorecard(
+    scorecard: {
+      finalScore: number;
+      benchmarkScore: number;
+      featureChecklistScore: number;
+      dimensions: Array<{ dimension: string; passed: boolean; score: number; threshold: number }>;
+    },
+    precomputedFailures?: Array<{ dimension: string; passed: boolean; score: number; threshold: number }>,
+  ): {
+    status: 'pass' | 'fail' | 'warning';
+    reasons: string[];
+    scorecard: Record<string, unknown>;
+    evaluatedAt: number;
+  } {
+    const failedDimensions = precomputedFailures || scorecard.dimensions.filter((dimension) => !dimension.passed);
+    const reasons: string[] = [];
+    let status: 'pass' | 'fail' | 'warning' = 'pass';
+
+    if (failedDimensions.length > 0) {
+      status = 'fail';
+      for (const dimension of failedDimensions) {
+        reasons.push(
+          `Dimension below threshold: ${dimension.dimension} (${dimension.score.toFixed(3)} < ${dimension.threshold.toFixed(3)})`,
+        );
+      }
+    }
+
+    if (scorecard.featureChecklistScore < 1) {
+      if (status !== 'fail') status = 'warning';
+      reasons.push('Feature checklist is not 100% complete.');
+    }
+
+    if (scorecard.finalScore < 0.85) {
+      status = 'fail';
+      reasons.push(`Final score below hard fail threshold (0.85): ${scorecard.finalScore.toFixed(3)}.`);
+    } else if (scorecard.finalScore < 0.9 && status !== 'fail') {
+      status = 'warning';
+      reasons.push('Final score is below launch pass threshold (0.90).');
+    }
+
+    return {
+      status,
+      reasons,
+      scorecard: scorecard as unknown as Record<string, unknown>,
+      evaluatedAt: Date.now(),
+    };
+  }
+
+  private hydrateRunFromCheckpointStore(runId: string): ManagedRun | null {
+    const checkpoints = this.runCheckpointRepository?.listForRun(runId) || [];
+    if (checkpoints.length === 0) {
+      return null;
+    }
+
+    const first = checkpoints[0]!;
+    const latest = checkpoints[checkpoints.length - 1]!;
+    const status = this.normalizeManagedRunStatus(latest.state.runStatus);
+
+    return {
+      id: runId,
+      sessionId: latest.sessionId,
+      branchId: latest.branchId,
+      status,
+      runOptions:
+        typeof latest.state.runOptions === 'object' && latest.state.runOptions !== null
+          ? (latest.state.runOptions as Record<string, unknown>)
+          : {},
+      createdAt: first.createdAt,
+      updatedAt: latest.createdAt,
+      checkpointCount: latest.checkpointIndex,
+      timeline: checkpoints.map((checkpoint) => ({
+        id: checkpoint.id,
+        type: 'run:checkpoint',
+        timestamp: checkpoint.createdAt,
+        data: {
+          stage: checkpoint.stage,
+          branchId: checkpoint.branchId,
+          checkpointIndex: checkpoint.checkpointIndex,
+          ...this.buildPublicCheckpointState(checkpoint.state),
+        },
+      })),
+    };
+  }
+
+  private writeRunCheckpoint(
+    run: ManagedRun,
+    stage: string,
+    state?: Record<string, unknown>,
+    opts?: { branchId?: string; emitEvent?: boolean; publicState?: Record<string, unknown> },
+  ): void {
+    run.checkpointCount += 1;
+    const checkpointIndex = run.checkpointCount;
+    const payloadState = {
+      ...(state || {}),
+      runStatus: run.status,
+      runOptions: run.runOptions,
+    };
+    const publicState = this.buildPublicCheckpointState(opts?.publicState || payloadState);
+    const timestamp = Date.now();
+
+    this.runCheckpointRepository?.upsert({
+      id: generateId('chk'),
+      runId: run.id,
+      sessionId: run.sessionId,
+      branchId: opts?.branchId,
+      checkpointIndex,
+      stage,
+      state: payloadState,
+      createdAt: timestamp,
+    });
+
+    this.appendRunTimelineEvent(run, 'run:checkpoint', {
+      checkpointIndex,
+      stage,
+      branchId: opts?.branchId || run.branchId,
+      ...publicState,
+    });
+
+    if (opts?.emitEvent === false) {
+      return;
+    }
+
+    eventEmitter.emit('run:checkpoint', run.sessionId, {
+      runId: run.id,
+      checkpointIndex,
+      stage,
+      branchId: opts?.branchId || run.branchId,
+      state: publicState,
+    });
+  }
+
+  private buildPublicCheckpointState(state: Record<string, unknown>): Record<string, unknown> {
+    const publicState: Record<string, unknown> = { ...state };
+    const dispatch = publicState.dispatch;
+    if (dispatch && typeof dispatch === 'object') {
+      const dispatchState = dispatch as Record<string, unknown>;
+      const message = typeof dispatchState.message === 'string' ? dispatchState.message : '';
+      const attachmentCount = Array.isArray(dispatchState.attachments)
+        ? dispatchState.attachments.length
+        : 0;
+      publicState.dispatch = {
+        messageLength: message.length,
+        attachmentCount,
+        hasAttachments: attachmentCount > 0,
+      };
+    }
+    return publicState;
+  }
+
+  private checkpointActiveRun(
+    sessionId: string,
+    stage: string,
+    state?: Record<string, unknown>,
+  ): void {
+    const runId = this.activeRunBySession.get(sessionId);
+    if (!runId) return;
+    const run = this.runs.get(runId);
+    if (!run) return;
+    this.writeRunCheckpoint(run, stage, state, { branchId: run.branchId });
+  }
+
+  private appendRunTimelineEvent(
+    run: ManagedRun,
+    type: string,
+    data?: Record<string, unknown>,
+  ): void {
+    run.timeline.push({
+      id: generateId('evt'),
+      type,
+      timestamp: Date.now(),
+      data,
+    });
+    run.updatedAt = Date.now();
+  }
+
+  /**
+   * Process queued messages for a session, one at a time.
+   */
+  private async processMessageQueue(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+
+    while (session.messageQueue.length > 0) {
+      if (session.pendingPlanProposal?.status === 'pending') {
+        break;
+      }
+      const next = session.messageQueue.shift()!;
+      // Emit queue update (item removed)
+      eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+        id: m.id, content: m.content, queuedAt: m.queuedAt,
+      })));
+      this.persistRuntimeSnapshot(session);
+      await this.executeMessage(sessionId, next.content, next.attachments);
+    }
+  }
+
+  /**
+   * Execute a message send (the actual agent invocation).
+   * Extracted from sendMessage to support queue processing.
+   */
+  private async executeMessage(
+    sessionId: string,
+    content: string,
+    attachments?: Attachment[],
+    maxTurns?: number
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    // Reset/replace any in-flight abort controller
+    if (session.abortController && !session.abortController.signal.aborted) {
+      session.abortController.abort();
+    }
+    const abortController = new AbortController();
+    session.abortController = abortController;
+    session.stopRequested = false;
+    session.isStreaming = true;
+    session.isThinking = true;
+    session.lastError = null;
+    this.persistRuntimeSnapshot(session);
+
+    // Build message content
+    let messageContent: string | Message['content'] = content;
+
+    if (attachments && attachments.length > 0) {
+      const parts: MessageContentPart[] = [];
+
+      if (content.trim()) {
+        parts.push({ type: 'text' as const, text: content });
+      }
+
+      for (const attachment of attachments) {
+        if (attachment.type === 'image' && attachment.data) {
+          parts.push({
+            type: 'image' as const,
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          });
+        } else if (attachment.type === 'audio' && attachment.data) {
+          parts.push({
+            type: 'audio' as const,
+            mimeType: attachment.mimeType || 'audio/mpeg',
+            data: attachment.data,
+          });
+        } else if (attachment.type === 'video' && attachment.data) {
+          parts.push({
+            type: 'video' as const,
+            mimeType: attachment.mimeType || 'video/mp4',
+            data: attachment.data,
+          });
+        } else if ((attachment.type === 'file' || attachment.type === 'pdf') && attachment.data) {
+          parts.push({
+            type: 'file' as const,
+            name: attachment.name,
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          });
+        } else if (attachment.type === 'text' && attachment.data) {
+          parts.push({
+            type: 'text' as const,
+            text: `File: ${attachment.name}\n${attachment.data}`,
+          });
+        } else if (attachment.type === 'file' || attachment.type === 'pdf') {
+          parts.push({
+            type: 'text' as const,
+            text: `File: ${attachment.name}`,
+          });
+        }
+      }
+
+      if (parts.length > 0) {
+        messageContent = parts;
+      }
+    }
+
+    // Save attachment files to disk and build persisted content (filePath instead of base64)
+    // messageContent keeps original base64 data in memory for the LLM call
+    // persistedContent replaces data with filePath for small JSON persistence
+    console.error('[MULTIMEDIA] messageContent type:', typeof messageContent, Array.isArray(messageContent) ? `(${messageContent.length} parts)` : '');
+    let persistedContent: string | Message['content'] = messageContent;
+    const savedFilePaths = new Map<string, string>(); // attachment name → filePath
+
+    if (Array.isArray(messageContent) && this.persistence) {
+      const persistedParts: MessageContentPart[] = [];
+      for (const part of messageContent as MessageContentPart[]) {
+        if (part.type !== 'text' && 'data' in part && (part as any).data) {
+          const mimeType = (part as any).mimeType || 'application/octet-stream';
+          const name = part.type === 'file' ? (part as any).name : `attachment.${part.type}`;
+          try {
+            const filePath = await this.persistence.saveAttachmentFile(
+              sessionId, name, (part as any).data, mimeType
+            );
+            savedFilePaths.set(name, filePath);
+            // Persisted part: filePath instead of data
+            const { data: _removed, ...rest } = part as any;
+            persistedParts.push({ ...rest, filePath } as MessageContentPart);
+          } catch {
+            // If save fails, keep original part with data
+            persistedParts.push(part);
+          }
+        } else {
+          persistedParts.push(part);
+        }
+      }
+      persistedContent = persistedParts;
+    }
+
+    // Generate turn ID and create V2 UserMessageItem
+    const turnId = generateMessageId();
+    session.updatedAt = Date.now();
+
+    // Track turn info for tool association
+    this.currentTurnInfo.set(sessionId, {
+      turnMessageId: turnId,
+      toolIds: [],
+    });
+    session.hasTodoStateThisTurn = false;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
+    session.activeTurnIntegrationOrigin = this.getCurrentIntegrationOrigin(session) || undefined;
+    session.pendingIntegrationOrigin = undefined;
+
+    // Filter attachments to only include supported types (exclude 'other')
+    // Strip base64 data from media attachments — data is only needed for the LLM call
+    const chatItemAttachments = attachments?.filter(
+      (a): a is typeof a & { type: 'file' | 'image' | 'text' | 'audio' | 'video' | 'pdf' } =>
+        a.type !== 'other'
+    ).map(a => {
+      // For media types, strip base64 data and add filePath if saved
+      if (a.type !== 'text' && a.data) {
+        const { data: _removed, ...rest } = a;
+        // Find filePath from saved files (keys are 'attachment.{type}' format)
+        const filePath = savedFilePaths.get(`attachment.${a.type}`) || savedFilePaths.get(a.name);
+        return filePath ? { ...rest, filePath } : rest;
+      }
+      return a;
+    });
+    const userChatItem: UserMessageItem = {
+      id: generateChatItemId(),
+      kind: 'user_message',
+      timestamp: now(),
+      turnId,
+      content: persistedContent,
+      attachments: chatItemAttachments,
+    };
+    this.appendChatItem(session, userChatItem);
+    session.currentTurnId = turnId;
+    this.resetAssistantStreamingState(session);
+
+    // Ensure agent is initialized (may be restored from disk without agent)
+    if (!session.agent.invoke) {
+      const toolHandlers = this.buildToolHandlers(session);
+      session.agent = await this.createDeepAgent(session, toolHandlers);
+      this.subscribeToAgentEvents(session);
+    }
+
+    const agentAny = session.agent as DeepAgentInstance;
+    let assistantMessage: Message | null = null;
+    let streamedText = '';
+    const systemPromptAdditions: string[] = [];
+
+    // Emit stream start — MUST be inside try so streamDone is guaranteed in finally/catch
+    eventEmitter.streamStart(sessionId);
+
+    try {
+      if (this.shouldUseLongTermMemory(session)) {
+        const middleware = this.middlewareHooks.get(sessionId);
+        if (middleware) {
+          try {
+            const beforeInvoke = await middleware.beforeInvoke({
+              sessionId,
+              input: content,
+              messages: this.deriveMessagesFromChatItems(session.chatItems),
+              systemPrompt: session.baseSystemPrompt || '',
+              systemPromptAdditions: [],
+            });
+            if (beforeInvoke.systemPromptAddition?.trim()) {
+              systemPromptAdditions.push(beforeInvoke.systemPromptAddition.trim());
+            }
+          } catch (error) {
+            console.warn(
+              '[memory] beforeInvoke failed:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+      }
+
+      // Convert multimodal parts to provider-compatible LangChain content.
+      const lcContent = typeof messageContent === 'string'
+        ? messageContent
+        : await this.toLangChainContentParts(messageContent as MessageContentPart[], session.provider);
+      console.error('[MULTIMEDIA] LangChain content types:', Array.isArray(lcContent)
+        ? lcContent.map((p: any) => p.type)
+        : typeof lcContent);
+      const newUserMessage = new HumanMessage(lcContent);
+      const lcMessages = [];
+      if (systemPromptAdditions.length > 0) {
+        lcMessages.push(new SystemMessage(systemPromptAdditions.join('\n\n')));
+      }
+      lcMessages.push(newUserMessage);
+
+      if (agentAny.streamEvents) {
+        try {
+          const streamOptions = {
+            version: 'v2',
+            recursionLimit: maxTurns ?? RECURSION_LIMIT,
+            signal: abortController.signal,
+            abortSignal: abortController.signal,
+            configurable: { thread_id: session.threadId },
+          };
+          const stream = agentAny.streamEvents(
+            { messages: lcMessages },
+            streamOptions
+          );
+          let finalState: unknown = null;
+
+          let thinkingStarted = false;
+          let streamingStarted = false;
+          let thinkingItemId: string | null = null;
+          let accumulatedThinking = '';
+
+          for await (const event of stream) {
+            if (session.stopRequested) {
+              break;
+            }
+
+            // Extract thinking content (agent's internal reasoning)
+            const thinkingText = this.extractThinkingContent(event);
+            if (thinkingText) {
+              if (!thinkingStarted) {
+                eventEmitter.thinkingStart(sessionId);
+                thinkingStarted = true;
+                session.isThinking = true;
+                this.persistRuntimeSnapshot(session);
+
+                // V2: Create ThinkingItem
+                thinkingItemId = generateChatItemId();
+                const thinkingItem: ThinkingItem = {
+                  id: thinkingItemId,
+                  kind: 'thinking',
+                  timestamp: Date.now(),
+                  turnId: session.currentTurnId,
+                  content: '',
+                  status: 'active',
+                };
+                this.appendChatItem(session, thinkingItem);
+              }
+              accumulatedThinking += thinkingText;
+              eventEmitter.thinkingChunk(sessionId, thinkingText);
+            }
+
+            // Extract regular stream content
+            const chunkText = this.extractStreamChunkText(event);
+            if (chunkText) {
+              const normalizedChunkText = this.normalizeAssistantStreamChunk(session, chunkText);
+              if (normalizedChunkText) {
+                // If we were thinking, mark thinking as done when regular content starts
+                if (thinkingStarted && !streamingStarted) {
+                  eventEmitter.thinkingDone(sessionId);
+                  streamingStarted = true;
+                  session.isThinking = false;
+                  this.persistRuntimeSnapshot(session);
+
+                  // V2: Update ThinkingItem to done with full content
+                  if (thinkingItemId) {
+                    this.updateChatItem(session, thinkingItemId, {
+                      content: accumulatedThinking,
+                      status: 'done',
+                    });
+                  }
+                }
+                streamedText += normalizedChunkText;
+                this.appendAssistantSegmentChunk(session, normalizedChunkText);
+                eventEmitter.streamChunk(sessionId, normalizedChunkText);
+              }
+            }
+
+            const output = this.extractStateFromStreamEvent(event);
+            if (output) {
+              finalState = output;
+            }
+
+            // Try to extract usage metadata from stream events
+            this.extractUsageFromStreamEvent(session, event);
+
+            this.syncTasksFromStreamEvent(session, event);
+          }
+
+          // Ensure thinking is marked done if it was started
+          if (thinkingStarted && !streamingStarted) {
+            eventEmitter.thinkingDone(sessionId);
+            session.isThinking = false;
+            this.persistRuntimeSnapshot(session);
+
+            // V2: Update ThinkingItem to done
+            if (thinkingItemId) {
+              this.updateChatItem(session, thinkingItemId, {
+                content: accumulatedThinking,
+                status: 'done',
+              });
+            }
+          }
+
+          if (session.stopRequested) {
+            if (streamedText) {
+              assistantMessage = {
+                id: generateMessageId(),
+                role: 'assistant',
+                content: streamedText,
+                createdAt: now(),
+              };
+            }
+          } else {
+            assistantMessage = this.extractAssistantMessage(finalState);
+            if (finalState) {
+              this.syncTasksFromState(session, finalState);
+              this.updateUsageFromState(session, finalState);
+            }
+            if (!assistantMessage && streamedText) {
+              assistantMessage = {
+                id: generateMessageId(),
+                role: 'assistant',
+                content: streamedText,
+                createdAt: now(),
+              };
+            }
+          }
+        } catch (streamError) {
+          console.error(
+            '[MULTIMEDIA] Stream error:',
+            sanitizeProviderErrorMessage(streamError instanceof Error ? streamError.message : String(streamError)),
+          );
+          if (this.isAbortError(streamError) || session.stopRequested) {
+            if (streamedText) {
+              assistantMessage = {
+                id: generateMessageId(),
+                role: 'assistant',
+                content: streamedText,
+                createdAt: now(),
+              };
+            }
+          } else if (!streamedText) {
+            const invokeOptions = {
+              recursionLimit: maxTurns ?? RECURSION_LIMIT,
+              signal: abortController.signal,
+              abortSignal: abortController.signal,
+              configurable: { thread_id: session.threadId },
+            };
+            const result = await this.invokeWithSubagentFallback(
+              session,
+              lcMessages as Array<HumanMessage | SystemMessage>,
+              invokeOptions,
+            );
+            assistantMessage = this.extractAssistantMessage(result);
+            this.syncTasksFromState(session, result);
+            this.updateUsageFromState(session, result);
+            if (assistantMessage) {
+              const textContent = this.extractTextContent(assistantMessage);
+              if (textContent) {
+                this.appendAssistantSegmentChunk(session, textContent);
+                eventEmitter.streamChunk(sessionId, textContent);
+              }
+            }
+          } else {
+            throw streamError;
+          }
+        }
+      } else {
+        const invokeOptions = {
+          recursionLimit: maxTurns ?? RECURSION_LIMIT,
+          signal: abortController.signal,
+          abortSignal: abortController.signal,
+          configurable: { thread_id: session.threadId },
+        };
+        const result = await this.invokeWithSubagentFallback(
+          session,
+          lcMessages as Array<HumanMessage | SystemMessage>,
+          invokeOptions,
+        );
+        assistantMessage = this.extractAssistantMessage(result);
+        this.syncTasksFromState(session, result);
+        this.updateUsageFromState(session, result);
+        if (assistantMessage) {
+          const textContent = this.extractTextContent(assistantMessage);
+          if (textContent) {
+            this.appendAssistantSegmentChunk(session, textContent);
+            eventEmitter.streamChunk(sessionId, textContent);
+          }
+        }
+      }
+
+      this.finalizeAssistantSegment(session);
+      if (assistantMessage) {
+        this.emitFinalAssistantSegment(session, assistantMessage);
+      }
+      const assistantTextForPlan = this.resolveAssistantTurnText(
+        session,
+        assistantMessage,
+        streamedText,
+      );
+      if (assistantMessage || session.hasAssistantTextThisTurn) {
+        session.updatedAt = Date.now();
+      }
+
+      if (
+        this.shouldUseLongTermMemory(session) &&
+        session.executionMode !== 'plan' &&
+        !session.stopRequested
+      ) {
+        const middleware = this.middlewareHooks.get(sessionId);
+        if (middleware) {
+          try {
+            await middleware.afterInvoke({
+              sessionId,
+              input: content,
+              messages: this.deriveMessagesFromChatItems(session.chatItems),
+              systemPrompt: session.baseSystemPrompt || '',
+              systemPromptAdditions,
+            });
+          } catch (error) {
+            console.warn(
+              '[memory] afterInvoke failed:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+      }
+
+      // Signal stream completion (frontend uses this for streaming state)
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
+      eventEmitter.streamDone(sessionId, null);
+
+      if (
+        session.executionMode === 'plan' &&
+        assistantTextForPlan.trim().length > 0 &&
+        !session.stopRequested
+      ) {
+        await this.handlePlanProposalFlow(session, assistantTextForPlan);
+      }
+
+      // Update context usage and compact if needed
+      this.emitContextUsage(session);
+      await this.maybeCompactContext(session);
+    } catch (error) {
+      const normalizedErrorMessage = sanitizeProviderErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      console.error('[MULTIMEDIA] Outer error:', normalizedErrorMessage);
+      console.error('[MULTIMEDIA] Outer error stack:', error instanceof Error ? error.stack : '');
+      if (this.isAbortError(error) || session.stopRequested) {
+        session.isStreaming = false;
+        session.isThinking = false;
+        this.persistRuntimeSnapshot(session);
+        this.finalizeAssistantSegment(session);
+        if (streamedText && !session.hasAssistantTextThisTurn) {
+          this.emitFinalAssistantSegment(session, {
+            id: generateMessageId(),
+            role: 'assistant',
+            content: streamedText,
+            createdAt: now(),
+          });
+        }
+        if (streamedText || session.hasAssistantTextThisTurn) {
+          session.updatedAt = Date.now();
+        }
+        // Signal stream completion
+        eventEmitter.streamDone(sessionId, null);
+        return;
+      }
+      const errorMessage = normalizedErrorMessage;
+
+      // Determine error code based on error message
+      let errorCode = 'AGENT_ERROR';
+      if (
+        errorMessage.includes('401') ||
+        errorMessage.toLowerCase().includes('api key') ||
+        errorMessage.toLowerCase().includes('authentication') ||
+        errorMessage.toLowerCase().includes('unauthorized') ||
+        errorMessage.toLowerCase().includes('invalid key')
+      ) {
+        errorCode = 'INVALID_API_KEY';
+      } else if (
+        errorMessage.includes('429') ||
+        errorMessage.toLowerCase().includes('rate limit')
+      ) {
+        errorCode = 'RATE_LIMIT';
+      } else if (
+        errorMessage.includes('500') ||
+        errorMessage.includes('503') ||
+        errorMessage.toLowerCase().includes('service unavailable')
+      ) {
+        errorCode = 'SERVICE_ERROR';
+      }
+
+      const rateLimitDetails = errorCode === 'RATE_LIMIT' ? this.parseRateLimitDetails(errorMessage) : null;
+
+      // V2: Create and persist ErrorItem
+      const errorItem: ErrorItem = {
+        id: generateChatItemId(),
+        kind: 'error',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        message: errorMessage,
+        code: errorCode,
+        recoverable: errorCode !== 'INVALID_API_KEY',
+        details: rateLimitDetails ? { ...rateLimitDetails } : undefined,
+      };
+      this.appendChatItem(session, errorItem);
+      session.lastError = {
+        message: errorMessage,
+        code: errorCode,
+        timestamp: Date.now(),
+      };
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
+
+      eventEmitter.error(sessionId, errorMessage, errorCode, rateLimitDetails ?? undefined);
+      // Always emit streamDone so frontend exits streaming state
+      eventEmitter.streamDone(sessionId, null);
+      // Don't re-throw - error has been emitted to UI, re-throwing causes unhandled rejection
+    } finally {
+      session.stopRequested = false;
+      session.abortController = undefined;
+      session.activeTurnIntegrationOrigin = undefined;
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
+      eventEmitter.flushSync();
+
+      // Finalize turn and persist to disk
+      await this.finalizeAndPersistTurn(session);
+    }
+  }
+
+  /**
+   * Respond to a permission request.
+   */
+  respondToPermission(
+    sessionId: string,
+    permissionId: string,
+    decision: PermissionDecision
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const pending = session.pendingPermissions.get(permissionId);
+    if (!pending) {
+      throw new Error(`Permission request not found: ${permissionId}`);
+    }
+
+    // Resolve the promise
+    pending.resolve(decision);
+    session.pendingPermissions.delete(permissionId);
+
+    if (decision === 'allow_session') {
+      const paths = this.resolveRequestPaths(session, pending.request);
+      if (paths.length > 0) {
+        const scopeSet = session.permissionScopes.get(pending.request.type) ?? new Set<string>();
+        for (const path of paths) {
+          scopeSet.add(path);
+        }
+        session.permissionScopes.set(pending.request.type, scopeSet);
+      } else {
+        const cacheKey = `${pending.request.type}:${pending.request.resource}`;
+        session.permissionCache.set(cacheKey, decision);
+      }
+    }
+
+    // Emit resolved event
+    eventEmitter.permissionResolved(sessionId, permissionId, decision);
+    this.checkpointActiveRun(sessionId, 'permission_resolved', {
+      permissionId,
+      decision,
+      permissionType: pending.request.type,
+      resource: pending.request.resource,
+    });
+    this.persistRuntimeSnapshot(session);
+  }
+
+  /**
+   * Stop generation for a session.
+   */
+  stopGeneration(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    session.stopRequested = true;
+    session.isStreaming = false;
+    session.isThinking = false;
+    if (session.abortController && !session.abortController.signal.aborted) {
+      session.abortController.abort();
+    }
+    // Resolve any pending permission requests to unblock the agent.
+    for (const [permissionId, pending] of session.pendingPermissions.entries()) {
+      pending.resolve('deny');
+      session.pendingPermissions.delete(permissionId);
+      eventEmitter.permissionResolved(sessionId, permissionId, 'deny');
+    }
+
+    // Resolve pending questions to avoid deadlocks on stop.
+    for (const [questionId, pending] of session.pendingQuestions.entries()) {
+      pending.resolve('__cancelled__');
+      session.pendingQuestions.delete(questionId);
+      this.updateQuestionStatus(session, 'pending', 'answered', '__cancelled__');
+      eventEmitter.questionAnswered(sessionId, questionId, '__cancelled__');
+    }
+
+    if (session.pendingPlanProposal?.status === 'pending') {
+      session.pendingPlanProposal.status = 'cancelled';
+    }
+
+    // Clear in-flight permissions to prevent stale state
+    session.inFlightPermissions.clear();
+
+    const agentAny = session.agent as { abort?: () => void; stop?: () => void; cancel?: () => void };
+    if (agentAny.abort) {
+      agentAny.abort();
+    } else if (agentAny.cancel) {
+      agentAny.cancel();
+    } else if (agentAny.stop) {
+      agentAny.stop();
+    }
+
+    const activeRunId = this.activeRunBySession.get(sessionId);
+    if (activeRunId) {
+      const run = this.runs.get(activeRunId);
+      if (run && run.status !== 'completed' && run.status !== 'failed' && run.status !== 'cancelled') {
+        run.status = 'cancelled';
+        run.updatedAt = Date.now();
+        this.writeRunCheckpoint(
+          run,
+          'cancelled',
+          {
+            reason: 'stop_generation',
+          },
+          { branchId: run.branchId },
+        );
+        this.appendRunTimelineEvent(run, 'run:cancelled', {
+          reason: 'stop_generation',
+        });
+      }
+      this.activeRunBySession.delete(sessionId);
+    }
+
+    this.persistRuntimeSnapshot(session);
+  }
+
+  // ============================================================================
+  // Message Queue Management
+  // ============================================================================
+
+  /**
+   * Get the current message queue for a session.
+   */
+  getMessageQueue(sessionId: string): Array<{ id: string; content: string; queuedAt: number }> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    return session.messageQueue.map(m => ({ id: m.id, content: m.content, queuedAt: m.queuedAt }));
+  }
+
+  /**
+   * Remove a message from the queue.
+   */
+  removeFromQueue(sessionId: string, messageId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const idx = session.messageQueue.findIndex(m => m.id === messageId);
+    if (idx === -1) return false;
+    session.messageQueue.splice(idx, 1);
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    this.persistRuntimeSnapshot(session);
+    return true;
+  }
+
+  /**
+   * Reorder the message queue.
+   */
+  reorderQueue(sessionId: string, messageIds: string[]): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const reordered: QueuedMessage[] = [];
+    for (const id of messageIds) {
+      const msg = session.messageQueue.find(m => m.id === id);
+      if (msg) reordered.push(msg);
+    }
+    session.messageQueue = reordered;
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    this.persistRuntimeSnapshot(session);
+    return true;
+  }
+
+  /**
+   * Send a queued message immediately (stops current agent, moves message to front).
+   */
+  async sendQueuedImmediately(sessionId: string, messageId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const idx = session.messageQueue.findIndex(m => m.id === messageId);
+    if (idx === -1) return false;
+
+    // Remove from current position and put at front
+    const [msg] = session.messageQueue.splice(idx, 1);
+    session.messageQueue.unshift(msg);
+
+    // Emit queue update
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    this.persistRuntimeSnapshot(session);
+
+    // Stop current generation — processMessageQueue will pick up queued message
+    this.stopGeneration(sessionId);
+    return true;
+  }
+
+  /**
+   * Edit the content of a queued message.
+   */
+  editQueuedMessage(sessionId: string, messageId: string, newContent: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+    const msg = session.messageQueue.find(m => m.id === messageId);
+    if (!msg) return false;
+    msg.content = newContent;
+    eventEmitter.queueUpdate(sessionId, session.messageQueue.map(m => ({
+      id: m.id, content: m.content, queuedAt: m.queuedAt,
+    })));
+    this.persistRuntimeSnapshot(session);
+    return true;
+  }
+
+  /**
+   * Ask a question to the user and wait for response.
+   * This is used by tools that need user input.
+   */
+  async askQuestion(
+    sessionId: string,
+    question: string,
+    options?: QuestionOption[],
+    multiSelect?: boolean,
+    header?: string,
+    allowCustom = true,
+    metadata?: Record<string, unknown>,
+    questionIdOverride?: string,
+  ): Promise<string | string[]> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const questionId = questionIdOverride || generateId('q');
+
+    const questionRequest: QuestionRequest = {
+      id: questionId,
+      question,
+      options,
+      multiSelect,
+      header,
+      allowCustom,
+      metadata,
+      timestamp: Date.now(),
+    };
+
+    // V2: Create and persist QuestionItem
+    const questionItem: QuestionItem = {
+      id: generateChatItemId(),
+      kind: 'question',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      questionId: questionId,
+      question: question,
+      header: header,
+      options: options?.map(o => ({ label: o.label, description: o.description, value: o.value })),
+      multiSelect: multiSelect,
+      status: 'pending',
+    };
+    this.appendChatItem(session, questionItem);
+
+    return new Promise((resolve) => {
+      // Store pending question
+      session.pendingQuestions.set(questionId, {
+        request: questionRequest,
+        resolve,
+      });
+
+      // Emit question event
+      eventEmitter.questionAsk(sessionId, questionRequest);
+      this.checkpointActiveRun(sessionId, 'question_asked', {
+        questionId,
+        hasOptions: Array.isArray(options) && options.length > 0,
+      });
+      this.persistRuntimeSnapshot(session);
+    });
+  }
+
+  /**
+   * Respond to a question from the agent.
+   */
+  respondToQuestion(
+    sessionId: string,
+    questionId: string,
+    answer: string | string[]
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const pending = session.pendingQuestions.get(questionId);
+    if (!pending) {
+      throw new Error(`Question not found: ${questionId}`);
+    }
+
+    // Resolve the promise with the answer
+    pending.resolve(answer);
+    session.pendingQuestions.delete(questionId);
+    this.updateQuestionStatus(session, questionId, 'answered', answer);
+
+    // Emit answered event
+    eventEmitter.questionAnswered(sessionId, questionId, answer);
+    this.checkpointActiveRun(sessionId, 'question_answered', {
+      questionId,
+      answerType: Array.isArray(answer) ? 'multi' : 'single',
+    });
+    this.persistRuntimeSnapshot(session);
+  }
+
+  private updateQuestionStatus(
+    session: ActiveSession,
+    questionId: string,
+    status: 'pending' | 'answered',
+    answer?: string | string[]
+  ): void {
+    const questionItem = [...session.chatItems]
+      .reverse()
+      .find(
+        (item): item is QuestionItem =>
+          item.kind === 'question' && item.questionId === questionId
+      );
+    if (!questionItem) return;
+    this.updateChatItem(session, questionItem.id, {
+      status,
+      answer,
+    } as Partial<QuestionItem>);
+  }
+
+  private getLatestRunForSession(sessionId: string): ManagedRun | null {
+    let latest: ManagedRun | null = null;
+    for (const run of this.runs.values()) {
+      if (run.sessionId !== sessionId) continue;
+      if (!latest || run.updatedAt > latest.updatedAt) {
+        latest = run;
+      }
+    }
+    return latest;
+  }
+
+  private getSessionRunState(session: ActiveSession): SessionRuntimeState['runState'] {
+    const activeRunId = this.activeRunBySession.get(session.id);
+    const activeRun = activeRunId ? this.runs.get(activeRunId) : null;
+
+    if (session.stopRequested && activeRun) {
+      return 'paused';
+    }
+    if (session.stopRequested) {
+      return 'stopping';
+    }
+
+    if (session.pendingPermissions.size > 0) {
+      return 'waiting_permission';
+    }
+
+    if (session.pendingQuestions.size > 0) {
+      return 'waiting_question';
+    }
+
+    if (session.isRetrying) {
+      return 'retrying';
+    }
+
+    const hasActiveTools = session.activeTools.size > 0;
+    const hasAbortController = Boolean(
+      session.abortController && !session.abortController.signal.aborted,
+    );
+
+    if (activeRun?.status === 'recovered') {
+      return 'recovered';
+    }
+
+    if (activeRun?.status === 'running') {
+      return 'running';
+    }
+
+    if (session.isStreaming || session.isThinking || hasActiveTools || hasAbortController) {
+      return 'running';
+    }
+
+    if (session.messageQueue.length > 0) {
+      return 'queued';
+    }
+
+    const latestRun = this.getLatestRunForSession(session.id);
+    if (latestRun?.status === 'completed') {
+      return 'completed';
+    }
+    if (latestRun?.status === 'failed') {
+      return 'failed';
+    }
+    if (latestRun?.status === 'cancelled') {
+      return 'cancelled';
+    }
+
+    if (session.lastError) {
+      return 'errored';
+    }
+
+    return 'idle';
+  }
+
+  private buildRuntimeState(session: ActiveSession): SessionRuntimeState {
+    const serializedScopes: Record<string, string[]> = {};
+    for (const [permissionType, scopes] of session.permissionScopes.entries()) {
+      const values = Array.from(scopes);
+      if (values.length > 0) {
+        serializedScopes[permissionType] = values;
+      }
+    }
+
+    const serializedCache: Record<string, PermissionDecision> = {};
+    for (const [cacheKey, decision] of session.permissionCache.entries()) {
+      if (decision === 'allow_session') {
+        serializedCache[cacheKey] = decision;
+      }
+    }
+
+    return {
+      version: 1,
+      runState: this.getSessionRunState(session),
+      isStreaming: session.isStreaming,
+      isThinking: session.isThinking,
+      activeTurnId: session.currentTurnId,
+      activeToolIds: Array.from(session.activeTools.keys()),
+      activeTools: Array.from(session.activeTools.values()).map((tool) => ({ ...tool })),
+      pendingPermissions: Array.from(session.pendingPermissions.values()).map((pending) => pending.request),
+      pendingQuestions: Array.from(session.pendingQuestions.values()).map((pending) => pending.request),
+      messageQueue: session.messageQueue.map((message) => ({
+        id: message.id,
+        content: message.content,
+        queuedAt: message.queuedAt,
+      })),
+      permissionScopes: serializedScopes,
+      permissionCache: serializedCache,
+      lastError: session.lastError ? { ...session.lastError } : null,
+      updatedAt: Date.now(),
+    };
+  }
+
+  private persistRuntimeSnapshot(session: ActiveSession): void {
+    if (!this.persistence) return;
+    const runtime = this.buildRuntimeState(session);
+    void this.persistence.saveRuntimeState(session.id, runtime).catch(() => {});
+  }
+
+  getSessionRuntimeState(sessionId: string): SessionRuntimeState | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return this.buildRuntimeState(session);
+  }
+
+  getBootstrapState(eventCursor: number): RuntimeBootstrapState {
+    const sessions = this.listSessions();
+    const runtime: Record<string, SessionRuntimeState> = {};
+    for (const session of this.sessions.values()) {
+      runtime[session.id] = this.buildRuntimeState(session);
+    }
+
+    return {
+      sessions,
+      runtime,
+      eventCursor,
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Get all sessions, sorted by updatedAt (most recent first).
+   */
+  listSessions(): SessionInfo[] {
+    return Array.from(this.sessions.values())
+      .map(session => {
+        const firstMessage = this.getFirstMessagePreview(session);
+
+        return {
+          id: session.id,
+          type: session.type,
+          provider: session.provider,
+          executionMode: session.executionMode,
+          title: session.title,
+          firstMessage,
+          workingDirectory: session.workingDirectory,
+          model: session.model,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          lastAccessedAt: session.lastAccessedAt,
+          messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
+        };
+      })
+      .sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+        return b.lastAccessedAt - a.lastAccessedAt;
+      });
+  }
+
+  listSessionsPage(options?: {
+    limit?: number;
+    offset?: number;
+    query?: string;
+  }): SessionListPage {
+    const allSessions = this.listSessions();
+    const query = (options?.query || '').trim().toLowerCase();
+    const filteredSessions =
+      query.length > 0
+        ? allSessions.filter((session) => {
+            const haystack = [
+              session.title || '',
+              session.firstMessage || '',
+              session.workingDirectory || '',
+              session.model || '',
+            ]
+              .join(' ')
+              .toLowerCase();
+            return haystack.includes(query);
+          })
+        : allSessions;
+
+    const limit = Math.max(1, Math.floor(options?.limit ?? 20));
+    const requestedOffset = Math.max(0, Math.floor(options?.offset ?? 0));
+    const offset = Math.min(requestedOffset, Math.max(0, filteredSessions.length));
+    const sessions = filteredSessions.slice(offset, offset + limit);
+    const total = filteredSessions.length;
+    const hasMore = offset + sessions.length < total;
+
+    return {
+      sessions,
+      total,
+      hasMore,
+      offset,
+      limit,
+      nextOffset: hasMore ? offset + sessions.length : null,
+    };
+  }
+
+  private compareChatItemsForTimeline(a: ChatItem, b: ChatItem): number {
+    const aSeq = typeof a.sequence === 'number' ? a.sequence : Number.POSITIVE_INFINITY;
+    const bSeq = typeof b.sequence === 'number' ? b.sequence : Number.POSITIVE_INFINITY;
+    if (aSeq !== bSeq) return aSeq - bSeq;
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+    return a.id.localeCompare(b.id);
+  }
+
+  getSessionChunk(
+    sessionId: string,
+    options?: { chatItemLimit?: number; beforeSequence?: number }
+  ): SessionDetails | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+
+    const orderedItems = [...session.chatItems].sort((a, b) =>
+      this.compareChatItemsForTimeline(a, b)
+    );
+    const indexedItems = orderedItems.map((item, index) => ({
+      item,
+      sequence: typeof item.sequence === 'number' ? item.sequence : index + 1,
+    }));
+
+    const chatItemLimit = Math.max(1, Math.floor(options?.chatItemLimit ?? 200));
+    const beforeSequence = typeof options?.beforeSequence === 'number' ? options.beforeSequence : undefined;
+    const scopedItems = beforeSequence !== undefined
+      ? indexedItems.filter((entry) => entry.sequence < beforeSequence)
+      : indexedItems;
+    const pageItems = scopedItems.slice(Math.max(0, scopedItems.length - chatItemLimit));
+    const chatItems = pageItems.map((entry) => entry.item);
+    const hasMoreHistory = scopedItems.length > pageItems.length;
+    const oldestLoadedSequence = pageItems.length > 0 ? pageItems[0].sequence : null;
+
+    const firstMessage = this.getFirstMessagePreview(session);
+    const ctxWindow = this.getContextWindow(session.provider, session.model);
+    const usedTokens = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+    const percentUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
+
+    return {
+      id: session.id,
+      type: session.type,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
+      messages: this.deriveMessagesFromChatItems(chatItems),
+      chatItems,
+      tasks: session.tasks,
+      artifacts: session.artifacts,
+      contextUsage: {
+        usedTokens,
+        maxTokens: ctxWindow.input,
+        percentUsed,
+      },
+      hasMoreHistory,
+      oldestLoadedSequence,
+      runtime: this.buildRuntimeState(session),
+    };
+  }
+
+  /**
+   * Get a session by ID.
+   */
+  getSession(sessionId: string): SessionDetails | null {
+    return this.getSessionChunk(sessionId, {
+      chatItemLimit: Number.MAX_SAFE_INTEGER,
+    });
+  }
+
+  /**
+   * Delete a session.
+   */
+  async deleteSession(sessionId: string): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    // Stop agent if running
+    session.agent.stop?.();
+
+    // Clear pending permissions
+    for (const pending of session.pendingPermissions.values()) {
+      pending.resolve('deny');
+    }
+    session.pendingPermissions.clear();
+
+    // Clear pending questions
+    for (const pending of session.pendingQuestions.values()) {
+      pending.resolve('__cancelled__');
+    }
+    session.pendingQuestions.clear();
+    session.pendingPlanProposal = undefined;
+
+    // Clear in-flight permissions
+    session.inFlightPermissions.clear();
+
+    // Delete from disk FIRST (before memory)
+    if (this.persistence) {
+      try {
+        await this.persistence.deleteSession(sessionId);
+      } catch (error) {
+        throw error;
+      }
+    }
+
+    // Clean up checkpointer thread data (removes stored LLM state for this session)
+    try {
+      const checkpointer = getCheckpointer();
+      await checkpointer.deleteThread(session.threadId);
+    } catch {
+      // Non-critical: if checkpointer cleanup fails, session is still deleted
+    }
+
+    // Clean up Deep Agents services for this session
+    this.clearSessionServices(sessionId, session.workingDirectory);
+    this.middlewareHooks.delete(sessionId);
+    this.lastPromptDiagnostics.delete(sessionId);
+
+    // Only delete from memory after successful disk deletion
+    this.sessions.delete(sessionId);
+    return true;
+  }
+
+  private async persistSessionSnapshot(session: ActiveSession): Promise<void> {
+    if (!this.persistence) return;
+    try {
+      const ctxWindow = this.getContextWindow(session.provider, session.model);
+      const usedTokens =
+        session.lastKnownPromptTokens > 0
+          ? session.lastKnownPromptTokens
+          : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+      const percentUsed = ctxWindow.input > 0 ? (usedTokens / ctxWindow.input) * 100 : 0;
+
+      await this.persistence.saveSessionV2({
+        metadata: {
+          version: 2,
+          id: session.id,
+          type: session.type,
+          provider: session.provider,
+          executionMode: session.executionMode,
+          title: session.title,
+          workingDirectory: session.workingDirectory,
+          model: session.model,
+          approvalMode: session.approvalMode,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          lastAccessedAt: session.lastAccessedAt,
+        },
+        chatItems: session.chatItems,
+        tasks: session.tasks,
+        artifacts: session.artifacts,
+        contextUsage: {
+          usedTokens,
+          maxTokens: ctxWindow.input,
+          percentUsed,
+          lastUpdated: Date.now(),
+        },
+        runtime: this.buildRuntimeState(session),
+      });
+    } catch {
+      // Best-effort persistence.
+    }
+  }
+
+  /**
+   * Finalize turn and persist session to disk.
+   * Associates tool executions with the user message that initiated them.
+   * Now uses V2 unified chatItems format.
+   */
+  private async finalizeAndPersistTurn(session: ActiveSession): Promise<void> {
+    const turnInfo = this.currentTurnInfo.get(session.id);
+    if (!turnInfo) return;
+
+    // Update session timestamp
+    session.updatedAt = Date.now();
+
+    // Clear current turn ID
+    session.currentTurnId = undefined;
+
+    await this.persistSessionSnapshot(session);
+
+    // Clear turn tracking
+    this.currentTurnInfo.delete(session.id);
+  }
+
+  /**
+   * Update session title.
+   */
+  async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    session.title = title;
+    session.updatedAt = Date.now();
+
+    await this.persistSessionSnapshot(session);
+
+    // Emit session updated event
+    const firstMessage = this.getFirstMessagePreview(session);
+
+    const sessionInfo: SessionInfo = {
+      id: session.id,
+      type: session.type,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
+    };
+    eventEmitter.sessionUpdated(sessionInfo);
+  }
+
+  /**
+   * Update session last accessed time.
+   */
+  async updateSessionLastAccessed(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const now = Date.now();
+    session.lastAccessedAt = now;
+
+    await this.persistSessionSnapshot(session);
+  }
+
+  /**
+   * Update session working directory.
+   */
+  async updateSessionWorkingDirectory(sessionId: string, workingDirectory: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    const normalizedWorkingDirectory = resolve(
+      (typeof workingDirectory === 'string' && workingDirectory.trim())
+        ? workingDirectory.trim()
+        : process.cwd(),
+    );
+    const oldWorkingDirectory = resolve(session.workingDirectory);
+    if (normalizedWorkingDirectory === oldWorkingDirectory) {
+      return;
+    }
+
+    const runState = this.getSessionRunState(session);
+    if (
+      runState === 'running'
+      || runState === 'queued'
+      || runState === 'waiting_permission'
+      || runState === 'waiting_question'
+      || runState === 'retrying'
+      || runState === 'stopping'
+      || runState === 'paused'
+      || runState === 'recovered'
+    ) {
+      throw new Error(
+        `Cannot change working directory while run is ${runState}. Wait for idle/completion and retry.`,
+      );
+    }
+
+    session.workingDirectory = normalizedWorkingDirectory;
+    session.updatedAt = Date.now();
+
+    // Refresh agent with updated working directory
+    const toolHandlers = this.buildToolHandlers(session);
+    session.agent = await this.createDeepAgent(session, toolHandlers);
+
+    // Persist to disk and update workspace indices.
+    if (this.persistence) {
+      try {
+        // Remove from old workspace index
+        await this.persistence.removeSessionFromWorkspace(sessionId, oldWorkingDirectory);
+      } catch {
+        // Failed to update old workspace index.
+      }
+    }
+    await this.persistSessionSnapshot(session);
+
+    // Emit session updated event
+    const firstMessageWd = this.getFirstMessagePreview(session);
+
+    const sessionInfo: SessionInfo = {
+      id: session.id,
+      type: session.type,
+      provider: session.provider,
+      executionMode: session.executionMode,
+      title: session.title,
+      firstMessage: firstMessageWd,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastAccessedAt: session.lastAccessedAt,
+      messageCount: session.chatItems.filter(ci => ci.kind === 'user_message' || ci.kind === 'assistant_message').length,
+    };
+    eventEmitter.sessionUpdated(sessionInfo);
+  }
+
+  /**
+   * Get tasks for a session.
+   * Tasks come from DeepAgents state synchronization.
+   */
+  getTasks(sessionId: string): Task[] {
+    const session = this.sessions.get(sessionId);
+    return session?.tasks ?? [];
+  }
+
+  /**
+   * Get artifacts for a session.
+   */
+  getArtifacts(sessionId: string): Artifact[] {
+    const session = this.sessions.get(sessionId);
+    return session?.artifacts || [];
+  }
+
+  /**
+   * Get context usage for a session.
+   * Uses the model's actual context window from the API.
+   */
+  getContextUsage(sessionId: string): { used: number; total: number; percentage: number } {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      const defaultContext = this.getContextWindow('google', 'gemini-3-flash-preview');
+      return { used: 0, total: defaultContext.input, percentage: 0 };
+    }
+
+    // Prefer API-tracked usage if available (more accurate than estimation)
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+
+    // Get context window from model configuration
+    const contextWindow = this.getContextWindow(session.provider, session.model);
+    const total = contextWindow.input;
+
+    return {
+      used,
+      total,
+      percentage: Math.round((used / total) * 100),
+    };
+  }
+
+  // ============================================================================
+  // Private Methods
+  // ============================================================================
+
+  private getSystemInfo(): {
+    username: string;
+    osName: string;
+    osVersion: string;
+    architecture: string;
+    shell: string;
+    computerName: string;
+    cpuModel: string;
+    cpuCores: number;
+    totalMemoryGB: string;
+    timezone: string;
+    timezoneOffset: string;
+    locale: string;
+  } {
+    const user = userInfo();
+    const cpuList = cpus();
+    const totalMem = totalmem();
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const offsetMin = new Date().getTimezoneOffset();
+    const offsetHrs = Math.abs(Math.floor(offsetMin / 60));
+    const offsetMins = Math.abs(offsetMin % 60);
+    const offsetSign = offsetMin <= 0 ? '+' : '-';
+    const offsetStr = `UTC${offsetSign}${String(offsetHrs).padStart(2, '0')}:${String(offsetMins).padStart(2, '0')}`;
+
+    // Map platform to friendly OS name
+    const platformNames: Record<string, string> = {
+      darwin: 'macOS',
+      win32: 'Windows',
+      linux: 'Linux',
+      freebsd: 'FreeBSD',
+    };
+
+    return {
+      username: user.username,
+      osName: platformNames[process.platform] || process.platform,
+      osVersion: release(),
+      architecture: arch(),
+      shell: user.shell || process.env.SHELL || process.env.COMSPEC || 'unknown',
+      computerName: hostname(),
+      cpuModel: cpuList.length > 0 ? cpuList[0].model : 'unknown',
+      cpuCores: cpuList.length,
+      totalMemoryGB: (totalMem / (1024 ** 3)).toFixed(1),
+      timezone: tz,
+      timezoneOffset: offsetStr,
+      locale: Intl.DateTimeFormat().resolvedOptions().locale || 'en-US',
+    };
+  }
+
+  private getPromptSystemInfo(): PromptSystemInfo {
+    const now = new Date();
+    const sys = this.getSystemInfo();
+    const formattedDate = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const formattedTime = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    return {
+      ...sys,
+      formattedDate,
+      formattedTime,
+    };
+  }
+
+  private shouldUseLegacySystemPrompt(): boolean {
+    const mode = process.env.COWORK_SYSTEM_PROMPT_MODE?.trim().toLowerCase();
+    if (mode === 'legacy') return true;
+    if (mode === 'dynamic' || mode === 'v2') return false;
+    return process.env.COWORK_LEGACY_SYSTEM_PROMPT === '1';
+  }
+
+  private maybeLogPromptDiagnostics(
+    sessionId: string,
+    diagnostics: PromptBuildDiagnostics,
+  ): void {
+    if (process.env.COWORK_LOG_PROMPT_DIAGNOSTICS !== '1') return;
+    const payload = {
+      sessionId,
+      provider: diagnostics.provider,
+      providerTemplateKey: diagnostics.providerTemplateKey,
+      modeTemplateKey: diagnostics.modeTemplateKey,
+      toolCount: diagnostics.toolCount,
+      restrictedToolCount: diagnostics.restrictedToolCount,
+      integrationCount: diagnostics.integrationCount,
+      sectionKeys: diagnostics.sectionKeys,
+      promptLength: diagnostics.promptLength,
+      usingLegacyFallback: diagnostics.usingLegacyFallback,
+    };
+    process.stderr.write(`[prompt:diagnostics] ${JSON.stringify(payload)}\n`);
+  }
+
+  private async buildDynamicSystemPrompt(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<{ prompt: string; diagnostics: PromptBuildDiagnostics }> {
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    const agentsMdPrompt = agentsMdConfig
+      ? this.buildAgentsMdPrompt(agentsMdConfig)
+      : '';
+
+    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
+    const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
+    const skillBlock = await this.buildSkillsPrompt(session);
+    const mcpPrompt = this.buildMcpPrompt();
+    const soulPrompt = this.buildSoulPromptSection();
+
+    const additionalSections: PromptTemplateSection[] = [
+      { key: 'soul', content: soulPrompt },
+      { key: 'agents_md', content: agentsMdPrompt },
+      { key: 'memory', content: memoryPrompt },
+      { key: 'subagents', content: subagentPrompt },
+      { key: 'skills', content: skillBlock },
+      { key: 'mcp_summary', content: mcpPrompt },
+    ].filter((section) => section.content && section.content.trim().length > 0);
+
+    const context: PromptBuildContext = {
+      provider: session.provider,
+      executionMode: session.executionMode,
+      sessionType: session.type,
+      workingDirectory: session.workingDirectory,
+      model: session.model,
+      systemInfo: this.getPromptSystemInfo(),
+      toolHandlers,
+      capabilitySnapshot: this.getCapabilitySnapshot(session.id) as PromptBuildContext['capabilitySnapshot'],
+      additionalSections,
+      defaultNotificationTarget: this.getDefaultScheduledTaskNotificationTarget(session.id),
+    };
+
+    const result = this.systemPromptBuilder.build(context);
+    this.lastPromptDiagnostics.set(session.id, result.diagnostics);
+    this.maybeLogPromptDiagnostics(session.id, result.diagnostics);
+    return {
+      prompt: result.prompt,
+      diagnostics: result.diagnostics,
+    };
+  }
+
+  private async buildSystemPromptForSession(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<{ prompt: string; diagnostics: PromptBuildDiagnostics }> {
+    if (!this.shouldUseLegacySystemPrompt()) {
+      return this.buildDynamicSystemPrompt(session, toolHandlers);
+    }
+
+    const prompt = await this.buildSystemPrompt(session, toolHandlers);
+    const diagnostics: PromptBuildDiagnostics = {
+      provider: session.provider,
+      providerTemplateKey: 'legacy-inline',
+      modeTemplateKey: session.executionMode,
+      sectionKeys: ['legacy_inline_prompt'],
+      toolCount: toolHandlers.length,
+      restrictedToolCount: 0,
+      integrationCount: 0,
+      promptLength: prompt.length,
+      usingLegacyFallback: true,
+    };
+    this.lastPromptDiagnostics.set(session.id, diagnostics);
+    this.maybeLogPromptDiagnostics(session.id, diagnostics);
+    return { prompt, diagnostics };
+  }
+
+  private async buildSystemPrompt(
+    session: ActiveSession,
+    toolHandlers: ToolHandler[],
+  ): Promise<string> {
+    const now = new Date();
+    const sys = this.getSystemInfo();
+    const formattedDate = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const formattedTime = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const toolNames = new Set(toolHandlers.map((tool) => tool.name));
+    const additionalToolLines: string[] = [
+      '- **read_any_file**: Read and analyze ANY file type - text, images, PDFs, video, audio (USE THIS for all file reading)',
+    ];
+    if (toolNames.has('deep_research')) {
+      additionalToolLines.push('- **deep_research**: Extensive autonomous research (5-60 min)');
+    }
+    if (toolNames.has('web_search')) {
+      additionalToolLines.push('- **web_search**: Quick web search with citations');
+    }
+    if (toolNames.has('web_fetch')) {
+      additionalToolLines.push('- **web_fetch**: Fetch and summarize a specific URL');
+    }
+    if (toolNames.has('generate_image') || toolNames.has('edit_image')) {
+      additionalToolLines.push('- **generate_image/edit_image**: Image generation and editing');
+    }
+    if (toolNames.has('generate_video') || toolNames.has('analyze_video')) {
+      additionalToolLines.push('- **generate_video/analyze_video**: Video generation and analysis');
+    }
+    if (toolNames.has('computer_use')) {
+      additionalToolLines.push(
+        '- **computer_use**: Browser automation for web tasks (session-isolated Chrome)',
+      );
+    }
+    const additionalToolsSection = additionalToolLines.join('\n');
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const sandboxEnforcement =
+      sandboxSettings.mode === 'danger-full-access'
+        ? 'Sandbox enforcement is disabled (danger-full-access).'
+        : isOsSandboxAvailable()
+          ? 'OS sandbox + validator enforcement are active.'
+          : 'Validator-only enforcement is active (OS sandbox unavailable).';
+    const sandboxPathsPreview =
+      sandboxSettings.allowedPaths.length > 0
+        ? sandboxSettings.allowedPaths.slice(0, 4).join(', ')
+        : session.workingDirectory;
+    const sandboxConstraintsSection = `### Effective Sandbox Constraints
+- Mode: ${sandboxSettings.mode}
+- Network: ${sandboxSettings.allowNetwork ? 'allowed' : 'blocked'}
+- Process spawn: ${sandboxSettings.allowProcessSpawn ? 'allowed' : 'blocked'}
+- Enforcement: ${sandboxEnforcement}
+- Allowed roots (sample): ${sandboxPathsPreview}`;
+
+    let basePrompt = `You are Cowork, a personal coworking assistant powered by DeepAgents.
+
+## Environment
+
+### User
+- Username: ${sys.username}
+- Home Directory: ${homedir()}
+
+### System
+- OS: ${sys.osName} ${sys.osVersion} (${sys.architecture})
+- Computer Name: ${sys.computerName}
+- Shell: ${sys.shell}
+- CPU: ${sys.cpuModel} (${sys.cpuCores} cores)
+- Memory: ${sys.totalMemoryGB} GB
+
+### Date & Time
+- Current Date: ${formattedDate}
+- Current Time: ${formattedTime}
+- Timezone: ${sys.timezone} (${sys.timezoneOffset})
+- Locale: ${sys.locale}
+
+### Workspace
+- Working Directory: ${session.workingDirectory}
+- Platform: ${process.platform}
+- Node.js: ${process.version}
+
+### Instructions for Using System Information
+- Use OS-appropriate commands: prefer \`pbcopy/pbpaste\` on macOS, \`clip\`/\`Get-Clipboard\` on Windows, \`xclip\` on Linux
+- Use OS-appropriate path separators: \`/\` on macOS/Linux, \`\\\` on Windows
+- Use OS-appropriate file locations: \`~/Library/\` on macOS, \`%APPDATA%\` on Windows, \`~/.config/\` on Linux
+- Use the user's timezone when scheduling tasks, formatting dates, or referencing time
+- Use the user's locale for number/date formatting when generating user-facing content
+- When suggesting shell commands, match the user's shell (bash, zsh, powershell, etc.)
+- Address the user by their username when appropriate for a personal touch
+- When discussing system resources or performance, use the CPU/memory info for context-aware suggestions
+
+## Tone and Style
+Be direct and concise. Avoid unnecessary preamble, postamble, or filler phrases.
+- DO NOT start responses with "I'll", "Let me", "Sure", "Of course"
+- DO NOT end with offers of further help unless relevant
+- DO use active voice and be specific about what you're doing
+- Output code without excessive comments unless requested
+
+When asked to do something:
+- If straightforward, do it without commentary
+- If complex, briefly explain your approach, then execute
+- If unclear, ask for clarification before acting
+
+## Task Management with write_todos
+For complex multi-step work, use write_todos to track progress. The UI displays these in real-time.
+
+### When to Use
+- Task requires 3+ distinct steps
+- Work spans multiple tool calls
+- Need to show progress on longer operations
+
+### Workflow
+1. Create tasks when starting:
+\`\`\`
+write_todos([
+  { status: 'in_progress', content: 'Analyze existing code' },
+  { status: 'pending', content: 'Implement changes' },
+  { status: 'pending', content: 'Verify and test' }
+])
+\`\`\`
+
+2. Update as you work - mark 'in_progress' when starting, 'completed' when done:
+\`\`\`
+write_todos([
+  { status: 'completed', content: 'Analyze existing code' },
+  { status: 'in_progress', content: 'Implement changes' },
+  { status: 'pending', content: 'Verify and test' }
+])
+\`\`\`
+
+3. Add discovered tasks as needed
+4. Always mark completed when done - never leave tasks in_progress
+
+### Task Guidelines
+- Use imperative form: "Implement feature", not "Implementing"
+- Be specific: "Add validation to UserForm", not "Add validation"
+- Keep atomic - one action per task
+
+## File Operations
+Paths are relative to working directory. Use absolute-style like \`/src/index.ts\`.
+
+### ls - List Directory
+\`\`\`
+ls("/src")  // List /src contents
+\`\`\`
+
+### read_any_file - Read ANY File (PREFERRED)
+**Use this as your PRIMARY tool for reading any file.** Handles ALL file types automatically.
+\`\`\`
+read_any_file({ file_path: "/src/index.ts" })                    // Code/text file
+read_any_file({ file_path: "/src/index.ts", offset: 100, limit: 50 })  // Lines 101-150
+read_any_file({ file_path: "/path/to/image.png" })               // Image → visual analysis
+read_any_file({ file_path: "/path/to/document.pdf" })            // PDF → visual analysis
+read_any_file({ file_path: "/path/to/video.mp4" })               // Video → video analysis
+read_any_file({ file_path: "/path/to/audio.mp3" })               // Audio → audio analysis
+\`\`\`
+**Supported file types:**
+- **Code/Text**: .ts, .js, .py, .java, .go, .rs, .c, .cpp, .html, .css, .json, .yaml, .toml, .md, .txt, .csv, .xml, .sql, .sh, .env
+- **Images**: .png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .ico, .heic, .tiff
+- **Documents**: .pdf (visual analysis)
+- **Video**: .mp4, .webm, .mov, .avi, .mkv
+- **Audio**: .mp3, .wav, .m4a, .ogg, .flac, .aac
+
+**Guidelines:**
+- ALWAYS use read_any_file instead of read_file for reading files
+- For text files: returns content with line numbers, use offset/limit for large files
+- For images/media/PDFs: content is captured for visual analysis by the model
+- Read before editing - always check current state first
+
+### write_file - Create New Files
+Creates new files. Fails if file exists (use edit_file instead).
+\`\`\`
+write_file({ file_path: "/src/utils.ts", content: "export const util = () => {};" })
+\`\`\`
+
+### edit_file - Modify Existing Files
+Precise string replacement. **Preferred over rewriting files.**
+\`\`\`
+edit_file({
+  file_path: "/src/utils.ts",
+  old_string: "export const util = () => {};",
+  new_string: "export const util = (v: string) => v.trim();"
+})
+\`\`\`
+- Keep old_string minimal but unique
+- Use replace_all: true for multiple occurrences
+- Preserve existing indentation
+
+### glob - Find Files
+\`\`\`
+glob({ pattern: "**/*.ts" })
+glob({ pattern: "src/**/*.test.ts" })
+\`\`\`
+
+### grep - Search Contents
+\`\`\`
+grep({ pattern: "TODO", path: "/src" })
+grep({ pattern: "function.*export", glob: "**/*.ts" })
+\`\`\`
+
+### Best Practices
+1. Read before edit - always
+2. Use edit_file for modifications, not full rewrites
+3. Verify critical changes with read_file
+4. Preserve formatting and style
+
+## Shell Commands (execute)
+\`\`\`
+execute({ command: "npm install" })
+execute({ command: "git status" })
+\`\`\`
+
+${sandboxConstraintsSection}
+
+### Guidelines
+- Explain non-trivial commands before executing
+- Avoid destructive commands (rm -rf, reset --hard) without confirmation
+- Never expose credentials in commands
+- Be cautious with commands affecting files outside working directory
+
+## Following Conventions
+- Match existing code patterns and style
+- Check for existing utilities before creating new ones
+- Follow project's naming, import, and error handling conventions
+- Don't assume libraries are available - check package.json first
+
+## Proactiveness
+**Do proactively:** Fix obvious bugs, add missing imports, create needed directories
+**Ask first:** Delete files, change config, install dependencies, modify git history
+**Never without request:** Push to remote, run system-wide commands
+
+## Additional Tools
+${additionalToolsSection}
+
+## Skill Creation with Conversation-Derived Drafts
+
+Skills are reusable operating contracts. Prefer them when work is recurring, quality-sensitive, multi-step, or repeatedly corrected.
+
+### Skill Creation Rules
+1. **Draft first**: call \`draft_skill_from_conversation\` before creating a skill.
+2. **Preview and confirm**: show a concise draft summary and ask for explicit user confirmation.
+3. **Create only after confirmation**: then call \`create_skill_from_conversation\`.
+4. **Support multiple focused skills** when conversation intent contains independent workflow tracks.
+5. **Current-session mining only**: extract durable intent, constraints, required tools, and output contract from current-session conversation.
+6. **Context hygiene**: remove temporary chatter/noise; keep durable instructions in the generated skill.
+
+### Skill Quality Checklist
+- Trigger description is specific and concise.
+- Includes "when to use" and "when not to use".
+- Workflow is deterministic and includes completion checks.
+- Repeated deterministic code belongs in \`scripts/\`; long domain detail belongs in \`references/\`.
+- Default generated-skill trust assumptions are draft/unverified unless explicitly raised.
+
+### When to Suggest Creating a Skill
+Proactively suggest skill creation when current-session conversation shows one or more:
+- repeated manual requests with similar shape
+- repeated correction loops on the same workflow
+- strict formatting/schema/report requirements
+- stable multi-tool orchestration steps
+- recurring monitoring/reporting intent
+
+## Scheduled Tasks with schedule_task
+
+Workflows are first-class automations. From main chat you can:
+- Create workflow drafts from natural language with \`create_workflow_from_chat\`
+- List and inspect workflows with \`manage_workflow\` (\`list\`, \`get\`)
+- Publish drafts with \`publish_workflow\`
+- Run workflows on demand with \`run_workflow\`
+- Inspect run history/events with \`get_workflow_runs\`
+
+Use \`schedule_task\` as the fast path when the user asks for a recurring automation and does not need detailed workflow editing.
+
+### CRITICAL RULES
+1. **ALWAYS create ONE schedule_task** for any repeating request. NEVER create multiple separate tasks.
+2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
+3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use web_search to search the web").
+4. **Skill-first scheduling is mandatory**. For schedule requests, first call \`draft_skill_from_conversation\`, show the draft summary, ask for confirmation, then call \`create_skill_from_conversation\`, and only then call \`schedule_task\`.
+5. **Make prompts self-contained and skill-bound**. The isolated agent has no memory of the current conversation; include complete execution context and explicit mandatory-skill usage instructions.
+6. **Default delivery channel rule**. If a scheduled task request comes from a shared integration session, default delivery to the same originating platform/channel unless the user explicitly chooses another destination. Ask a clarifying question only when no origin is available and no channel was specified.
+
+### When to Suggest Scheduling
+Proactively suggest scheduling when the user:
+- Mentions "every day", "daily", "weekly", "monthly", "regularly", "every X minutes/hours"
+- Says "remind me", "don't forget", "check this tomorrow", "in 30 minutes"
+- Asks to do something repeatedly or a specific number of times
+- Wants monitoring, reporting, or periodic checks
+- Mentions specific future times ("on Friday", "next week", "at 3 PM")
+- Repeats similar requests across recent conversation history (same task pattern done manually multiple times)
+
+### Confirmation Before Creation
+- When you detect a likely recurring workflow from the latest message + recent conversation history, proactively suggest automation and ask a direct confirmation question before creating it.
+- Use a short confirmation question such as: "Should I create an automation for this?"
+- If the user clearly asked to schedule already ("set up a cron job", "schedule this", "run every..."), you may create directly.
+- Even when creating directly, still run the internal skill flow first: \`draft_skill_from_conversation\` -> confirmation -> \`create_skill_from_conversation\` -> \`schedule_task\`.
+
+### How schedule_task Works
+- Creates a workflow-backed automation that runs automatically on the configured schedule.
+- The \`prompt\` field is the execution objective. The runtime will synthesize detailed managed skill(s) from conversation context and inject mandatory skill-usage instructions into the execution prompt.
+- Skill usage can include multiple mandatory skills when the conversation contains multiple workflow tracks.
+- The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the workflow run can use matching \`send_notification_<platform>\` tools to deliver results.
+- When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack", "post in Teams"), include that instruction in the prompt using the matching notification tool.
+- If the current request includes integration origin context, use that origin platform/channel as the default scheduled-task delivery target.
+- If no origin context is available and messaging integrations are connected but no delivery channel was chosen, ask which channel to use before creating the task.
+- If no integrations are connected, proceed without asking and keep delivery in-app.
+- Results are also delivered to the user's chat when each run completes.
+- \`maxRuns\` limits total executions - task auto-stops and marks as "completed" after reaching the limit.
+- The scheduler uses a precise single timer (not polling). It arms a setTimeout for the exact next due trigger, fires it, then re-arms for the next one.
+- Use \`manage_scheduled_task\` to list, pause, resume, run, delete, or view history.
+
+### Workflow Tool Routing Rules
+- If the user asks to "list/show my workflows", use \`manage_workflow\` with \`action: "list"\`.
+- If the user asks to run a specific existing workflow, use \`run_workflow\` with the workflow id (or call \`manage_workflow\` first to discover the id).
+- If the user asks to create a multi-step flow from chat, call \`create_workflow_from_chat\`; publish only when the user asked to activate it immediately.
+- If the user asks to pause/resume scheduled workflow triggers, use \`manage_workflow\` with \`pause_scheduled\` / \`resume_scheduled\`.
+- If the user asks for draft edits beyond a simple natural-language update, use \`update_workflow\` then \`publish_workflow\` when the user wants activation.
+
+### Schedule Types Reference
+- **once**: One-time future execution
+  \`{ type: "once", datetime: "tomorrow at 9am" }\`
+  \`{ type: "once", datetime: "in 30 minutes" }\`
+  \`{ type: "once", datetime: "2026-02-10T15:00:00" }\`
+
+- **interval**: Every N minutes (combine with maxRuns to limit)
+  \`{ type: "interval", every: 1 }\` (every minute)
+  \`{ type: "interval", every: 60 }\` (every hour)
+
+- **daily**: Every day at specified time
+  \`{ type: "daily", time: "09:00" }\`
+  \`{ type: "daily", time: "18:00", timezone: "America/Los_Angeles" }\`
+
+- **weekly**: Specific day and time each week
+  \`{ type: "weekly", dayOfWeek: "monday", time: "09:00" }\`
+
+- **cron**: Advanced cron expression for complex schedules
+  \`{ type: "cron", expression: "0 9 * * MON-FRI" }\` (weekdays at 9 AM)
+  \`{ type: "cron", expression: "*/15 * * * *" }\` (every 15 minutes)
+
+### Examples (8 common scenarios)
+
+**Example 1: Interval with maxRuns - "Fetch news every minute for 5 minutes"**
+\`\`\`
+schedule_task({
+  name: "News Updates",
+  prompt: "Use web_search to find the latest breaking news headlines worldwide. Provide a brief summary of the top 5 stories with their sources and links.",
+  schedule: { type: "interval", every: 1 },
+  maxRuns: 5
+})
+\`\`\`
+Result: Runs every 1 minute, automatically stops after 5 runs.
+
+**Example 2: Daily recurring - "Review my commits every morning"**
+\`\`\`
+schedule_task({
+  name: "Daily Code Review",
+  prompt: "Run git log for the last 24 hours. Review each commit for code quality, missing tests, potential bugs, and security issues. Provide a summary with actionable recommendations.",
+  schedule: { type: "daily", time: "09:00" }
+})
+\`\`\`
+Result: Runs every day at 9 AM indefinitely until paused or deleted.
+
+**Example 3: One-time reminder - "Remind me to deploy on Friday at 3 PM"**
+\`\`\`
+schedule_task({
+  name: "Deploy Reminder",
+  prompt: "Remind the user: It's time to deploy! Check that all tests pass, staging is verified, and the changelog is updated before deploying to production.",
+  schedule: { type: "once", datetime: "Friday at 15:00" }
+})
+\`\`\`
+Result: Fires once at the specified time, then auto-completes.
+
+**Example 4: Weekly report - "Send me a security scan every Monday"**
+\`\`\`
+schedule_task({
+  name: "Weekly Security Scan",
+  prompt: "Run a comprehensive security review: check for outdated dependencies with npm audit, scan for hardcoded secrets, review recent changes for common vulnerabilities (XSS, SQL injection, path traversal). Provide a detailed report with severity levels.",
+  schedule: { type: "weekly", dayOfWeek: "monday", time: "08:00" }
+})
+\`\`\`
+Result: Runs every Monday at 8 AM indefinitely.
+
+**Example 5: Search + Discord notification - "Google latest news every 5 min and send to Discord"**
+\`\`\`
+schedule_task({
+  name: "News to Discord",
+  prompt: "Use web_search to find the latest breaking news headlines worldwide. Summarize the top 5 stories in a concise format. Then send the summary to the user via send_notification_discord.",
+  schedule: { type: "interval", every: 5 }
+})
+\`\`\`
+Result: Searches every 5 min, sends results to Discord each time. The cron agent has access to all connected platform notification tools automatically.
+
+**Example 6: Monitoring + Teams alert - "Check API health every 5 min for 1 hour, alert on Teams if down"**
+\`\`\`
+schedule_task({
+  name: "API Health Monitor",
+  prompt: "Use web_search to check if api.example.com is responding. If the API appears down or has errors, immediately send an alert via send_notification_teams with the error details. If it's up, just log the status.",
+  schedule: { type: "interval", every: 5 },
+  maxRuns: 12
+})
+\`\`\`
+Result: Checks every 5 minutes, alerts on Teams only if issues found, stops after 12 checks (= 1 hour).
+
+**Example 7: Cron expression - "Run tests every weekday at 6 PM"**
+Cron expressions follow the format: \`minute hour day-of-month month day-of-week\`
+- \`0 18 * * MON-FRI\` = at minute 0, hour 18, any day, any month, Monday through Friday
+- \`*/15 * * * *\` = every 15 minutes
+- \`0 9 1 * *\` = 9 AM on the 1st of every month
+\`\`\`
+schedule_task({
+  name: "Weekday Test Run",
+  prompt: "Run the full test suite with 'pnpm test'. Report results including pass/fail counts, any failures with details, and test duration. If tests fail, analyze the errors and suggest fixes.",
+  schedule: { type: "cron", expression: "0 18 * * MON-FRI" }
+})
+\`\`\`
+Result: Runs at 6 PM Monday through Friday.
+
+**Example 8: Quick repeated task - "Search for Bitcoin price 3 times, once every 2 minutes"**
+\`\`\`
+schedule_task({
+  name: "Bitcoin Price Check",
+  prompt: "Use web_search to find the current Bitcoin (BTC) price in USD. Report the price, 24h change percentage, and any notable market news.",
+  schedule: { type: "interval", every: 2 },
+  maxRuns: 3
+})
+\`\`\`
+Result: Checks every 2 minutes, stops after 3 checks.
+
+**Example 9: Delayed one-time - "In 30 minutes, summarize my git changes"**
+\`\`\`
+schedule_task({
+  name: "Git Summary",
+  prompt: "Run git diff and git status to see all current changes. Provide a clear summary of what was modified, added, and deleted. Group changes by file and describe the purpose of each change.",
+  schedule: { type: "once", datetime: "in 30 minutes" }
+})
+\`\`\`
+Result: Fires once, 30 minutes from now.
+
+**Example 10: Search + iMessage with limit - "Fetch weather every hour for 8 hours, send to iMessage"**
+\`\`\`
+schedule_task({
+  name: "Weather Updates",
+  prompt: "Use web_search to find the current weather conditions and forecast for San Francisco. Format a brief update with temperature, conditions, and any alerts. Send the update via send_notification_imessage.",
+  schedule: { type: "interval", every: 60 },
+  maxRuns: 8
+})
+\`\`\`
+Result: Searches weather every hour, sends to iMessage, auto-stops after 8 updates.
+
+**Example 11: Conversation-history suggestion + confirmation**
+Conversation pattern:
+- User asks multiple times over chat to "check latest errors and summarize"
+- User manually repeats this every morning
+
+Assistant should ask first:
+"I can automate this as a scheduled task so you don't need to ask each day. Should I create it?"
+
+If user confirms:
+\`\`\`
+schedule_task({
+  name: "Daily Error Summary",
+  prompt: "Check latest production errors, summarize top issues, and send the summary to the selected notification channel.",
+  schedule: { type: "daily", time: "09:00" }
+})
+\`\`\`
+
+### Managing Existing Tasks
+Use \`manage_scheduled_task\` to:
+- \`list\`: Show all scheduled tasks with status, schedule, next run time, and run count
+- \`pause\`: Temporarily stop a task (keeps config, stops running)
+- \`resume\`: Resume a paused task
+- \`run\`: Trigger immediate execution of a task (doesn't count against maxRuns schedule)
+- \`history\`: View past runs with results, duration, and errors
+- \`delete\`: Permanently remove a task
+
+Use workflow-specific tools when the request is about workflow definitions or workflow run introspection:
+- \`manage_workflow\` for workflow definitions and scheduled trigger controls
+- \`run_workflow\` for manual workflow execution
+- \`get_workflow_runs\` for run history and run events
+
+## Important Reminders
+1. In execute mode, call write_todos early and keep statuses updated continuously after each major step (not only at the end)
+2. If a tool fails, explain and try alternatives
+3. Stay focused on the requested task
+4. Remove debug code before completion`;
+
+    if (session.type === 'isolated' || session.type === 'cron') {
+      basePrompt = basePrompt.replace(
+        /\n## Skill Creation with Conversation-Derived Drafts[\s\S]*?\n## Important Reminders/,
+        '\n## Important Reminders'
+      );
+    }
+
+    if (!WORKFLOWS_ENABLED) {
+      basePrompt = basePrompt
+        .replace(
+          /\nWorkflows are first-class automations\. From main chat you can:[\s\S]*?- Inspect run history\/events with `get_workflow_runs`\n\n/,
+          '\n',
+        )
+        .replace(
+          /Use `schedule_task` as the fast path when the user asks for a recurring automation and does not need detailed workflow editing\./g,
+          'Use `schedule_task` as the fast path for recurring automations.',
+        )
+        .replace(
+          /- Creates a workflow-backed automation that runs automatically on the configured schedule\./g,
+          '- Creates an automation that runs automatically on the configured schedule.',
+        )
+        .replace(/- When you detect a likely recurring workflow/g, '- When you detect a likely recurring automation')
+        .replace(/workflow run can use/g, 'automation run can use')
+        .replace(
+          /\n### Workflow Tool Routing Rules[\s\S]*?(?=\n### Schedule Types Reference)/,
+          '',
+        )
+        .replace(
+          /\nUse workflow-specific tools when the request is about workflow definitions or workflow run introspection:[\s\S]*?(?=\n## Important Reminders)/,
+          '\n',
+        );
+    }
+
+    const modePrompt =
+      session.executionMode === 'plan'
+        ? `## Plan Mode (Read-Only)
+You are in plan mode for this session.
+- Analyze and investigate only. Do not perform mutating or side-effect actions.
+- Allowed behavior: read files, inspect code, run safe read-only shell commands, and use web analysis tools if available.
+- Forbidden behavior: writing files, destructive shell commands, scheduling, notifications, media generation, browser automation, and any side-effect operation.
+- Your final answer MUST include exactly one <proposed_plan>...</proposed_plan> block that is decision-complete.
+- If tool access is blocked by plan mode, continue planning with available evidence.`
+        : `## Execute Mode
+Execution is enabled. Use write_todos before non-trivial implementation work and keep todos actively synced with progress throughout the turn.`;
+
+    // Build Deep Agents middleware prompts
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    const agentsMdPrompt = agentsMdConfig
+      ? this.buildAgentsMdPrompt(agentsMdConfig)
+      : '';
+
+    // Memory system prompt
+    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
+
+    // Subagent prompts
+    const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
+
+    // Legacy skill prompts
+    const skillBlock = await this.buildSkillsPrompt(session);
+
+    // Integration prompt (conditional - only when messaging platforms connected)
+    const integrationPrompt = this.buildIntegrationPrompt();
+    const mcpPrompt = this.buildMcpPrompt();
+
+    return buildFullSystemPrompt(basePrompt, [
+      modePrompt,
+      agentsMdPrompt,
+      memoryPrompt,
+      subagentPrompt,
+      skillBlock,
+      integrationPrompt,
+      mcpPrompt,
+    ].filter(Boolean));
+  }
+
+  /**
+   * Build integration system prompt section.
+   * Returns empty string if no platforms connected.
+   */
+  private buildIntegrationPrompt(): string {
+    const statuses = this.getIntegrationStatusesForSnapshot();
+    const connected = statuses.filter((status) => status.connected);
+    if (connected.length === 0) return '';
+
+    const displayNames: Record<string, string> = {
+      whatsapp: 'WhatsApp',
+      slack: 'Slack',
+      telegram: 'Telegram',
+      discord: 'Discord',
+      imessage: 'iMessage',
+      teams: 'Microsoft Teams',
+    };
+
+    const platformList = connected
+      .map((status) => {
+        const name = displayNames[status.platform] || status.platform;
+        return `- ${name}: Connected${status.displayName ? ` as ${status.displayName}` : ''}`;
+      })
+      .join('\n');
+
+    const toolList = connected
+      .map((status) => {
+        const name = displayNames[status.platform] || status.platform;
+        return `- \`send_notification_${status.platform}\`: Send a message to the user via ${name}`;
+      })
+      .join('\n');
+
+    return `## Messaging Integrations
+
+The user has connected the following messaging platforms. You can proactively send notifications through these platforms.
+
+### Connected Platforms
+${platformList}
+
+### Notification Tools
+${toolList}
+
+### When to Use Notifications
+- Proactively notify when scheduled/long-running tasks complete
+- Alert about important findings during operations
+- Send summaries when cron jobs finish
+- Respond to user requests like "notify me when done" via the requested connected platform
+
+### Guidelines
+- Keep notification messages concise (platform character limits apply)
+- Use plain text formatting (no complex markdown)
+- Don't send notifications for trivial operations
+- For live integration-origin conversations, do not call send_notification_<same platform> for the same turn response; the normal assistant reply is already routed there.
+- Always use the last active chat unless told otherwise
+- In shared integration sessions, treat the request origin platform/channel as the default destination for scheduled-task notifications unless the user explicitly overrides it`;
+  }
+
+  private buildMcpPrompt(): string {
+    const tools = Array.from(this.mcpToolRegistry.entries());
+    if (tools.length === 0) return '';
+
+    const preview = tools
+      .slice(0, 20)
+      .map(([generatedName, meta]) => {
+        const summary = meta.description ? ` - ${meta.description}` : '';
+        return `- \`${generatedName}\` (${meta.serverDisplayName}:${meta.toolName})${summary}`;
+      })
+      .join('\n');
+
+    const stitchTools = tools.filter(([generatedName, meta]) => {
+      const haystack = `${generatedName} ${meta.serverDisplayName} ${meta.toolName}`.toLowerCase();
+      return haystack.includes('stitch');
+    });
+
+    const stitchGuidance = stitchTools.length > 0
+      ? `
+### Stitch Tools
+- Stitch MCP tools are available in this session.
+- Use Stitch tools for UI/design-specific workflows when the user asks for interface mockups, layouts, or design assets.
+- Prefer Stitch outputs for design previews when available; otherwise continue with standard coding tools.`
+      : '';
+
+    return `## MCP Tools
+
+The following MCP tools are connected and available:
+${preview}
+${stitchGuidance}
+`;
+  }
+
+  /**
+   * Build AGENTS.md prompt section.
+   */
+  private buildAgentsMdPrompt(config: AgentsMdConfig): string {
+    const parts: string[] = [
+      '',
+      '## Project Context (from AGENTS.md)',
+      '',
+    ];
+
+    // Project overview
+    if (config.overview) {
+      parts.push('### Project Overview');
+      parts.push(config.overview);
+      parts.push('');
+    }
+
+    // Tech stack
+    if (config.techStack.language !== 'Unknown') {
+      parts.push('### Tech Stack');
+      parts.push(`- Language: ${config.techStack.language}`);
+      if (config.techStack.framework) {
+        parts.push(`- Framework: ${config.techStack.framework}`);
+      }
+      if (config.techStack.buildTool) {
+        parts.push(`- Build Tool: ${config.techStack.buildTool}`);
+      }
+      if (config.techStack.packageManager) {
+        parts.push(`- Package Manager: ${config.techStack.packageManager}`);
+      }
+      parts.push('');
+    }
+
+    // Commands
+    if (config.commands.length > 0) {
+      parts.push('### Available Commands');
+      for (const cmd of config.commands.slice(0, 10)) {
+        parts.push(`- \`${cmd.command}\`: ${cmd.description}`);
+      }
+      parts.push('');
+    }
+
+    // Instructions
+    if (config.instructions.do.length > 0 || config.instructions.dont.length > 0) {
+      parts.push('### Instructions');
+      if (config.instructions.do.length > 0) {
+        parts.push('**Do:**');
+        for (const item of config.instructions.do) {
+          parts.push(`- ${item}`);
+        }
+      }
+      if (config.instructions.dont.length > 0) {
+        parts.push("**Don't:**");
+        for (const item of config.instructions.dont) {
+          parts.push(`- ${item}`);
+        }
+      }
+      parts.push('');
+    }
+
+    // Important files
+    if (config.importantFiles.length > 0) {
+      parts.push('### Important Files');
+      for (const file of config.importantFiles.slice(0, 10)) {
+        parts.push(`- \`${file.path}\`: ${file.description}`);
+      }
+      parts.push('');
+    }
+
+    return parts.join('\n');
+  }
+
+  private async buildInstalledSubagentPrompt(session: ActiveSession): Promise<string> {
+    try {
+      const service = createSubagentService(this.appDataDir || undefined);
+      await service.initialize();
+      const configs = await service.getSubagentConfigs(session.model, session.workingDirectory);
+      return service.buildSubagentPromptSection(configs);
+    } catch {
+      return '';
+    }
+  }
+
+  private async buildSkillsPrompt(session: ActiveSession): Promise<string> {
+    // Prefer DeepAgents native skill loading to avoid duplicating full skill content
+    // in the system prompt. This keeps prompt size smaller and aligns with tool-driven
+    // skill retrieval.
+    const deepAgentSkillConfig = await this.resolveDeepAgentSkillConfig();
+    if (deepAgentSkillConfig.syncSkillIds.length > 0) {
+      try {
+        const names: string[] = [];
+        for (const skillId of deepAgentSkillConfig.syncSkillIds) {
+          const skill = await skillService.getSkill(skillId);
+          if (!skill) continue;
+          names.push(skill.frontmatter.name || skill.id);
+        }
+        if (names.length > 0) {
+          return [
+            '## Skills',
+            'Enabled skills are available through native skill loading from `/skills/`.',
+            `Available skills: ${names.sort((a, b) => a.localeCompare(b)).join(', ')}`,
+            'Load and apply only the skills relevant to the current task.',
+          ].join('\n');
+        }
+      } catch {
+        // Fall back to legacy skill loading.
+      }
+    }
+
+    // Fallback to legacy skill loading for backwards compatibility
+    const enabledSkills = this.skills.filter((skill) => skill.enabled !== false);
+    if (enabledSkills.length === 0) return '';
+
+    const blocks: string[] = [];
+    for (const skill of enabledSkills) {
+      const resolvedPath = await this.resolveSkillPath(skill.path, session.workingDirectory);
+      if (!resolvedPath) {
+        blocks.push(`### ${skill.name}\n[Missing skill file: ${skill.path}]`);
+        continue;
+      }
+      const content = await this.loadTextFile(resolvedPath, 16000);
+      if (!content) {
+        blocks.push(`### ${skill.name}\n[Unable to load skill content from ${resolvedPath}]`);
+        continue;
+      }
+      blocks.push(`### ${skill.name}\n${content}`);
+    }
+
+    return blocks.length > 0 ? `## Skills\n${blocks.join('\n\n')}` : '';
+  }
+
+  private resolveInputPath(inputPath: string, workingDirectory: string): string {
+    let resolved = inputPath.trim();
+    if (resolved.startsWith('~')) {
+      resolved = join(homedir(), resolved.slice(1));
+    }
+    if (!isAbsolute(resolved)) {
+      resolved = resolve(workingDirectory, resolved);
+    }
+    return resolved;
+  }
+
+  private async resolveSkillPath(inputPath: string, workingDirectory: string): Promise<string | null> {
+    const resolved = this.resolveInputPath(inputPath, workingDirectory);
+    try {
+      const info = await stat(resolved);
+      if (info.isDirectory()) {
+        const skillPath = join(resolved, 'SKILL.md');
+        if (existsSync(skillPath)) return skillPath;
+
+        const entries = await readdir(resolved);
+        const fallback = entries.find((entry) => entry.toLowerCase().endsWith('.md'));
+        return fallback ? join(resolved, fallback) : null;
+      }
+      return resolved;
+    } catch {
+      return null;
+    }
+  }
+
+  private async loadTextFile(filePath: string, maxChars: number): Promise<string | null> {
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      if (content.length <= maxChars) return content;
+      return `${content.slice(0, maxChars)}\n...[truncated]`;
+    } catch {
+      return null;
+    }
+  }
+
+  private subscribeToAgentEvents(session: ActiveSession): void {
+    this.emitContextUsage(session);
+  }
+
+  private async createDeepAgent(session: ActiveSession, tools: ToolHandler[]): Promise<DeepAgentInstance> {
+    const providerKey = this.getSessionProviderKey(session);
+    if (!providerKey) {
+      throw new Error(`API key not set for provider ${session.provider}`);
+    }
+    const ctxWindow = this.getContextWindow(session.provider, session.model);
+    const glmMaxTokens =
+      session.provider === 'glm' && ctxWindow.output > 0
+        ? Math.min(ctxWindow.output, 131072)
+        : undefined;
+
+    // Initialize Deep Agents services for this session
+    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
+    if (this.shouldUseLongTermMemory(session)) {
+      const memoryService = await this.getMemoryService(session.workingDirectory);
+      const memoryExtractor = this.getMemoryExtractor(session.id);
+      const memorySettings = this.runtimeConfig.memory;
+      const autoExtractEnabled = memorySettings.enabled && memorySettings.autoExtract && session.executionMode !== 'plan';
+      memoryExtractor.updateConfig({
+        enabled: autoExtractEnabled,
+        confidenceThreshold:
+          memorySettings.style === 'conservative'
+            ? 0.78
+            : memorySettings.style === 'aggressive'
+              ? 0.58
+              : 0.68,
+        maxPerConversation: 5,
+        style: memorySettings.style,
+        maxAcceptedPerTurn:
+          memorySettings.style === 'conservative'
+            ? 1
+            : memorySettings.style === 'aggressive'
+              ? 4
+              : 2,
+      });
+      memoryExtractor.setInvoker(async ({ system, user }) => {
+        const providerFactory = createProvider as unknown as (
+          id: ProviderId,
+          config: {
+            providerId?: ProviderId;
+            baseUrl?: string;
+            credentials: { type: 'api_key'; apiKey: string };
+          },
+        ) => {
+          generate: (request: {
+            model: string;
+            messages: Message[];
+          }) => Promise<{ message: Message }>;
+        };
+        try {
+          const provider = providerFactory(session.provider, {
+            providerId: session.provider,
+            baseUrl: session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+            credentials: {
+              type: 'api_key',
+              apiKey: providerKey,
+            },
+          });
+          const response = await provider.generate({
+            model: session.model,
+            messages: [
+              {
+                id: generateMessageId(),
+                role: 'system',
+                content: system,
+                createdAt: now(),
+              },
+              {
+                id: generateMessageId(),
+                role: 'user',
+                content: user,
+                createdAt: now(),
+              },
+            ],
+          });
+          return typeof response.message.content === 'string'
+            ? response.message.content
+            : this.extractTextContent(response.message) || '{"candidates":[]}';
+        } catch {
+          return '{"candidates":[]}';
+        }
+      });
+
+      const middlewareStack = await createMiddlewareStack(
+        {
+          id: session.id,
+          messages: this.deriveMessagesFromChatItems(session.chatItems),
+          model: session.model,
+        },
+        memoryService,
+        memoryExtractor,
+        agentsMdConfig,
+        {
+          maxMemoriesInPrompt: memorySettings.maxInPrompt,
+          autoExtract: autoExtractEnabled,
+          consolidation: {
+            enabled: memorySettings.consolidation.enabled,
+            intervalMinutes: memorySettings.consolidation.intervalMinutes,
+            redundancyThreshold: memorySettings.consolidation.redundancyThreshold,
+            decayFactor: memorySettings.consolidation.decayFactor,
+            minConfidence: memorySettings.consolidation.minConfidence,
+            staleAfterHours: memorySettings.consolidation.staleAfterHours,
+            strategy: memorySettings.consolidation.strategy,
+          },
+        },
+      );
+      this.storeMiddlewareHooks(session.id, middlewareStack);
+    } else {
+      this.middlewareHooks.delete(session.id);
+    }
+
+    // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
+    // See: https://github.com/langchain-ai/langchainjs/issues/7434
+    // The package throws "Unknown content type thinking" error when enabled
+    // Thinking UI remains in place for when support is added
+    const model = session.provider === 'google'
+      ? new ChatGoogleGenerativeAI({
+          model: session.model,
+          apiKey: providerKey,
+        })
+      : new ChatOpenAI({
+          model: session.model,
+          apiKey: providerKey,
+          ...(glmMaxTokens ? { maxTokens: glmMaxTokens } : {}),
+          configuration: {
+            baseURL: this.toOpenAICompatibleBaseUrl(
+              session.provider,
+              session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+            ),
+          },
+        });
+
+    const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
+
+    // Determine skills paths for DeepAgents.
+    // Expose /skills/ only when there are managed installed skills selected
+    // for this session (or all managed installed skills when nothing is explicitly selected).
+    const deepAgentSkillConfig = await this.resolveDeepAgentSkillConfig();
+    const skillsParam = deepAgentSkillConfig.skills;
+    const skillsDir = this.getSkillsDirectory();
+    const deepAgentSubagents = await this.resolveDeepAgentSubagents(
+      session.model,
+      session.workingDirectory,
+      skillsParam,
+    );
+
+    // Determine AGENTS.md paths for DeepAgents built-in memory loading
+    const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
+    const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
+
+    const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
+    const promptBuild = await this.buildSystemPromptForSession(session, tools);
+    session.baseSystemPrompt = promptBuild.prompt;
+    const agent = createDeepAgentAny({
+      model,
+      tools: wrappedTools,
+      systemPrompt: promptBuild.prompt,
+      middleware: [this.createToolMiddleware(session)],
+      recursionLimit: RECURSION_LIMIT,
+      skills: skillsParam,
+      subagents: deepAgentSubagents.length > 0 ? deepAgentSubagents : undefined,
+      checkpointer: getCheckpointer(),
+      memory: memoryPaths,
+      backend: () => {
+        const sandboxBackend = new CoworkBackend(
+          session.workingDirectory,
+          session.id,
+          () => this.getBackendAllowedScopes(session),
+          undefined,
+          () => this.getSessionSandboxSettings(session),
+        );
+
+        // Route all filesystem operations through DeepAgents FilesystemBackend rooted
+        // to the session working directory, while keeping command execution on sandboxBackend.
+        const routeBackends: Record<string, FilesystemBackend> = {
+          '/': new FilesystemBackend({
+            rootDir: resolve(session.workingDirectory),
+            virtualMode: true,
+          }),
+        };
+
+        if (skillsParam && skillsParam.length > 0) {
+          // Route /skills/* through DeepAgents FilesystemBackend rooted at ~/.cowork/skills.
+          routeBackends['/skills/'] = new FilesystemBackend({
+            rootDir: skillsDir,
+            virtualMode: true,
+          });
+        }
+
+        return new CompositeBackend(sandboxBackend, routeBackends);
+      },
+    });
+
+    return agent;
+  }
+
+  /**
+   * Middleware hooks storage for memory injection and extraction.
+   */
+  private middlewareHooks: Map<string, {
+    beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
+    afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
+  }> = new Map();
+
+  private storeMiddlewareHooks(
+    sessionId: string,
+    stack: {
+      beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
+      afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
+    }
+  ): void {
+    this.middlewareHooks.set(sessionId, stack);
+  }
+
+  /**
+   * Get the managed skills directory for DeepAgents backend
+   */
+  private getSkillsDirectory(): string {
+    return skillService.getManagedSkillsDir();
+  }
+
+  private async resolveDeepAgentSkillConfig(): Promise<{
+    skills: string[] | undefined;
+    syncSkillIds: string[];
+  }> {
+    const normalizedEnabledSkillIds = Array.from(
+      new Set(
+        [...this.enabledSkillIds]
+          .map((skillId) => (typeof skillId === 'string' ? skillId.trim() : ''))
+          .filter((skillId) => skillId.length > 0),
+      ),
+    );
+
+    try {
+      await skillService.autoRepairManagedSkills();
+    } catch {
+      // Best effort repair only.
+    }
+
+    let installedSkillIds: string[] = [];
+    try {
+      installedSkillIds = await skillService.getInstalledSkillIds();
+    } catch {
+      installedSkillIds = [];
+    }
+
+    const normalizedInstalledSkillIds = Array.from(
+      new Set(
+        installedSkillIds
+          .map((skillId) => (typeof skillId === 'string' ? skillId.trim() : ''))
+          .filter((skillId) => skillId.length > 0),
+      ),
+    );
+    const installedSkillIdSet = new Set(normalizedInstalledSkillIds);
+    const syncSkillIds = normalizedEnabledSkillIds.length > 0
+      ? normalizedEnabledSkillIds.filter((skillId) => installedSkillIdSet.has(skillId))
+      : normalizedInstalledSkillIds;
+    const hasManagedSkills = syncSkillIds.some((skillId) => {
+      const [prefix, ...rest] = skillId.split(':');
+      if (prefix !== 'managed') {
+        return false;
+      }
+      return rest.join(':').trim().length > 0;
+    });
+
+    return {
+      // DeepAgents expects skill SOURCE DIRECTORIES. We expose installed managed
+      // skills via the /skills/ source root.
+      skills: hasManagedSkills ? ['/skills/'] : undefined,
+      syncSkillIds,
+    };
+  }
+
+  private async resolveDeepAgentSubagents(
+    sessionModel: string,
+    workingDirectory: string,
+    skillSourcePaths?: string[],
+  ): Promise<Array<{
+    name: string;
+    description: string;
+    systemPrompt: string;
+    model?: string;
+    skills?: string[];
+  }>> {
+    try {
+      const service = createSubagentService(this.appDataDir || undefined);
+      await service.initialize();
+      const subagentConfigs = await service.getSubagentConfigs(sessionModel, workingDirectory);
+
+      return subagentConfigs
+        .filter((config) => (
+          typeof config.name === 'string'
+          && config.name.trim().length > 0
+          && typeof config.description === 'string'
+          && config.description.trim().length > 0
+          && typeof config.systemPrompt === 'string'
+          && config.systemPrompt.trim().length > 0
+        ))
+        .map((config) => {
+          const scopedSkills = this.resolveSubagentSkillSources(
+            config.skills,
+            skillSourcePaths,
+          );
+
+          return {
+            name: config.name.trim(),
+            description: config.description.trim(),
+            systemPrompt: config.systemPrompt,
+            ...(typeof config.model === 'string' && config.model.trim().length > 0
+              ? { model: config.model.trim() }
+              : {}),
+            ...(scopedSkills.length > 0
+              ? { skills: scopedSkills }
+              : {}),
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  private resolveSubagentSkillSources(
+    declaredSubagentSkills: string[] | undefined,
+    installedSkillSources: string[] | undefined,
+  ): string[] {
+    const installed = Array.isArray(installedSkillSources)
+      ? Array.from(
+          new Set(
+            installedSkillSources
+              .map((value) => this.normalizeDeepAgentSkillSourcePath(value))
+              .filter((value): value is string => value !== null),
+          ),
+        )
+      : [];
+
+    const installedSet = new Set(installed);
+    if (installedSet.has('/skills/')) {
+      // When main agent uses source-root loading, keep subagents aligned to that
+      // source. Subset filtering by individual skill directory is not reliable
+      // in DeepAgents source semantics.
+      return ['/skills/'];
+    }
+
+    const declared = Array.isArray(declaredSubagentSkills)
+      ? Array.from(
+          new Set(
+            declaredSubagentSkills
+              .map((value) => this.normalizeDeepAgentSkillSourcePath(value))
+              .filter((value): value is string => value !== null),
+          ),
+        )
+      : [];
+
+    if (declared.length === 0) {
+      return installed;
+    }
+
+    if (installedSet.size === 0) {
+      return [];
+    }
+
+    return declared.filter((value) => installedSet.has(value));
+  }
+
+  private normalizeDeepAgentSkillSourcePath(value: string | undefined): string | null {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized === '/skills' || normalized === '/skills/') {
+      return '/skills/';
+    }
+
+    if (normalized.startsWith('/skills/')) {
+      return normalized.replace(/\/+$/, '');
+    }
+
+    if (normalized.startsWith('skills/')) {
+      return `/${normalized.replace(/\/+$/, '')}`;
+    }
+
+    const sanitized = normalized
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+    if (!sanitized) {
+      return null;
+    }
+
+    return `/skills/${sanitized}`;
+  }
+
+  private getCurrentIntegrationOrigin(
+    session: ActiveSession,
+  ): IntegrationMessageOrigin | null {
+    if (session.type !== 'integration') {
+      return null;
+    }
+
+    return session.activeTurnIntegrationOrigin ?? session.pendingIntegrationOrigin ?? null;
+  }
+
+  private getDefaultScheduledTaskNotificationTarget(sessionId: string): {
+    platform: PlatformType;
+    chatId?: string;
+    senderName?: string;
+  } | null {
+    const sourceSession = this.sessions.get(sessionId);
+    if (!sourceSession) {
+      return null;
+    }
+
+    const origin = this.getCurrentIntegrationOrigin(sourceSession);
+    if (!origin) {
+      return null;
+    }
+
+    const status = integrationBridge
+      .getStatuses()
+      .find((entry: { platform: PlatformType; connected: boolean }) => entry.platform === origin.platform);
+    if (!status?.connected) {
+      return null;
+    }
+
+    return {
+      platform: origin.platform,
+      chatId: origin.chatId || undefined,
+      senderName: origin.senderName || undefined,
+    };
+  }
+
+  private buildToolHandlers(session: ActiveSession): ToolHandler[] {
+    const capabilityContext = this.getToolCapabilityContext(session.provider);
+
+    const researchTools = capabilityContext.hasResearchKey
+      ? createResearchTools(
+          () => this.getGoogleApiKey(),
+          () => this.getDeepResearchModel(),
+        )
+      : [];
+    const computerUseTools = capabilityContext.hasComputerUseKey
+      ? createComputerUseTools(
+          () => session.provider,
+          (provider) => this.getProviderApiKey(provider),
+          (provider) => this.getProviderBaseUrl(provider),
+          () => this.getGoogleApiKey(),
+          () => this.getComputerUseModel(),
+          () => session.model,
+        )
+      : [];
+    const mediaTools = createMediaTools(
+      (provider) => this.getProviderApiKey(provider),
+      () => this.getGoogleApiKey(),
+      () => this.getOpenAIApiKey(),
+      () => this.getFalApiKey(),
+      () => this.getProviderBaseUrl('openai'),
+      () => this.getMediaRoutingSettings(),
+      () => ({
+        imageGeneration: this.getImageGenerationModel(),
+        videoGeneration: this.getVideoGenerationModel(),
+      }),
+      () => session.model,
+    ).filter((tool) => {
+      if (tool.name === 'generate_image' || tool.name === 'edit_image') {
+        return capabilityContext.hasImageMediaKey;
+      }
+      if (tool.name === 'generate_video') {
+        return capabilityContext.hasVideoMediaKey;
+      }
+      if (tool.name === 'analyze_video') {
+        return capabilityContext.hasAnalyzeVideoKey;
+      }
+      return true;
+    });
+    const groundingTools = createGroundingTools(
+      () => session.provider,
+      (provider) => this.getProviderApiKey(provider),
+      (provider) => this.getProviderBaseUrl(provider),
+      () => this.getGoogleApiKey(),
+      () => this.getExternalSearchProvider(),
+      () => this.getExaApiKey(),
+      () => this.getTavilyApiKey(),
+      () => session.model,
+    ).filter((tool) => {
+      if (tool.name === 'web_search' || tool.name === 'google_grounded_search') {
+        return capabilityContext.hasWebSearch;
+      }
+      if (tool.name === 'web_fetch') {
+        return capabilityContext.hasWebFetch;
+      }
+      return true;
+    });
+    const mcpTools = this.createMcpTools();
+    const connectorTools = this.createConnectorTools(session.id);
+
+    // Create read_any_file tool - unified file reading for ALL types
+    const readAnyFileTool: ToolHandler = {
+      name: 'read_any_file',
+      description: 'Read and analyze ANY type of file. This is the PREFERRED tool for all file reading. Handles text/code files with line numbers and offset/limit, images/PDFs/videos/audio for visual/audio analysis, and raw file reads when raw=true.',
+      parameters: z.object({
+        file_path: z.string().describe('Path to the file to read'),
+        offset: z.number().optional().default(0).describe('Starting line number (0-indexed, text files only)'),
+        limit: z.number().optional().default(2000).describe('Maximum lines to return (text files only)'),
+        raw: z.boolean().optional().default(false).describe('Return raw backend content including binary/base64 envelopes when true'),
+      }),
+      requiresPermission: (args: unknown) => ({
+        type: 'file_read',
+        resource: String((args as { file_path?: string }).file_path || ''),
+        reason: `Read file: ${(args as { file_path?: string }).file_path}`,
+        toolName: 'read_any_file',
+      }),
+      execute: async (args: unknown): Promise<{ success: boolean; data?: unknown; error?: string }> => {
+        const { file_path, offset = 0, limit = 2000, raw = false } = args as {
+          file_path: string;
+          offset?: number;
+          limit?: number;
+          raw?: boolean;
+        };
+        const backend = new CoworkBackend(
+          session.workingDirectory,
+          session.id,
+          () => this.getBackendAllowedScopes(session),
+          undefined,
+          () => this.getSessionSandboxSettings(session),
+        );
+
+        try {
+          if (raw) {
+            const rawData = await backend.readRaw(file_path);
+            return {
+              success: true,
+              data: {
+                type: 'raw',
+                path: file_path,
+                createdAt: rawData.created_at,
+                modifiedAt: rawData.modified_at,
+                lineCount: rawData.content.length,
+                content: rawData.content.join('\n'),
+                contentLines: rawData.content,
+              },
+            };
+          }
+
+          const result = await backend.readForAnalysis(file_path);
+
+          if (result.type === 'multimodal') {
+            // Store multimodal content for injection into next model call
+            session.pendingMultimodalContent = session.pendingMultimodalContent || [];
+            session.pendingMultimodalContent.push({
+              type: result.mimeType.startsWith('image/') ? 'image' :
+                    result.mimeType.startsWith('video/') ? 'video' :
+                    result.mimeType.startsWith('audio/') ? 'audio' : 'file',
+              mimeType: result.mimeType,
+              data: result.base64!,
+              path: result.path,
+            });
+
+            // Emit artifact for UI preview
+            eventEmitter.artifactCreated(session.id, {
+              id: generateId('art'),
+              path: result.path,
+              type: 'touched',
+              mimeType: result.mimeType,
+              timestamp: Date.now(),
+            });
+
+            return {
+              success: true,
+              data: {
+                type: 'multimodal',
+                mimeType: result.mimeType,
+                path: result.path,
+                size: result.size,
+                message:
+                  session.provider === 'google' || result.mimeType.startsWith('image/')
+                    ? 'File content captured for visual analysis. I can now see and analyze this file.'
+                    : result.mimeType.startsWith('video/')
+                      ? 'Video captured. For this provider, ask me to use analyze_video for detailed analysis.'
+                      : 'File captured. Inline binary analysis is limited for this provider path.',
+              },
+            };
+          }
+
+          // Text file - read with offset/limit support
+          const content = await backend.read(file_path, offset, limit);
+
+          // Get total line count from readForAnalysis result
+          const totalLines = result.lineCount || 0;
+          const sliceEnd = Math.min(offset + limit, totalLines);
+          const returnedLines = sliceEnd - offset;
+
+          return {
+            success: true,
+            data: {
+              type: 'text',
+              path: result.path,
+              lineCount: returnedLines,
+              totalLines,
+              offset,
+              content,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    };
+
+    // Notification tools (conditional - only for connected messaging platforms)
+    const notificationTools: ToolHandler[] = createNotificationTools(
+      () => integrationBridge,
+      {
+        shouldSkip: ({ platform, chatId }) => {
+          const origin = this.getCurrentIntegrationOrigin(session);
+          if (!origin) return null;
+          if (origin.platform !== platform) return null;
+          if (chatId && chatId.trim() && chatId.trim() !== origin.chatId) return null;
+          return 'Current turn already originates from this platform/chat; the direct assistant reply is sent there automatically.';
+        },
+      },
+    );
+
+    const conversationSkillTools =
+      session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createConversationSkillTools({
+            draftFromConversation: async (input) => this.draftSkillFromSession({
+              sessionId: input.sessionId,
+              goal: input.goal,
+              purpose: input.purpose,
+              maxSkills: input.maxSkills,
+            }),
+            createFromConversation: async (input) => this.createSkillFromSession({
+              sessionId: input.sessionId,
+              goal: input.goal,
+              purpose: input.purpose,
+              maxSkills: input.maxSkills,
+            }),
+          });
+
+    const cronTools =
+      session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createCronTools(
+            (sourceSessionId) =>
+              this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
+            (sourceSessionId) =>
+              this.getSessionPermissionBootstrap(sourceSessionId),
+            async (input) => this.createScheduledTaskSkillBindings(input),
+          );
+
+    const workflowTools =
+      !WORKFLOWS_ENABLED || session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createWorkflowTools();
+
+    const availability = this.externalCliDiscoveryService.getCachedAvailability();
+    const codexToolEnabled =
+      Boolean(this.externalCliRunManager) &&
+      Boolean(availability?.codex.installed) &&
+      this.runtimeConfig.externalCli.codex.enabled;
+    const claudeToolEnabled =
+      Boolean(this.externalCliRunManager) &&
+      Boolean(availability?.claude.installed) &&
+      this.runtimeConfig.externalCli.claude.enabled;
+
+    let externalCliTools: ToolHandler[] = [];
+    if (this.externalCliRunManager && (codexToolEnabled || claudeToolEnabled)) {
+      externalCliTools = createExternalCliTools({
+        runManager: this.externalCliRunManager,
+        getSessionOrigin: (sessionId) => this.getExternalCliOrigin(sessionId),
+      }).filter((tool) => {
+        if (tool.name === 'start_codex_cli_run') return codexToolEnabled;
+        if (tool.name === 'start_claude_cli_run') return claudeToolEnabled;
+        return true;
+      });
+    }
+
+    const handlers = [
+      readAnyFileTool,
+      ...researchTools,
+      ...computerUseTools,
+      ...mediaTools,
+      ...groundingTools,
+      ...mcpTools,
+      ...connectorTools,
+      ...notificationTools,
+      ...conversationSkillTools,
+      ...cronTools,
+      ...workflowTools,
+      ...externalCliTools,
+    ];
+
+    if (session.executionMode !== 'plan') {
+      return handlers;
+    }
+
+    return handlers.filter((tool) => this.isPlanModeToolAllowed(session, tool.name, {}));
+  }
+
+  private wrapTool(tool: ToolHandler, session: ActiveSession): DynamicStructuredTool {
+    return new DynamicStructuredTool({
+      name: tool.name,
+      description: tool.description,
+      schema: tool.parameters,
+      tags: ['cowork'],
+      metadata: {
+        source: 'cowork',
+      },
+      func: async (args: Record<string, unknown>) => {
+        const toolCallId = generateId('tool');
+        const parentToolId = session.activeParentToolId;
+        const toolCall = { id: toolCallId, name: tool.name, args, parentToolId };
+        const startedAt = Date.now();
+        session.toolStartTimes.set(toolCallId, startedAt);
+        session.activeTools.set(toolCallId, {
+          id: toolCallId,
+          name: tool.name,
+          args,
+          parentToolId,
+          startedAt,
+        });
+        this.persistRuntimeSnapshot(session);
+        this.finalizeAssistantSegment(session);
+        eventEmitter.toolStart(session.id, toolCall);
+        this.checkpointActiveRun(session.id, 'tool_start', {
+          toolCallId,
+          toolName: tool.name,
+          parentToolId,
+        });
+
+        // Create and emit ToolStartItem
+        const toolStartItem: ToolStartItem = {
+          id: generateChatItemId(),
+          kind: 'tool_start',
+          timestamp: startedAt,
+          turnId: session.currentTurnId,
+          toolId: toolCallId,
+          name: tool.name,
+          args,
+          status: 'running',
+          parentToolId,
+        };
+        this.appendChatItem(session, toolStartItem);
+
+        // Track tool in current turn for persistence
+        const turnInfo = this.currentTurnInfo.get(session.id);
+        if (turnInfo) {
+          turnInfo.toolIds.push(toolCallId);
+        }
+
+        if (!this.isPlanModeToolAllowed(session, tool.name, args)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
+          const error = `Plan mode blocks "${tool.name}". Analyze only and return a <proposed_plan> block.`;
+          eventEmitter.toolResult(session.id, toolCall, {
+            toolCallId,
+            success: false,
+            result: null,
+            error,
+            duration,
+            parentToolId,
+          });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: false,
+            error,
+            duration,
+          });
+          toolStartItem.status = 'error';
+          this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+          this.appendChatItem(session, {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: 'error',
+            error,
+            duration,
+          } as ToolResultItem);
+          return { error };
+        }
+
+        if (this.shouldEnforceTodoGuard(session, tool.name)) {
+          // Advisory-only: keep light telemetry, never block execution on todo state.
+          session.nonTodoToolCallsSinceTodoUpdate += 1;
+        }
+
+        if (tool.requiresPermission) {
+          const request = tool.requiresPermission(args);
+          if (request) {
+            const decision = await this.requestPermission(session, request);
+            if (decision === 'deny') {
+              const duration = this.consumeToolDuration(session, toolCallId);
+              session.activeTools.delete(toolCallId);
+              this.persistRuntimeSnapshot(session);
+              const payload = {
+                toolCallId,
+                success: false,
+                result: null,
+                error: 'Permission denied',
+                duration,
+                parentToolId,
+              };
+              eventEmitter.toolResult(session.id, toolCall, payload);
+              this.checkpointActiveRun(session.id, 'tool_result', {
+                toolCallId,
+                toolName: tool.name,
+                success: false,
+                error: 'Permission denied',
+                duration,
+              });
+              // Update ToolStartItem and emit ToolResultItem
+              toolStartItem.status = 'error';
+              this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+
+              const toolResultItem: ToolResultItem = {
+                id: generateChatItemId(),
+                kind: 'tool_result',
+                timestamp: Date.now(),
+                turnId: session.currentTurnId,
+                toolId: toolCallId,
+                name: tool.name,
+                status: 'error',
+                error: 'Permission denied',
+                duration,
+              };
+              this.appendChatItem(session, toolResultItem);
+
+              return { error: 'Permission denied' };
+            }
+          }
+        }
+
+        try {
+          const result = await tool.execute(args, this.buildToolContext(session));
+          const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
+          const limitedOutput = this.applyToolOutputTokenLimit(
+            tool.name,
+            toolCallId,
+            result.data,
+          );
+          const payload = {
+            toolCallId,
+            success: result.success,
+            result: limitedOutput,
+            error: result.error,
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCall, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: result.success,
+            error: result.error,
+            duration,
+          });
+          this.recordArtifactForTool(session, tool.name, args, limitedOutput);
+          if (result.success && this.isTodoTool(tool.name)) {
+            session.hasTodoStateThisTurn = true;
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+          }
+
+          // Update ToolStartItem and emit ToolResultItem
+          toolStartItem.status = result.success ? 'completed' : 'error';
+          this.updateChatItem(session, toolStartItem.id, { status: toolStartItem.status });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: result.success ? 'success' : 'error',
+            result: limitedOutput,
+            error: result.error,
+            duration,
+          };
+          this.appendChatItem(session, toolResultItem);
+          if (result.success) {
+            this.emitSupplementalToolResultItems(session, tool.name, toolCallId, result.data);
+          }
+
+          return limitedOutput ?? result;
+        } catch (error) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
+          const payload = {
+            toolCallId,
+            success: false,
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCall, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName: tool.name,
+            success: false,
+            error: payload.error,
+            duration,
+          });
+          // Update ToolStartItem and emit ToolResultItem
+          toolStartItem.status = 'error';
+          this.updateChatItem(session, toolStartItem.id, { status: 'error' });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: tool.name,
+            status: 'error',
+            error: payload.error,
+            duration,
+          };
+          this.appendChatItem(session, toolResultItem);
+
+          return { error: payload.error };
+        }
+      },
+    });
+  }
+
+  private createToolMiddleware(session: ActiveSession) {
+    return createMiddleware({
+      name: 'CoworkToolMiddleware',
+      wrapModelCall: async (request, handler) => {
+        // Inject pending multimodal content into messages in a provider-safe format.
+        if (session.pendingMultimodalContent?.length) {
+          const supportsBinaryMediaParts = session.provider === 'google';
+          const parts: Array<{ type: string; [key: string]: unknown }> = [];
+          const notes: string[] = [];
+          for (const mc of session.pendingMultimodalContent) {
+            if (mc.type === 'image') {
+              parts.push({
+                type: 'image_url',
+                image_url: { url: `data:${mc.mimeType};base64,${mc.data}` },
+              });
+            } else if (supportsBinaryMediaParts) {
+              parts.push({ type: 'media', mimeType: mc.mimeType, data: mc.data });
+            } else if (mc.type === 'video') {
+              const videoPath = mc.path ? ` at ${mc.path}` : '';
+              notes.push(
+                `Video attachment captured (${mc.mimeType})${videoPath}. Use analyze_video${mc.path ? ` with videoPath: "${mc.path}"` : ''} for detailed analysis.`,
+              );
+            } else {
+              notes.push(
+                `${mc.type} attachment captured (${mc.mimeType}). Inline binary input is not supported for ${session.provider} in this chat path.`,
+              );
+            }
+          }
+          const content: Array<{ type: string; [key: string]: unknown }> = [
+            { type: 'text', text: `[Multimodal file content for analysis - ${session.pendingMultimodalContent.length} file(s)]` },
+          ];
+          if (notes.length > 0) {
+            content.push({ type: 'text', text: notes.join('\n') });
+          }
+          content.push(...parts);
+          const injectedMsg = new HumanMessage({
+            content,
+          });
+          request = {
+            ...request,
+            messages: [...(request.messages || []), injectedMsg],
+          };
+          session.pendingMultimodalContent = [];
+        }
+
+        if (session.activeTurnIntegrationOrigin) {
+          const origin = session.activeTurnIntegrationOrigin;
+          const originContext = [
+            '[Integration Origin Context]',
+            `platform: ${origin.platform}`,
+            `chatId: ${origin.chatId}`,
+            `senderName: ${origin.senderName}`,
+            'Scheduling rule: when creating schedule_task without explicit notification channel, default delivery to this origin platform/chat using send_notification_<platform>.',
+          ].join('\n');
+          const injectedOriginMsg = new HumanMessage(originContext);
+          request = {
+            ...request,
+            messages: [...(request.messages || []), injectedOriginMsg],
+          };
+        }
+
+        if (!request.tools || request.tools.length === 0) {
+          return handler(request);
+        }
+
+        const deduped = new Map<string, typeof request.tools[number]>();
+        for (const tool of request.tools) {
+          const name = (tool as { name?: unknown })?.name;
+          if (typeof name !== 'string' || !name) continue;
+          const existing = deduped.get(name);
+          if (!existing) {
+            deduped.set(name, tool);
+            continue;
+          }
+          const preferIncoming = this.isCoworkTool(tool) && !this.isCoworkTool(existing);
+          if (preferIncoming) {
+            deduped.set(name, tool);
+          }
+        }
+
+        if (deduped.size === request.tools.length) {
+          return handler(request);
+        }
+
+        return handler({
+          ...request,
+          tools: Array.from(deduped.values()),
+        });
+      },
+      wrapToolCall: async (request, handler) => {
+        const toolCall = request.toolCall;
+        const toolName = toolCall?.name || '';
+        const args =
+          toolCall && typeof toolCall.args === 'object' && toolCall.args !== null
+            ? (toolCall.args as Record<string, unknown>)
+            : {};
+
+        if (request.tool && this.isCoworkTool(request.tool)) {
+          return handler(request);
+        }
+
+        const toolCallId = toolCall?.id ?? generateId('tool');
+        const isTask = this.isTaskTool(toolName);
+        // Capture current parent before we potentially become the new parent
+        const parentToolId = session.activeParentToolId;
+
+        const toolCallPayload = {
+          id: toolCallId,
+          name: toolName,
+          args,
+          parentToolId,
+        };
+
+        const startedAt = Date.now();
+        session.toolStartTimes.set(toolCallId, startedAt);
+        session.activeTools.set(toolCallId, {
+          id: toolCallId,
+          name: toolName,
+          args,
+          parentToolId,
+          startedAt,
+        });
+        this.persistRuntimeSnapshot(session);
+        this.finalizeAssistantSegment(session);
+        eventEmitter.toolStart(session.id, toolCallPayload);
+        this.checkpointActiveRun(session.id, 'tool_start', {
+          toolCallId,
+          toolName,
+          parentToolId,
+        });
+
+        // Create and emit ToolStartItem
+        const toolStartItem: ToolStartItem = {
+          id: generateChatItemId(),
+          kind: 'tool_start',
+          timestamp: startedAt,
+          turnId: session.currentTurnId,
+          toolId: toolCallId,
+          name: toolName,
+          args,
+          status: 'running',
+          parentToolId,
+        };
+        this.appendChatItem(session, toolStartItem);
+
+        // Track tool in current turn for persistence
+        const turnInfo = this.currentTurnInfo.get(session.id);
+        if (turnInfo) {
+          turnInfo.toolIds.push(toolCallId);
+        }
+
+        // Helper to emit V2 tool result
+        const emitToolResult = (status: 'success' | 'error', result?: unknown, error?: string, duration?: number) => {
+          toolStartItem.status = status === 'success' ? 'completed' : 'error';
+          this.updateChatItem(session, toolStartItem.id, { status: toolStartItem.status });
+
+          const toolResultItem: ToolResultItem = {
+            id: generateChatItemId(),
+            kind: 'tool_result',
+            timestamp: Date.now(),
+            turnId: session.currentTurnId,
+            toolId: toolCallId,
+            name: toolName,
+            status,
+            result,
+            error,
+            duration,
+          };
+          this.appendChatItem(session, toolResultItem);
+          if (status === 'success') {
+            this.emitSupplementalToolResultItems(session, toolName, toolCallId, result);
+          }
+        };
+
+        const finishRuntimeTool = () => {
+          session.activeTools.delete(toolCallId);
+          this.persistRuntimeSnapshot(session);
+        };
+
+        if (!this.isPlanModeToolAllowed(session, toolName, args)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const errorMsg = `Plan mode blocks "${toolName}". Analyze only and return a <proposed_plan> block.`;
+          eventEmitter.toolResult(session.id, toolCallPayload, {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
+          emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
+        if (this.isExternalCliStartTool(toolName) && !this.shouldAllowExternalCliLaunch(session, toolName)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const errorMsg = this.buildExternalCliLaunchBlockedMessage(toolName);
+          eventEmitter.toolResult(session.id, toolCallPayload, {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
+          emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
+        if (this.shouldEnforceTodoGuard(session, toolName)) {
+          // Advisory-only: keep light telemetry, never block execution on todo state.
+          session.nonTodoToolCallsSinceTodoUpdate += 1;
+        }
+
+        // Step 1: Evaluate tool call against policy
+        const policyContext: ToolCallContext = {
+          toolName,
+          arguments: args as Record<string, unknown>,
+          sessionType: session.type,
+          sessionId: session.id,
+        };
+        const policyResult = toolPolicyService.evaluate(policyContext);
+        const permissionRequest = this.getPermissionForDeepagentsTool(
+          toolName,
+          args,
+          toolCallId,
+          policyResult,
+        );
+        const shouldPromptForPolicyDeny =
+          policyResult.action === 'deny'
+            && this.shouldPromptForPolicyDeny(policyResult, permissionRequest);
+
+        // If policy explicitly denies, block immediately
+        if (policyResult.action === 'deny' && !shouldPromptForPolicyDeny) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const policyCode = policyResult.reasonCode ? ` (${policyResult.reasonCode})` : '';
+          const errorMsg = `Tool blocked by policy${policyCode}: ${policyResult.reason}`;
+          const payload = {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
+          // Emit tool result
+          emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
+
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
+        // Step 2: Check existing permission system (for 'ask' or when policy allows but still needs user approval)
+        if (permissionRequest) {
+          // If policy says 'allow', we can skip the permission prompt for non-dangerous ops
+          // But we still respect the existing permission system for dangerous operations
+          const skipPermission =
+            !shouldPromptForPolicyDeny
+            && policyResult.action === 'allow'
+            && !this.isDangerousOperation(toolName, args);
+
+          if (!skipPermission) {
+            const decision = await this.requestPermission(session, permissionRequest);
+            if (decision === 'deny') {
+              const duration = this.consumeToolDuration(session, toolCallId);
+              const payload = {
+                toolCallId,
+                success: false,
+                result: null,
+                error: 'Permission denied',
+                duration,
+                parentToolId,
+              };
+              eventEmitter.toolResult(session.id, toolCallPayload, payload);
+              this.checkpointActiveRun(session.id, 'tool_result', {
+                toolCallId,
+                toolName,
+                success: false,
+                error: 'Permission denied',
+                duration,
+              });
+              // Emit tool result
+              emitToolResult('error', null, 'Permission denied', duration);
+              finishRuntimeTool();
+
+              return new ToolMessage({
+                content: 'Permission denied',
+                tool_call_id: toolCallId,
+                name: toolName,
+              });
+            }
+          }
+        }
+
+        // If this is a task tool, set it as the active parent so sub-tools inherit it
+        if (isTask) {
+          session.activeParentToolId = toolCallId;
+        }
+
+        try {
+          const result = await handler(request);
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const limitedResult = this.applyToolOutputLimitToDeepagentsResult(
+            result,
+            toolName,
+            toolCallId,
+          );
+          const normalized = this.normalizeDeepagentsToolResult(limitedResult);
+          const limitedOutput = this.applyToolOutputTokenLimit(
+            toolName,
+            toolCallId,
+            normalized.output,
+          );
+          const payload = {
+            toolCallId,
+            success: normalized.success,
+            result: limitedOutput,
+            error: normalized.error,
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: normalized.success,
+            error: normalized.error,
+            duration,
+          });
+          this.recordArtifactForTool(session, toolName, args, limitedOutput);
+          if (normalized.success && this.isTodoTool(toolName)) {
+            session.hasTodoStateThisTurn = true;
+            session.nonTodoToolCallsSinceTodoUpdate = 0;
+          }
+
+          // Emit tool result
+          emitToolResult(
+            normalized.success ? 'success' : 'error',
+            limitedOutput,
+            normalized.error,
+            duration,
+          );
+
+          return limitedResult;
+        } catch (error) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const payload = {
+            toolCallId,
+            success: false,
+            result: null,
+            error: error instanceof Error ? error.message : String(error),
+            duration,
+            parentToolId,
+          };
+          eventEmitter.toolResult(session.id, toolCallPayload, payload);
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: payload.error,
+            duration,
+          });
+
+          // Emit tool result
+          emitToolResult('error', null, payload.error, duration);
+
+          throw error;
+        } finally {
+          finishRuntimeTool();
+          // Clear activeParentToolId when task tool completes
+          if (isTask && session.activeParentToolId === toolCallId) {
+            session.activeParentToolId = undefined;
+          }
+        }
+      },
+    });
+  }
+
+  private isCoworkTool(tool: unknown): boolean {
+    if (!tool || typeof tool !== 'object') return false;
+    const toolAny = tool as { tags?: string[]; metadata?: Record<string, unknown> };
+    if (Array.isArray(toolAny.tags) && toolAny.tags.includes('cowork')) return true;
+    const source = toolAny.metadata?.source;
+    return source === 'cowork';
+  }
+
+  /**
+   * Check if a tool name represents a task/subagent tool.
+   * Sub-tools executed within task tools will have parentToolId set.
+   */
+  private isTaskTool(toolName: string): boolean {
+    const lower = toolName.toLowerCase();
+    return lower === 'task' || lower.includes('spawn_task') || lower.includes('subagent');
+  }
+
+  private isExternalCliStartTool(toolName: string): toolName is ExternalCliStartToolName {
+    return EXTERNAL_CLI_START_TOOLS.has(toolName as ExternalCliStartToolName);
+  }
+
+  private hasExplicitExternalCliLaunchIntent(
+    userText: string | null,
+    toolName: ExternalCliStartToolName,
+  ): boolean {
+    if (!userText) return false;
+    const normalized = userText.trim();
+    if (!normalized) return false;
+    return EXTERNAL_CLI_INTENT_PATTERNS[toolName].some((pattern) => pattern.test(normalized));
+  }
+
+  private shouldAllowExternalCliLaunch(
+    session: ActiveSession,
+    toolName: ExternalCliStartToolName,
+  ): boolean {
+    // Allow recent follow-up answers after an explicit launch request.
+    const recentUserMessages = [...session.chatItems]
+      .reverse()
+      .filter((item): item is UserMessageItem => item.kind === 'user_message')
+      .slice(0, 3);
+
+    for (const item of recentUserMessages) {
+      const text = this.getTextFromMessageContent(item.content as Message['content']);
+      if (this.hasExplicitExternalCliLaunchIntent(text, toolName)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private buildExternalCliLaunchBlockedMessage(toolName: ExternalCliStartToolName): string {
+    const providerLabel = toolName === 'start_codex_cli_run' ? 'Codex CLI' : 'Claude CLI';
+    return [
+      `${providerLabel} launch blocked: \`${toolName}\` is allowed only when the user explicitly asks to launch ${providerLabel}.`,
+      'For discovery/lookups (for example Twitter profiles/posts), use `web_search` and `web_fetch` instead of external CLI launch tools.',
+    ].join(' ');
+  }
+
+  private getPermissionForDeepagentsTool(
+    toolName: string,
+    args: Record<string, unknown>,
+    toolCallId: string,
+    policyResult?: Pick<ToolEvaluationResult, 'action' | 'reason' | 'reasonCode'>,
+  ): PermissionRequest | null {
+    const policyExplainability = {
+      policyAction: policyResult?.action,
+      policyReason: policyResult?.reason,
+      policyReasonCode: policyResult?.reasonCode,
+    };
+
+    switch (toolName) {
+      case 'read_file':
+      case 'ls':
+      case 'glob':
+      case 'grep': {
+        const resource = String(args.file_path ?? args.path ?? args.pattern ?? '');
+        return {
+          type: 'file_read',
+          resource,
+          reason: `Read file data: ${resource || toolName}`,
+          toolName,
+          toolCallId,
+          ...policyExplainability,
+        };
+      }
+      case 'write_file':
+      case 'edit_file': {
+        const resource = String(args.file_path ?? args.path ?? '');
+        return {
+          type: 'file_write',
+          resource,
+          reason: `Write file data: ${resource || toolName}`,
+          toolName,
+          toolCallId,
+          ...policyExplainability,
+        };
+      }
+      case 'delete_file': {
+        const resource = String(args.file_path ?? args.path ?? '');
+        return {
+          type: 'file_delete',
+          resource,
+          reason: `Delete file: ${resource || toolName}`,
+          toolName,
+          toolCallId,
+          ...policyExplainability,
+        };
+      }
+      case 'execute': {
+        const resource = String(args.command ?? '');
+        return {
+          type: 'shell_execute',
+          resource,
+          reason: `Execute command: ${resource || toolName}`,
+          toolName,
+          toolCallId,
+          ...policyExplainability,
+        };
+      }
+      default:
+        return null;
+    }
+  }
+
+  private shouldPromptForPolicyDeny(
+    policyResult: Pick<ToolEvaluationResult, 'action' | 'reasonCode'>,
+    permissionRequest: PermissionRequest | null,
+  ): boolean {
+    if (!permissionRequest) return false;
+    if (policyResult.action !== 'deny') return false;
+
+    // Profile defaults are guardrails; allow a runtime permission override so users
+    // can approve case-by-case without permanently relaxing policy.
+    if (policyResult.reasonCode === 'profile_deny') {
+      return true;
+    }
+
+    return false;
+  }
+
+  private stringifyToolOutputValue(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    const seen = new WeakSet<object>();
+    try {
+      const serialized = JSON.stringify(value, (_key, currentValue) => {
+        if (typeof currentValue === 'bigint') {
+          return `${currentValue.toString()}n`;
+        }
+        if (typeof currentValue === 'object' && currentValue !== null) {
+          if (seen.has(currentValue)) {
+            return '[Circular]';
+          }
+          seen.add(currentValue);
+        }
+        return currentValue;
+      });
+      if (typeof serialized === 'string') {
+        return serialized;
+      }
+    } catch {
+      // Fall through to String() conversion.
+    }
+
+    try {
+      return String(value);
+    } catch {
+      return '[unserializable tool output]';
+    }
+  }
+
+  private logToolOutputTruncation(
+    toolName: string,
+    toolCallId: string,
+    originalChars: number,
+    maxChars: number,
+  ): void {
+    const approxOriginalTokens = Math.ceil(originalChars / TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN);
+    console.warn('[tool-output-limit] Truncated tool output before model handoff', {
+      toolName,
+      toolCallId,
+      limitTokens: this.runtimeConfig.toolOutputTokenLimit,
+      approxOriginalTokens,
+      originalChars,
+      maxChars,
+    });
+  }
+
+  private applyToolOutputTokenLimit(
+    toolName: string,
+    toolCallId: string,
+    output: unknown,
+  ): unknown {
+    if (output === null || output === undefined) {
+      return output;
+    }
+
+    const limitTokens = normalizeToolOutputTokenLimit(this.runtimeConfig.toolOutputTokenLimit);
+    const maxChars = limitTokens * TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN;
+    if (maxChars <= 0) {
+      return output;
+    }
+
+    const truncationSuffix = `\n\n[tool output truncated at ${limitTokens} tokens by runtime limit]`;
+
+    if (typeof output === 'string') {
+      if (output.length <= maxChars) {
+        return output;
+      }
+      const allowedChars = Math.max(0, maxChars - truncationSuffix.length);
+      this.logToolOutputTruncation(toolName, toolCallId, output.length, maxChars);
+      return `${output.slice(0, allowedChars)}${truncationSuffix}`;
+    }
+
+    const serialized = this.stringifyToolOutputValue(output);
+    if (serialized.length <= maxChars) {
+      return output;
+    }
+
+    const allowedChars = Math.max(0, maxChars - truncationSuffix.length);
+    this.logToolOutputTruncation(toolName, toolCallId, serialized.length, maxChars);
+    return `${serialized.slice(0, allowedChars)}${truncationSuffix}`;
+  }
+
+  private applyToolOutputLimitToDeepagentsResult<T>(
+    result: T,
+    toolName: string,
+    toolCallId: string,
+  ): T {
+    const toolMessage = this.extractToolMessage(result);
+    if (!toolMessage) {
+      return result;
+    }
+
+    const limitedContent = this.applyToolOutputTokenLimit(
+      toolName,
+      toolCallId,
+      toolMessage.content,
+    );
+    if (limitedContent === toolMessage.content) {
+      return result;
+    }
+
+    (toolMessage as unknown as { content: unknown }).content = limitedContent;
+    return result;
+  }
+
+  private normalizeDeepagentsToolResult(result: unknown): { success: boolean; output: unknown; error?: string } {
+    const toolMessage = this.extractToolMessage(result);
+    if (toolMessage) {
+      const content = toolMessage.content;
+      const text = typeof content === 'string' ? content : content;
+      if (typeof content === 'string' && content.startsWith('Error:')) {
+        return { success: false, output: text, error: content };
+      }
+      return { success: true, output: text };
+    }
+
+    return { success: true, output: result };
+  }
+
+  private extractToolMessage(result: unknown): ToolMessage | null {
+    if (ToolMessage.isInstance(result)) {
+      return result;
+    }
+
+    const candidate = result as { update?: { messages?: unknown[] } };
+    const messages = candidate?.update?.messages;
+    if (Array.isArray(messages)) {
+      const msg = messages.find((message) => ToolMessage.isInstance(message));
+      if (msg && ToolMessage.isInstance(msg)) {
+        return msg;
+      }
+    }
+
+    return null;
+  }
+
+  private parseSubagentTypeError(message: string): { requestedType: string; allowedTypes: string[] } | null {
+    const normalized = message.trim();
+    const match = normalized.match(
+      /invoked agent of type\s+([^,]+),\s+the only allowed types are\s+(.+)$/i,
+    );
+    if (!match) {
+      return null;
+    }
+
+    const requestedType = match[1]?.trim().replace(/^["'`]|["'`]$/g, '');
+    const allowedRaw = match[2]?.trim() || '';
+    const allowedTypes = allowedRaw
+      .split(',')
+      .map((value) => value.trim().replace(/^["'`]|["'`]$/g, ''))
+      .filter(Boolean);
+
+    if (!requestedType || allowedTypes.length === 0) {
+      return null;
+    }
+
+    return { requestedType, allowedTypes };
+  }
+
+  private async invokeWithSubagentFallback(
+    session: ActiveSession,
+    lcMessages: Array<HumanMessage | SystemMessage>,
+    invokeOptions: {
+      recursionLimit: number;
+      signal: AbortSignal;
+      abortSignal: AbortSignal;
+      configurable: { thread_id: string };
+    },
+  ): Promise<unknown> {
+    try {
+      return await session.agent.invoke({ messages: lcMessages }, invokeOptions);
+    } catch (error) {
+      const errorMessage = sanitizeProviderErrorMessage(
+        error instanceof Error ? error.message : String(error),
+      );
+      const parsed = this.parseSubagentTypeError(errorMessage);
+      if (!parsed) {
+        throw error;
+      }
+
+      const fallbackType = parsed.allowedTypes.includes('general-purpose')
+        ? 'general-purpose'
+        : parsed.allowedTypes[0];
+      process.stderr.write(
+        `[agent-runner] Subagent compatibility fallback for session ${session.id}: "${parsed.requestedType}" -> "${fallbackType}"\n`,
+      );
+
+      const retryMessages = [
+        ...lcMessages,
+        new SystemMessage(
+          `Task tool compatibility rule: when calling "task", set subagent_type to "${fallbackType}". Never use "${parsed.requestedType}".`,
+        ),
+      ];
+
+      session.isRetrying = true;
+      this.persistRuntimeSnapshot(session);
+      try {
+        return await session.agent.invoke({ messages: retryMessages }, invokeOptions);
+      } finally {
+        session.isRetrying = false;
+        this.persistRuntimeSnapshot(session);
+      }
+    }
+  }
+
+  private buildToolContext(session: ActiveSession): ToolContext {
+    return {
+      workingDirectory: session.workingDirectory,
+      sessionId: session.id,
+      agentId: session.id,
+      appDataDir: this.appDataDir ?? undefined,
+    };
+  }
+
+  private applySessionPermissionBootstrap(
+    session: ActiveSession,
+    bootstrap?: SessionPermissionBootstrap | null,
+  ): void {
+    if (!bootstrap) return;
+
+    if (bootstrap.approvalMode) {
+      session.approvalMode = bootstrap.approvalMode;
+    }
+
+    for (const [permissionType, rawPaths] of Object.entries(bootstrap.permissionScopes || {})) {
+      if (!Array.isArray(rawPaths) || rawPaths.length === 0) continue;
+      const scopeSet = session.permissionScopes.get(permissionType) ?? new Set<string>();
+      for (const rawPath of rawPaths) {
+        const normalized = this.normalizePermissionPath(session, String(rawPath));
+        if (normalized) {
+          scopeSet.add(normalized);
+        }
+      }
+      if (scopeSet.size > 0) {
+        session.permissionScopes.set(permissionType, scopeSet);
+      }
+    }
+
+    for (const [cacheKey, decision] of Object.entries(bootstrap.permissionCache || {})) {
+      if (decision === 'allow_session') {
+        session.permissionCache.set(cacheKey, decision);
+      }
+    }
+  }
+
+  getSessionPermissionBootstrap(sessionId: string): SessionPermissionBootstrap | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+
+    const permissionScopes: Record<string, string[]> = {};
+    for (const [permissionType, scopes] of session.permissionScopes.entries()) {
+      const values = Array.from(scopes).map((scope) => String(scope || '').trim()).filter(Boolean);
+      if (values.length > 0) {
+        permissionScopes[permissionType] = Array.from(new Set(values));
+      }
+    }
+
+    const permissionCache: Record<string, PermissionDecision> = {};
+    for (const [cacheKey, decision] of session.permissionCache.entries()) {
+      if (decision === 'allow_session') {
+        permissionCache[cacheKey] = decision;
+      }
+    }
+
+    return {
+      version: 1,
+      sourceSessionId: session.id,
+      approvalMode: session.approvalMode,
+      permissionScopes,
+      permissionCache,
+      createdAt: Date.now(),
+    };
+  }
+
+  private consumeToolDuration(session: ActiveSession, toolCallId: string): number | undefined {
+    const startTime = session.toolStartTimes.get(toolCallId);
+    if (toolCallId) {
+      session.toolStartTimes.delete(toolCallId);
+    }
+    return startTime ? Date.now() - startTime : undefined;
+  }
+
+
+  private async requestPermission(
+    session: ActiveSession,
+    request: PermissionRequest
+  ): Promise<PermissionDecision> {
+    // Step 1: Check cached decisions
+    const cachedDecision = this.getCachedPermissionDecision(session, request);
+    if (cachedDecision) {
+      return cachedDecision;
+    }
+
+    // Step 2: Check approval mode
+    const modeDecision = this.applyApprovalMode(session, request);
+    if (modeDecision) {
+      return modeDecision;
+    }
+
+    // Step 3: Generate cache key for deduplication
+    const cacheKey = `${request.type}:${request.resource}`;
+
+    // Step 4: Check if there's already an in-flight request for the same permission
+    const existingInFlight = session.inFlightPermissions.get(cacheKey);
+    if (existingInFlight) {
+      // Join the existing request - create a promise that resolves when the existing one resolves
+      return new Promise((resolve) => {
+        existingInFlight.resolvers.push(resolve);
+      });
+    }
+
+    // Step 5: Create new permission request
+    const permissionId = generateId('perm');
+    const extendedRequest: ExtendedPermissionRequest = {
+      ...request,
+      id: permissionId,
+      riskLevel: this.assessRiskLevel(request),
+      timestamp: Date.now(),
+    };
+
+    // Step 6: Create promise and store in-flight tracking
+    return new Promise((resolve) => {
+      // Track in-flight request with its resolvers
+      session.inFlightPermissions.set(cacheKey, {
+        permissionId,
+        promise: Promise.resolve('deny' as PermissionDecision), // placeholder
+        resolvers: [resolve],
+      });
+
+      // Store in pending permissions for respondToPermission() to find
+      session.pendingPermissions.set(permissionId, {
+        request: extendedRequest,
+        resolve: (decision: PermissionDecision) => {
+          // When user responds, resolve ALL waiting resolvers
+          const inFlight = session.inFlightPermissions.get(cacheKey);
+          if (inFlight) {
+            for (const resolver of inFlight.resolvers) {
+              resolver(decision);
+            }
+            session.inFlightPermissions.delete(cacheKey);
+          } else {
+            // Fallback: just resolve this one
+            resolve(decision);
+          }
+          this.persistRuntimeSnapshot(session);
+        },
+      });
+
+      // V2: Create and persist PermissionItem
+      const permissionItem: PermissionItem = {
+        id: generateChatItemId(),
+        kind: 'permission',
+        timestamp: Date.now(),
+        turnId: session.currentTurnId,
+        permissionId: permissionId,
+        request: {
+          type: extendedRequest.type,
+          resource: extendedRequest.resource,
+          reason: extendedRequest.reason,
+          toolCallId: extendedRequest.toolCallId,
+          toolName: extendedRequest.toolName,
+          riskLevel: extendedRequest.riskLevel,
+          command: extendedRequest.command,
+          policyAction: extendedRequest.policyAction,
+          policyReason: extendedRequest.policyReason,
+          policyReasonCode: extendedRequest.policyReasonCode,
+        },
+        status: 'pending',
+      };
+      this.appendChatItem(session, permissionItem);
+
+      eventEmitter.permissionRequest(session.id, extendedRequest);
+      this.checkpointActiveRun(session.id, 'permission_request', {
+        permissionId,
+        permissionType: extendedRequest.type,
+        resource: extendedRequest.resource,
+        riskLevel: extendedRequest.riskLevel,
+      });
+      this.persistRuntimeSnapshot(session);
+    });
+  }
+
+  private getSessionSandboxSettings(session: ActiveSession): CommandSandboxSettings {
+    const base = normalizeCommandSandboxSettings(this.runtimeConfig.sandbox);
+    const allowedRoots = new Set<string>([resolve(session.workingDirectory)]);
+    const grantedScopes: string[] = [];
+
+    for (const configuredPath of base.allowedPaths) {
+      const normalized = this.normalizePermissionPath(session, configuredPath);
+      if (normalized) {
+        allowedRoots.add(resolve(normalized));
+      }
+    }
+
+    for (const scopes of session.permissionScopes.values()) {
+      for (const scope of scopes) {
+        const normalized = this.normalizePermissionPath(session, scope);
+        if (normalized) {
+          const resolvedScope = resolve(normalized);
+          allowedRoots.add(resolvedScope);
+          grantedScopes.push(resolvedScope);
+        }
+      }
+    }
+
+    const filteredDeniedPaths = base.deniedPaths.filter((deniedPath) => {
+      const normalizedDenied = this.normalizePermissionPath(session, deniedPath);
+      if (!normalizedDenied) return true;
+      const deniedAbsolute = resolve(normalizedDenied);
+      // If user granted a narrower session scope inside a denied root, allow that scope
+      // by removing the denied ancestor for this session.
+      return !grantedScopes.some((scope) =>
+        scope === deniedAbsolute || scope.startsWith(`${deniedAbsolute}${sep}`),
+      );
+    });
+
+    return {
+      ...base,
+      allowedPaths: Array.from(allowedRoots),
+      deniedPaths: filteredDeniedPaths,
+    };
+  }
+
+  private applyApprovalMode(
+    session: ActiveSession,
+    request: PermissionRequest
+  ): PermissionDecision | null {
+    const mode = session.approvalMode;
+    const isRead = request.type === 'file_read';
+    const isWrite = request.type === 'file_write';
+    const isDelete = request.type === 'file_delete';
+    const isShell = request.type === 'shell_execute';
+    const isNetwork = request.type === 'network_request';
+    const touchesOutside = this.requestTouchesOutsideWorkingDirectory(session, request);
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const shellPolicy = isShell
+      ? evaluateSandboxPolicy(request.resource, sandboxSettings, session.workingDirectory)
+      : null;
+    const shellAllowed = shellPolicy?.allowed ?? false;
+    const shellRisk = shellPolicy?.analysis.risk;
+    const shellViolations = shellPolicy?.violations ?? [];
+    const isTrustedShell = isShell
+      ? this.isTrustedShellCommand(request.resource, sandboxSettings)
+      : false;
+    const isDangerousShell = isShell
+      ? this.isDangerousOperation('execute', { command: request.resource })
+      : false;
+
+    if (isShell && !shellAllowed) {
+      // Keep hard-deny for explicitly blocked/dangerous shell commands, but ask user
+      // for runtime approval when the denial is caused by default sandbox scope.
+      if (mode === 'read_only') {
+        return 'deny';
+      }
+      const hasHardSecurityViolation = shellViolations.some(
+        (violation) =>
+          violation.startsWith('Command is explicitly blocked.')
+          || violation.startsWith('Command matches dangerous shell patterns.'),
+      );
+      const hasOnlyPathBoundaryViolations =
+        shellViolations.length > 0
+        && shellViolations.every(
+          (violation) =>
+            violation.startsWith('Path is denied:')
+            || violation.startsWith('Path is outside allowed roots:'),
+        );
+
+      if (shellRisk === 'blocked' || hasHardSecurityViolation) {
+        return 'deny';
+      }
+      if (shellRisk === 'dangerous' && !hasOnlyPathBoundaryViolations) {
+        return 'deny';
+      }
+      return null;
+    }
+
+    if (mode === 'read_only') {
+      if (isRead && !touchesOutside) {
+        return 'allow';
+      }
+      return 'deny';
+    }
+
+    if (mode === 'full') {
+      if (isNetwork) {
+        return null;
+      }
+      if (isDelete) {
+        return null;
+      }
+      if (isShell) {
+        if (isDangerousShell) {
+          return null;
+        }
+        return 'allow';
+      }
+      if (touchesOutside) {
+        return null;
+      }
+      return 'allow';
+    }
+
+    // Auto mode
+    if (isRead && !touchesOutside) {
+      return 'allow';
+    }
+    if (isShell && !touchesOutside && shellAllowed && isTrustedShell) {
+      return 'allow';
+    }
+    if (isNetwork || isWrite || isDelete || isShell) {
+      return null;
+    }
+    return null;
+  }
+
+  private isTrustedShellCommand(
+    command: string,
+    sandboxSettings: CommandSandboxSettings,
+  ): boolean {
+    const normalized = command.trim().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+    return sandboxSettings.trustedCommands.some(
+      (safe) => normalized === safe || normalized.startsWith(`${safe} `),
+    );
+  }
+
+  private isPlanModeSafeShell(session: ActiveSession, command: string): boolean {
+    const normalized = command.trim().replace(/\s+/g, ' ');
+    if (!normalized) return false;
+    const sandboxSettings = this.getSessionSandboxSettings(session);
+    const readOnlyPolicy: CommandSandboxSettings = {
+      ...sandboxSettings,
+      mode: 'read-only',
+      allowNetwork: false,
+      allowProcessSpawn: false,
+    };
+    const policy = evaluateSandboxPolicy(
+      normalized,
+      readOnlyPolicy,
+      session.workingDirectory,
+    );
+    return policy.allowed && isReadOnlySafeCommand(normalized);
+  }
+
+  private isTodoTool(toolName: string): boolean {
+    const lower = toolName.toLowerCase();
+    return (
+      lower === 'write_todos' ||
+      lower === 'todowrite' ||
+      lower === 'taskcreate' ||
+      lower === 'taskupdate' ||
+      lower === 'tasklist' ||
+      lower === 'taskget'
+    );
+  }
+
+  private shouldEnforceTodoGuard(session: ActiveSession, toolName: string): boolean {
+    // TODO discipline is advisory (system prompt operating practice), not a hard runtime block.
+    // Keep returning false so execution is never blocked with "run write_todos first" errors.
+    void session;
+    void toolName;
+    return false;
+  }
+
+  private isPlanModeToolAllowed(
+    session: ActiveSession,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): boolean {
+    if (session.executionMode !== 'plan') return true;
+
+    const lower = toolName.toLowerCase();
+    const allowed = new Set([
+      'read_any_file',
+      'read_file',
+      'read',
+      'ls',
+      'glob',
+      'grep',
+      'web_search',
+      'google_grounded_search',
+      'web_fetch',
+    ]);
+
+    if (allowed.has(lower)) {
+      return true;
+    }
+
+    if (lower === 'execute' || lower === 'bash' || lower === 'run_command' || lower === 'shell') {
+      const command = String(args.command || '').trim();
+      if (!command) {
+        // Registration-time check (no args yet): allow tool registration,
+        // then enforce command-level policy at call time.
+        return true;
+      }
+      return this.isPlanModeSafeShell(session, command);
+    }
+
+    return false;
+  }
+
+  private getCachedPermissionDecision(
+    session: ActiveSession,
+    request: PermissionRequest
+  ): PermissionDecision | null {
+    const paths = this.resolveRequestPaths(session, request);
+    if (paths.length > 0) {
+      const scopes = session.permissionScopes.get(request.type);
+      if (scopes && this.pathsWithinScopes(paths, scopes)) {
+        return 'allow_session';
+      }
+    }
+
+    const cacheKey = `${request.type}:${request.resource}`;
+    const cachedDecision = session.permissionCache.get(cacheKey);
+    return cachedDecision === 'allow_session' ? cachedDecision : null;
+  }
+
+  private resolveRequestPaths(session: ActiveSession, request: PermissionRequest): string[] {
+    if (request.type === 'file_read' || request.type === 'file_write' || request.type === 'file_delete') {
+      const normalized = this.normalizePermissionPath(session, request.resource);
+      return normalized ? [normalized] : [];
+    }
+    if (request.type === 'shell_execute') {
+      const rawPaths = this.extractCommandPaths(request.resource);
+      const resolved = rawPaths
+        .map((path) => this.normalizePermissionPath(session, path))
+        .filter((path): path is string => !!path);
+      return resolved;
+    }
+    return [];
+  }
+
+  private requestTouchesOutsideWorkingDirectory(session: ActiveSession, request: PermissionRequest): boolean {
+    const paths = this.resolveRequestPaths(session, request);
+    if (paths.length === 0) return false;
+    return paths.some((path) => !this.isWithinWorkingDirectoryAbsolute(session, path));
+  }
+
+  private isWithinWorkingDirectoryAbsolute(session: ActiveSession, absolutePath: string): boolean {
+    const base = resolve(session.workingDirectory);
+    return absolutePath === base || absolutePath.startsWith(`${base}${sep}`);
+  }
+
+  private pathsWithinScopes(paths: string[], scopes: Set<string>): boolean {
+    for (const path of paths) {
+      if (!this.isPathWithinAnyScope(path, scopes)) return false;
+    }
+    return true;
+  }
+
+  private isPathWithinAnyScope(target: string, scopes: Set<string>): boolean {
+    for (const scope of scopes) {
+      if (target === scope || target.startsWith(`${scope}${sep}`)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private normalizePermissionPath(session: ActiveSession, resource: string): string | null {
+    let raw = String(resource || '').trim();
+    if (!raw || raw === '.') return resolve(session.workingDirectory);
+    if (raw === '/') return resolve(session.workingDirectory);
+
+    if (raw.startsWith('~')) {
+      raw = join(homedir(), raw.slice(1));
+    }
+
+    if (isAbsolute(raw)) {
+      const absolute = resolve(raw);
+      const isVirtual = this.isVirtualPath(session, absolute);
+      if (isVirtual) {
+        const relative = raw.replace(/^[/\\]+/, '');
+        return resolve(session.workingDirectory, relative);
+      }
+      return absolute;
+    }
+
+    const relative = raw.replace(/^[/\\]+/, '');
+    return resolve(session.workingDirectory, relative);
+  }
+
+  private isVirtualPath(session: ActiveSession, absolutePath: string): boolean {
+    const normalized = resolve(absolutePath);
+    if (normalized.startsWith(resolve(session.workingDirectory))) return false;
+
+    const prefixes = [
+      '/Users',
+      '/home',
+      '/var',
+      '/etc',
+      '/System',
+      '/usr',
+      '/private',
+      '/Library',
+      '/Applications',
+      '/Volumes',
+      '/opt',
+      '/tmp',
+    ];
+    return !prefixes.some((prefix) => normalized.startsWith(prefix));
+  }
+
+  private extractCommandPaths(command: string): string[] {
+    const paths: string[] = [];
+    const quotedMatches = command.match(/"[^"]+"|'[^']+'/g) || [];
+    for (const match of quotedMatches) {
+      const path = match.slice(1, -1);
+      if (this.looksLikePath(path)) {
+        paths.push(path);
+      }
+    }
+
+    const tokens = command.split(/\s+/);
+    for (const token of tokens) {
+      if (!token || token.startsWith('-')) continue;
+      if (this.looksLikePath(token)) {
+        paths.push(token);
+      }
+    }
+
+    return [...new Set(paths)];
+  }
+
+  private looksLikePath(value: string): boolean {
+    return (
+      value.startsWith('/') ||
+      value.startsWith('./') ||
+      value.startsWith('../') ||
+      value.startsWith('~') ||
+      /^[a-zA-Z]:[\\/]/.test(value)
+    );
+  }
+
+  private isAbortError(error: unknown): boolean {
+    if (!error) return false;
+    const anyError = error as { name?: string; message?: string };
+    const name = anyError.name?.toLowerCase() || '';
+    const message = anyError.message?.toLowerCase() || '';
+    return name.includes('abort') || message.includes('abort') || message.includes('cancel');
+  }
+
+  private getBackendAllowedScopes(session: ActiveSession): string[] {
+    const roots = new Set<string>([resolve(session.workingDirectory)]);
+    for (const path of this.runtimeConfig.sandbox.allowedPaths) {
+      const normalized = this.normalizePermissionPath(session, path);
+      if (normalized) {
+        roots.add(resolve(normalized));
+      }
+    }
+    for (const [type, scopes] of session.permissionScopes.entries()) {
+      if (!type.startsWith('file_')) continue;
+      for (const scope of scopes) {
+        const normalized = this.normalizePermissionPath(session, scope);
+        if (normalized) {
+          roots.add(resolve(normalized));
+        }
+      }
+    }
+    return Array.from(roots);
+  }
+
+  private getMessageRole(candidate: unknown): string | null {
+    if (!candidate || typeof candidate !== 'object') return null;
+    const candidateAny = candidate as {
+      role?: unknown;
+      type?: unknown;
+      _getType?: () => string;
+      constructor?: { name?: string };
+    };
+
+    const rawRole =
+      (typeof candidateAny.role === 'string' && candidateAny.role) ||
+      (typeof candidateAny.type === 'string' && candidateAny.type) ||
+      (typeof candidateAny._getType === 'function' ? candidateAny._getType() : '') ||
+      (typeof candidateAny.constructor?.name === 'string'
+        ? candidateAny.constructor.name.replace(/message$/i, '').toLowerCase()
+        : '');
+
+    if (!rawRole) return null;
+    const normalized = rawRole.toLowerCase();
+
+    if (normalized === 'ai' || normalized === 'assistant' || normalized === 'model') {
+      return 'assistant';
+    }
+    if (normalized === 'human' || normalized === 'user') {
+      return 'user';
+    }
+    if (normalized === 'system') {
+      return 'system';
+    }
+
+    return normalized;
+  }
+
+  private extractMessageContentCandidate(candidate: unknown): unknown {
+    if (!candidate || typeof candidate !== 'object') return candidate;
+    const candidateAny = candidate as {
+      content?: unknown;
+      text?: unknown;
+      message?: unknown;
+      output?: unknown;
+      kwargs?: { content?: unknown; text?: unknown };
+      lc_kwargs?: { content?: unknown; text?: unknown };
+      additional_kwargs?: { content?: unknown; text?: unknown };
+    };
+
+    if (candidateAny.content !== undefined) return candidateAny.content;
+    if (candidateAny.text !== undefined) return candidateAny.text;
+    if (candidateAny.kwargs?.content !== undefined) return candidateAny.kwargs.content;
+    if (candidateAny.kwargs?.text !== undefined) return candidateAny.kwargs.text;
+    if (candidateAny.lc_kwargs?.content !== undefined) return candidateAny.lc_kwargs.content;
+    if (candidateAny.lc_kwargs?.text !== undefined) return candidateAny.lc_kwargs.text;
+    if (candidateAny.additional_kwargs?.content !== undefined) return candidateAny.additional_kwargs.content;
+    if (candidateAny.additional_kwargs?.text !== undefined) return candidateAny.additional_kwargs.text;
+    if (candidateAny.message !== undefined) return this.extractMessageContentCandidate(candidateAny.message);
+    if (candidateAny.output !== undefined) return this.extractMessageContentCandidate(candidateAny.output);
+    return candidate;
+  }
+
+  private extractAssistantMessage(result: unknown): Message | null {
+    const resultAny = result as {
+      messages?: unknown;
+      output?: unknown;
+      message?: unknown;
+      content?: unknown;
+      text?: unknown;
+    };
+
+    const messageLists: unknown[][] = [];
+    if (Array.isArray(resultAny.messages)) {
+      messageLists.push(resultAny.messages);
+    }
+    if (Array.isArray(resultAny.output)) {
+      messageLists.push(resultAny.output);
+    }
+    if (resultAny.output && typeof resultAny.output === 'object') {
+      const outputAny = resultAny.output as { messages?: unknown };
+      if (Array.isArray(outputAny.messages)) {
+        messageLists.push(outputAny.messages);
+      }
+    }
+
+    for (const messages of messageLists) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const candidate = messages[i];
+        const role = this.getMessageRole(candidate);
+        if (role !== 'assistant') continue;
+
+        const content = this.extractMessageContentCandidate(candidate);
+        return {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: this.normalizeContent(content ?? ''),
+          createdAt: now(),
+        };
+      }
+    }
+
+    const directContent =
+      resultAny.content ??
+      resultAny.text ??
+      resultAny.message ??
+      resultAny.output;
+
+    if (directContent !== undefined && directContent !== null) {
+      const normalized = this.normalizeContent(this.extractMessageContentCandidate(directContent));
+      const hasText =
+        typeof normalized === 'string'
+          ? normalized.trim().length > 0
+          : normalized.length > 0;
+      if (hasText) {
+        return {
+          id: generateMessageId(),
+          role: 'assistant',
+          content: normalized,
+          createdAt: now(),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private syncTasksFromState(session: ActiveSession, state: unknown): void {
+    const todos = this.extractTodos(state);
+    if (!todos) return;
+
+    this.applyTodosToSession(session, todos);
+  }
+
+  private syncTasksFromStreamEvent(session: ActiveSession, event: unknown): void {
+    const eventAny = event as { data?: unknown };
+    const todos = this.extractTodos(eventAny?.data ?? event);
+    if (!todos) return;
+    this.applyTodosToSession(session, todos);
+  }
+
+  private applyTodosToSession(
+    session: ActiveSession,
+    todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>
+  ): void {
+    const signature = JSON.stringify(todos);
+    if (signature === session.lastTodosSignature) return;
+
+    const nowTs = Date.now();
+    const tasks: Task[] = todos.map((todo, index) => ({
+      id: `task-${session.id}-${index}-${this.hashTodo(todo)}`,
+      subject: todo.content,
+      status: todo.status,
+      createdAt: nowTs,
+    }));
+
+    session.lastTodosSignature = signature;
+    session.tasks = tasks;
+    session.hasTodoStateThisTurn = true;
+    session.nonTodoToolCallsSinceTodoUpdate = 0;
+    eventEmitter.taskSet(session.id, tasks);
+  }
+
+  private hashTodo(todo: { content: string; status: string }): string {
+    const input = `${todo.status}:${todo.content}`;
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash * 31 + input.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash).toString(36);
+  }
+
+  private extractTodos(state: unknown): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> | null {
+    if (!state || typeof state !== 'object') return null;
+    const stateAny = state as Record<string, unknown>;
+    const candidates = [
+      stateAny,
+      stateAny.output as Record<string, unknown> | undefined,
+      stateAny.state as Record<string, unknown> | undefined,
+      stateAny.result as Record<string, unknown> | undefined,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== 'object') continue;
+      const todos = (candidate as { todos?: unknown }).todos;
+      if (Array.isArray(todos)) {
+        return todos.filter(
+          (todo): todo is { content: string; status: 'pending' | 'in_progress' | 'completed' } =>
+            todo &&
+            typeof (todo as { content?: string }).content === 'string' &&
+            typeof (todo as { status?: string }).status === 'string'
+        ).map((todo) => ({
+          content: String((todo as { content: string }).content),
+          status: (todo as { status: 'pending' | 'in_progress' | 'completed' }).status,
+        }));
+      }
+    }
+
+    return null;
+  }
+
+  private normalizeContent(content: unknown): string | MessageContentPart[] {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        const partAny = part as { type?: string; text?: string; image_url?: { url?: string } };
+        if (partAny.type === 'text') {
+          return { type: 'text', text: partAny.text || '' } as MessageContentPart;
+        }
+        if (partAny.type === 'image_url' && partAny.image_url?.url) {
+          const url = partAny.image_url.url;
+          const match = url.match(/^data:(.+);base64,(.+)$/);
+          if (match) {
+            return {
+              type: 'image',
+              mimeType: match[1],
+              data: match[2],
+            } as MessageContentPart;
+          }
+        }
+        return { type: 'text', text: JSON.stringify(partAny) } as MessageContentPart;
+      });
+    }
+    return String(content);
+  }
+
+  private getContextWindow(provider: ProviderId, model: string): { input: number; output: number } {
+    if (provider === 'google') {
+      return getModelContextWindow(model);
+    }
+
+    const fromCatalog = this.modelCatalog.find((entry) => entry.id === model);
+    if (fromCatalog?.inputTokenLimit && fromCatalog?.outputTokenLimit) {
+      return {
+        input: fromCatalog.inputTokenLimit,
+        output: fromCatalog.outputTokenLimit,
+      };
+    }
+
+    return { input: 128000, output: 8192 };
+  }
+
+  private emitContextUsage(session: ActiveSession): void {
+    // Prefer API-reported token count (accurate) over character-based estimation
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(this.deriveMessagesFromChatItems(session.chatItems));
+    const contextWindow = this.getContextWindow(session.provider, session.model);
+    eventEmitter.contextUpdate(session.id, used, contextWindow.input);
+
+    // V2: Emit context usage update with percentage
+    const percentUsed = contextWindow.input > 0 ? (used / contextWindow.input) * 100 : 0;
+    eventEmitter.contextUsageUpdate(session.id, {
+      usedTokens: used,
+      maxTokens: contextWindow.input,
+      percentUsed,
+    });
+  }
+
+  private extractTextContent(message: Message): string | null {
+    if (typeof message.content === 'string') {
+      return message.content;
+    }
+
+    const textParts = message.content.filter(part => part.type === 'text');
+    if (textParts.length === 0) return null;
+
+    return textParts.map(part => (part as { text: string }).text).join('');
+  }
+
+  private getStreamSuffixPrefixOverlap(left: string, right: string): number {
+    const maxOverlap = Math.min(left.length, right.length);
+    for (let size = maxOverlap; size > 0; size -= 1) {
+      if (left.slice(left.length - size) === right.slice(0, size)) {
+        return size;
+      }
+    }
+    return 0;
+  }
+
+  private normalizeAssistantStreamChunk(session: ActiveSession, rawChunkText: string): string {
+    if (!rawChunkText) return '';
+
+    const previousRaw = session.lastRawAssistantChunkText;
+    if (rawChunkText === previousRaw) {
+      return '';
+    }
+
+    const currentText = session.activeAssistantSegmentText;
+    let delta = rawChunkText;
+
+    if (currentText.length > 0) {
+      if (rawChunkText.startsWith(currentText)) {
+        delta = rawChunkText.slice(currentText.length);
+      } else if (currentText.endsWith(rawChunkText)) {
+        delta = '';
+      } else {
+        const overlap = this.getStreamSuffixPrefixOverlap(currentText, rawChunkText);
+        if (overlap > 0) {
+          delta = rawChunkText.slice(overlap);
+        }
+      }
+    }
+
+    session.lastRawAssistantChunkText = rawChunkText;
+    return delta;
+  }
+
+  private extractStreamChunkText(event: unknown): string | null {
+    const eventAny = event as { event?: string; name?: string; data?: Record<string, unknown> };
+    const eventName = String(eventAny.event || eventAny.name || '').toLowerCase();
+    const data = eventAny.data || {};
+
+    const chunkCandidate =
+      data.chunk ??
+      data.delta ??
+      data.token ??
+      data.text ??
+      data.content ??
+      data.message;
+
+    if (!chunkCandidate) return null;
+
+    if (
+      eventName &&
+      !eventName.includes('stream') &&
+      !eventName.includes('token') &&
+      !eventName.includes('chat_model') &&
+      !eventName.includes('llm')
+    ) {
+      // If it's not a stream-like event, only accept plain string chunks.
+      if (typeof chunkCandidate !== 'string') return null;
+    }
+
+    if (typeof chunkCandidate === 'string') return chunkCandidate;
+
+    if (typeof chunkCandidate === 'object') {
+      const chunkAny = chunkCandidate as {
+        content?: unknown;
+        text?: string;
+        delta?: unknown;
+        messages?: unknown[];
+        additional_kwargs?: { tool_calls?: unknown };
+      };
+
+      if (Array.isArray(chunkAny.messages)) {
+        return null;
+      }
+
+      if (typeof chunkAny.text === 'string') return chunkAny.text;
+
+      const content = chunkAny.content ?? chunkAny.delta;
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        return content
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part === 'object' && 'text' in part) {
+              return String((part as { text?: string }).text || '');
+            }
+            return '';
+          })
+          .join('');
+      }
+
+      // Some providers include message content under data.message.content
+      const messageAny = (data as { message?: { content?: unknown } }).message;
+      const messageContent = messageAny?.content;
+      if (typeof messageContent === 'string') return messageContent;
+      if (Array.isArray(messageContent)) {
+        return messageContent
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part === 'object' && 'text' in part) {
+              return String((part as { text?: string }).text || '');
+            }
+            return '';
+          })
+          .join('');
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract thinking/reasoning content from a stream event.
+   * Gemini API returns thinking content in parts with `thought: true`.
+   */
+  private extractThinkingContent(event: unknown): string | null {
+    const eventAny = event as { event?: string; name?: string; data?: Record<string, unknown> };
+    const data = eventAny.data || {};
+
+    // Look for chunk data with thinking content
+    const chunkCandidate =
+      data.chunk ??
+      data.delta ??
+      data.message;
+
+    if (!chunkCandidate || typeof chunkCandidate !== 'object') return null;
+
+    const chunkAny = chunkCandidate as {
+      content?: unknown;
+      additional_kwargs?: { thought_text?: string };
+    };
+
+    // Check for thought_text in additional_kwargs (LangChain pattern)
+    if (chunkAny.additional_kwargs?.thought_text) {
+      return chunkAny.additional_kwargs.thought_text;
+    }
+
+    // Check content array for parts with thought: true (Gemini pattern)
+    const content = chunkAny.content;
+    if (Array.isArray(content)) {
+      const thoughtParts = content
+        .filter((part) => part && typeof part === 'object' && (part as { thought?: boolean }).thought === true)
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          const partAny = part as { text?: string };
+          return partAny.text || '';
+        })
+        .filter(Boolean);
+
+      if (thoughtParts.length > 0) {
+        return thoughtParts.join('');
+      }
+    }
+
+    // Check for thinking tags in content (deepagents pattern)
+    if (typeof content === 'string') {
+      const thinkingMatch = content.match(/<thinking>([\s\S]*?)<\/thinking>/);
+      if (thinkingMatch) {
+        return thinkingMatch[1].trim();
+      }
+    }
+
+    return null;
+  }
+
+  private parseRateLimitDetails(errorMessage: string): { retryAfterSeconds?: number; quotaMetric?: string; model?: string; docsUrl?: string } | null {
+    const details: { retryAfterSeconds?: number; quotaMetric?: string; model?: string; docsUrl?: string } = {};
+
+    const retryMatch = errorMessage.match(/retry in ([0-9.]+)s/i);
+    if (retryMatch) {
+      details.retryAfterSeconds = Number(retryMatch[1]);
+    }
+
+    const retryDelayMatch = errorMessage.match(/\"retryDelay\"\\s*:\\s*\"([0-9.]+)s\"/i);
+    if (retryDelayMatch) {
+      details.retryAfterSeconds = Number(retryDelayMatch[1]);
+    }
+
+    const quotaMatch = errorMessage.match(/\"quotaMetric\"\\s*:\\s*\"([^\"]+)\"/i);
+    if (quotaMatch) {
+      details.quotaMetric = quotaMatch[1];
+    }
+
+    const modelMatch = errorMessage.match(/\"model\"\\s*:\\s*\"([^\"]+)\"/i);
+    if (modelMatch) {
+      details.model = modelMatch[1];
+    }
+
+    if (errorMessage.includes('ai.google.dev/gemini-api/docs/rate-limits')) {
+      details.docsUrl = 'https://ai.google.dev/gemini-api/docs/rate-limits';
+    } else if (errorMessage.includes('ai.dev/rate-limit')) {
+      details.docsUrl = 'https://ai.dev/rate-limit';
+    }
+
+    return Object.keys(details).length > 0 ? details : null;
+  }
+
+  private extractStateFromStreamEvent(event: unknown): unknown | null {
+    const eventAny = event as {
+      event?: string;
+      name?: string;
+      data?: { output?: unknown; messages?: unknown; message?: unknown };
+    };
+    const eventName = String(eventAny.event || eventAny.name || '').toLowerCase();
+    const data = eventAny.data;
+    if (!data || typeof data !== 'object') return null;
+
+    const output = data.output;
+    if (output !== undefined && output !== null) {
+      if (typeof output === 'string') return { output };
+      if (Array.isArray(output)) return { messages: output };
+      if (typeof output === 'object') {
+        const outputAny = output as {
+          messages?: unknown;
+          message?: unknown;
+          content?: unknown;
+          text?: unknown;
+        };
+        if (
+          Array.isArray(outputAny.messages) ||
+          outputAny.message !== undefined ||
+          outputAny.content !== undefined ||
+          outputAny.text !== undefined
+        ) {
+          return output;
+        }
+      }
+    }
+
+    if (Array.isArray(data.messages)) {
+      return { messages: data.messages };
+    }
+    if (data.message !== undefined) {
+      return { message: data.message };
+    }
+
+    // Some stream implementations only provide useful final payload on *end events.
+    if (eventName.includes('end') && data.output !== undefined) {
+      return data.output;
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract and update usage metadata from stream events or final state.
+   * Gemini API returns usage_metadata with prompt_token_count, candidates_token_count, total_token_count.
+   * LangChain wraps this in response_metadata.usage_metadata or similar structures.
+   */
+  private updateUsageFromState(session: ActiveSession, state: unknown): void {
+    if (!state || typeof state !== 'object') return;
+
+    const stateAny = state as Record<string, unknown>;
+
+    // Try to find usage metadata in various places it might be
+    const usage = this.extractUsageMetadata(stateAny);
+    if (usage && usage.promptTokens > 0) {
+      session.lastKnownPromptTokens = usage.promptTokens;
+    }
+  }
+
+  /**
+   * Extract usage metadata from a stream event and update the session.
+   */
+  private extractUsageFromStreamEvent(session: ActiveSession, event: unknown): void {
+    if (!event || typeof event !== 'object') return;
+
+    const eventAny = event as Record<string, unknown>;
+    const data = eventAny.data as Record<string, unknown> | undefined;
+
+    // Check for usage in various places in stream events
+    if (data) {
+      // LangChain often puts it in data.output or data.chunk
+      const output = data.output as Record<string, unknown> | undefined;
+      const chunk = data.chunk as Record<string, unknown> | undefined;
+
+      if (output) {
+        const usage = this.extractUsageMetadata(output);
+        if (usage && usage.promptTokens > 0) {
+          session.lastKnownPromptTokens = usage.promptTokens;
+          return;
+        }
+      }
+
+      if (chunk) {
+        // Check response_metadata on chunk (common LangChain pattern)
+        const responseMetadata = chunk.response_metadata as Record<string, unknown> | undefined;
+        if (responseMetadata) {
+          const usage = this.extractUsageMetadata(responseMetadata);
+          if (usage && usage.promptTokens > 0) {
+            session.lastKnownPromptTokens = usage.promptTokens;
+            return;
+          }
+        }
+        // Check usage_metadata directly on chunk
+        if (chunk.usage_metadata && typeof chunk.usage_metadata === 'object') {
+          const usageMetadata = chunk.usage_metadata as Record<string, unknown>;
+          const promptTokens = Number(usageMetadata.prompt_token_count ?? usageMetadata.promptTokenCount ?? 0);
+          if (promptTokens > 0) {
+            session.lastKnownPromptTokens = promptTokens;
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  private extractUsageMetadata(obj: Record<string, unknown>, depth = 0): { promptTokens: number; completionTokens: number; totalTokens: number } | null {
+    // Prevent infinite recursion
+    if (depth > 5) return null;
+
+    // Direct usage object
+    if (obj.usage && typeof obj.usage === 'object') {
+      const usage = obj.usage as Record<string, unknown>;
+      const promptTokens = Number(usage.prompt_tokens ?? usage.promptTokens ?? usage.prompt_token_count ?? usage.inputTokens ?? 0);
+      const completionTokens = Number(usage.completion_tokens ?? usage.completionTokens ?? usage.candidates_token_count ?? usage.outputTokens ?? 0);
+      const totalTokens = Number(usage.total_tokens ?? usage.totalTokens ?? usage.total_token_count ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // usage_metadata (Gemini style)
+    if (obj.usage_metadata && typeof obj.usage_metadata === 'object') {
+      const usage = obj.usage_metadata as Record<string, unknown>;
+      const promptTokens = Number(usage.prompt_token_count ?? usage.promptTokenCount ?? usage.input_tokens ?? 0);
+      const completionTokens = Number(usage.candidates_token_count ?? usage.candidatesTokenCount ?? usage.output_tokens ?? 0);
+      const totalTokens = Number(usage.total_token_count ?? usage.totalTokenCount ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // usageMetadata (camelCase - common in JS SDKs)
+    if (obj.usageMetadata && typeof obj.usageMetadata === 'object') {
+      const usage = obj.usageMetadata as Record<string, unknown>;
+      const promptTokens = Number(usage.promptTokenCount ?? usage.prompt_token_count ?? 0);
+      const completionTokens = Number(usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0);
+      const totalTokens = Number(usage.totalTokenCount ?? usage.total_token_count ?? promptTokens + completionTokens);
+      if (promptTokens > 0) {
+        return { promptTokens, completionTokens, totalTokens };
+      }
+    }
+
+    // response_metadata (LangChain style)
+    if (obj.response_metadata && typeof obj.response_metadata === 'object') {
+      const nested = this.extractUsageMetadata(obj.response_metadata as Record<string, unknown>, depth + 1);
+      if (nested) return nested;
+    }
+
+    // Check in messages array (final state often has messages with metadata)
+    if (Array.isArray(obj.messages)) {
+      // Check from the end (most recent message likely has usage)
+      for (let i = obj.messages.length - 1; i >= 0; i--) {
+        const msg = obj.messages[i];
+        if (msg && typeof msg === 'object') {
+          const msgAny = msg as Record<string, unknown>;
+          // LangChain AIMessage often has response_metadata
+          if (msgAny.response_metadata && typeof msgAny.response_metadata === 'object') {
+            const nested = this.extractUsageMetadata(msgAny.response_metadata as Record<string, unknown>, depth + 1);
+            if (nested) return nested;
+          }
+          // Check usage_metadata directly on message
+          if (msgAny.usage_metadata && typeof msgAny.usage_metadata === 'object') {
+            const nested = this.extractUsageMetadata({ usage_metadata: msgAny.usage_metadata }, depth + 1);
+            if (nested) return nested;
+          }
+          // Check usageMetadata (camelCase)
+          if (msgAny.usageMetadata && typeof msgAny.usageMetadata === 'object') {
+            const nested = this.extractUsageMetadata({ usageMetadata: msgAny.usageMetadata }, depth + 1);
+            if (nested) return nested;
+          }
+          // Recurse into the message itself
+          const nested = this.extractUsageMetadata(msgAny, depth + 1);
+          if (nested) return nested;
+        }
+      }
+    }
+
+    // Check in output object (deepagents pattern)
+    if (obj.output && typeof obj.output === 'object') {
+      const nested = this.extractUsageMetadata(obj.output as Record<string, unknown>, depth + 1);
+      if (nested) return nested;
+    }
+
+    return null;
+  }
+
+  private getFirstMessagePreview(session: ActiveSession): string | null {
+    const firstUserItem = session.chatItems.find(ci => ci.kind === 'user_message');
+    if (!firstUserItem || firstUserItem.kind !== 'user_message') return null;
+
+    const content = typeof firstUserItem.content === 'string'
+      ? firstUserItem.content
+      : this.extractTextContent({ content: firstUserItem.content } as Message);
+
+    return content ? content.slice(0, 100) : null;
+  }
+
+  private assessRiskLevel(request: PermissionRequest): 'low' | 'medium' | 'high' {
+    switch (request.type) {
+      case 'file_read':
+        return 'low';
+      case 'file_write':
+      case 'file_delete':
+        // Check if writing to system directories
+        if (request.resource.startsWith('/System') ||
+            request.resource.startsWith('/etc') ||
+            request.resource.startsWith('/usr')) {
+          return 'high';
+        }
+        return 'medium';
+      case 'shell_execute':
+        // Shell commands are potentially dangerous
+        return 'medium';
+      case 'network_request':
+        return 'medium';
+      default:
+        return 'medium';
+    }
+  }
+
+  /**
+   * Check if an operation is dangerous and requires user approval even when policy allows.
+   * These are high-risk operations that should always prompt the user.
+   */
+  private isDangerousOperation(toolName: string, args: Record<string, unknown>): boolean {
+    // Shell commands with dangerous patterns
+    if (toolName === 'execute' || toolName === 'Bash') {
+      const command = (args.command as string) || '';
+      const dangerousPatterns = [
+        /\brm\s+(-rf?|--recursive)\b/i,  // rm -rf
+        /\brm\s+.*\*/,                    // rm with wildcard
+        /\bsudo\b/,                       // sudo commands
+        /\bchmod\s+777\b/,                // chmod 777
+        /\bdd\b/,                         // dd command
+        />\s*\/dev\//,                    // writing to /dev
+        /\bgit\s+(push|reset\s+--hard|clean\s+-[fd])/i, // dangerous git ops
+        /\bnpm\s+publish\b/,              // npm publish
+        /\bcurl\b.*\|\s*(ba)?sh/,         // curl | sh
+      ];
+      return dangerousPatterns.some(p => p.test(command));
+    }
+
+    // File operations on system directories
+    if (toolName === 'write_file' || toolName === 'Write' ||
+        toolName === 'edit_file' || toolName === 'Edit' ||
+        toolName === 'delete_file') {
+      const path = (args.file_path as string) || (args.path as string) || '';
+      const systemDirs = ['/System', '/etc', '/usr', '/bin', '/sbin', '/var', '/private'];
+      return systemDirs.some(dir => path.startsWith(dir));
+    }
+
+    return false;
+  }
+
+  private createConnectorTools(_sessionId: string): ToolHandler[] {
+    const tools = connectorBridge.getTools();
+    return tools
+      .filter((tool) => {
+        const haystack = `${tool.name} ${tool.description || ''}`.toLowerCase();
+        const requiresStitch = haystack.includes('stitch');
+        return !requiresStitch || Boolean(this.stitchApiKey);
+      })
+      .map((tool) => ({
+        name: `connector_${tool.connectorId}_${tool.name.replace(/[^a-zA-Z0-9_]/g, '_')}`,
+        description: `[Connector:${tool.connectorId}] ${tool.description || tool.name}`,
+        parameters: z.record(z.unknown()),
+        execute: async (args: unknown) => {
+          const result = await connectorBridge.callTool(
+            tool.connectorId,
+            tool.name,
+            (args as Record<string, unknown>) || {}
+          );
+          return { success: true, data: result };
+        },
+      }));
+  }
+
+  private recordArtifactForTool(
+    session: ActiveSession,
+    toolName: string,
+    args: Record<string, unknown>,
+    result: unknown
+  ): void {
+    const name = toolName.toLowerCase();
+    const artifacts: Artifact[] = [];
+
+    const addArtifact = (artifact: Artifact) => {
+      session.artifacts.push(artifact);
+      eventEmitter.artifactCreated(session.id, artifact);
+    };
+
+    const resolvePathArg = (...keys: string[]) => {
+      for (const key of keys) {
+        if (key in args && args[key] !== undefined) {
+          return String(args[key]);
+        }
+      }
+      return null;
+    };
+
+    const filePath = resolvePathArg('file_path', 'path');
+
+    if ((name === 'read_file' || name === 'read') && filePath) {
+      artifacts.push({
+        id: generateId('art'),
+        path: filePath,
+        type: 'touched',
+        content: typeof result === 'string' ? result : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'write_file' && filePath) {
+      artifacts.push({
+        id: generateId('art'),
+        path: filePath,
+        type: 'created',
+        content: typeof args.content === 'string' ? args.content : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'edit_file' && filePath) {
+      artifacts.push({
+        id: generateId('art'),
+        path: filePath,
+        type: 'modified',
+        content: typeof args.new_string === 'string' ? args.new_string : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'delete_file' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'deleted',
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'create_directory' && args.path) {
+      artifacts.push({
+        id: generateId('art'),
+        path: String(args.path),
+        type: 'created',
+        timestamp: Date.now(),
+      });
+    }
+
+    if (name === 'generate_image' || name === 'edit_image' || name === 'generate_video') {
+      const resultAny = result as { images?: Array<{ path?: string; url?: string }>; videos?: Array<{ path?: string; url?: string }> };
+      const files = [...(resultAny?.images || []), ...(resultAny?.videos || [])];
+      for (const file of files) {
+        if (!file.path && !file.url) continue;
+        artifacts.push({
+          id: generateId('art'),
+          path: file.path || file.url || '',
+          type: 'created',
+          url: file.url,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    if (name === 'deep_research') {
+      const resultAny = result as { report?: string; reportPath?: string } | undefined;
+      if (resultAny?.reportPath) {
+        artifacts.push({
+          id: generateId('art'),
+          path: resultAny.reportPath,
+          type: 'created',
+          content: resultAny.report,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    // Handle execute/bash/shell commands for artifact tracking
+    if (name === 'execute' || name === 'bash' || name === 'shell' || name === 'run_command') {
+      const command = String(args.command ?? args.cmd ?? '');
+      const resultAny = result as { output?: string; stdout?: string } | string | undefined;
+      const output = typeof resultAny === 'string'
+        ? resultAny
+        : resultAny?.output ?? resultAny?.stdout ?? '';
+
+      const shellArtifacts = this.parseShellCommandArtifacts(
+        command,
+        output,
+        session.workingDirectory
+      );
+      artifacts.push(...shellArtifacts);
+    }
+
+    if (name.startsWith('mcp_') || name.includes('stitch')) {
+      artifacts.push(...this.extractDesignArtifacts(toolName, result));
+    }
+
+    for (const artifact of artifacts) {
+      addArtifact(artifact);
+    }
+  }
+
+  private extractDesignArtifacts(toolName: string, result: unknown): Artifact[] {
+    if (!result || typeof result !== 'object') return [];
+    const resultAny = result as Record<string, unknown>;
+    const artifacts: Artifact[] = [];
+    const safeName = toolName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'design';
+    const timestamp = Date.now();
+
+    const addArtifact = (path: string, content?: string, url?: string) => {
+      artifacts.push({
+        id: generateId('art'),
+        path,
+        type: 'created',
+        content,
+        url,
+        timestamp,
+      });
+    };
+
+    const design = resultAny.design as Record<string, unknown> | undefined;
+    const code = resultAny.code as Record<string, unknown> | undefined;
+
+    const html = (resultAny.html || design?.html || code?.html) as string | undefined;
+    const css = (resultAny.css || design?.css || code?.css) as string | undefined;
+    const svg = (resultAny.svg || design?.svg) as string | undefined;
+    const previewUrl = (resultAny.previewUrl || (resultAny.preview as { url?: string } | undefined)?.url) as string | undefined;
+
+    if (html || css) {
+      const htmlContent = html
+        ? html
+        : `<html><head>${css ? `<style>${css}</style>` : ''}</head><body></body></html>`;
+      const combined = css && html && !html.includes('<style')
+        ? htmlContent.replace(/<head>/i, `<head><style>${css}</style>`)
+        : htmlContent;
+      addArtifact(`${safeName}-design.html`, combined);
+    }
+
+    if (svg) {
+      const wrappedSvg = `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;background:#fff;">${svg}</body></html>`;
+      addArtifact(`${safeName}-design.svg.html`, wrappedSvg);
+    }
+
+    if (previewUrl) {
+      const previewHtml = `<html><body style="margin:0;"><iframe src="${previewUrl}" style="width:100%;height:100%;border:0;"></iframe></body></html>`;
+      addArtifact(`${safeName}-preview.html`, previewHtml, previewUrl);
+    }
+
+    const files = resultAny.files as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(files)) {
+      for (const file of files) {
+        const path = String(file.path || file.name || file.filename || '');
+        if (!path) continue;
+        const content =
+          typeof file.content === 'string'
+            ? file.content
+            : typeof file.data === 'string'
+              ? file.data
+              : undefined;
+        const url = typeof file.url === 'string' ? file.url : undefined;
+        addArtifact(path, content, url);
+      }
+    }
+
+    return artifacts;
+  }
+
+  /**
+   * Parse shell command outputs to detect file creation/deletion.
+   * Handles git clone, mkdir, touch, cp, rm, and common scaffolding commands.
+   */
+  private parseShellCommandArtifacts(
+    command: string,
+    output: string,
+    workingDirectory: string
+  ): Artifact[] {
+    const artifacts: Artifact[] = [];
+    const timestamp = Date.now();
+    const cmd = command.trim().toLowerCase();
+
+    // 1. Git clone detection - "Cloning into 'repo-name'..."
+    const gitCloneMatch = output.match(/Cloning into ['"]?([^'".\n]+)['"]?/i);
+    if (gitCloneMatch && cmd.includes('git clone')) {
+      const clonedName = gitCloneMatch[1];
+      const clonedPath = isAbsolute(clonedName)
+        ? clonedName
+        : join(workingDirectory, clonedName);
+      artifacts.push({
+        id: generateId('art'),
+        path: clonedPath,
+        type: 'created',
+        timestamp,
+      });
+    }
+
+    // 2. mkdir detection
+    const mkdirMatch = cmd.match(/^mkdir\s+(?:-p\s+)?(.+)$/);
+    if (mkdirMatch && !output.toLowerCase().includes('error')) {
+      const paths = this.parseShellPaths(mkdirMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'created', timestamp });
+      }
+    }
+
+    // 3. touch detection
+    const touchMatch = cmd.match(/^touch\s+(.+)$/);
+    if (touchMatch && !output.toLowerCase().includes('error')) {
+      const paths = this.parseShellPaths(touchMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'created', timestamp });
+      }
+    }
+
+    // 4. cp detection (creates at destination)
+    const cpMatch = cmd.match(/^cp\s+(?:-[rRfai]+\s+)?(.+)\s+(\S+)$/);
+    if (cpMatch && !output.toLowerCase().includes('error')) {
+      const dest = this.resolveShellPath(cpMatch[2], workingDirectory);
+      artifacts.push({ id: generateId('art'), path: dest, type: 'created', timestamp });
+    }
+
+    // 5. npm init / npx create-* / yarn create detection
+    if (cmd.match(/^(npm\s+init|npx\s+create-|yarn\s+create)/)) {
+      // Look for "Created X" patterns in output
+      const createdMatches = output.match(/[Cc]reated?\s+([^\n]+)/g);
+      if (createdMatches) {
+        for (const match of createdMatches) {
+          const filePath = match.replace(/[Cc]reated?\s+/, '').trim();
+          if (filePath && !filePath.includes(' ')) {
+            artifacts.push({
+              id: generateId('art'),
+              path: this.resolveShellPath(filePath, workingDirectory),
+              type: 'created',
+              timestamp,
+            });
+          }
+        }
+      }
+      // Also check for common project directory creation
+      const projectMatch = output.match(/Success[!]?\s+Created\s+(\S+)/i) ||
+                          output.match(/Creating a new .+ app in\s+(\S+)/i);
+      if (projectMatch) {
+        artifacts.push({
+          id: generateId('art'),
+          path: this.resolveShellPath(projectMatch[1], workingDirectory),
+          type: 'created',
+          timestamp,
+        });
+      }
+    }
+
+    // 6. rm detection
+    const rmMatch = cmd.match(/^rm\s+(?:-[rRfi]+\s+)?(.+)$/);
+    if (rmMatch && !output.includes('No such file')) {
+      const paths = this.parseShellPaths(rmMatch[1], workingDirectory);
+      for (const p of paths) {
+        artifacts.push({ id: generateId('art'), path: p, type: 'deleted', timestamp });
+      }
+    }
+
+    return artifacts;
+  }
+
+  /**
+   * Parse space-separated paths from shell arguments, handling quotes.
+   */
+  private parseShellPaths(argsString: string, workingDirectory: string): string[] {
+    const paths: string[] = [];
+    const regex = /(?:"([^"]+)"|'([^']+)'|(\S+))/g;
+    let match;
+    while ((match = regex.exec(argsString)) !== null) {
+      const p = match[1] || match[2] || match[3];
+      if (p && !p.startsWith('-')) {
+        paths.push(this.resolveShellPath(p, workingDirectory));
+      }
+    }
+    return paths;
+  }
+
+  /**
+   * Resolve a file path relative to working directory if not absolute.
+   */
+  private resolveShellPath(filePath: string, workingDirectory: string): string {
+    // Remove any trailing quotes or whitespace
+    const cleaned = filePath.replace(/['"]/g, '').trim();
+    return isAbsolute(cleaned) ? cleaned : join(workingDirectory, cleaned);
+  }
+
+  private async maybeCompactContext(session: ActiveSession): Promise<void> {
+    if (!this.getSessionProviderKey(session)) return;
+    const contextWindow = this.getContextWindow(session.provider, session.model);
+    const messages = this.deriveMessagesFromChatItems(session.chatItems);
+    const used = session.lastKnownPromptTokens > 0
+      ? session.lastKnownPromptTokens
+      : this.estimateTokens(messages);
+    const ratio = contextWindow.input > 0 ? used / contextWindow.input : 0;
+    if (ratio < 0.7) return;
+
+    const keepLast = 6;
+    if (messages.length <= keepLast + 2) return;
+
+    const toSummarize = messages.slice(0, -keepLast);
+    const summary = await this.summarizeMessages(session, toSummarize, session.model);
+    if (!summary) return;
+
+    // Create a system_message chatItem with the summary and remove old items
+    const summaryItem: ChatItem = {
+      id: generateChatItemId(),
+      kind: 'system_message',
+      content: `Summary of earlier conversation:\n${summary}`,
+      timestamp: now(),
+    } as ChatItem;
+
+    // Keep only recent chatItems (those from the last keepLast messages) + summary
+    const keepMessageIds = new Set(messages.slice(-keepLast).map(m => m.id));
+    const recentChatItems = session.chatItems.filter(ci => {
+      if (ci.kind === 'user_message') return keepMessageIds.has(ci.turnId || ci.id);
+      if (ci.kind === 'assistant_message') return keepMessageIds.has(ci.id);
+      // Keep all non-message items that are recent (tool_start, tool_result, etc.)
+      const turnId = ci.turnId;
+      return turnId ? keepMessageIds.has(turnId) : false;
+    });
+    session.chatItems = [summaryItem, ...recentChatItems];
+    if (!this.shouldUseLongTermMemory(session)) {
+      await this.persistSummary(session.workingDirectory, summary);
+    }
+    this.emitContextUsage(session);
+  }
+
+  private async summarizeMessages(
+    session: ActiveSession,
+    messages: Message[],
+    model: string,
+  ): Promise<string> {
+    const providerKey = this.getSessionProviderKey(session);
+    if (!providerKey) return '';
+    const transcript = messages
+      .map((msg) => {
+        const content = typeof msg.content === 'string'
+          ? msg.content
+          : this.extractTextContent(msg) || '[non-text content]';
+        return `${msg.role.toUpperCase()}: ${content}`;
+      })
+      .join('\n\n');
+
+    const providerFactory = createProvider as unknown as (
+      id: ProviderId,
+      config: {
+        providerId?: ProviderId;
+        baseUrl?: string;
+        credentials: { type: 'api_key'; apiKey: string };
+      },
+    ) => {
+      generate: (request: {
+        model: string;
+        messages: Message[];
+      }) => Promise<{ message: Message }>;
+    };
+
+    const provider = providerFactory(session.provider, {
+      providerId: session.provider,
+      baseUrl: session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
+      credentials: {
+        type: 'api_key',
+        apiKey: providerKey,
+      },
+    });
+
+    const response = await provider.generate({
+      model,
+      messages: [
+        {
+          id: generateMessageId(),
+          role: 'system',
+          content: 'Summarize the conversation so far into compact project memory. Focus on decisions, plans, files, and open questions.',
+          createdAt: now(),
+        },
+        {
+          id: generateMessageId(),
+          role: 'user',
+          content: transcript,
+          createdAt: now(),
+        },
+      ],
+    });
+
+    return typeof response.message.content === 'string'
+      ? response.message.content
+      : this.extractTextContent(response.message) || '';
+  }
+
+  private async persistSummary(workingDirectory: string, summary: string): Promise<void> {
+    const memoryPath = join(workingDirectory, 'GEMINI.md');
+    const header = '# GEMINI.md - Project Memory';
+    const section = '## Additional Context';
+    const entry = `- ${new Date().toISOString()}: ${summary.replace(/\n/g, ' ')}`;
+
+    if (!existsSync(memoryPath)) {
+      const content = [header, '', section, entry, ''].join('\n');
+      await mkdir(workingDirectory, { recursive: true });
+      await writeFile(memoryPath, content, 'utf-8');
+      return;
+    }
+
+    const existing = await readFile(memoryPath, 'utf-8');
+    if (existing.includes(section)) {
+      const updated = existing.replace(section, `${section}\n${entry}`);
+      await writeFile(memoryPath, updated, 'utf-8');
+    } else {
+      const updated = `${existing.trim()}\n\n${section}\n${entry}\n`;
+      await writeFile(memoryPath, updated, 'utf-8');
+    }
+  }
+
+  private estimateTokens(messages: Message[]): number {
+    // Rough estimation: ~4 characters per token
+    let totalChars = 0;
+
+    for (const message of messages) {
+      if (typeof message.content === 'string') {
+        totalChars += message.content.length;
+      } else {
+        for (const part of message.content) {
+          if (part.type === 'text') {
+            totalChars += part.text.length;
+          } else if (part.type === 'image') {
+            totalChars += 500 * 4; // ~500 tokens for images
+          } else {
+            totalChars += JSON.stringify(part).length;
+          }
+        }
+      }
+    }
+
+    return Math.ceil(totalChars / 4);
+  }
+}
+
+// Singleton instance
+export const agentRunner = new AgentRunner();

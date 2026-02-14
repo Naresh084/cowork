@@ -1,0 +1,25 @@
+{
+  "name": "init",
+  "displayName": "Initialize AGENTS.md",
+  "description": "Generate an AGENTS.md file with project context for the AI agent",
+  "version": "1.0.0",
+  "author": "Gemini Cowork",
+  "aliases": ["initialize", "setup"],
+  "category": "setup",
+  "icon": "file-plus",
+  "arguments": [
+    {
+      "name": "force",
+      "type": "boolean",
+      "required": false,
+      "default": false,
+      "description": "Overwrite existing AGENTS.md file"
+    }
+  ],
+  "type": "system",
+  "requiresSession": false,
+  "requiresWorkingDir": true,
+  "autoSuggest": true,
+  "priority": 100,
+  "keywords": ["create", "generate", "agents", "context", "setup"]
+}

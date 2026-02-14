@@ -1,0 +1,75 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default permissions for the application",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:app:default",
+    "core:path:default",
+    "core:path:allow-resolve-directory",
+    "core:path:allow-resolve",
+    "core:path:allow-join",
+    "core:path:allow-normalize",
+    "core:path:allow-basename",
+    "core:path:allow-dirname",
+    "shell:default",
+    "shell:allow-open",
+    "shell:allow-execute",
+    "shell:allow-spawn",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/sidecar",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/cowork-agentd",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "binaries/sidecar",
+          "sidecar": true,
+          "args": true
+        },
+        {
+          "name": "binaries/cowork-agentd",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "opener:default",
+    "opener:allow-reveal-item-in-dir",
+    "fs:default",
+    "fs:allow-read",
+    "fs:allow-exists",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$HOME/.cowork/**",
+        "$HOME/**"
+      ]
+    },
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart",
+    "notification:default",
+    "notification:allow-show",
+    "notification:allow-request-permission"
+  ]
+}

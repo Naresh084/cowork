@@ -1,0 +1,26 @@
+{
+  "id": "github",
+  "name": "github",
+  "displayName": "GitHub",
+  "description": "Create issues, manage pull requests, read repository contents, and interact with GitHub APIs",
+  "version": "1.0.0",
+  "icon": "Github",
+  "category": "developer",
+  "tags": ["git", "repositories", "issues", "pull-requests", "code", "version-control"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://api.githubcopilot.com/mcp/"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://docs.github.com/en/copilot/how-tos/context/model-context-protocol/using-the-github-mcp-server",
+    "homepage": "https://docs.github.com/en/copilot/how-tos/context/model-context-protocol/using-the-github-mcp-server"
+  }
+}

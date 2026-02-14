@@ -1,0 +1,18 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+export const colors = {
+  bg: '#0B0C10',
+  bgElevated: '#12141B',
+  panel: '#151A24',
+  panelAlt: '#1C2330',
+  border: 'rgba(255,255,255,0.10)',
+  text: '#EEF2FF',
+  textMuted: 'rgba(238,242,255,0.62)',
+  textDim: 'rgba(238,242,255,0.42)',
+  primary: '#2563EB',
+  primarySoft: 'rgba(37,99,235,0.24)',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  danger: '#EF4444',
+};

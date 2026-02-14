@@ -1,0 +1,12 @@
+{
+  "name": "documentation-writer",
+  "displayName": "Documentation Writer",
+  "description": "Creates clear, comprehensive documentation. Use for: README files, API docs, user guides, code comments, technical specifications.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "productivity",
+  "icon": "file-text",
+  "tags": ["documentation", "readme", "api-docs", "guides", "technical-writing"],
+  "priority": 85,
+  "source": "built-in"
+}

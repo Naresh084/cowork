@@ -1,0 +1,36 @@
+{
+  "id": "discord",
+  "name": "discord",
+  "displayName": "Discord",
+  "description": "Send messages, manage channels, read conversations, and interact with Discord servers",
+  "version": "1.0.0",
+  "icon": "MessageCircle",
+  "category": "communication",
+  "tags": ["messaging", "gaming", "community", "chat", "voice", "server"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-discord"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "DISCORD_BOT_TOKEN",
+        "envVar": "DISCORD_TOKEN",
+        "description": "Discord Bot Token",
+        "required": true,
+        "placeholder": "MTIzNDU2Nzg5MDEyMzQ1Njc4OQ...",
+        "link": "https://discord.com/developers/applications"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/v-3/mcp-discord#setup",
+    "homepage": "https://github.com/v-3/mcp-discord"
+  }
+}

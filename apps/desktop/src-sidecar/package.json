@@ -1,0 +1,73 @@
+{
+  "name": "@cowork/sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "prompts:generate": "node ./scripts/generate-prompt-templates.mjs",
+    "build": "node ./scripts/generate-prompt-templates.mjs && tsc",
+    "dev": "node ./scripts/generate-prompt-templates.mjs && tsc --watch",
+    "start": "node dist/index.js",
+    "start:daemon": "node dist/daemon.js",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "bundle": "npm run build && npm run pkg:all",
+    "pkg:all": "npm run pkg:macos-arm64 && npm run pkg:macos-x64 && npm run pkg:win-x64 && npm run pkg:linux-x64 && npm run pkg:daemon:all",
+    "pkg:macos-arm64": "pkg dist/index.js --target node20-macos-arm64 --output ../src-tauri/binaries/sidecar-aarch64-apple-darwin",
+    "pkg:macos-x64": "pkg dist/index.js --target node20-macos-x64 --output ../src-tauri/binaries/sidecar-x86_64-apple-darwin",
+    "pkg:win-x64": "pkg dist/index.js --target node20-win-x64 --output ../src-tauri/binaries/sidecar-x86_64-pc-windows-msvc.exe",
+    "pkg:linux-x64": "pkg dist/index.js --target node20-linux-x64 --output ../src-tauri/binaries/sidecar-x86_64-unknown-linux-gnu",
+    "pkg:daemon:all": "npm run pkg:daemon:macos-arm64 && npm run pkg:daemon:macos-x64 && npm run pkg:daemon:win-x64 && npm run pkg:daemon:linux-x64",
+    "pkg:daemon:macos-arm64": "pkg dist/daemon.js --target node20-macos-arm64 --output ../src-tauri/binaries/cowork-agentd-aarch64-apple-darwin",
+    "pkg:daemon:macos-x64": "pkg dist/daemon.js --target node20-macos-x64 --output ../src-tauri/binaries/cowork-agentd-x86_64-apple-darwin",
+    "pkg:daemon:win-x64": "pkg dist/daemon.js --target node20-win-x64 --output ../src-tauri/binaries/cowork-agentd-x86_64-pc-windows-msvc.exe",
+    "pkg:daemon:linux-x64": "pkg dist/daemon.js --target node20-linux-x64 --output ../src-tauri/binaries/cowork-agentd-x86_64-unknown-linux-gnu"
+  },
+  "dependencies": {
+    "@cowork/core": "workspace:*",
+    "@cowork/mcp": "workspace:*",
+    "@cowork/providers": "workspace:*",
+    "@cowork/sandbox": "workspace:*",
+    "@cowork/shared": "workspace:*",
+    "@cowork/storage": "workspace:*",
+    "@google/genai": "^1.33.0",
+    "@google/generative-ai": "^0.24.0",
+    "@langchain/core": "^1.1.24",
+    "@langchain/google-genai": "^2.1.18",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.1",
+    "@langchain/openai": "^1.2.7",
+    "langchain": "^1.2.24",
+    "@slack/socket-mode": "^2.0.0",
+    "@slack/web-api": "^7.0.0",
+    "chrome-remote-interface": "^0.33.3",
+    "cron-parser": "^5.5.0",
+    "deepagents": "^1.7.6",
+    "micromatch": "^4.0.5",
+    "node-telegram-bot-api": "^0.67.0",
+    "playwright": "^1.40.0",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.26.0",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/chrome-remote-interface": "^0.31.14",
+    "@types/node": "^20.0.0",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.5.10",
+    "@yao-pkg/pkg": "^5.11.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2"
+  },
+  "pkg": {
+    "assets": [
+      "node_modules/**/*.node",
+      "node_modules/**/*.wasm"
+    ],
+    "scripts": [
+      "dist/**/*.js"
+    ]
+  }
+}

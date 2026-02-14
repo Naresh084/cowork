@@ -1,0 +1,196 @@
+task_id,title,workstream,phase,month_target,priority,status,owner,dependencies,acceptance,evidence_file,notes
+PM-01,"Create master tracking system (`README`, master tasks, ledger, log).",program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-01.md,checklist
+PM-02,Create evidence folder and evidence file standards.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-02.md,checklist
+PM-03,Lock status and gate vocabulary.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-03.md,checklist
+PM-04,Capture benchmark baseline (all dimensions) before Month 1 execution.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-04.md,checklist
+PM-05,Publish weekly scorecard cadence and owners.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-05.md,checklist
+PM-06,Define release gate authority and escalation tree.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-06.md,checklist
+PM-07,Freeze API command naming contract for v2 additions.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-07.md,checklist
+PM-08,Freeze event schema compatibility policy.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-08.md,checklist
+PM-09,Define benchmark holdout set governance (anti-overfitting policy).,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-09.md,checklist
+PM-10,Create launch-readiness reporting dashboard process.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-10.md,checklist
+PM-11,Open risk register with owners and mitigation due dates.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-11.md,checklist
+PM-12,Define defect triage SLA by severity.,program_management,governance,1,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PM-12.md,checklist
+PH1-01,Freeze target architecture and flow diagrams in engineering ADR.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-01.md,checklist
+PH1-02,Freeze command/type/event contracts for v2 interfaces.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-02.md,checklist
+PH1-03,Add database schema version scaffolding from v2 to v6 path.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-03.md,checklist
+PH1-04,Add run state machine skeleton in sidecar runtime.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-04.md,checklist
+PH1-05,Add event schema version + correlation id envelope.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-05.md,checklist
+PH1-06,Add benchmark runner/suite scaffolds.,monthly_phase,month_1,1,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH1-06.md,checklist
+PH2-01,Implement checkpoint persistence and resume command path.,monthly_phase,month_2,2,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH2-01.md,checklist
+PH2-02,Implement structured provider error taxonomy.,monthly_phase,month_2,2,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH2-02.md,checklist
+PH2-03,Implement stream-stall detector and recover UX.,monthly_phase,month_2,2,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH2-03.md,checklist
+PH2-04,Start memory migration scaffolding and import adapters.,monthly_phase,month_2,2,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH2-04.md,checklist
+PH3-01,Complete DB-backed memory repositories.,monthly_phase,month_3,3,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH3-01.md,checklist
+PH3-02,Implement hybrid retrieval baseline with scoring.,monthly_phase,month_3,3,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH3-02.md,checklist
+PH3-03,"Add legacy memory importer (`.cowork/memories`, `GEMINI.md`).",monthly_phase,month_3,3,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH3-03.md,checklist
+PH3-04,Deliver memory inspector alpha UI.,monthly_phase,month_3,3,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH3-04.md,checklist
+PH4-01,Complete branch schema and APIs.,monthly_phase,month_4,4,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH4-01.md,checklist
+PH4-02,Add branch-aware runtime context separation.,monthly_phase,month_4,4,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH4-02.md,checklist
+PH4-03,Add branch graph + merge UX.,monthly_phase,month_4,4,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH4-03.md,checklist
+PH4-04,Finish reliability/resume E2E suite.,monthly_phase,month_4,4,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH4-04.md,checklist
+PH5-01,Deterministic workflow resume + compensation hooks.,monthly_phase,month_5,5,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH5-01.md,checklist
+PH5-02,Adaptive trigger confidence + explainability.,monthly_phase,month_5,5,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH5-02.md,checklist
+PH5-03,Workflow pack templates.,monthly_phase,month_5,5,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH5-03.md,checklist
+PH5-04,Workflow run timeline expansion.,monthly_phase,month_5,5,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH5-04.md,checklist
+PH6-01,Deep research resilient polling + partial results.,monthly_phase,month_6,6,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH6-01.md,checklist
+PH6-02,Browser operator blocker detection + recovery.,monthly_phase,month_6,6,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH6-02.md,checklist
+PH6-03,Add research/browser benchmark suites.,monthly_phase,month_6,6,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH6-03.md,checklist
+PH6-04,Tool cards explain deep-tool failures and recovery.,monthly_phase,month_6,6,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH6-04.md,checklist
+PH7-01,Permission queue UX + durable pending state.,monthly_phase,month_7,7,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH7-01.md,checklist
+PH7-02,Policy explainability payloads.,monthly_phase,month_7,7,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH7-02.md,checklist
+PH7-03,Enterprise policy profiles + settings UI.,monthly_phase,month_7,7,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH7-03.md,checklist
+PH7-04,E2E policy/permission resilience tests.,monthly_phase,month_7,7,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH7-04.md,checklist
+PH8-01,Replace plaintext credentials with keychain abstraction.,monthly_phase,month_8,8,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH8-01.md,checklist
+PH8-02,Encrypt connector secrets + rotation.,monthly_phase,month_8,8,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH8-02.md,checklist
+PH8-03,Signed pack validation for connectors/skills/workflows.,monthly_phase,month_8,8,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH8-03.md,checklist
+PH8-04,Security audit log pipeline.,monthly_phase,month_8,8,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH8-04.md,checklist
+PH9-01,Complete simple onboarding/pro mode switch UX.,monthly_phase,month_9,9,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH9-01.md,checklist
+PH9-02,Complete unified run timeline UX.,monthly_phase,month_9,9,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH9-02.md,checklist
+PH9-03,Artifact virtualization + preview boundaries.,monthly_phase,month_9,9,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH9-03.md,checklist
+PH9-04,Internal usability studies + iteration.,monthly_phase,month_9,9,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH9-04.md,checklist
+PH10-01,Run full 600-scenario benchmark.,monthly_phase,month_10,10,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH10-01.md,checklist
+PH10-02,Fix all benchmark blockers.,monthly_phase,month_10,10,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH10-02.md,checklist
+PH10-03,Stabilize dashboard and release gate panels.,monthly_phase,month_10,10,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH10-03.md,checklist
+PH10-04,Freeze public API schemas.,monthly_phase,month_10,10,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH10-04.md,checklist
+PH11-01,Enter bug-fix-only code freeze.,monthly_phase,month_11,11,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH11-01.md,checklist
+PH11-02,Complete 3 benchmark passes with no P0/P1.,monthly_phase,month_11,11,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH11-02.md,checklist
+PH11-03,Security audit + dependency hardening.,monthly_phase,month_11,11,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH11-03.md,checklist
+PH11-04,Migration docs and rollback artifact freeze.,monthly_phase,month_11,11,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH11-04.md,checklist
+PH12-01,Execute final release gate evaluation.,monthly_phase,month_12,12,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH12-01.md,checklist
+PH12-02,Perform public big-bang launch.,monthly_phase,month_12,12,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH12-02.md,checklist
+PH12-03,Operate 30-day hypercare with daily benchmark checks.,monthly_phase,month_12,12,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH12-03.md,checklist
+PH12-04,Enforce gate-controlled hotfix acceptance.,monthly_phase,month_12,12,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/PH12-04.md,checklist
+R1-01,Define explicit run states and transition map; implement state machine in `agent-runner.ts`; add invalid-transition guardrails; add deterministic unit tests for all paths,reliability,workstream_execution,2,P0,done,RUNTIME,PH1-02,"Deterministic transitions, unit tested",docs/5-5-launch/evidence/R1-01.md,table
+R1-02,Define checkpoint schema; checkpoint at tool and turn boundaries; persist checkpoints through storage repository; replay on restart from latest valid checkpoint,reliability,workstream_execution,2,P0,done,RUNTIME,"R1-01, PH2-01",Restart resumes correctly,docs/5-5-launch/evidence/R1-02.md,table
+R1-03,Add Rust retry envelope with transient error classification; add idempotency keys from command layer; dedupe duplicate retried actions,reliability,workstream_execution,2,P0,done,RUNTIME,R1-01,No duplicate execution,docs/5-5-launch/evidence/R1-03.md,table
+R1-04,Add IPC handlers for resume/timeline commands; validate payloads with strict type schemas; return typed errors for invalid payloads,reliability,workstream_execution,2,P0,done,RUNTIME,PH1-02,Invalid payload returns typed errors,docs/5-5-launch/evidence/R1-04.md,table
+R1-05,Replace provider substring matching with structured error taxonomy; map retry hints and backoff strategies; add fixture tests for error class precision,reliability,workstream_execution,2,P0,done,RUNTIME,PH2-02,>=98% mapping accuracy,docs/5-5-launch/evidence/R1-05.md,table
+R1-06,Add stream stall detector in event hook; add recover action in chat store/UI; emit stall/recover events with diagnosis reason,reliability,workstream_execution,2,P0,done,RUNTIME,"R1-01, O9-01",<=1 click recovery for >=90% scenarios,docs/5-5-launch/evidence/R1-06.md,table
+R1-07,Persist message queue and pending permissions in durable state keyed by session/run; restore on reload,reliability,workstream_execution,2,P0,done,RUNTIME,R1-02,No pending-work loss on reload,docs/5-5-launch/evidence/R1-07.md,table
+R1-08,Emit run health counters in event emitter; surface live reliability stats in benchmark UI,reliability,workstream_execution,2,P0,done,RUNTIME,O9-05,Live reliability metrics visible,docs/5-5-launch/evidence/R1-08.md,table
+M2-01,Create shared memory types (`memory.ts`); export through shared type index; validate payload contracts,memory_kernel,workstream_execution,3,P0,done,MEM,PH1-02,Memory payloads typed/validated,docs/5-5-launch/evidence/M2-01.md,table
+M2-02,Bump DB schema and add memory tables; implement repositories for atoms/queries/feedback; add integration tests,memory_kernel,workstream_execution,3,P0,done,MEM,M2-01,CRUD/query integration passes,docs/5-5-launch/evidence/M2-02.md,table
+M2-03,Refactor sidecar memory-service to DB-backed adapter; keep compatibility facade for existing commands,memory_kernel,workstream_execution,3,P0,done,MEM,M2-02,Legacy memory commands continue to work,docs/5-5-launch/evidence/M2-03.md,table
+M2-04,Implement lexical + dense + graph fusion scoring and rerank pipeline in relevance scorer,memory_kernel,workstream_execution,3,P0,done,MEM,"M2-02, PH3-02",precision@8 >= 0.88,docs/5-5-launch/evidence/M2-04.md,table
+M2-05,Add contradiction and sensitivity filters with provenance retention in semantic extractor,memory_kernel,workstream_execution,3,P0,done,MEM,M2-03,Sensitive false-positive persistence < 1%,docs/5-5-launch/evidence/M2-05.md,table
+M2-06,Build consolidation service with decay/pinning policy and scheduled runs,memory_kernel,workstream_execution,3,P0,done,MEM,M2-03,Redundancy reduced >=35% no recall drop,docs/5-5-launch/evidence/M2-06.md,table
+M2-07,"Build memory inspector/editor/panel UX with evidence source, pin/delete/edit/feedback",memory_kernel,workstream_execution,3,P0,done,MEM,"M2-03, PH3-04",Full memory control in UI,docs/5-5-launch/evidence/M2-07.md,table
+M2-08,Extend memory store to support confidence/explanations and feedback APIs,memory_kernel,workstream_execution,3,P0,done,MEM,"M2-04, M2-07",Feedback influences ranking,docs/5-5-launch/evidence/M2-08.md,table
+B3-01,Add branch/merge shared types; ensure Rust-Node-UI serialization compatibility,branching,workstream_execution,4,P1,done,RUNTIME,PH1-02,Cross-layer type compatibility,docs/5-5-launch/evidence/B3-01.md,table
+B3-02,Add session branch and merge lineage tables + repository methods,branching,workstream_execution,4,P1,done,RUNTIME,B3-01,Branch metadata persists reliably,docs/5-5-launch/evidence/B3-02.md,table
+B3-03,Add branch-aware run context and checkpoint isolation in agent-runner,branching,workstream_execution,4,P1,done,RUNTIME,"R1-02, B3-02",Branch context isolation preserved,docs/5-5-launch/evidence/B3-03.md,table
+B3-04,Expose branch commands in Rust agent command layer,branching,workstream_execution,4,P1,done,RUNTIME,B3-01,Typed branch API responses/errors,docs/5-5-launch/evidence/B3-04.md,table
+B3-05,Build branch graph + merge controls in chat header/panel,branching,workstream_execution,4,P1,done,RUNTIME,B3-04,Branch create/merge in chat UI,docs/5-5-launch/evidence/B3-05.md,table
+B3-06,Add session-store branch cache and active-branch switch performance path,branching,workstream_execution,4,P1,done,RUNTIME,B3-05,Branch switch < 300ms cached,docs/5-5-launch/evidence/B3-06.md,table
+B3-07,Handle branch lifecycle events in event hook/store updates,branching,workstream_execution,4,P1,done,RUNTIME,B3-06,UI consistency across branch operations,docs/5-5-launch/evidence/B3-07.md,table
+B3-08,Add E2E test for branch create/merge scenario,branching,workstream_execution,4,P1,done,RUNTIME,B3-05,E2E passes in CI,docs/5-5-launch/evidence/B3-08.md,table
+W4-01,Add deterministic resume points in workflow engine; add compensation hooks to prevent duplicate side effects,workflow_skills,workstream_execution,5,P1,done,WF,R1-02,Resume without duplicate effects,docs/5-5-launch/evidence/W4-01.md,table
+W4-02,"Add policy profiles (`fast_safe`, `balanced`, `strict_enterprise`) in retry policy",workflow_skills,workstream_execution,5,P1,done,WF,W4-01,Profile contract enforced,docs/5-5-launch/evidence/W4-02.md,table
+W4-03,Build adaptive trigger router with confidence scoring + explainability payload,workflow_skills,workstream_execution,5,P1,done,WF,W4-02,False positives < 3%,docs/5-5-launch/evidence/W4-03.md,table
+W4-04,Expand workflow builder/inspector for pack templates and trigger diagnostics,workflow_skills,workstream_execution,5,P1,done,WF,W4-03,Workflow creation completion >=90%,docs/5-5-launch/evidence/W4-04.md,table
+W4-05,Upgrade workflow run panel to timeline + node drilldown + replay controls,workflow_skills,workstream_execution,5,P1,done,WF,W4-01,Diagnose failed run <=2 minutes,docs/5-5-launch/evidence/W4-05.md,table
+W4-06,Extend workflow-store with live run stream buffering and scheduled health state,workflow_skills,workstream_execution,5,P1,done,WF,W4-05,Live progression without refresh,docs/5-5-launch/evidence/W4-06.md,table
+W4-07,Add workflow pack invocation API + typed error map in workflow tool,workflow_skills,workstream_execution,5,P1,done,WF,W4-02,Structured actionable tool output,docs/5-5-launch/evidence/W4-07.md,table
+W4-08,Add skill pack lifecycle states and trust signals in skills UI/store,workflow_skills,workstream_execution,5,P1,done,WF,W4-04,Skill lifecycle visibility before use,docs/5-5-launch/evidence/W4-08.md,table
+RB5-01,Harden deep-research with polling/retry budget/partial-result handling/cancel resume token,research_browser,workstream_execution,6,P1,done,RB,PH6-01,>=95% reliability under failures,docs/5-5-launch/evidence/RB5-01.md,table
+RB5-02,Normalize evidence and source confidence in research tools,research_browser,workstream_execution,6,P1,done,RB,RB5-01,Ranked citations with provenance,docs/5-5-launch/evidence/RB5-02.md,table
+RB5-03,"Harden browser operator with action safety classifier, blocker detection, stop criteria, retries",research_browser,workstream_execution,6,P1,done,RB,PH6-02,>=85% benchmark completion,docs/5-5-launch/evidence/RB5-03.md,table
+RB5-04,Persist browser action history and checkpoints for restart recovery,research_browser,workstream_execution,6,P1,done,RB,RB5-03,Restart resumes browser task state,docs/5-5-launch/evidence/RB5-04.md,table
+RB5-05,"Expand live browser view with progress timeline, blockers, and recovery controls",research_browser,workstream_execution,6,P1,done,RB,RB5-04,Recovery in <=3 clicks,docs/5-5-launch/evidence/RB5-05.md,table
+RB5-06,Upgrade tool execution cards for replay and failure explanations,research_browser,workstream_execution,6,P1,done,RB,"RB5-02, RB5-03",Non-experts can understand outcomes,docs/5-5-launch/evidence/RB5-06.md,table
+RB5-07,Handle new research/browser event envelopes in event hook,research_browser,workstream_execution,6,P1,done,RB,O9-02,No dropped events in stress tests,docs/5-5-launch/evidence/RB5-07.md,table
+RB5-08,Add failure-injected reliability tests for research/browser tools,research_browser,workstream_execution,6,P1,done,RB,"RB5-01, RB5-03",Retry/fallback contracts enforced,docs/5-5-launch/evidence/RB5-08.md,table
+P6-01,"Upgrade permission dialog with queue mode, keyboard shortcuts, timeout-safe defaults, batch actions",policy_permissions,workstream_execution,7,P1,done,SEC,R1-07,Queue approvals manageable,docs/5-5-launch/evidence/P6-01.md,table
+P6-02,Add inline queue summary + jump-to-pending actions in message list,policy_permissions,workstream_execution,7,P1,done,SEC,P6-01,Chronological resolution path,docs/5-5-launch/evidence/P6-02.md,table
+P6-03,Persist pending permission/question state in chat-store across restart,policy_permissions,workstream_execution,7,P1,done,SEC,R1-07,No pending-loss on reload,docs/5-5-launch/evidence/P6-03.md,table
+P6-04,Add policy explainability payloads and reason codes in runner events,policy_permissions,workstream_execution,7,P1,done,SEC,P6-05,Clear allow/deny rationale shown,docs/5-5-launch/evidence/P6-04.md,table
+P6-05,Extend tool-policy shared types with enterprise profiles + deny enums,policy_permissions,workstream_execution,7,P1,done,SEC,PH1-02,Auditable typed policy behavior,docs/5-5-launch/evidence/P6-05.md,table
+P6-06,Build policy profile editor settings panel with impact preview,policy_permissions,workstream_execution,7,P1,done,SEC,P6-05,Safe policy edit preview,docs/5-5-launch/evidence/P6-06.md,table
+P6-07,Add sandbox command intent classification + trust scoring,policy_permissions,workstream_execution,7,P1,done,SEC,P6-05,>=97% alignment in validation tests,docs/5-5-launch/evidence/P6-07.md,table
+P6-08,Add idempotency markers in sandbox executor for retried shell actions,policy_permissions,workstream_execution,7,P1,done,SEC,P6-07,No duplicate destructive effects,docs/5-5-launch/evidence/P6-08.md,table
+S7-01,Replace plaintext credential storage with OS keychain adapter + encrypted fallback vault,security,workstream_execution,8,P0,done,SEC,PH8-01,No plaintext secrets at rest,docs/5-5-launch/evidence/S7-01.md,table
+S7-02,Route provider auth operations through secure credential abstraction,security,workstream_execution,8,P0,done,SEC,S7-01,Backward-compatible auth APIs,docs/5-5-launch/evidence/S7-02.md,table
+S7-03,Register secure credential module and one-time migration cleanup in command registration,security,workstream_execution,8,P0,done,SEC,S7-01,Old plaintext migrated then deleted,docs/5-5-launch/evidence/S7-03.md,table
+S7-04,Encrypt connector secrets with keychain-derived key + rotation support,security,workstream_execution,8,P0,done,SEC,S7-01,Secret rotation/revoke integration passes,docs/5-5-launch/evidence/S7-04.md,table
+S7-05,Build security settings panel with migration status/audit summary,security,workstream_execution,8,P0,done,SEC,S7-03,User-visible security posture,docs/5-5-launch/evidence/S7-05.md,table
+S7-06,Add signed package validation in connector/skill pack service,security,workstream_execution,8,P0,done,SEC,S7-01,Unsigned/tampered packs blocked,docs/5-5-launch/evidence/S7-06.md,table
+S7-07,Tighten external CLI allowlist and signature checks,security,workstream_execution,8,P0,done,SEC,S7-06,Abuse risk reduced to accepted level,docs/5-5-launch/evidence/S7-07.md,table
+S7-08,Add structured redacted security audit logs,security,workstream_execution,8,P0,done,SEC,S7-01,Diagnosable incidents without secret leakage,docs/5-5-launch/evidence/S7-08.md,table
+U8-01,Build 4-step onboarding with environment health checks and defaults,ux,workstream_execution,9,P2,done,UX,PH9-01,First successful run <=3 minutes,docs/5-5-launch/evidence/U8-01.md,table
+U8-02,Add settings profile switch (`simple`/`pro`) and capability surfacing,ux,workstream_execution,9,P2,done,UX,U8-01,Simple mode reduces complexity safely,docs/5-5-launch/evidence/U8-02.md,table
+U8-03,Add chat run-status rail + recovery controls + branch context pill,ux,workstream_execution,9,P2,done,UX,"R1-06, B3-05",Active run state always actionable,docs/5-5-launch/evidence/U8-03.md,table
+U8-04,Add unified timeline grouping across stream/tool/permission/memory events,ux,workstream_execution,9,P2,done,UX,U8-03,Timeline readable under heavy runs,docs/5-5-launch/evidence/U8-04.md,table
+U8-05,Add resilient preview boundaries + lazy virtualization in preview panel,ux,workstream_execution,9,P2,done,UX,U8-04,Large artifacts do not freeze panel,docs/5-5-launch/evidence/U8-05.md,table
+U8-06,Add artifact pagination/search for long sessions,ux,workstream_execution,9,P2,done,UX,U8-05,Scalable artifact navigation,docs/5-5-launch/evidence/U8-06.md,table
+U8-07,Create design tokens file with motion/typography hierarchy,ux,workstream_execution,9,P2,done,UX,U8-02,UX consistency score >=4.6/5,docs/5-5-launch/evidence/U8-07.md,table
+U8-08,Add shared UI primitives for timeline/reliability/policy badges,ux,workstream_execution,9,P2,done,UX,U8-07,Shared primitives used consistently,docs/5-5-launch/evidence/U8-08.md,table
+O9-01,Add event schema versioning + correlation IDs in event emitter,observability,workstream_execution,2,P0,done,OBS,PH1-05,Full event trace correlation,docs/5-5-launch/evidence/O9-01.md,table
+O9-02,Extend frontend event types for benchmark/release gate envelopes,observability,workstream_execution,2,P0,done,OBS,O9-01,Strict type-safe frontend compile,docs/5-5-launch/evidence/O9-02.md,table
+O9-03,Build benchmark runner with seeded deterministic scenarios,observability,workstream_execution,2,P0,done,OBS,PH1-06,Deterministic runs within tolerance,docs/5-5-launch/evidence/O9-03.md,table
+O9-04,Add Twin-Track comparable suites (target 600 scenarios),observability,workstream_execution,2,P0,done,OBS,O9-03,Suite available in CI/local,docs/5-5-launch/evidence/O9-04.md,table
+O9-05,Build benchmark dashboard scorecard + trends,observability,workstream_execution,2,P0,done,OBS,O9-03,Daily score movement visibility,docs/5-5-launch/evidence/O9-05.md,table
+O9-06,Build release gate panel with hard fail criteria,observability,workstream_execution,2,P0,done,OBS,O9-05,Auto-block release on fail,docs/5-5-launch/evidence/O9-06.md,table
+O9-07,Add Rust wrappers for benchmark trigger/poll + gate status,observability,workstream_execution,2,P0,done,OBS,O9-03,Frontend can run/poll benchmarks,docs/5-5-launch/evidence/O9-07.md,table
+O9-08,Add shared benchmark type schema,observability,workstream_execution,2,P0,done,OBS,O9-03,Portable typed benchmark artifacts,docs/5-5-launch/evidence/O9-08.md,table
+Q10-01,Add provider error taxonomy and failover tests,quality,workstream_execution,10,P0,done,QA,R1-05,Retry hint coverage complete,docs/5-5-launch/evidence/Q10-01.md,table
+Q10-02,Add sandbox validator/executor tests for policy/idempotency,quality,workstream_execution,10,P0,done,QA,"P6-07, P6-08",Regressions caught pre-merge,docs/5-5-launch/evidence/Q10-02.md,table
+Q10-03,Add core agent integration tests for tool/permission/retry/resume,quality,workstream_execution,10,P0,done,QA,R1-02,Agent loop stability in CI,docs/5-5-launch/evidence/Q10-03.md,table
+Q10-04,"Add reliability E2E: stream recovery, permission queue, restart-resume",quality,workstream_execution,10,P0,done,QA,"R1-06, P6-03",UX resilience validated E2E,docs/5-5-launch/evidence/Q10-04.md,table
+Q10-05,Add memory E2E: create/retrieve/conflict/feedback,quality,workstream_execution,10,P0,done,QA,M2-08,Memory quality targets validated,docs/5-5-launch/evidence/Q10-05.md,table
+Q10-06,Add workflow E2E: build/run/retry/resume,quality,workstream_execution,10,P0,done,QA,W4-05,Workflow reliability validated,docs/5-5-launch/evidence/Q10-06.md,table
+Q10-07,Add chaos fault-injection module for provider/network/storage/IPC,quality,workstream_execution,10,P0,done,QA,R1-08,Reliability under chaos validated,docs/5-5-launch/evidence/Q10-07.md,table
+Q10-08,Add CI gates for benchmark delta and reliability regression,quality,workstream_execution,10,P0,done,QA,"O9-04, Q10-07",PRs blocked on quality regression,docs/5-5-launch/evidence/Q10-08.md,table
+DB-01,Bump `SCHEMA_VERSION` from 2 to 6.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-01.md,checklist
+DB-02,Add new tables:,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-02.md,checklist
+DB-03,Wrap migration in rollback-safe transaction + checkpoint.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-03.md,checklist
+DB-04,Import `.cowork/memories` legacy files into memory atoms.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-04.md,checklist
+DB-05,Import legacy `GEMINI.md` as `instructions` atoms with `legacy_gemini_md` provenance.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-05.md,checklist
+DB-06,Preserve existing sessions/messages/workflows untouched.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-06.md,checklist
+DB-07,Generate migration report and surface in settings diagnostics.,database_migration,migration,3,P0,done,MEM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DB-07.md,checklist
+FLOW-01,Validate simple setup to first success flow.,ux_flow_validation,ux_flow_validation,,P2,done,UX,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/FLOW-01.md,checklist
+FLOW-02,Validate long multi-tool run with crash/recovery flow.,ux_flow_validation,ux_flow_validation,,P2,done,UX,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/FLOW-02.md,checklist
+FLOW-03,Validate memory-driven continuation loop with feedback effect.,ux_flow_validation,ux_flow_validation,,P2,done,UX,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/FLOW-03.md,checklist
+FLOW-04,Validate heavy permission queue flow under restart scenarios.,ux_flow_validation,ux_flow_validation,,P2,done,UX,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/FLOW-04.md,checklist
+FLOW-05,Validate workflow pack execution + resume/cancel path.,ux_flow_validation,ux_flow_validation,,P2,done,UX,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/FLOW-05.md,checklist
+VAL-U01,Provider taxonomy mapping,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-U01.md,checklist
+VAL-U02,Retry/backoff/idempotency math,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-U02.md,checklist
+VAL-U03,Memory scoring/contradiction filtering,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-U03.md,checklist
+VAL-U04,Branch merge conflict logic,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-U04.md,checklist
+VAL-U05,Policy reason-code mapping,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-U05.md,checklist
+VAL-I01,Tauri command -> sidecar IPC v2 path,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-I01.md,checklist
+VAL-I02,Checkpoint write/read + resume,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-I02.md,checklist
+VAL-I03,Memory migration from file source,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-I03.md,checklist
+VAL-I04,Workflow node resume with retries,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-I04.md,checklist
+VAL-I05,Secure credential migration,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-I05.md,checklist
+VAL-E01,Onboarding simple flow,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E01.md,checklist
+VAL-E02,Stream stall + recovery,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E02.md,checklist
+VAL-E03,Permission queue with restart,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E03.md,checklist
+VAL-E04,Memory inspector edit/pin/delete/retrieval effect,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E04.md,checklist
+VAL-E05,Branch create/merge lifecycle,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E05.md,checklist
+VAL-E06,Workflow build/run/resume lifecycle,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E06.md,checklist
+VAL-E07,Browser blocker + recovery path,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-E07.md,checklist
+VAL-B01,Coding multi-file edits,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B01.md,checklist
+VAL-B02,Reliability chaos (network/provider),validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B02.md,checklist
+VAL-B03,Memory recall/contamination resistance,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B03.md,checklist
+VAL-B04,Research citation quality,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B04.md,checklist
+VAL-B05,Browser completion/safety behavior,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B05.md,checklist
+VAL-B06,Enterprise policy compliance,validation_matrix,validation,11,P1,done,QA,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/VAL-B06.md,checklist
+REL-01,Internal feature flags enabled for controlled hardening.,release_controls,release,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/REL-01.md,checklist
+REL-02,Benchmark/checklist/security/crash-free hard gate automation active.,release_controls,release,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/REL-02.md,checklist
+REL-03,Enforce release slip policy when any gate fails.,release_controls,release,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/REL-03.md,checklist
+REL-04,Freeze launch change window and bug severity policy.,release_controls,release,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/REL-04.md,checklist
+REL-05,Execute final release gate and archive evidence bundle.,release_controls,release,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/REL-05.md,checklist
+RISK-01,Big-bang integration complexity mitigation tracking.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-01.md,checklist
+RISK-02,Memory migration corruption dry-run and backup tests.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-02.md,checklist
+RISK-03,Provider API drift monitoring + fallback drills.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-03.md,checklist
+RISK-04,UI complexity creep reviews for simple/pro parity.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-04.md,checklist
+RISK-05,Benchmark overfitting prevention via hidden holdout checks.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-05.md,checklist
+RISK-06,Security regression pre-release audit enforcement.,risk_register,risk,,P2,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/RISK-06.md,checklist
+DOD-01,All workstream tasks `R1`..`Q10` complete.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-01.md,checklist
+DOD-02,All new commands/types/events documented and tested.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-02.md,checklist
+DOD-03,Migration passes on clean + legacy datasets.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-03.md,checklist
+DOD-04,3 consecutive benchmark passes meet thresholds.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-04.md,checklist
+DOD-05,No open P0/P1 defects.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-05.md,checklist
+DOD-06,Security audit unresolved critical/high = 0.,definition_of_done,done_gate,12,P0,done,PM,,See internal-master-tasks.md acceptance criteria,docs/5-5-launch/evidence/DOD-06.md,checklist
+

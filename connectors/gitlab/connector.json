@@ -1,0 +1,41 @@
+{
+  "id": "gitlab",
+  "name": "gitlab",
+  "displayName": "GitLab",
+  "description": "Create issues, manage merge requests, read repository contents, and interact with GitLab APIs",
+  "version": "1.0.0",
+  "icon": "GitBranch",
+  "category": "developer",
+  "tags": ["git", "repositories", "issues", "merge-requests", "code", "version-control", "ci-cd"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "gitlab-mcp"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
+        "description": "GitLab Personal Access Token",
+        "required": true,
+        "placeholder": "glpat-...",
+        "link": "https://gitlab.com/-/user_settings/personal_access_tokens"
+      },
+      {
+        "key": "GITLAB_API_URL",
+        "description": "GitLab API URL (optional, defaults to https://gitlab.com/api/v4)",
+        "required": false,
+        "placeholder": "https://gitlab.com/api/v4"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/yoda-digital/gitlab-mcp#setup",
+    "homepage": "https://github.com/yoda-digital/gitlab-mcp"
+  }
+}

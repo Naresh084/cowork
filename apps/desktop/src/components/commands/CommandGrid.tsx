@@ -1,0 +1,66 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { CommandManifest } from '../../stores/command-store';
+import { useCommandStore } from '../../stores/command-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import { CommandCard } from './CommandCard';
+
+interface CommandGridProps {
+  commands: CommandManifest[];
+  onSelect: (commandId: string) => void;
+  onInstall: (commandId: string) => void;
+}
+
+export function CommandGrid({
+  commands,
+  onSelect,
+  onInstall,
+}: CommandGridProps) {
+  const { isInstalling, isCommandInstalled } = useCommandStore();
+
+  const handleEnable = (commandId: string) => {
+    const cmd = commands.find((c) => c.id === commandId);
+    if (!cmd || cmd.source.type !== 'platform') return;
+
+    const { installedCommandConfigs, addInstalledCommandConfig, updateInstalledCommandConfig } = useSettingsStore.getState();
+    const config = installedCommandConfigs.find((c) => c.name === cmd.frontmatter.name);
+    if (config) {
+      updateInstalledCommandConfig(config.id, { enabled: true });
+    } else {
+      addInstalledCommandConfig({
+        id: cmd.id,
+        name: cmd.frontmatter.name,
+        enabled: true,
+        installedAt: Date.now(),
+        source: 'platform',
+      });
+    }
+  };
+
+  if (commands.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-zinc-500">
+        <span className="text-4xl mb-4">🔍</span>
+        <p className="text-lg">No commands found</p>
+        <p className="text-sm">Try adjusting your search or filters</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {commands.map((command) => (
+        <CommandCard
+          key={command.id}
+          command={command}
+          isInstalled={isCommandInstalled(command.id)}
+          isInstalling={isInstalling.has(command.id)}
+          onSelect={() => onSelect(command.id)}
+          onInstall={() => onInstall(command.id)}
+          onEnable={() => handleEnable(command.id)}
+        />
+      ))}
+    </div>
+  );
+}

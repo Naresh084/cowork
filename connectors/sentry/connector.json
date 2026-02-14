@@ -1,0 +1,26 @@
+{
+  "id": "sentry",
+  "name": "sentry",
+  "displayName": "Sentry",
+  "description": "View and manage error tracking, issues, and performance monitoring in Sentry",
+  "version": "1.0.0",
+  "icon": "AlertTriangle",
+  "category": "developer",
+  "tags": ["errors", "monitoring", "debugging", "performance", "crash-reporting"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://mcp.sentry.dev/mcp"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/getsentry/sentry-mcp",
+    "homepage": "https://mcp.sentry.dev"
+  }
+}

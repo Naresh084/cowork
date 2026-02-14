@@ -1,0 +1,12 @@
+{
+  "name": "task-planner",
+  "displayName": "Task Planner",
+  "description": "Creates detailed implementation plans and task breakdowns. Use for: feature planning, sprint planning, task decomposition, project roadmaps.",
+  "version": "1.0.0",
+  "author": "Cowork Team",
+  "category": "productivity",
+  "icon": "clipboard-list",
+  "tags": ["planning", "tasks", "decomposition", "roadmap", "sprint"],
+  "priority": 87,
+  "source": "built-in"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "notion",
+  "name": "notion",
+  "displayName": "Notion",
+  "description": "Create, read, and update Notion pages, databases, and blocks",
+  "version": "1.0.0",
+  "icon": "FileText",
+  "category": "productivity",
+  "tags": ["notes", "wiki", "database", "documentation", "workspace", "collaboration"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "https://mcp.notion.com/mcp"]
+  },
+  "auth": {
+    "type": "none"
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://developers.notion.com/docs/get-started-with-mcp",
+    "homepage": "https://developers.notion.com/docs/get-started-with-mcp"
+  }
+}

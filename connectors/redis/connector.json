@@ -1,0 +1,39 @@
+{
+  "id": "redis",
+  "name": "redis",
+  "displayName": "Redis",
+  "description": "Interact with Redis key-value store, execute commands, and manage data",
+  "version": "1.0.0",
+  "icon": "Database",
+  "category": "database",
+  "tags": ["cache", "database", "key-value", "redis", "in-memory"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "redis-mcp", "--redis-host", "${REDIS_HOST}", "--redis-port", "${REDIS_PORT}"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "REDIS_HOST",
+        "description": "Redis host",
+        "required": true,
+        "placeholder": "localhost"
+      },
+      {
+        "key": "REDIS_PORT",
+        "description": "Redis port",
+        "required": true,
+        "placeholder": "6379"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "homepage": "https://github.com/gongrzhe/mcp-redis-server"
+  }
+}

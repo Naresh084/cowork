@@ -1,0 +1,42 @@
+{
+  "id": "slack",
+  "name": "slack",
+  "displayName": "Slack",
+  "description": "Send messages, search conversations, manage channels, react to messages, and manage pins in Slack workspaces",
+  "version": "1.0.0",
+  "icon": "MessageSquare",
+  "category": "communication",
+  "tags": ["messaging", "team", "channels", "chat", "collaboration", "workspace"],
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-slack"]
+  },
+  "auth": {
+    "type": "env",
+    "secrets": [
+      {
+        "key": "SLACK_BOT_TOKEN",
+        "description": "Bot User OAuth Token (starts with xoxb-)",
+        "required": true,
+        "placeholder": "xoxb-...",
+        "link": "https://api.slack.com/apps"
+      },
+      {
+        "key": "SLACK_TEAM_ID",
+        "description": "Workspace/Team ID (starts with T)",
+        "required": true,
+        "placeholder": "T...",
+        "validation": "^T[A-Z0-9]+$"
+      }
+    ]
+  },
+  "requirements": {
+    "runtime": "node",
+    "bins": ["npx"]
+  },
+  "documentation": {
+    "setup": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack#setup",
+    "homepage": "https://github.com/modelcontextprotocol/servers"
+  }
+}

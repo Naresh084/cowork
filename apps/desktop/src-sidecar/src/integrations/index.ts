@@ -1,0 +1,805 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import { WhatsAppAdapter } from './adapters/whatsapp-adapter.js';
+import { SlackAdapter } from './adapters/slack-adapter.js';
+import { TelegramAdapter } from './adapters/telegram-adapter.js';
+import { DiscordAdapter } from './adapters/discord-adapter.js';
+import { IMessageBlueBubblesAdapter } from './adapters/imessage-bluebubbles-adapter.js';
+import { TeamsAdapter } from './adapters/teams-adapter.js';
+import { MessageRouter } from './message-router.js';
+import { IntegrationStore, type IntegrationGeneralSettings } from './store.js';
+import { eventEmitter } from '../event-emitter.js';
+import {
+  DEFAULT_WHATSAPP_DENIAL_MESSAGE,
+  SUPPORTED_INTEGRATION_PLATFORMS,
+  type PlatformType,
+  type PlatformStatus,
+} from './types.js';
+import type { BaseAdapter } from './adapters/base-adapter.js';
+const WILDCARD_ALLOW_ALL = '*';
+type WhatsAppRecoveryMode = 'soft' | 'hard';
+
+// ============================================================================
+// Integration Bridge Service
+// ============================================================================
+
+/**
+ * Main service that orchestrates all messaging platform adapters,
+ * the message router, and config persistence.
+ *
+ * Provides a clean API for IPC handlers to:
+ * - Connect/disconnect platforms
+ * - Get statuses
+ * - Send test/notification messages
+ * - Get WhatsApp QR codes
+ */
+export class IntegrationBridgeService {
+  private adapters: Map<PlatformType, BaseAdapter> = new Map();
+  private router: MessageRouter;
+  private store: IntegrationStore;
+  private agentRunner: any = null;
+  private initialized = false;
+  private initializePromise: Promise<void> | null = null;
+  private eventHooksInstalled = false;
+  private platformOpInFlight: Set<PlatformType> = new Set();
+  private healthCache: Map<
+    PlatformType,
+    {
+      health?: PlatformStatus['health'];
+      healthMessage?: string;
+      requiresReconnect?: boolean;
+      lastHealthCheckAt?: number;
+      connected: boolean;
+    }
+  > = new Map();
+
+  constructor() {
+    this.router = new MessageRouter();
+    this.store = new IntegrationStore();
+  }
+
+  private log(message: string): void {
+    process.stderr.write(`[integration] ${message}\n`);
+  }
+
+  private summarizeConfig(
+    platform: PlatformType,
+    config: Record<string, unknown>,
+  ): string {
+    if (platform === 'whatsapp') {
+      const allowFromCount = Array.isArray(config.allowFrom)
+        ? config.allowFrom.length
+        : 0;
+      const hasSessionDir =
+        typeof config.sessionDataDir === 'string' &&
+        config.sessionDataDir.trim().length > 0;
+      const denialMessageLength =
+        typeof config.denialMessage === 'string'
+          ? config.denialMessage.length
+          : 0;
+      return `allowFromCount=${allowFromCount} hasSessionDataDir=${hasSessionDir} denialMessageLength=${denialMessageLength}`;
+    }
+
+    const keys = Object.keys(config).sort();
+    return `keys=${keys.join(',') || '(none)'}`;
+  }
+
+  /**
+   * Initialize the bridge service.
+   * Must be called after agentRunner is ready.
+   */
+  async initialize(agentRunner: any): Promise<void> {
+    if (this.initialized) return;
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
+    }
+
+    this.initializePromise = (async () => {
+      if (this.initialized) return;
+
+      this.agentRunner = agentRunner;
+      this.router.setAgentRunner(agentRunner);
+      await this.store.load();
+      this.router.setSharedSessionWorkingDirectory(
+        this.store.getSettings().sharedSessionWorkingDirectory,
+      );
+
+      // Subscribe to stream:done events for response routing.
+      this.subscribeToAgentEvents();
+
+      // Auto-reconnect previously enabled platforms.
+      const enabled = this.store.getEnabledPlatforms();
+      this.initialized = true;
+      // Keep startup fast: reconnect in background so one slow platform cannot block
+      // app initialization and discovery surfaces (skills/commands/subagents).
+      if (enabled.length > 0) {
+        void this.autoReconnectEnabledPlatforms(enabled);
+      }
+      process.stderr.write(
+        `[integration] Bridge initialized. ${enabled.length} platform(s) configured.\n`,
+      );
+    })().finally(() => {
+      this.initializePromise = null;
+    });
+
+    await this.initializePromise;
+  }
+
+  private async autoReconnectEnabledPlatforms(
+    enabled: Array<{ platform: PlatformType; config: Record<string, unknown> }>,
+  ): Promise<void> {
+    for (const platformConfig of enabled) {
+      try {
+        process.stderr.write(
+          `[integration] Auto-reconnecting ${platformConfig.platform}...\n`,
+        );
+        await this.connect(platformConfig.platform, platformConfig.config);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Auto-reconnect failed for ${platformConfig.platform}: ${msg}\n`,
+        );
+        eventEmitter.error(
+          undefined,
+          `Auto-reconnect failed for ${platformConfig.platform}: ${msg}`,
+          'INTEGRATION_RECONNECT_ERROR',
+        );
+      }
+    }
+  }
+
+  /**
+   * Subscribe to agent events to route responses back to platforms.
+   * Intercepts chat/stream lifecycle events to route responses back to platforms.
+   */
+  private subscribeToAgentEvents(): void {
+    if (this.eventHooksInstalled) {
+      return;
+    }
+    this.eventHooksInstalled = true;
+
+    // Intercept chat:item events for segment/media routing.
+    const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
+    eventEmitter.chatItem = (sessionId: string, item: import('@cowork/shared').ChatItem) => {
+      originalChatItem(sessionId, item);
+      this.router.onChatItem(sessionId, item);
+    };
+
+    // Intercept chat:update events for streaming text updates.
+    const originalChatUpdate = eventEmitter.chatItemUpdate.bind(eventEmitter);
+    eventEmitter.chatItemUpdate = (
+      sessionId: string,
+      itemId: string,
+      updates: Partial<import('@cowork/shared').ChatItem>,
+    ) => {
+      originalChatUpdate(sessionId, itemId, updates);
+      this.router.onChatItemUpdate(sessionId, itemId, updates);
+    };
+
+    // Intercept stream completion to close active integration request state.
+    const originalStreamDone = eventEmitter.streamDone.bind(eventEmitter);
+    eventEmitter.streamDone = (sessionId: string, message: unknown) => {
+      originalStreamDone(sessionId, message);
+      this.router.onStreamDone(sessionId).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error finishing integration stream: ${errMsg}\n`,
+        );
+      });
+    };
+
+    // Intercept errors to clear blocked integration state.
+    const originalError = eventEmitter.error.bind(eventEmitter);
+    eventEmitter.error = (
+      sessionId: string | undefined,
+      errorMessage: string,
+      code?: string,
+      details?: unknown,
+    ) => {
+      originalError(sessionId, errorMessage, code, details);
+      if (sessionId) {
+        this.router.onStreamError(sessionId, errorMessage).catch(() => {
+          // Best-effort cleanup only.
+        });
+      }
+    };
+
+    // Intercept question prompts/resolutions so external CLI HITL can roundtrip to origin chat.
+    const originalQuestionAsk = eventEmitter.questionAsk.bind(eventEmitter);
+    eventEmitter.questionAsk = (sessionId: string, request: unknown) => {
+      originalQuestionAsk(sessionId, request);
+      this.router.onQuestionAsk(sessionId, request).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error routing question ask: ${errMsg}\n`,
+        );
+      });
+    };
+
+    const originalQuestionAnswered = eventEmitter.questionAnswered.bind(eventEmitter);
+    eventEmitter.questionAnswered = (
+      sessionId: string,
+      questionId: string,
+      answer: string | string[],
+    ) => {
+      originalQuestionAnswered(sessionId, questionId, answer);
+      this.router.onQuestionAnswered(sessionId, questionId, answer).catch((err) => {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(
+          `[integration] Error routing question answered: ${errMsg}\n`,
+        );
+      });
+    };
+  }
+
+  /** Connect a platform with given config */
+  async connect(
+    platform: PlatformType,
+    config: Record<string, unknown> = {},
+  ): Promise<void> {
+    const connectStartedAt = Date.now();
+    this.log(
+      `connect:start platform=${platform} inputKeys=${Object.keys(config).sort().join(',') || '(none)'}`,
+    );
+    // Serialize platform operations to avoid concurrent connect/disconnect races.
+    while (this.platformOpInFlight.has(platform)) {
+      this.log(`connect:wait platform=${platform} reason=operation-in-flight`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
+    try {
+    // Ensure previous adapter/browser for this platform is fully torn down before reconnecting.
+    // This prevents profile lock conflicts (e.g. WhatsApp LocalAuth userDataDir in use).
+    if (this.adapters.has(platform)) {
+      const existing = this.adapters.get(platform)!;
+      this.log(`connect:cleanup-existing platform=${platform}`);
+      existing.removeAllListeners();
+      this.router.unregisterAdapter(platform);
+      try {
+        await existing.disconnect();
+      } catch {
+        // Best effort cleanup
+      }
+      this.adapters.delete(platform);
+    }
+
+    if (platform === 'whatsapp') {
+      // Chromium profile locks may persist briefly after teardown.
+      this.log('connect:delay platform=whatsapp reason=profile-lock-buffer');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const adapter = this.createAdapter(platform);
+    const existingConfig = this.store.getConfig(platform)?.config || {};
+    const normalizedConfig = this.normalizePlatformConfig(platform, {
+      ...existingConfig,
+      ...config,
+    });
+    this.log(
+      `connect:normalized platform=${platform} ${this.summarizeConfig(platform, normalizedConfig)}`,
+    );
+
+    // Wire adapter status events to integration event emitter
+    adapter.on('status', (status: PlatformStatus) => {
+      this.log(
+        `event:status platform=${status.platform} connected=${status.connected} error=${status.error ?? '-'}`,
+      );
+      eventEmitter.integrationStatus(status);
+    });
+
+    adapter.on('qr', (qrDataUrl: string) => {
+      this.log(
+        `event:qr platform=${platform} hasDataUrl=${Boolean(qrDataUrl)} length=${qrDataUrl.length}`,
+      );
+      eventEmitter.integrationQR(qrDataUrl);
+    });
+
+    adapter.on('error', (error: Error) => {
+      this.log(`event:error platform=${platform} message=${error.message}`);
+      eventEmitter.error(
+        undefined,
+        `${platform} error: ${error.message}`,
+        'INTEGRATION_PLATFORM_ERROR',
+      );
+    });
+
+    // Attempt connection
+    try {
+      this.log(`connect:adapter-call platform=${platform}`);
+      await adapter.connect(normalizedConfig);
+      this.log(
+        `connect:adapter-returned platform=${platform} elapsedMs=${Date.now() - connectStartedAt}`,
+      );
+    } catch (err) {
+      // Clean up the failed adapter
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.log(
+        `connect:adapter-failed platform=${platform} elapsedMs=${Date.now() - connectStartedAt} error=${errorMessage}`,
+      );
+      adapter.removeAllListeners();
+      try { await adapter.disconnect(); } catch { /* ignore cleanup errors */ }
+      throw err;
+    }
+
+    // Register new adapter
+    this.router.registerAdapter(adapter);
+    this.adapters.set(platform, adapter);
+
+    // Save config for auto-reconnect (only after successful connection)
+    await this.store.setConfig(platform, {
+      platform,
+      enabled: true,
+      config: normalizedConfig,
+    });
+    this.log(`connect:config-saved platform=${platform}`);
+
+    try {
+      const statusWithHealth = await this.getStatusWithHealth(platform);
+      eventEmitter.integrationStatus(statusWithHealth);
+      this.log(
+        `connect:status-emitted platform=${platform} connected=${statusWithHealth.connected} health=${statusWithHealth.health ?? '-'}`,
+      );
+    } catch {
+      // Best effort only; status events continue via adapter hooks.
+      this.log(`connect:status-emission-failed platform=${platform}`);
+    }
+    } finally {
+      this.platformOpInFlight.delete(platform);
+      this.log(
+        `connect:done platform=${platform} elapsedMs=${Date.now() - connectStartedAt}`,
+      );
+    }
+  }
+
+  async recoverWhatsApp(mode: WhatsAppRecoveryMode = 'soft'): Promise<PlatformStatus> {
+    while (this.platformOpInFlight.has('whatsapp')) {
+      this.log('recover:whatsapp:wait reason=operation-in-flight');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const startedAt = Date.now();
+    const storedConfig = this.store.getConfig('whatsapp')?.config || {};
+    const normalizedConfig = this.normalizePlatformConfig('whatsapp', storedConfig);
+    const sessionDataDir = this.resolveWhatsAppSessionDataDir(normalizedConfig);
+    this.log(
+      `recover:whatsapp:start mode=${mode} sessionDataDir=${sessionDataDir} storedConfigKeys=${Object.keys(storedConfig).sort().join(',') || '(none)'}`,
+    );
+
+    if (mode === 'hard') {
+      const activeAdapter = this.adapters.get('whatsapp') as
+        | (BaseAdapter & { disconnectAndForget?: () => Promise<void> })
+        | undefined;
+
+      if (activeAdapter) {
+        this.log('recover:whatsapp:hard active-adapter found; forcing disconnect and forget');
+        activeAdapter.removeAllListeners();
+        this.router.unregisterAdapter('whatsapp');
+        if (typeof activeAdapter.disconnectAndForget === 'function') {
+          await activeAdapter.disconnectAndForget();
+        } else {
+          await activeAdapter.disconnect();
+          await WhatsAppAdapter.clearPersistedSessionData(sessionDataDir);
+        }
+        this.adapters.delete('whatsapp');
+      } else {
+        this.log('recover:whatsapp:hard no active adapter; clearing persisted session data');
+        await WhatsAppAdapter.clearPersistedSessionData(sessionDataDir);
+      }
+    } else {
+      this.log('recover:whatsapp:soft reconnect path');
+      await WhatsAppAdapter.cleanupPersistedProfileLocks(sessionDataDir);
+    }
+
+    await this.connect('whatsapp', normalizedConfig);
+    const status = await this.getStatusWithHealth('whatsapp');
+    this.log(
+      `recover:whatsapp:done mode=${mode} connected=${status.connected} health=${status.health ?? '-'} elapsedMs=${Date.now() - startedAt}`,
+    );
+    return status;
+  }
+
+  /** Persist and apply runtime configuration for a platform */
+  async configure(
+    platform: PlatformType,
+    config: Record<string, unknown> = {},
+  ): Promise<void> {
+    while (this.platformOpInFlight.has(platform)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
+    try {
+      const existingConfig = this.store.getConfig(platform)?.config || {};
+      const normalizedConfig = this.normalizePlatformConfig(platform, {
+        ...existingConfig,
+        ...config,
+      });
+
+      await this.store.setConfig(platform, {
+        platform,
+        enabled: true,
+        config: normalizedConfig,
+      });
+
+      const adapter = this.adapters.get(platform);
+      if (adapter) {
+        await adapter.updateConfig(normalizedConfig);
+        eventEmitter.integrationStatus(adapter.getStatus());
+      }
+    } finally {
+      this.platformOpInFlight.delete(platform);
+    }
+  }
+
+  /** Disconnect a platform */
+  async disconnect(platform: PlatformType): Promise<void> {
+    while (this.platformOpInFlight.has(platform)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    this.platformOpInFlight.add(platform);
+    this.healthCache.delete(platform);
+    try {
+    const adapter = this.adapters.get(platform);
+    if (adapter) {
+      const forgettableAdapter = adapter as BaseAdapter & {
+        disconnectAndForget?: () => Promise<void>;
+      };
+      if (
+        platform === 'whatsapp' &&
+        typeof forgettableAdapter.disconnectAndForget === 'function'
+      ) {
+        await forgettableAdapter.disconnectAndForget();
+      } else {
+        await adapter.disconnect();
+      }
+      this.router.unregisterAdapter(platform);
+      this.adapters.delete(platform);
+    }
+    await this.store.removeConfig(platform);
+    } finally {
+      this.platformOpInFlight.delete(platform);
+    }
+  }
+
+  /** Get statuses of all platforms */
+  getStatuses(): PlatformStatus[] {
+    return SUPPORTED_INTEGRATION_PLATFORMS.map((p) => {
+      const adapter = this.adapters.get(p);
+      return adapter
+        ? adapter.getStatus()
+        : { platform: p, connected: false };
+    });
+  }
+
+  /** Get statuses with live health probes */
+  async getStatusesWithHealth(): Promise<PlatformStatus[]> {
+    return Promise.all(
+      SUPPORTED_INTEGRATION_PLATFORMS.map((platform) =>
+        this.getStatusWithHealth(platform),
+      ),
+    );
+  }
+
+  /** Get one platform status with live health probe */
+  async getStatusWithHealth(platform: PlatformType): Promise<PlatformStatus> {
+    const adapter = this.adapters.get(platform);
+    const baseStatus = adapter
+      ? adapter.getStatus()
+      : ({ platform, connected: false } as PlatformStatus);
+
+    const checkedAt = Date.now();
+    const cached = this.healthCache.get(platform);
+    if (
+      cached &&
+      cached.connected === baseStatus.connected &&
+      typeof cached.lastHealthCheckAt === 'number' &&
+      checkedAt - cached.lastHealthCheckAt < 15000
+    ) {
+      return {
+        ...baseStatus,
+        health: cached.health,
+        healthMessage: cached.healthMessage,
+        requiresReconnect: cached.requiresReconnect,
+        lastHealthCheckAt: cached.lastHealthCheckAt,
+      };
+    }
+
+    if (!adapter) {
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: 'unhealthy',
+        healthMessage: baseStatus.error || 'Disconnected',
+        requiresReconnect: false,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    }
+
+    try {
+      const probe = await adapter.checkHealth();
+      const requiresReconnect =
+        typeof probe.requiresReconnect === 'boolean'
+          ? probe.requiresReconnect
+          : baseStatus.connected && probe.health === 'unhealthy';
+
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: probe.health,
+        healthMessage: probe.healthMessage || baseStatus.error,
+        requiresReconnect,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status: PlatformStatus = {
+        ...baseStatus,
+        health: 'unhealthy',
+        healthMessage: message || baseStatus.error || 'Health check failed',
+        requiresReconnect: baseStatus.connected,
+        lastHealthCheckAt: checkedAt,
+      };
+      this.healthCache.set(platform, {
+        health: status.health,
+        healthMessage: status.healthMessage,
+        requiresReconnect: status.requiresReconnect,
+        lastHealthCheckAt: status.lastHealthCheckAt,
+        connected: status.connected,
+      });
+      return status;
+    }
+  }
+
+  /** Get WhatsApp QR code (if available during connection) */
+  getWhatsAppQR(): string | null {
+    const adapter = this.adapters.get('whatsapp') as
+      | WhatsAppAdapter
+      | undefined;
+    return adapter?.getQRCode() ?? null;
+  }
+
+  /** Send a test message on a platform */
+  async sendTestMessage(
+    platform: PlatformType,
+    message: string,
+  ): Promise<void> {
+    const adapter = this.adapters.get(platform);
+    if (!adapter || !adapter.getStatus().connected) {
+      throw new Error(`${platform} is not connected`);
+    }
+    const chatId = adapter.getDefaultChatId();
+    if (!chatId) {
+      throw new Error(
+        `No active chat for ${platform}. Send a message from the platform first.`,
+      );
+    }
+    await adapter.sendMessage(chatId, message);
+  }
+
+  /** Send a notification message (used by notification tools) */
+  async sendNotification(
+    platform: PlatformType,
+    message: string,
+    chatId?: string,
+  ): Promise<void> {
+    const adapter = this.adapters.get(platform);
+    if (!adapter || !adapter.getStatus().connected) {
+      throw new Error(`${platform} is not connected`);
+    }
+    const targetChat = chatId || adapter.getDefaultChatId();
+    if (!targetChat) {
+      throw new Error(
+        `No target chat for ${platform}. Send a message from the platform first.`,
+      );
+    }
+    await adapter.sendMessage(targetChat, message);
+  }
+
+  /** Create adapter instance by platform type */
+  private createAdapter(platform: PlatformType): BaseAdapter {
+    switch (platform) {
+      case 'whatsapp':
+        return new WhatsAppAdapter();
+      case 'slack':
+        return new SlackAdapter();
+      case 'telegram':
+        return new TelegramAdapter();
+      case 'discord':
+        return new DiscordAdapter();
+      case 'imessage':
+        return new IMessageBlueBubblesAdapter();
+      case 'teams':
+        return new TeamsAdapter();
+      default:
+        throw new Error(`Unknown platform: ${platform}`);
+    }
+  }
+
+  /** Get config store (for IPC handlers) */
+  getStore(): IntegrationStore {
+    return this.store;
+  }
+
+  getSettings(): IntegrationGeneralSettings {
+    return this.store.getSettings();
+  }
+
+  async updateSettings(settings: IntegrationGeneralSettings): Promise<void> {
+    const normalized = this.normalizeIntegrationSettings(settings);
+    await this.store.setSettings(normalized);
+    this.router.setSharedSessionWorkingDirectory(
+      normalized.sharedSessionWorkingDirectory,
+    );
+
+    const sessionId = this.router.getSessionId();
+    if (!sessionId) {
+      return;
+    }
+
+    if (
+      normalized.sharedSessionWorkingDirectory &&
+      this.agentRunner &&
+      typeof this.agentRunner.updateSessionWorkingDirectory === 'function'
+    ) {
+      try {
+        await Promise.resolve(
+          this.agentRunner.updateSessionWorkingDirectory(
+            sessionId,
+            normalized.sharedSessionWorkingDirectory,
+          ),
+        );
+        eventEmitter.sessionUpdated({
+          id: sessionId,
+          workingDirectory: normalized.sharedSessionWorkingDirectory,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(
+          `[integration] Failed to apply shared session working directory: ${message}\n`,
+        );
+      }
+    }
+  }
+
+  private normalizePlatformConfig(
+    platform: PlatformType,
+    config: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (platform === 'whatsapp') {
+      const allowFromRaw = Array.isArray(config.allowFrom) ? config.allowFrom : [];
+      const allowFromSet = new Set<string>();
+      for (const value of allowFromRaw) {
+        const entry = String(value ?? '').trim();
+        if (!entry) {
+          continue;
+        }
+        if (entry === WILDCARD_ALLOW_ALL || entry.toLowerCase() === 'all') {
+          allowFromSet.add(WILDCARD_ALLOW_ALL);
+          continue;
+        }
+        const normalized = this.normalizeE164Like(value);
+        if (normalized) {
+          allowFromSet.add(normalized);
+        }
+      }
+
+      const denialMessage =
+        typeof config.denialMessage === 'string' && config.denialMessage.trim()
+          ? config.denialMessage.trim().slice(0, 280)
+          : DEFAULT_WHATSAPP_DENIAL_MESSAGE;
+
+      return {
+        ...config,
+        senderPolicy: 'allowlist',
+        allowFrom: Array.from(allowFromSet),
+        denialMessage,
+      };
+    }
+
+    if (platform === 'discord') {
+      const allowedGuildIds = Array.isArray(config.allowedGuildIds)
+        ? config.allowedGuildIds.map((id) => String(id).trim()).filter(Boolean)
+        : [];
+      const allowedChannelIds = Array.isArray(config.allowedChannelIds)
+        ? config.allowedChannelIds.map((id) => String(id).trim()).filter(Boolean)
+        : [];
+
+      return {
+        ...config,
+        botToken: typeof config.botToken === 'string' ? config.botToken.trim() : '',
+        allowedGuildIds,
+        allowedChannelIds,
+        allowDirectMessages: config.allowDirectMessages !== false,
+      };
+    }
+
+    if (platform === 'imessage') {
+      const allowHandles = Array.isArray(config.allowHandles)
+        ? config.allowHandles.map((entry) => String(entry).trim()).filter(Boolean)
+        : [];
+      const pollIntervalSeconds =
+        typeof config.pollIntervalSeconds === 'number'
+          ? Math.max(5, Math.min(300, Math.floor(config.pollIntervalSeconds)))
+          : 20;
+
+      return {
+        ...config,
+        serverUrl:
+          typeof config.serverUrl === 'string'
+            ? config.serverUrl.trim().replace(/\/$/, '')
+            : '',
+        accessToken: typeof config.accessToken === 'string' ? config.accessToken.trim() : '',
+        defaultChatGuid:
+          typeof config.defaultChatGuid === 'string' ? config.defaultChatGuid.trim() : '',
+        allowHandles,
+        pollIntervalSeconds,
+      };
+    }
+
+    if (platform === 'teams') {
+      const pollIntervalSeconds =
+        typeof config.pollIntervalSeconds === 'number'
+          ? Math.max(10, Math.min(300, Math.floor(config.pollIntervalSeconds)))
+          : 30;
+
+      return {
+        ...config,
+        tenantId: typeof config.tenantId === 'string' ? config.tenantId.trim() : '',
+        clientId: typeof config.clientId === 'string' ? config.clientId.trim() : '',
+        clientSecret:
+          typeof config.clientSecret === 'string' ? config.clientSecret.trim() : '',
+        teamId: typeof config.teamId === 'string' ? config.teamId.trim() : '',
+        channelId: typeof config.channelId === 'string' ? config.channelId.trim() : '',
+        pollIntervalSeconds,
+      };
+    }
+
+    return config;
+  }
+
+  private normalizeE164Like(value: unknown): string | null {
+    const raw = typeof value === 'string' ? value : String(value ?? '');
+    const digits = raw.replace(/\D+/g, '');
+    if (!digits) {
+      return null;
+    }
+    return `+${digits}`;
+  }
+
+  private normalizeIntegrationSettings(
+    settings: IntegrationGeneralSettings,
+  ): IntegrationGeneralSettings {
+    const sharedSessionWorkingDirectory =
+      typeof settings.sharedSessionWorkingDirectory === 'string'
+        ? settings.sharedSessionWorkingDirectory.trim()
+        : '';
+
+    return sharedSessionWorkingDirectory
+      ? { sharedSessionWorkingDirectory }
+      : {};
+  }
+
+  private resolveWhatsAppSessionDataDir(config: Record<string, unknown>): string {
+    return WhatsAppAdapter.resolveSessionDataDir(config.sessionDataDir);
+  }
+}
+
+// Singleton instance
+export const integrationBridge = new IntegrationBridgeService();
