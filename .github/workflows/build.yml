@@ -74,7 +74,19 @@ jobs:
         shell: bash
         run: |
           mkdir -p apps/desktop/src-tauri/binaries
-          touch apps/desktop/src-tauri/binaries/.gitkeep
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            TRIPLE="aarch64-apple-darwin"
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            TRIPLE="x86_64-unknown-linux-gnu"
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            TRIPLE="x86_64-pc-windows-msvc"
+          fi
+          touch "apps/desktop/src-tauri/binaries/sidecar-${TRIPLE}"
+          touch "apps/desktop/src-tauri/binaries/cowork-agentd-${TRIPLE}"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            touch "apps/desktop/src-tauri/binaries/sidecar-${TRIPLE}.exe"
+            touch "apps/desktop/src-tauri/binaries/cowork-agentd-${TRIPLE}.exe"
+          fi
 
       - name: Typecheck frontend
         run: pnpm typecheck
