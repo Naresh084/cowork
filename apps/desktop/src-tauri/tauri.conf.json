@@ -48,7 +48,7 @@
     "macOS": {
       "minimumSystemVersion": "10.15",
       "exceptionDomain": "",
-      "signingIdentity": null,
+      "signingIdentity": "-",
       "entitlements": "./Cowork.entitlements",
       "frameworks": []
     },

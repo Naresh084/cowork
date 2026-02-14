@@ -357,6 +357,7 @@ fn run_command(program: &str, args: &[String]) -> Result<Output, String> {
         .map_err(|e| format!("Failed to run command `{}`: {}", command_preview(program, args), e))
 }
 
+#[allow(dead_code)]
 fn run_command_expect_success(program: &str, args: &[String]) -> Result<String, String> {
     let output = run_command(program, args)?;
     if output.status.success() {
