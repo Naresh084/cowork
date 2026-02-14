@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "native-tls"] }
 dirs = "5"
 base64 = "0.22"
-keyring = "2.3"
+keyring = "3.6"
 aes-gcm = "0.10"
 rand = "0.8"
 sha2 = "0.10"
