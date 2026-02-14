@@ -70,3 +70,16 @@ temp/
 # Sidecar binaries (built during CI)
 apps/desktop/src-tauri/binaries/sidecar-*
 !apps/desktop/src-tauri/binaries/.gitkeep
+
+# Generated output / artifacts
+output/
+logs.txt
+
+# Agent prompts (internal only)
+AGENT_MISSION.md
+
+# Test reports
+playwright-report/
+
+# Local AI state
+.cowork/
