@@ -1,7 +1,6 @@
+#!/usr/bin/env node
 // Copyright (c) 2026 Naresh. All rights reserved.
 // Licensed under the MIT License. See LICENSE file for details.
-
-#!/usr/bin/env node
 
 import fs from 'node:fs';
 import path from 'node:path';
