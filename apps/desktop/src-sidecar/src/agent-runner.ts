@@ -7062,6 +7062,13 @@ ${stitchGuidance}
     // Determine AGENTS.md paths for DeepAgents built-in memory loading
     const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
     const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
+    const largeToolResultsRoot = this.getLargeToolResultsDir(session.id);
+    try {
+      await mkdir(largeToolResultsRoot, { recursive: true });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[tool-output] Failed to prepare large tool results directory: ${reason}`);
+    }
 
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const promptBuild = await this.buildSystemPromptForSession(session, tools);
@@ -7090,6 +7097,17 @@ ${stitchGuidance}
         const routeBackends: Record<string, FilesystemBackend> = {
           '/': new FilesystemBackend({
             rootDir: resolve(session.workingDirectory),
+            virtualMode: true,
+          }),
+          // DeepAgents writes oversized tool outputs to /large_tool_results/* by default.
+          // Route that path to app data so chat working directories remain clean.
+          '/large_tool_results/': new FilesystemBackend({
+            rootDir: largeToolResultsRoot,
+            virtualMode: true,
+          }),
+          // Defensive alias in case any middleware uses hyphenated path form.
+          '/large-tool-results/': new FilesystemBackend({
+            rootDir: largeToolResultsRoot,
             virtualMode: true,
           }),
         };
@@ -7132,6 +7150,14 @@ ${stitchGuidance}
    */
   private getSkillsDirectory(): string {
     return skillService.getManagedSkillsDir();
+  }
+
+  private getLargeToolResultsDir(sessionId: string): string {
+    const configuredAppDataDir =
+      typeof this.appDataDir === 'string' && this.appDataDir.trim().length > 0
+        ? this.appDataDir
+        : join(homedir(), '.cowork');
+    return join(configuredAppDataDir, 'runtime', 'large-tool-results', sessionId);
   }
 
   private async resolveDeepAgentSkillConfig(): Promise<{
