@@ -154,7 +154,7 @@ jobs:
         working-directory: apps/desktop/src-sidecar
 
       - name: Upload sidecar artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sidecar-${{ matrix.output-suffix }}
           path: apps/desktop/src-sidecar/sidecar-${{ matrix.output-suffix }}*
