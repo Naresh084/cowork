@@ -63,6 +63,9 @@ jobs:
       - name: Sync desktop icons
         run: pnpm --filter @cowork/desktop icon:sync
 
+      - name: Build workspace packages
+        run: pnpm turbo run build --filter='./packages/*'
+
       - name: Build sidecar
         run: pnpm build
         working-directory: apps/desktop/src-sidecar

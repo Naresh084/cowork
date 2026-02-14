@@ -166,7 +166,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
-        working-directory: apps/desktop/src-sidecar
+
+      - name: Build workspace packages
+        run: pnpm turbo run build --filter='./packages/*'
 
       - name: Build sidecar
         run: pnpm build
