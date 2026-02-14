@@ -767,7 +767,6 @@ pub fn resolve_sidecar_dir(app_data_dir: &str) -> Result<PathBuf, String> {
     })?;
 
     ensure_runtime_binary(&runtime_dir, app_data_dir, "sidecar")?;
-    ensure_runtime_binary(&runtime_dir, app_data_dir, "cowork-agentd")?;
 
     Ok(runtime_dir.canonicalize().unwrap_or(runtime_dir))
 }
@@ -906,7 +905,8 @@ fn spawn_daemon_process(
             .args([
                 "exec",
                 "tsx",
-                "src/daemon.ts",
+                "src/index.ts",
+                "--daemon",
                 "--app-data-dir",
                 app_data_dir,
                 "--endpoint",
@@ -930,15 +930,15 @@ fn spawn_daemon_process(
             .map_err(|e| format!("Failed to spawn daemon (dev mode): {}", e))
     } else {
         let binary_name = if cfg!(windows) {
-            "cowork-agentd.exe"
+            "sidecar.exe"
         } else {
-            "cowork-agentd"
+            "sidecar"
         };
         let binary_path = sidecar_dir.join(binary_name);
 
         if !binary_path.exists() {
             return Err(format!(
-                "Daemon binary not found at: {:?}. Please reinstall the application.",
+                "Sidecar binary not found at: {:?}. Please reinstall the application.",
                 binary_path
             ));
         }
@@ -946,6 +946,7 @@ fn spawn_daemon_process(
         let mut command = Command::new(binary_path);
         command
             .args([
+                "--daemon",
                 "--app-data-dir",
                 app_data_dir,
                 "--endpoint",

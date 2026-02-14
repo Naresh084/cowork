@@ -2,6 +2,7 @@ name: "\U0001F680 Auto Release"
 run-name: "\U0001F680 Release build triggered by ${{ github.actor }}"
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -248,6 +249,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Build workspace packages
+        run: pnpm turbo run build --filter='./packages/*'
+
       - name: Sync desktop icons
         run: pnpm --filter @cowork/desktop icon:sync
 
@@ -257,26 +261,14 @@ jobs:
           name: ${{ matrix.sidecar-artifact }}
           path: apps/desktop/src-tauri/binaries/
 
-      - name: Rename sidecar binary (Unix)
-        if: matrix.platform != 'windows-latest'
+      - name: Prepare sidecar binary
         shell: bash
         run: |
           cd apps/desktop/src-tauri/binaries
-          if [ -f "sidecar-${{ matrix.sidecar-artifact }}" ]; then
-            mv "sidecar-${{ matrix.sidecar-artifact }}" "sidecar-${{ matrix.target }}"
-          fi
-          chmod +x sidecar-*
           ls -la
-
-      - name: Rename sidecar binary (Windows)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        run: |
-          cd apps/desktop/src-tauri/binaries
-          if (Test-Path "sidecar-${{ matrix.sidecar-artifact }}") {
-            Move-Item "sidecar-${{ matrix.sidecar-artifact }}" "sidecar-${{ matrix.target }}.exe"
-          }
-          Get-ChildItem
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            chmod +x sidecar-*
+          fi
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0

@@ -35,7 +35,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/sidecar", "binaries/cowork-agentd"],
+    "externalBin": ["binaries/sidecar"],
     "resources": ["binaries/*"],
     "icon": [
       "icons/icon.png",

@@ -252,21 +252,25 @@ fn resolve_daemon_exec_spec() -> Result<DaemonExecSpec, String> {
     }
 
     let sidecar_dir = resolve_sidecar_dir(&app_data_dir.to_string_lossy())?;
-    let daemon_binary = if cfg!(windows) {
-        sidecar_dir.join("cowork-agentd.exe")
+    let sidecar_binary = if cfg!(windows) {
+        sidecar_dir.join("sidecar.exe")
     } else {
-        sidecar_dir.join("cowork-agentd")
+        sidecar_dir.join("sidecar")
     };
-    if !daemon_binary.exists() {
+    if !sidecar_binary.exists() {
         return Err(format!(
-            "Daemon binary not found at {:?}. Reinstall the app or run sidecar packaging.",
-            daemon_binary
+            "Sidecar binary not found at {:?}. Reinstall the app or run sidecar packaging.",
+            sidecar_binary
         ));
     }
 
+    // Prepend --daemon flag so the single sidecar binary runs in daemon mode
+    let mut daemon_args = vec!["--daemon".to_string()];
+    daemon_args.extend(args);
+
     Ok(DaemonExecSpec {
-        program: daemon_binary.to_string_lossy().to_string(),
-        args,
+        program: sidecar_binary.to_string_lossy().to_string(),
+        args: daemon_args,
         app_data_dir,
         endpoint,
         token_file,

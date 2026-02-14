@@ -81,11 +81,10 @@ jobs:
           elif [[ "$RUNNER_OS" == "Windows" ]]; then
             TRIPLE="x86_64-pc-windows-msvc"
           fi
-          touch "apps/desktop/src-tauri/binaries/sidecar-${TRIPLE}"
-          touch "apps/desktop/src-tauri/binaries/cowork-agentd-${TRIPLE}"
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             touch "apps/desktop/src-tauri/binaries/sidecar-${TRIPLE}.exe"
-            touch "apps/desktop/src-tauri/binaries/cowork-agentd-${TRIPLE}.exe"
+          else
+            touch "apps/desktop/src-tauri/binaries/sidecar-${TRIPLE}"
           fi
 
       - name: Typecheck frontend
