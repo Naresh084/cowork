@@ -38,42 +38,30 @@ jobs:
       - name: Determine next version
         id: version
         run: |
-          # Get latest tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          echo "Latest tag: $LATEST_TAG"
+          # Read version from tauri.conf.json (single source of truth)
+          VERSION=$(jq -r '.version' apps/desktop/src-tauri/tauri.conf.json)
+          echo "Version from tauri.conf.json: $VERSION"
 
-          # Check if HEAD is already tagged
-          HEAD_TAG=$(git tag --points-at HEAD 2>/dev/null | grep '^v' | head -1)
-          if [ -n "$HEAD_TAG" ]; then
-            echo "HEAD is already tagged as $HEAD_TAG, skipping release"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "version=${HEAD_TAG#v}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Strip 'v' prefix and split
-          VERSION="${LATEST_TAG#v}"
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          PATCH=$(echo "$VERSION" | cut -d. -f3)
-
-          # Check commit messages for version hints
-          COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s" -10)
-
-          if echo "$COMMITS" | grep -qiE '^(breaking|major)'; then
-            MAJOR=$((MAJOR + 1))
-            MINOR=0
-            PATCH=0
-          elif echo "$COMMITS" | grep -qiE '^(feat|feature|minor)'; then
-            MINOR=$((MINOR + 1))
-            PATCH=0
-          else
+          # Check if this version tag already exists
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            HEAD_TAG=$(git tag --points-at HEAD 2>/dev/null | grep "^v${VERSION}$" | head -1)
+            if [ -n "$HEAD_TAG" ]; then
+              echo "HEAD is already tagged as v${VERSION}, skipping release"
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "version=${VERSION}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            # Tag exists but not at HEAD — bump patch
+            MAJOR=$(echo "$VERSION" | cut -d. -f1)
+            MINOR=$(echo "$VERSION" | cut -d. -f2)
+            PATCH=$(echo "$VERSION" | cut -d. -f3)
             PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+            echo "Tag already exists, bumped to: $VERSION"
           fi
 
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "Next version: $NEW_VERSION"
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Next version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "should_release=true" >> $GITHUB_OUTPUT
 
   create-release:
