@@ -27,7 +27,7 @@ dirs = "5"
 base64 = "0.22"
 keyring = "2.3"
 aes-gcm = "0.10"
-rand = "0.8"
+rand = "0.10"
 sha2 = "0.10"
 
 [features]
