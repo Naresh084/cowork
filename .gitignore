@@ -83,3 +83,6 @@ playwright-report/
 
 # Local AI state
 .cowork/
+
+# Reference repos (submodule leftovers)
+oauth-reference/
