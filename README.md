@@ -1,33 +1,59 @@
 <p align="center">
-  <img src="apps/desktop/src-tauri/icons/icon.svg" width="88" height="88" alt="Cowork" />
+  <img src="apps/desktop/src-tauri/icons/icon.svg" width="100" height="100" alt="Cowork" />
 </p>
 
 <h1 align="center">Cowork</h1>
 
 <p align="center">
-  <strong>AI command center for coding, research, tools, and integrations</strong>
+  <strong>Your AI command center for coding, research, tools, and integrations</strong>
 </p>
 
 <p align="center">
-  Multi-provider desktop app built with Tauri + React + TypeScript + a Node.js sidecar agent runtime.
+  Multi-provider desktop app built with Tauri 2.0 + React + TypeScript + a Node.js sidecar agent runtime.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Naresh084/cowork/releases/latest"><img src="https://img.shields.io/github/v/release/Naresh084/cowork?style=flat-square&color=blue" alt="Latest Release" /></a>
+  <a href="https://github.com/Naresh084/cowork/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/Naresh084/cowork/build.yml?branch=main&style=flat-square&label=build" alt="Build Status" /></a>
+  <a href="https://github.com/Naresh084/cowork/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Naresh084/cowork?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen?style=flat-square" alt="Platform" />
+  <a href="https://github.com/Naresh084/cowork/stargazers"><img src="https://img.shields.io/github/stars/Naresh084/cowork?style=flat-square" alt="Stars" /></a>
+  <a href="https://github.com/Naresh084/cowork/releases"><img src="https://img.shields.io/github/downloads/Naresh084/cowork/total?style=flat-square&color=orange" alt="Downloads" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Naresh084/cowork/releases/latest">Download</a> &middot;
+  <a href="docs/GET_STARTED.md">Get Started</a> &middot;
+  <a href="docs/DEVELOPMENT.md">Development</a> &middot;
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-## What You Get
+## Why Cowork
 
-Cowork combines chat, tool execution, browser automation, research, media generation, and integrations in one desktop workflow.
+Stop juggling ChatGPT, Claude, Gemini, and a dozen browser tabs. Cowork puts 8 AI providers, 51 skills, and 6 messaging platforms into one native desktop app that actually does things on your computer.
 
-Current platform scope:
+### At a Glance
 
-- 8 chat providers: Google, OpenAI, Anthropic, OpenRouter, Moonshot (Kimi), GLM, DeepSeek, LM Studio
-- 6 messaging integrations: WhatsApp, Slack, Telegram, Discord, iMessage (BlueBubbles), Microsoft Teams
-- Unified web tools: `web_search` and `web_fetch` with provider-aware routing and fallback paths
-- Unified media tools: `generate_image`, `edit_image`, `generate_video`, `analyze_video`
-- `computer_use` browser automation with provider-aware routing
-- `deep_research` long-form autonomous research flow
-- 51 skills, 10 subagents, 23 connector configs, and 5 slash-command packs
-- Session persistence, memory system, workflow automations, tool policies, permission gates
+| | |
+|---|---|
+| **AI Providers** | Google, OpenAI, Anthropic, OpenRouter, Moonshot, GLM, DeepSeek, LM Studio |
+| **Messaging** | WhatsApp, Slack, Telegram, Discord, iMessage, Microsoft Teams |
+| **Skills** | 51 built-in skills, 10 subagents, 23 MCP connectors, 5 command packs |
+| **Platforms** | macOS (Apple Silicon + Intel), Windows, Linux (deb/rpm/AppImage) |
+| **Stack** | Tauri 2.0 (Rust) + React 18 + Node.js sidecar + SQLite |
+
+### What You Get
+
+- **Multi-provider chat** - switch AI providers mid-session, same tools everywhere
+- **Web search + fetch** with provider-aware routing and external fallbacks (Exa / Tavily / Google)
+- **Media generation** - images, video, editing from chat (Google / OpenAI / Fal backends)
+- **Browser automation** - `computer_use` with native provider routing
+- **Deep research** - autonomous long-form research flows
+- **Workflow automation** - visual builder, triggers, scheduling, durable runs
+- **6 messaging bridges** - receive and reply across platforms from one session
+- **Session persistence** - memory system, tool policies, permission gates
 
 ---
 
@@ -482,9 +508,9 @@ Output path:
 
 - `apps/desktop/src-tauri/target/release/bundle/`
 
-Auto-update note:
+Auto-update:
 
-- Update plugin is wired, but auto-update rollout is currently disabled in app setup until proper signing key workflow is configured.
+- The Tauri updater plugin is configured with signed releases. The app checks for updates on launch from GitHub Releases.
 
 ---
 
@@ -531,4 +557,4 @@ Auto-update note:
 
 ## License
 
-Private and proprietary.
+[MIT License](LICENSE) - Copyright (c) 2026 Naresh

@@ -121,8 +121,10 @@ jobs:
             | macOS (Apple Silicon) | `Cowork_${{ needs.determine-version.outputs.version }}_aarch64.dmg` |
             | macOS (Intel) | `Cowork_${{ needs.determine-version.outputs.version }}_x64.dmg` |
             | Windows (64-bit) | `Cowork_${{ needs.determine-version.outputs.version }}_x64-setup.exe` |
+            | Windows (MSI) | `Cowork_${{ needs.determine-version.outputs.version }}_x64_en-US.msi` |
             | Linux (AppImage) | `Cowork_${{ needs.determine-version.outputs.version }}_amd64.AppImage` |
-            | Linux (Debian) | `Cowork_${{ needs.determine-version.outputs.version }}_amd64.deb` |
+            | Linux (Debian/Ubuntu) | `Cowork_${{ needs.determine-version.outputs.version }}_amd64.deb` |
+            | Linux (Fedora/RHEL) | `Cowork-${{ needs.determine-version.outputs.version }}-1.x86_64.rpm` |
 
             ### What's Changed
 

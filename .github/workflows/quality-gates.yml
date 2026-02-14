@@ -64,6 +64,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace packages
+        run: pnpm turbo run build --filter='./packages/*'
+
       - name: Install Playwright Chromium
         run: pnpm --filter @cowork/desktop exec playwright install --with-deps chromium
 
