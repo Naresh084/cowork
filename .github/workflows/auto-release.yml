@@ -1,4 +1,5 @@
-name: Auto Release
+name: "\U0001F680 Auto Release"
+run-name: "\U0001F680 Release build triggered by ${{ github.actor }}"
 
 on:
   push:
