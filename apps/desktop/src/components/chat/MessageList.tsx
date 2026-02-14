@@ -4,19 +4,14 @@ import {
   Copy,
   Check,
   ChevronDown,
-  ChevronRight,
   Sparkles,
   Code,
-  Shield,
-  ShieldAlert,
   CheckCircle2,
-  XCircle,
   Circle,
   Loader2,
   Mic,
   ArrowDown,
   Search,
-  Clock3,
   Database,
 } from 'lucide-react';
 import { useChatStore, deriveMessagesFromItems, deriveToolMapFromItems, deriveTurnActivitiesFromItems, type ExtendedPermissionRequest, type ToolExecution, type MediaActivityItem, type ReportActivityItem, type DesignActivityItem, type MemoryActivityItem, type UserQuestion } from '../../stores/chat-store';
@@ -35,7 +30,6 @@ import { ToolExecutionCard } from './ToolExecutionCard';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import remarkGfm from 'remark-gfm';
 import { fixNestedCodeFences } from '../../lib/fix-markdown';
-import { PolicyPill } from '../ui/PolicyPill';
 
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
@@ -116,23 +110,6 @@ function messageContentToSearchText(content: Message['content']): string {
     .trim();
 }
 
-function sortPendingPermissions(
-  pendingPermissions: ExtendedPermissionRequest[],
-): ExtendedPermissionRequest[] {
-  return [...pendingPermissions].sort((left, right) => {
-    if (left.createdAt !== right.createdAt) {
-      return left.createdAt - right.createdAt;
-    }
-    return left.id.localeCompare(right.id);
-  });
-}
-
-const PERMISSION_TIMEOUT_SECONDS_BY_RISK: Record<'low' | 'medium' | 'high', number> = {
-  low: 90,
-  medium: 60,
-  high: 30,
-};
-
 export function MessageList({ optimisticFirstMessage = null }: MessageListProps) {
   const { activeSessionId } = useSessionStore();
   const branchesBySession = useSessionStore((state) => state.branchesBySession);
@@ -189,17 +166,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     return new Set(Array.from(latestAssistantByTurn.values(), (item) => item.id));
   }, [chatItems]);
   const artifacts = agentState.artifacts;
-  const { respondToQuestion, respondToPermission, loadOlderMessages } = useChatStore();
+  const { respondToQuestion, loadOlderMessages } = useChatStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
-  const permissionRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasManualScroll, setHasManualScroll] = useState(false);
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
-  const [activePendingPermissionIndex, setActivePendingPermissionIndex] = useState(0);
   const [mergeSourceBranchId, setMergeSourceBranchId] = useState('');
   const [branchActionBusy, setBranchActionBusy] = useState<null | 'create' | 'switch' | 'merge'>(null);
 
@@ -235,11 +210,6 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
       setMergeSourceBranchId(mergeCandidates[0]?.id ?? '');
     }
   }, [mergeCandidates, mergeSourceBranchId]);
-
-  const sortedPendingPermissions = useMemo(
-    () => sortPendingPermissions(pendingPermissions),
-    [pendingPermissions],
-  );
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     bottomRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -287,56 +257,6 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     }
     messageRefMap.current.delete(messageId);
   }, []);
-
-  const registerPermissionRef = useCallback(
-    (permissionId: string, node: HTMLDivElement | null) => {
-      if (node) {
-        permissionRefMap.current.set(permissionId, node);
-        return;
-      }
-      permissionRefMap.current.delete(permissionId);
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (sortedPendingPermissions.length === 0) {
-      setActivePendingPermissionIndex(0);
-      return;
-    }
-    setActivePendingPermissionIndex((previous) =>
-      Math.min(Math.max(previous, 0), sortedPendingPermissions.length - 1),
-    );
-  }, [sortedPendingPermissions.length]);
-
-  const jumpToPermission = useCallback(
-    (permissionId: string) => {
-      const node = permissionRefMap.current.get(permissionId);
-      if (node) {
-        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return;
-      }
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    },
-    [],
-  );
-
-  const cyclePendingPermission = useCallback(
-    (offset: number) => {
-      if (sortedPendingPermissions.length === 0) return;
-      setActivePendingPermissionIndex((previous) => {
-        const nextIndex =
-          (previous + offset + sortedPendingPermissions.length) %
-          sortedPendingPermissions.length;
-        const nextPermission = sortedPendingPermissions[nextIndex];
-        if (nextPermission) {
-          jumpToPermission(nextPermission.id);
-        }
-        return nextIndex;
-      });
-    },
-    [jumpToPermission, sortedPendingPermissions],
-  );
 
   const handleCreateBranchInline = useCallback(async () => {
     if (!activeSessionId) return;
@@ -392,15 +312,6 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
           Math.min(
             Math.max(activeSearchResultIndex, 0),
             Math.max(0, matchingMessageIds.length - 1)
-          )
-        ]
-      : null;
-  const activePendingPermission =
-    sortedPendingPermissions.length > 0
-      ? sortedPendingPermissions[
-          Math.min(
-            Math.max(activePendingPermissionIndex, 0),
-            sortedPendingPermissions.length - 1,
           )
         ]
       : null;
@@ -551,22 +462,7 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
             }
 
             if (activity.type === 'permission') {
-              const permission = pendingPermissions.find((p) => p.id === activity.permissionId);
-              if (!permission) return null;
-              return (
-                <div
-                  key={activity.id}
-                  ref={(node) => registerPermissionRef(permission.id, node)}
-                  data-pending-permission-id={permission.id}
-                >
-                  <PermissionInlineCard
-                    request={permission}
-                    onDecision={(decision) => {
-                      void respondToPermission(permission.sessionId, permission.id, decision);
-                    }}
-                  />
-                </div>
-              );
+              return null;
             }
 
             if (activity.type === 'question') {
@@ -739,18 +635,6 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
                   </>
                 )}
               </div>
-              {sortedPendingPermissions.length > 0 && (
-                <PendingPermissionSummaryCard
-                  permissions={sortedPendingPermissions}
-                  activePermissionId={activePendingPermission?.id ?? null}
-                  onJumpToPermission={(permissionId, index) => {
-                    setActivePendingPermissionIndex(index);
-                    jumpToPermission(permissionId);
-                  }}
-                  onJumpPrevious={() => cyclePendingPermission(-1)}
-                  onJumpNext={() => cyclePendingPermission(1)}
-                />
-              )}
             </div>
           </div>
 
@@ -913,221 +797,92 @@ interface MessageBubbleProps {
   showAvatar?: boolean;
 }
 
-interface PendingPermissionSummaryCardProps {
-  permissions: ExtendedPermissionRequest[];
-  activePermissionId: string | null;
-  onJumpToPermission: (permissionId: string, index: number) => void;
-  onJumpPrevious: () => void;
-  onJumpNext: () => void;
+function collectStructuredRows(value: unknown, maxRows = 18): Array<{ key: string; value: string }> {
+  const rows: Array<{ key: string; value: string }> = [];
+  const visited = new WeakSet<object>();
+
+  const push = (key: string, rawValue: unknown) => {
+    if (rows.length >= maxRows) return;
+    rows.push({ key, value: formatStructuredValue(rawValue) });
+  };
+
+  const walk = (node: unknown, path: string) => {
+    if (rows.length >= maxRows) return;
+
+    if (node === null || node === undefined || typeof node !== 'object') {
+      push(path || 'value', node);
+      return;
+    }
+
+    if (visited.has(node)) {
+      push(path || 'value', '[circular]');
+      return;
+    }
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      if (node.length === 0) {
+        push(path || 'value', '[empty list]');
+        return;
+      }
+      node.forEach((item, index) => {
+        walk(item, `${path}[${index}]`);
+      });
+      return;
+    }
+
+    const entries = Object.entries(node);
+    if (entries.length === 0) {
+      push(path || 'value', '[empty object]');
+      return;
+    }
+    entries.forEach(([key, child]) => {
+      walk(child, path ? `${path}.${key}` : key);
+    });
+  };
+
+  walk(value, '');
+  return rows;
 }
 
-function PendingPermissionSummaryCard({
-  permissions,
-  activePermissionId,
-  onJumpToPermission,
-  onJumpPrevious,
-  onJumpNext,
-}: PendingPermissionSummaryCardProps) {
-  const highRiskCount = permissions.filter(
-    (permission) => permission.riskLevel === 'high',
-  ).length;
-  const oldestPermission = permissions[0];
-  const oldestRisk = oldestPermission?.riskLevel || 'medium';
-  const oldestTimeoutSeconds =
-    PERMISSION_TIMEOUT_SECONDS_BY_RISK[oldestRisk];
-  const oldestRemainingSeconds = oldestPermission
-    ? Math.max(
-        0,
-        oldestTimeoutSeconds -
-          Math.floor((Date.now() - oldestPermission.createdAt) / 1000),
-      )
-    : 0;
+function formatStructuredValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NaN';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string') {
+    const collapsed = value.replace(/\s+/g, ' ').trim();
+    return collapsed.length > 160 ? `${collapsed.slice(0, 157)}...` : collapsed || '""';
+  }
+  if (Array.isArray(value)) return `[${value.length} items]`;
+  if (typeof value === 'object') return '[object]';
+  return String(value);
+}
+
+function renderStructuredRows(value: unknown, emptyLabel = 'No details available') {
+  const rows = collectStructuredRows(value);
+  if (rows.length === 0) {
+    return <div className="text-[11px] text-white/45">{emptyLabel}</div>;
+  }
 
   return (
-    <div className="mt-2 rounded-xl border border-[#1D4ED8]/30 bg-[#1D4ED8]/10 p-2.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-[#BFDBFE]">
-            {permissions.length} approval{permissions.length === 1 ? '' : 's'} pending
-            {highRiskCount > 0 ? ` (${highRiskCount} high risk)` : ''}
-          </p>
-          {oldestPermission && (
-            <p className="mt-0.5 text-[11px] text-[#93C5FD]/85">
-              Oldest request auto-denies in {oldestRemainingSeconds}s
-            </p>
-          )}
+    <div className="rounded-md border border-white/[0.06] bg-[#0A0B0F] overflow-hidden">
+      {rows.map((row, index) => (
+        <div
+          key={`${row.key}-${index}`}
+          className="grid grid-cols-[minmax(110px,40%)_1fr] gap-2 px-2.5 py-1.5 border-b border-white/[0.05] last:border-b-0"
+        >
+          <div className="text-[10px] text-white/38 break-all">{row.key}</div>
+          <div className="text-[11px] text-white/75 break-words">{row.value}</div>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onJumpPrevious}
-            className="h-7 rounded-md border border-white/[0.16] px-2 text-[11px] text-white/75 hover:bg-white/[0.08]"
-          >
-            Prev Pending
-          </button>
-          <button
-            type="button"
-            onClick={onJumpNext}
-            className="h-7 rounded-md border border-white/[0.16] px-2 text-[11px] text-white/75 hover:bg-white/[0.08]"
-          >
-            Next Pending
-          </button>
+      ))}
+      {rows.length >= 18 && (
+        <div className="px-2.5 py-1.5 text-[10px] text-white/35 border-t border-white/[0.05]">
+          More fields hidden.
         </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {permissions.slice(0, 8).map((permission, index) => {
-          const isActive = permission.id === activePermissionId;
-          const risk = permission.riskLevel || 'medium';
-          return (
-            <button
-              key={permission.id}
-              type="button"
-              onClick={() => onJumpToPermission(permission.id, index)}
-              className={cn(
-                'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-1 text-[11px] transition-colors',
-                isActive
-                  ? 'border-[#93C5FD]/80 bg-[#1D4ED8]/30 text-white'
-                  : 'border-white/[0.14] bg-white/[0.04] text-white/75 hover:bg-white/[0.12]',
-              )}
-            >
-              {risk === 'high' ? (
-                <ShieldAlert className="h-3 w-3 text-[#FCA5A5]" />
-              ) : (
-                <Clock3 className="h-3 w-3 text-[#93C5FD]" />
-              )}
-              <span className="truncate">
-                {permission.toolName || permission.type}
-              </span>
-            </button>
-          );
-        })}
-        {permissions.length > 8 && (
-          <span className="inline-flex items-center rounded-full border border-white/[0.14] px-2 py-1 text-[11px] text-white/55">
-            +{permissions.length - 8} more
-          </span>
-        )}
-      </div>
+      )}
     </div>
   );
-}
-
-interface PermissionInlineCardProps {
-  request: ExtendedPermissionRequest;
-  onDecision: (decision: 'allow' | 'deny' | 'allow_once' | 'allow_session') => void;
-}
-
-function PermissionInlineCard({ request, onDecision }: PermissionInlineCardProps) {
-  const { rightPanelPinned, rightPanelCollapsed, toggleRightPanelPinned, toggleRightPanel } = useSettingsStore();
-  const riskLevel = request.riskLevel || 'medium';
-  const riskIcon = riskLevel === 'high' ? ShieldAlert : Shield;
-  const RiskIcon = riskIcon;
-  const toolMeta = request.toolName ? getToolMeta(request.toolName) : null;
-
-  const typeLabel = request.type.startsWith('file_')
-    ? 'File access'
-    : request.type === 'shell_execute'
-      ? 'Command execution'
-      : request.type === 'network_request'
-        ? 'Network request'
-        : 'Permission request';
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      className={cn('rounded-xl border p-3', 'bg-[#111218] border-white/[0.08]')}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            'p-2 rounded-lg',
-            riskLevel === 'high' ? 'bg-[#FF5449]/10' : 'bg-[#1D4ED8]/10'
-          )}
-        >
-          <RiskIcon
-            className={cn(
-              'w-4 h-4',
-              riskLevel === 'high' ? 'text-[#FF5449]' : 'text-[#93C5FD]'
-            )}
-          />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            {toolMeta ? (
-              <>
-                <span className="text-[11px] uppercase tracking-wide text-white/40">
-                  {toolMeta.category}
-                </span>
-                <span className="text-white/20">•</span>
-                <span className="text-sm font-medium text-white/90">{toolMeta.title}</span>
-              </>
-            ) : (
-              <span className="text-sm font-medium text-white/90">{typeLabel}</span>
-            )}
-            <PolicyPill
-              action={riskLevel === 'high' ? 'deny' : riskLevel === 'low' ? 'allow' : 'review'}
-              label={riskLevel === 'high' ? 'High risk' : riskLevel === 'low' ? 'Low risk' : 'Review'}
-            />
-          </div>
-          <button
-            onClick={() => {
-              if (!rightPanelPinned) toggleRightPanelPinned();
-              if (rightPanelCollapsed) toggleRightPanel();
-            }}
-            className="mt-2 inline-flex items-center gap-1 text-[11px] text-white/50 hover:text-white/80"
-          >
-            Details
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-
-          <div className="mt-2 text-xs text-white/40">Resource</div>
-          <div className="mt-1 text-xs text-white/80 font-mono break-all bg-[#0B0C10] border border-white/[0.06] rounded-lg px-2 py-1">
-            {request.resource}
-          </div>
-
-          {request.reason && (
-            <div className="mt-2 text-xs text-white/50">{request.reason}</div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3 flex items-center justify-end gap-2">
-        <button
-          onClick={() => onDecision('deny')}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-[#FF5449] bg-[#FF5449]/10 border border-[#FF5449]/20 hover:bg-[#FF5449]/20"
-        >
-          <XCircle className="w-3.5 h-3.5" />
-          Deny
-        </button>
-        <button
-          onClick={() => onDecision('allow_once')}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white/80 bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.10]"
-        >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          Allow once
-        </button>
-        <button
-          onClick={() => onDecision('allow_session')}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs text-white bg-[#1D4ED8] hover:bg-[#1E40AF]"
-        >
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          Allow session
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-function formatObject(value: unknown): string {
-  if (value === undefined) return '';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function truncateText(text: string, max = 2000): string {
@@ -1677,11 +1432,15 @@ function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; co
         content: <div className="text-[11px] font-mono text-white/70 break-all">{path}</div>,
       });
     }
-    const preview = typeof tool.result === 'string' ? tool.result : formatObject(tool.result);
-    if (preview) {
+    if (typeof tool.result === 'string' && tool.result) {
       sections.push({
         title: 'Preview',
-        content: renderCode(truncateText(preview, 2400), 'text'),
+        content: renderCode(truncateText(tool.result, 2400), 'text'),
+      });
+    } else if (tool.result !== undefined) {
+      sections.push({
+        title: 'Preview',
+        content: renderStructuredRows(tool.result),
       });
     }
     return sections;
@@ -1947,28 +1706,26 @@ function buildToolDetailSections(tool: ToolExecution): Array<{ title: string; co
         ),
       });
     }
-    const formattedArgs = formatObject(args);
-    if (formattedArgs && formattedArgs !== '{}') {
+    if (Object.keys(args).length > 0) {
       sections.push({
         title: 'Arguments',
-        content: renderCode(formattedArgs, 'json'),
+        content: renderStructuredRows(args),
       });
     }
     return sections;
   }
 
   if (kind === 'other') {
-    const formattedArgs = formatObject(args);
-    if (formattedArgs && formattedArgs !== '{}') {
+    if (Object.keys(args).length > 0) {
       sections.push({
         title: 'Arguments',
-        content: renderCode(formattedArgs, 'json'),
+        content: renderStructuredRows(args),
       });
     }
     if (tool.result !== undefined) {
       sections.push({
         title: 'Result',
-        content: renderCode(formatObject(tool.result), 'json'),
+        content: renderStructuredRows(tool.result),
       });
     }
   }

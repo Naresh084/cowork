@@ -15,6 +15,12 @@ metadata: {
 
 Fast X/Twitter CLI using GraphQL + cookie auth.
 
+## Routing Policy (Important)
+
+- For public profile/post lookup requests, use `web_search` + `web_fetch` first.
+- Use `bird` CLI when authenticated/private account data is required (home, bookmarks, mentions, posting) or when the user explicitly asks for `bird`.
+- Do not launch external Codex/Claude CLI runs to execute `bird` tasks.
+
 ## Install
 
 ```bash

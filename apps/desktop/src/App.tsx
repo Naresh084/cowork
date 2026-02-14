@@ -75,6 +75,7 @@ export function App() {
         providerBaseUrls: refreshedSettings.providerBaseUrls,
         externalSearchProvider: refreshedSettings.externalSearchProvider,
         mediaRouting: refreshedSettings.mediaRouting,
+        toolOutputTokenLimit: refreshedSettings.toolOutputTokenLimit,
         specializedModels: refreshedSettings.specializedModelsV2,
         sandbox: refreshedSettings.commandSandbox,
         activeSoul,

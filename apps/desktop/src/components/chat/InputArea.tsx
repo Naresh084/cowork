@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUp,
@@ -8,21 +8,80 @@ import {
   Folder,
   FolderOpen,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   StopCircle,
   Search,
+  ShieldAlert,
 } from 'lucide-react';
 import { BrandMark } from '../icons/BrandMark';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useCommandStore, type SlashCommand } from '../../stores/command-store';
-import { useChatStore, type Attachment } from '../../stores/chat-store';
+import { useChatStore, type Attachment, type ExtendedPermissionRequest } from '../../stores/chat-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
 import { homeDir } from '@tauri-apps/api/path';
 import { toast } from '../ui/Toast';
 import { CommandPalette } from './CommandPalette';
 import { AttachmentPreview } from './AttachmentPreview';
+
+type PermissionDecision = 'allow_once' | 'allow_session' | 'deny';
+
+interface PermissionActionOption {
+  key: PermissionDecision;
+  label: string;
+  className: string;
+  activeClassName: string;
+}
+
+const PERMISSION_ACTION_OPTIONS: PermissionActionOption[] = [
+  {
+    key: 'allow_once',
+    label: 'Allow',
+    className: 'border-white/[0.14] bg-white/[0.04] text-white/80 hover:bg-white/[0.10]',
+    activeClassName: 'border-white/[0.45] bg-white/[0.12] text-white',
+  },
+  {
+    key: 'allow_session',
+    label: 'Allow for session',
+    className: 'border-[#1D4ED8]/45 bg-[#1D4ED8]/20 text-[#BFDBFE] hover:bg-[#1D4ED8]/30',
+    activeClassName: 'border-[#93C5FD] bg-[#1D4ED8]/40 text-white',
+  },
+  {
+    key: 'deny',
+    label: 'Deny',
+    className: 'border-[#FF5449]/35 bg-[#FF5449]/12 text-[#FCA5A5] hover:bg-[#FF5449]/20',
+    activeClassName: 'border-[#FF5449] bg-[#FF5449]/28 text-white',
+  },
+];
+const EMPTY_PENDING_PERMISSIONS: ExtendedPermissionRequest[] = [];
+
+function sortPendingPermissions(
+  pendingPermissions: ExtendedPermissionRequest[],
+): ExtendedPermissionRequest[] {
+  return [...pendingPermissions].sort((left, right) => {
+    if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function getPermissionPromptTitle(request: ExtendedPermissionRequest): string {
+  if (request.toolName?.trim()) return request.toolName.trim();
+  if (request.type.startsWith('file_')) return 'File Access';
+  if (request.type === 'shell_execute') return 'Command Execution';
+  if (request.type === 'network_request') return 'Network Request';
+  return 'Permission Request';
+}
+
+function getPermissionPromptQuestion(request: ExtendedPermissionRequest): string {
+  const reason = request.reason?.trim();
+  if (reason) return reason;
+  const resource = request.resource?.trim();
+  if (resource) return `Allow this action on ${resource}?`;
+  return 'Allow this action to continue?';
+}
 
 interface InputAreaProps {
   onSend: (message: string, attachments?: Attachment[]) => void;
@@ -93,6 +152,11 @@ export function InputArea({
     updateSetting: updateSettings,
   } = useSettingsStore();
   const { activeSessionId, sessions, updateSessionWorkingDirectory } = useSessionStore();
+  const pendingPermissions = useChatStore((state) => {
+    if (!activeSessionId) return EMPTY_PENDING_PERMISSIONS;
+    return state.sessions[activeSessionId]?.pendingPermissions ?? EMPTY_PENDING_PERMISSIONS;
+  });
+  const respondToPermission = useChatStore((state) => state.respondToPermission);
 
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
@@ -100,10 +164,53 @@ export function InputArea({
   const [folderSelectorOpen, setFolderSelectorOpen] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [userHomeDir, setUserHomeDir] = useState<string | null>(null);
+  const [activePermissionIndex, setActivePermissionIndex] = useState(0);
+  const [focusedPermissionActionIndex, setFocusedPermissionActionIndex] = useState(0);
+  const [isPermissionSubmitting, setIsPermissionSubmitting] = useState(false);
+  const permissionActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const modelListRef = useRef<HTMLDivElement | null>(null);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  const sortedPendingPermissions = useMemo(
+    () => sortPendingPermissions(pendingPermissions),
+    [pendingPermissions],
+  );
+  const activePermission =
+    sortedPendingPermissions.length > 0
+      ? sortedPendingPermissions[Math.min(activePermissionIndex, sortedPendingPermissions.length - 1)] || null
+      : null;
+  const hasPendingPermissionPrompt = Boolean(activeSessionId && activePermission);
+  const activePermissionTitle = activePermission ? getPermissionPromptTitle(activePermission) : '';
+  const activePermissionQuestion = activePermission ? getPermissionPromptQuestion(activePermission) : '';
+
+  useEffect(() => {
+    if (sortedPendingPermissions.length === 0) {
+      setActivePermissionIndex(0);
+      setFocusedPermissionActionIndex(0);
+      setIsPermissionSubmitting(false);
+      return;
+    }
+    setActivePermissionIndex((current) =>
+      Math.min(Math.max(current, 0), sortedPendingPermissions.length - 1),
+    );
+  }, [sortedPendingPermissions.length]);
+
+  useEffect(() => {
+    setFocusedPermissionActionIndex(0);
+    if (hasPendingPermissionPrompt) {
+      requestAnimationFrame(() => {
+        permissionActionRefs.current[0]?.focus();
+      });
+    }
+  }, [activePermission?.id, hasPendingPermissionPrompt]);
+
+  useEffect(() => {
+    if (hasPendingPermissionPrompt && isPaletteOpen) {
+      closePalette();
+    }
+  }, [closePalette, hasPendingPermissionPrompt, isPaletteOpen]);
 
   // Get user home directory dynamically
   useEffect(() => {
@@ -339,7 +446,103 @@ export function InputArea({
     }
   }, [closePalette, message]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const focusPermissionAction = useCallback((index: number) => {
+    const safeIndex = Math.max(0, Math.min(index, PERMISSION_ACTION_OPTIONS.length - 1));
+    setFocusedPermissionActionIndex(safeIndex);
+    permissionActionRefs.current[safeIndex]?.focus();
+  }, []);
+
+  const handlePermissionDecision = useCallback(
+    async (decision: PermissionDecision) => {
+      if (!activeSessionId || !activePermission || isPermissionSubmitting) return;
+      setIsPermissionSubmitting(true);
+      try {
+        await respondToPermission(activeSessionId, activePermission.id, decision);
+      } finally {
+        setIsPermissionSubmitting(false);
+      }
+    },
+    [activePermission, activeSessionId, isPermissionSubmitting, respondToPermission],
+  );
+
+  useEffect(() => {
+    if (!hasPendingPermissionPrompt) return;
+
+    const onPermissionKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey) return;
+
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        if (sortedPendingPermissions.length <= 1) return;
+        event.preventDefault();
+        setActivePermissionIndex((current) => {
+          const next =
+            event.key === 'ArrowDown'
+              ? (current + 1) % sortedPendingPermissions.length
+              : (current - 1 + sortedPendingPermissions.length) % sortedPendingPermissions.length;
+          return next;
+        });
+        return;
+      }
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        const next =
+          event.key === 'ArrowRight'
+            ? (focusedPermissionActionIndex + 1) % PERMISSION_ACTION_OPTIONS.length
+            : (focusedPermissionActionIndex - 1 + PERMISSION_ACTION_OPTIONS.length) %
+              PERMISSION_ACTION_OPTIONS.length;
+        focusPermissionAction(next);
+        return;
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        const selectedOption = PERMISSION_ACTION_OPTIONS[focusedPermissionActionIndex];
+        if (selectedOption) {
+          void handlePermissionDecision(selectedOption.key);
+        }
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === 'a') {
+        event.preventDefault();
+        void handlePermissionDecision('allow_once');
+        return;
+      }
+      if (key === 's') {
+        event.preventDefault();
+        void handlePermissionDecision('allow_session');
+        return;
+      }
+      if (key === 'd') {
+        event.preventDefault();
+        void handlePermissionDecision('deny');
+      }
+    };
+
+    window.addEventListener('keydown', onPermissionKeyDown);
+    return () => window.removeEventListener('keydown', onPermissionKeyDown);
+  }, [
+    focusPermissionAction,
+    focusedPermissionActionIndex,
+    handlePermissionDecision,
+    hasPendingPermissionPrompt,
+    sortedPendingPermissions.length,
+  ]);
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -500,7 +703,7 @@ export function InputArea({
       <div className="mx-10">
         {/* Attachments Preview */}
         <AnimatePresence>
-          {(attachments.length > 0 || isRecording || recordingError) && (
+          {!hasPendingPermissionPrompt && (attachments.length > 0 || isRecording || recordingError) && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -538,13 +741,134 @@ export function InputArea({
 
         {/* Input Card with Command Palette */}
         <div className="relative">
-          {/* Command Palette - positioned above input */}
-          <CommandPalette
-            onSelect={handleCommandSelect}
-            onClose={handlePaletteClose}
-          />
+          {hasPendingPermissionPrompt && activePermission ? (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={cn(
+                'rounded-2xl border border-[#1D4ED8]/35 bg-[#0F1014]/95 px-3 py-2.5',
+                'backdrop-blur shadow-lg shadow-black/35'
+              )}
+              role="group"
+              aria-label="Permission prompt"
+            >
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-lg border border-[#1D4ED8]/35 bg-[#1D4ED8]/15 flex items-center justify-center">
+                  <ShieldAlert className="h-3.5 w-3.5 text-[#93C5FD]" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wide text-white/45">Permission required</p>
+                  <p className="text-[12px] font-medium text-white/90 truncate">
+                    {activePermissionTitle}
+                  </p>
+                </div>
 
-          <motion.div
+                {sortedPendingPermissions.length > 1 && (
+                  <div className="ml-auto flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePermissionIndex(
+                          (current) =>
+                            (current - 1 + sortedPendingPermissions.length) %
+                            sortedPendingPermissions.length,
+                        )
+                      }
+                      className="h-6 w-6 rounded-md border border-white/[0.12] bg-white/[0.03] text-white/70 hover:bg-white/[0.08] flex items-center justify-center"
+                      title="Previous permission"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+
+                    <div className="max-w-[180px] overflow-x-auto">
+                      <div className="flex items-center gap-1">
+                        {sortedPendingPermissions.map((permission, index) => (
+                          <button
+                            key={permission.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={index === activePermissionIndex}
+                            onClick={() => setActivePermissionIndex(index)}
+                            className={cn(
+                              'h-6 min-w-6 rounded-md border px-1 text-[10px] leading-none transition-colors',
+                              index === activePermissionIndex
+                                ? 'border-[#93C5FD]/70 bg-[#1D4ED8]/28 text-white'
+                                : 'border-white/[0.12] bg-white/[0.03] text-white/60 hover:bg-white/[0.08]'
+                            )}
+                            title={`Permission ${index + 1}`}
+                          >
+                            {index + 1}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePermissionIndex(
+                          (current) => (current + 1) % sortedPendingPermissions.length,
+                        )
+                      }
+                      className="h-6 w-6 rounded-md border border-white/[0.12] bg-white/[0.03] text-white/70 hover:bg-white/[0.08] flex items-center justify-center"
+                      title="Next permission"
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-1.5 text-[12px] text-white/82 break-words">
+                {activePermissionQuestion}
+              </p>
+              {activePermission.resource ? (
+                <p className="mt-1 text-[10px] text-white/48 font-mono truncate">
+                  {activePermission.resource}
+                </p>
+              ) : null}
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {PERMISSION_ACTION_OPTIONS.map((option, index) => (
+                  <button
+                    key={option.key}
+                    ref={(node) => {
+                      permissionActionRefs.current[index] = node;
+                    }}
+                    type="button"
+                    disabled={isPermissionSubmitting}
+                    onFocus={() => setFocusedPermissionActionIndex(index)}
+                    onClick={() => void handlePermissionDecision(option.key)}
+                    className={cn(
+                      'h-8 rounded-lg border px-2.5 text-[11px] font-medium transition-colors',
+                      option.className,
+                      focusedPermissionActionIndex === index && option.activeClassName,
+                      isPermissionSubmitting && 'opacity-55 cursor-not-allowed',
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-white/42">
+                <span>
+                  {sortedPendingPermissions.length > 1
+                    ? `${activePermissionIndex + 1}/${sortedPendingPermissions.length} pending`
+                    : 'Awaiting your decision'}
+                </span>
+                <span className="truncate">↑/↓ request · ←/→ option · Enter · A/S/D</span>
+              </div>
+            </motion.div>
+          ) : (
+            <>
+              {/* Command Palette - positioned above input */}
+              <CommandPalette
+                onSelect={handleCommandSelect}
+                onClose={handlePaletteClose}
+              />
+
+              <motion.div
             whileFocus={{ boxShadow: '0 0 0 1px rgba(76, 113, 255, 0.45)' }}
             className={cn(
               'rounded-[20px] overflow-visible',
@@ -933,6 +1257,8 @@ export function InputArea({
               </div>
           </div>
         </motion.div>
+            </>
+          )}
         </div>
       </div>
     </div>

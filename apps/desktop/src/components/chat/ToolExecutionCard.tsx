@@ -65,30 +65,24 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const [isExpanded, setIsExpanded] = useState(false);
   const [copiedArgs, setCopiedArgs] = useState(false);
   const [copiedResult, setCopiedResult] = useState(false);
-  const [argsExpanded, setArgsExpanded] = useState(false);
-  const [resultExpanded, setResultExpanded] = useState(false);
 
   const { icon: Icon, title: displayName, category } = getToolMeta(execution.name, execution.args as Record<string, unknown>);
   const externalCliPresentation = getExternalCliPresentation(execution);
   const isExternalCliTool = Boolean(externalCliPresentation);
+  const isWebSearch = isWebSearchTool(execution.name.toLowerCase());
   const { activeSessionId } = useSessionStore();
   const pendingPermission = useChatStore((state) =>
     state.getSessionState(activeSessionId).pendingPermissions.find((permission) => permission.toolCallId === execution.id)
   );
-  const sourcesPreview = renderSourcesPreview(execution.result);
+  const sourcesPreview = isWebSearch ? null : renderSourcesPreview(execution.result);
   const setPreviewArtifact = useAgentStore((state) => state.setPreviewArtifact);
   const a2uiPreview = renderA2uiPreview(execution.result, setPreviewArtifact);
   const designPreview = renderDesignPreview(execution.result, setPreviewArtifact);
   const safetyBlock = getSafetyBlock(execution.result);
-  const argsText = JSON.stringify(execution.args, null, 2);
-  const argsPreview = buildPreview(argsText);
-  const argsDisplay = argsExpanded ? argsText : argsPreview.text;
+  const argsText = safeJsonString(execution.args);
   const argsToolView = renderToolSpecificArgs(execution, externalCliPresentation);
   const specializedArgs = argsToolView?.node;
   const hideRawArgs = argsToolView?.hideRaw ?? false;
-  const resultText = formatResult(execution.result);
-  const resultPreview = buildPreview(resultText);
-  const resultDisplay = resultExpanded ? resultText : resultPreview.text;
   const visibleError = extractExecutionErrorMessage(execution);
   const hasResultOrError = execution.result !== undefined || Boolean(visibleError);
   const externalCliResultNode = renderExternalCliResult(execution, externalCliPresentation);
@@ -106,7 +100,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
 
   const handleCopyArgs = async () => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(execution.args, null, 2));
+      await navigator.clipboard.writeText(argsText);
       setCopiedArgs(true);
       setTimeout(() => setCopiedArgs(false), 2000);
     } catch (err) {
@@ -118,10 +112,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
   const handleCopyResult = async () => {
     if (!execution.result) return;
     try {
-      const resultText = typeof execution.result === 'string'
-        ? execution.result
-        : JSON.stringify(execution.result, null, 2);
-      await navigator.clipboard.writeText(resultText);
+      await navigator.clipboard.writeText(safeJsonString(execution.result));
       setCopiedResult(true);
       setTimeout(() => setCopiedResult(false), 2000);
     } catch (err) {
@@ -319,25 +310,9 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
                     )}
                   </button>
                 </div>
-                {specializedArgs}
-                {!hideRawArgs && (
-                  <CodeBlock
-                    code={argsDisplay}
-                    language="json"
-                    showLineNumbers={false}
-                    maxHeight={180}
-                  />
-                )}
-                {!hideRawArgs && argsPreview.truncated && (
-                  <button
-                    onClick={() => setArgsExpanded((prev) => !prev)}
-                    className="mt-2 text-xs text-white/50 hover:text-white/80 transition-colors"
-                  >
-                    {argsExpanded
-                      ? 'Collapse arguments'
-                      : `Expand arguments (${argsPreview.totalLines} lines)`}
-                  </button>
-                )}
+                {specializedArgs ?? (!hideRawArgs ? (
+                  <StructuredDataView value={execution.args} emptyLabel="No arguments supplied." />
+                ) : null)}
               </div>
 
               {/* Result */}
@@ -383,24 +358,7 @@ export function ToolExecutionCard({ execution, className, isActive }: ToolExecut
                       {designPreview}
                       {a2uiPreview}
                       {!hideRawResult && (
-                        <>
-                          <CodeBlock
-                            code={resultDisplay}
-                            language={getResultLanguage(execution.result)}
-                            showLineNumbers={false}
-                            maxHeight={240}
-                          />
-                          {resultPreview.truncated && (
-                            <button
-                              onClick={() => setResultExpanded((prev) => !prev)}
-                              className="text-xs text-white/50 hover:text-white/80 transition-colors"
-                            >
-                              {resultExpanded
-                                ? 'Collapse output'
-                                : `Expand output (${resultPreview.totalLines} lines)`}
-                            </button>
-                          )}
-                        </>
+                        <StructuredDataView value={execution.result} emptyLabel="No output returned." />
                       )}
                     </div>
                   )}
@@ -504,6 +462,16 @@ function getStatusConfig(status: ToolExecution['status']) {
   }
 }
 
+function safeJsonString(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function formatResult(result: unknown): string {
   if (result === null || result === undefined) {
     return 'null';
@@ -568,10 +536,150 @@ function buildPreview(content: string, maxLines = 24, maxChars = 4000) {
   return { text: preview, truncated: true, totalLines: lines.length };
 }
 
+interface StructuredDataRow {
+  key: string;
+  value: string;
+}
+
+interface StructuredDataSummary {
+  rows: StructuredDataRow[];
+  truncated: boolean;
+}
+
+function collectStructuredRows(value: unknown, maxRows = 28): StructuredDataSummary {
+  const rows: StructuredDataRow[] = [];
+  const visited = new WeakSet<object>();
+  let truncated = false;
+
+  const pushRow = (key: string, rawValue: unknown) => {
+    if (rows.length >= maxRows) {
+      truncated = true;
+      return;
+    }
+
+    rows.push({
+      key,
+      value: formatStructuredValue(rawValue),
+    });
+  };
+
+  const walk = (node: unknown, path: string) => {
+    if (rows.length >= maxRows) {
+      truncated = true;
+      return;
+    }
+
+    if (node === null || node === undefined) {
+      pushRow(path || 'value', node);
+      return;
+    }
+
+    if (typeof node !== 'object') {
+      pushRow(path || 'value', node);
+      return;
+    }
+
+    if (visited.has(node)) {
+      pushRow(path || 'value', '[circular]');
+      return;
+    }
+
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      if (node.length === 0) {
+        pushRow(path || 'value', '[empty list]');
+        return;
+      }
+      node.forEach((item, index) => {
+        walk(item, `${path}[${index}]`);
+      });
+      return;
+    }
+
+    const entries = Object.entries(node);
+    if (entries.length === 0) {
+      pushRow(path || 'value', '[empty object]');
+      return;
+    }
+
+    entries.forEach(([key, child]) => {
+      walk(child, path ? `${path}.${key}` : key);
+    });
+  };
+
+  walk(value, '');
+
+  return { rows, truncated };
+}
+
+function formatStructuredValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NaN';
+  if (typeof value === 'string') {
+    const collapsed = value.replace(/\s+/g, ' ').trim();
+    return collapsed.length > 160 ? `${collapsed.slice(0, 157)}...` : collapsed;
+  }
+  if (Array.isArray(value)) return `[${value.length} items]`;
+  if (typeof value === 'object') return '[object]';
+  return String(value);
+}
+
+function StructuredDataView({
+  value,
+  emptyLabel,
+}: {
+  value: unknown;
+  emptyLabel: string;
+}) {
+  const { rows, truncated } = collectStructuredRows(value);
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2 text-xs text-white/45">
+        {emptyLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-[#0B0C10] overflow-hidden">
+      <div className="max-h-64 overflow-y-auto">
+        {rows.map((row, index) => (
+          <div
+            key={`${row.key}-${index}`}
+            className="grid grid-cols-[minmax(120px,38%)_1fr] gap-2 px-3 py-2 border-b border-white/[0.05] last:border-b-0"
+          >
+            <div className="text-[11px] text-white/45 break-all">{row.key}</div>
+            <div className="text-[12px] text-white/82 break-words">{row.value || '""'}</div>
+          </div>
+        ))}
+      </div>
+      {truncated && (
+        <div className="px-3 py-1.5 text-[11px] text-white/45 border-t border-white/[0.05]">
+          More fields hidden.
+        </div>
+      )}
+    </div>
+  );
+}
+
 type ToolView = { node: JSX.Element; hideRaw?: boolean };
 
 function renderToolSpecificResult(execution: ToolExecution): ToolView | null {
   const name = execution.name.toLowerCase();
+  if (isWebSearchTool(name)) {
+    const searchResult = extractWebSearchResult(execution.result, execution.args);
+    if (searchResult) {
+      return {
+        hideRaw: true,
+        node: <WebSearchResultView result={searchResult} />,
+      };
+    }
+  }
+
   if (isScheduleTaskTool(name)) {
     const scheduleResult = extractScheduleTaskResult(execution.result, execution.args);
     if (scheduleResult) {
@@ -957,6 +1065,176 @@ function BrowserRunResultView({ result }: { result: BrowserRunResultData }) {
   );
 }
 
+interface WebSearchSource {
+  title: string;
+  url: string;
+  snippet?: string;
+  domain?: string;
+  confidence?: number;
+}
+
+interface WebSearchResultData {
+  query: string;
+  provider?: string;
+  model?: string;
+  fallbackUsed?: boolean;
+  sources: WebSearchSource[];
+}
+
+function WebSearchArgsView({ query }: { query: string }) {
+  return (
+    <div className="rounded-lg border border-[#2563EB]/30 bg-[#0D1629] px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-[#93C5FD]">Search Query</div>
+      <div className="mt-1 text-sm text-white/90 break-words">
+        {query || 'No query provided'}
+      </div>
+    </div>
+  );
+}
+
+function WebSearchResultView({ result }: { result: WebSearchResultData }) {
+  const topResults = result.sources.slice(0, 8);
+  return (
+    <div className="rounded-lg border border-[#2563EB]/30 bg-[#0D1629] p-3 space-y-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-wide text-[#93C5FD]">Web Search</div>
+          <div className="text-sm text-white/90 break-words">{result.query || 'Search query'}</div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-1.5 text-[10px]">
+          {result.provider && (
+            <span className="px-2 py-0.5 rounded-full border border-white/[0.18] bg-white/[0.05] text-white/70">
+              {result.provider}
+            </span>
+          )}
+          {result.model && (
+            <span className="px-2 py-0.5 rounded-full border border-white/[0.18] bg-white/[0.05] text-white/70">
+              {result.model}
+            </span>
+          )}
+          {result.fallbackUsed && (
+            <span className="px-2 py-0.5 rounded-full border border-[#F59E0B]/40 bg-[#F59E0B]/15 text-[#FDE68A]">
+              Fallback
+            </span>
+          )}
+        </div>
+      </div>
+
+      {topResults.length === 0 ? (
+        <div className="rounded-md border border-white/[0.12] bg-white/[0.04] px-2.5 py-2 text-xs text-white/55">
+          No search results returned.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {topResults.map((source, index) => (
+            <a
+              key={`${source.url}-${index}`}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-lg border border-white/[0.08] bg-[#0A111F] px-2.5 py-2 hover:bg-[#0F1A32] transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm text-white/85 truncate">{source.title || source.url}</div>
+                {typeof source.confidence === 'number' && (
+                  <div className="text-[10px] text-[#BFDBFE]">
+                    {Math.round(source.confidence * 100)}%
+                  </div>
+                )}
+              </div>
+              <div className="mt-0.5 text-[11px] text-[#93C5FD] truncate">{source.domain || source.url}</div>
+              {source.snippet && (
+                <div className="mt-1 text-[11px] text-white/55 line-clamp-2">{source.snippet}</div>
+              )}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isWebSearchTool(name: string): boolean {
+  return (
+    name === 'web_search'
+    || name === 'google_grounded_search'
+    || name.includes('grounded_search')
+  );
+}
+
+function extractWebSearchResult(
+  result: unknown,
+  args: Record<string, unknown>,
+): WebSearchResultData | null {
+  const queryFromArgs = String(args.query ?? args.search ?? args.q ?? '').trim();
+  if (!result || typeof result !== 'object') {
+    if (!queryFromArgs) return null;
+    return { query: queryFromArgs, sources: [] };
+  }
+
+  const payload = result as {
+    query?: unknown;
+    providerUsed?: unknown;
+    provider?: unknown;
+    model?: unknown;
+    modelUsed?: unknown;
+    fallbackUsed?: unknown;
+    sources?: unknown;
+    results?: unknown;
+    items?: unknown;
+  };
+
+  const sourceCandidates = Array.isArray(payload.sources)
+    ? payload.sources
+    : Array.isArray(payload.results)
+      ? payload.results
+      : Array.isArray(payload.items)
+        ? payload.items
+        : [];
+
+  const sources: WebSearchSource[] = sourceCandidates
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+    .map((entry) => {
+      const url = String(entry.url ?? entry.link ?? '').trim();
+      const title = String(entry.title ?? entry.name ?? url).trim();
+      const snippet = String(entry.snippet ?? entry.summary ?? entry.description ?? '').trim();
+      const domain = extractDomain(url);
+      const confidenceRaw = Number(entry.confidence ?? entry.score);
+      return {
+        title: title || url,
+        url,
+        snippet: snippet || undefined,
+        domain: domain || undefined,
+        confidence: Number.isFinite(confidenceRaw) ? confidenceRaw : undefined,
+      };
+    })
+    .filter((source) => Boolean(source.url));
+
+  const queryFromResult = String(payload.query ?? '').trim();
+  const query = queryFromArgs || queryFromResult;
+
+  if (!query && sources.length === 0) {
+    return null;
+  }
+
+  return {
+    query: query || 'Search query',
+    provider: String(payload.providerUsed ?? payload.provider ?? '').trim() || undefined,
+    model: String(payload.model ?? payload.modelUsed ?? '').trim() || undefined,
+    fallbackUsed: Boolean(payload.fallbackUsed),
+    sources,
+  };
+}
+
+function extractDomain(url: string): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '');
+  } catch {
+    return null;
+  }
+}
+
 type ExternalCliProvider = 'codex' | 'claude' | 'shared';
 type ExternalCliAction = 'start' | 'progress' | 'respond' | 'cancel';
 
@@ -1330,6 +1608,14 @@ function renderToolSpecificArgs(
   execution: ToolExecution,
   presentation: ExternalCliPresentation | null,
 ): ToolView | null {
+  if (isWebSearchTool(execution.name.toLowerCase())) {
+    const query = String(execution.args.query ?? execution.args.search ?? execution.args.q ?? '').trim();
+    return {
+      hideRaw: true,
+      node: <WebSearchArgsView query={query} />,
+    };
+  }
+
   if (isScheduleTaskTool(execution.name.toLowerCase())) {
     const scheduleArgs = extractScheduleTaskArgs(execution.args);
     if (scheduleArgs) {

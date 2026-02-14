@@ -4,6 +4,7 @@ import {
   ListChecks,
   Folder,
   Wrench,
+  Puzzle,
   Layers,
   Calendar,
 } from 'lucide-react';
@@ -15,6 +16,7 @@ import { useCronActiveJobCount } from '../../stores/cron-store';
 import { ProgressSection } from '../panels/ProgressSection';
 import { WorkingFolderSection } from '../panels/WorkingFolderSection';
 import { ToolsUsedSection } from '../panels/ToolsUsedSection';
+import { InstalledSkillsUsedSection } from '../panels/InstalledSkillsUsedSection';
 import { ContextSection } from '../panels/ContextSection';
 import { ScheduledSection } from '../panels/ScheduledSection';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -189,6 +191,15 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
                 title="Tools & Skills"
               />
               <CollapsedSectionButton
+                icon={Puzzle}
+                isActive={rightPanelSections.installedSkillsUsed}
+                onClick={() => {
+                  if (!rightPanelSections.installedSkillsUsed) toggleRightPanelSection('installedSkillsUsed');
+                  toggleRightPanel();
+                }}
+                title="Installed Skills"
+              />
+              <CollapsedSectionButton
                 icon={Layers}
                 isActive={rightPanelSections.context}
                 onClick={() => {
@@ -230,6 +241,7 @@ export function RightPanel({ onPreviewArtifact: _onPreviewArtifact }: RightPanel
               <ProgressSection />
               <WorkingFolderSection />
               <ToolsUsedSection />
+              <InstalledSkillsUsedSection />
               <ContextSection />
               <ScheduledSection />
             </div>

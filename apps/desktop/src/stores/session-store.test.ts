@@ -97,6 +97,54 @@ describe('session-store', () => {
       expect(state.error).toBe('Failed to load sessions');
       expect(state.isLoading).toBe(false);
     });
+
+    it('dedupes duplicate session IDs from backend list response', async () => {
+      const now = Date.now();
+      setMockInvokeResponse('agent_get_bootstrap_state', {
+        sessions: [],
+        runtime: {},
+        eventCursor: 0,
+        timestamp: now,
+      });
+      setMockInvokeResponse('agent_list_sessions_page', {
+        sessions: [
+          {
+            id: 'session-dup',
+            title: 'First',
+            firstMessage: null,
+            workingDirectory: '/path/one',
+            model: 'gemini-3-flash-preview',
+            messageCount: 2,
+            createdAt: now,
+            updatedAt: now,
+            lastAccessedAt: now,
+          },
+          {
+            id: 'session-dup',
+            title: 'Second',
+            firstMessage: null,
+            workingDirectory: '/path/two',
+            model: 'gemini-3-flash-preview',
+            messageCount: 4,
+            createdAt: now,
+            updatedAt: now,
+            lastAccessedAt: now,
+          },
+        ],
+        total: 2,
+        hasMore: false,
+        offset: 0,
+        limit: 20,
+        nextOffset: null,
+      });
+
+      await useSessionStore.getState().loadSessions();
+
+      const state = useSessionStore.getState();
+      expect(state.sessions).toHaveLength(1);
+      expect(state.sessions[0].id).toBe('session-dup');
+      expect(state.sessions[0].title).toBe('First');
+    });
   });
 
   describe('createSession', () => {

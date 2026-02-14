@@ -130,6 +130,7 @@ describe('system-prompt-builder', () => {
     expect(result.prompt).toContain('`bypassPermission`');
     expect(result.prompt).toContain('external_cli_get_progress');
     expect(result.prompt).toContain('low=5s');
-    expect(result.prompt).toContain('do not ask redundant confirmation');
+    expect(result.prompt).toContain('explicitly asks to use Codex/Claude CLI');
+    expect(result.prompt).toContain('`web_search`');
   });
 });

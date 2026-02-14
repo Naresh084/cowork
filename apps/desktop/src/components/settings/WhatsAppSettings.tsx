@@ -18,6 +18,8 @@ export function WhatsAppSettings() {
   const connect = useIntegrationStore((s) => s.connect);
   const disconnect = useIntegrationStore((s) => s.disconnect);
   const reconnect = useIntegrationStore((s) => s.reconnect);
+  const recoverWhatsApp = useIntegrationStore((s) => s.recoverWhatsApp);
+  const isRecoveringWhatsapp = useIntegrationStore((s) => s.isRecoveringWhatsapp);
   const whatsappConfig = useIntegrationStore((s) => s.whatsappConfig);
   const isConfigLoading = useIntegrationStore((s) => s.isConfigLoading);
   const isConfigSaving = useIntegrationStore((s) => s.isConfigSaving);
@@ -33,8 +35,12 @@ export function WhatsAppSettings() {
   );
   const [formError, setFormError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
 
   const connected = platform?.connected ?? false;
+  const isConnectionBusy = isConnecting || isRecoveringWhatsapp;
+  const isRecoveryBusy = isRecoveringWhatsapp;
   const displayName = platform?.displayName;
   const identityPhone = platform?.identityPhone;
   const identityName = platform?.identityName;
@@ -42,6 +48,10 @@ export function WhatsAppSettings() {
   const health = platform?.health;
   const healthMessage = platform?.healthMessage;
   const requiresReconnect = Boolean(platform?.requiresReconnect || health === 'unhealthy');
+  const showRecoverySection =
+    !connected ||
+    requiresReconnect ||
+    Boolean(recoveryError || recoveryNotice || error);
 
   useEffect(() => {
     void loadConfig('whatsapp');
@@ -68,6 +78,12 @@ export function WhatsAppSettings() {
     return () => clearTimeout(timer);
   }, [saveNotice]);
 
+  useEffect(() => {
+    if (!recoveryNotice) return;
+    const timer = setTimeout(() => setRecoveryNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [recoveryNotice]);
+
   const handleConnect = async () => {
     await connect('whatsapp');
   };
@@ -78,6 +94,34 @@ export function WhatsAppSettings() {
 
   const handleReconnect = async () => {
     await reconnect('whatsapp');
+  };
+
+  const handleSoftRecovery = async () => {
+    setRecoveryError(null);
+    setRecoveryNotice(null);
+    try {
+      await recoverWhatsApp('soft');
+      setRecoveryNotice('Self-recovery completed. If QR appears, scan to finish connecting.');
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleHardRecovery = async () => {
+    const shouldProceed = window.confirm(
+      'Hard recovery will clear WhatsApp session data and require scanning a new QR code. Continue?'
+    );
+    if (!shouldProceed) {
+      return;
+    }
+    setRecoveryError(null);
+    setRecoveryNotice(null);
+    try {
+      await recoverWhatsApp('hard');
+      setRecoveryNotice('Hard recovery completed. Scan the new QR code to reconnect.');
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const addAllowFromNumber = () => {
@@ -191,7 +235,7 @@ export function WhatsAppSettings() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleReconnect}
-                disabled={isConnecting}
+                disabled={isConnectionBusy}
                 className={cn(
                   'px-4 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
                   requiresReconnect
@@ -199,14 +243,14 @@ export function WhatsAppSettings() {
                     : 'bg-white/[0.08] text-white/80 hover:bg-white/[0.12]',
                 )}
               >
-                {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reconnect'}
+                {isConnectionBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reconnect'}
               </button>
               <button
                 onClick={handleDisconnect}
-                disabled={isConnecting}
+                disabled={isConnectionBusy}
                 className="px-4 py-2 rounded-lg text-sm bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20 transition-colors disabled:opacity-50"
               >
-                {isConnecting ? (
+                {isConnectionBusy ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   'Disconnect'
@@ -216,17 +260,17 @@ export function WhatsAppSettings() {
           ) : (
             <button
               onClick={handleConnect}
-              disabled={isConnecting}
+              disabled={isConnectionBusy}
               className="px-4 py-2 rounded-lg text-sm text-white transition-colors disabled:opacity-50"
               style={{ backgroundColor: '#25D366' }}
               onMouseEnter={(e) => {
-                if (!isConnecting) e.currentTarget.style.backgroundColor = '#1EB954';
+                if (!isConnectionBusy) e.currentTarget.style.backgroundColor = '#1EB954';
               }}
               onMouseLeave={(e) => {
-                if (!isConnecting) e.currentTarget.style.backgroundColor = '#25D366';
+                if (!isConnectionBusy) e.currentTarget.style.backgroundColor = '#25D366';
               }}
             >
-              {isConnecting ? (
+              {isConnectionBusy ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 'Connect'
@@ -235,6 +279,56 @@ export function WhatsAppSettings() {
           )}
         </div>
       </div>
+
+      {showRecoverySection && (
+        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+          <div>
+            <h3 className="text-sm font-medium text-white/90">Connection Recovery</h3>
+            <p className="mt-1 text-xs text-white/45">
+              If WhatsApp bootstrap stalls, run self-recovery first. Use hard recovery only if soft recovery fails.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={handleSoftRecovery}
+              disabled={isRecoveryBusy}
+              className={cn(
+                'px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
+                'bg-[#1D4ED8]/20 text-[#93C5FD] hover:bg-[#1D4ED8]/30',
+              )}
+            >
+              {isRecoveringWhatsapp ? (
+                <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+              ) : (
+                'Run Self-Recovery'
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleHardRecovery}
+              disabled={isRecoveryBusy}
+              className={cn(
+                'px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50',
+                'bg-[#FF5449]/12 text-[#FCA5A5] hover:bg-[#FF5449]/20',
+              )}
+            >
+              Hard Recovery (Reset Session)
+            </button>
+          </div>
+          <ol className="list-decimal pl-5 space-y-1 text-xs text-white/45">
+            <li>Close other WhatsApp/Chromium windows tied to this profile.</li>
+            <li>Run self-recovery.</li>
+            <li>If still failing, run hard recovery and scan a fresh QR code.</li>
+          </ol>
+          {(recoveryError || error) && (
+            <p className="text-xs text-[#FF5449]">{recoveryError || error}</p>
+          )}
+          {recoveryNotice && (
+            <p className="text-xs text-[#86EFAC]">{recoveryNotice}</p>
+          )}
+        </div>
+      )}
 
       {/* Sender Control Section */}
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-4">

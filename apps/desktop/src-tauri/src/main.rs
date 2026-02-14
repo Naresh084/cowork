@@ -222,6 +222,7 @@ fn main() {
             // Integration commands
             commands::integrations::agent_integration_list_statuses,
             commands::integrations::agent_integration_connect,
+            commands::integrations::agent_integration_recover_whatsapp,
             commands::integrations::agent_integration_disconnect,
             commands::integrations::agent_integration_get_qr,
             commands::integrations::agent_integration_configure,

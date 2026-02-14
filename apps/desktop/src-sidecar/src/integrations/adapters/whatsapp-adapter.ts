@@ -19,11 +19,33 @@ const DEBUG_WHATSAPP_AUTH =
   process.env.COWORK_DEBUG_WHATSAPP_AUTH === 'true';
 const WILDCARD_ALLOW_ALL = '*';
 const DEFAULT_SEND_TIMEOUT_MS = 12_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 25_000;
+const DEFAULT_PROTOCOL_TIMEOUT_MS = 180_000;
 
 function resolveSendTimeoutMs(): number {
   const raw = Number(process.env.COWORK_WHATSAPP_SEND_TIMEOUT_MS ?? DEFAULT_SEND_TIMEOUT_MS);
   if (!Number.isFinite(raw) || raw <= 0) {
     return DEFAULT_SEND_TIMEOUT_MS;
+  }
+  return Math.floor(raw);
+}
+
+function resolveConnectTimeoutMs(): number {
+  const raw = Number(
+    process.env.COWORK_WHATSAPP_CONNECT_TIMEOUT_MS ?? DEFAULT_CONNECT_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_CONNECT_TIMEOUT_MS;
+  }
+  return Math.floor(raw);
+}
+
+function resolveProtocolTimeoutMs(): number {
+  const raw = Number(
+    process.env.COWORK_WHATSAPP_PROTOCOL_TIMEOUT_MS ?? DEFAULT_PROTOCOL_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_PROTOCOL_TIMEOUT_MS;
   }
   return Math.floor(raw);
 }
@@ -81,10 +103,42 @@ export class WhatsAppAdapter extends BaseAdapter {
   private denialMessage: string = DEFAULT_WHATSAPP_DENIAL_MESSAGE;
   private senderAliasToPhone: Map<string, string> = new Map();
   private readonly sendTimeoutMs = resolveSendTimeoutMs();
+  private readonly connectTimeoutMs = resolveConnectTimeoutMs();
+  private readonly protocolTimeoutMs = resolveProtocolTimeoutMs();
 
   constructor() {
     super('whatsapp');
     this.sessionDataDir = DEFAULT_SESSION_DIR;
+  }
+
+  static getDefaultSessionDataDir(): string {
+    return DEFAULT_SESSION_DIR;
+  }
+
+  static resolveSessionDataDir(sessionDataDir: unknown): string {
+    if (typeof sessionDataDir === 'string' && sessionDataDir.trim().length > 0) {
+      return sessionDataDir.trim();
+    }
+    return DEFAULT_SESSION_DIR;
+  }
+
+  static async clearPersistedSessionData(sessionDataDir?: unknown): Promise<void> {
+    const targetDir = WhatsAppAdapter.resolveSessionDataDir(sessionDataDir);
+    await rm(targetDir, { recursive: true, force: true });
+  }
+
+  static async cleanupPersistedProfileLocks(sessionDataDir?: unknown): Promise<void> {
+    const profileDir = join(WhatsAppAdapter.resolveSessionDataDir(sessionDataDir), 'session');
+    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    await Promise.all(
+      lockFiles.map(async (file) => {
+        try {
+          await rm(join(profileDir, file), { force: true });
+        } catch {
+          // Ignore cleanup failures; lock cleanup is best-effort.
+        }
+      }),
+    );
   }
 
   /** Returns the current QR code as a base64 data URL, or null if not available. */
@@ -93,11 +147,17 @@ export class WhatsAppAdapter extends BaseAdapter {
   }
 
   async connect(config: Record<string, unknown> = {}): Promise<void> {
+    const connectStartedAt = Date.now();
     const waConfig = config as unknown as WhatsAppConfig;
-    this.sessionDataDir = waConfig.sessionDataDir ?? DEFAULT_SESSION_DIR;
+    this.sessionDataDir = WhatsAppAdapter.resolveSessionDataDir(waConfig.sessionDataDir);
     await this.updateConfig(config);
+    const configKeys = Object.keys(config).sort().join(',') || '(none)';
+    this.log(
+      `connect:start sessionDataDir=${this.sessionDataDir} timeoutMs=${this.connectTimeoutMs} protocolTimeoutMs=${this.protocolTimeoutMs} configKeys=${configKeys}`,
+    );
 
     if (this.client) {
+      this.log('connect:existing-client-detected disconnecting previous client');
       await this.disconnect();
     }
 
@@ -105,17 +165,42 @@ export class WhatsAppAdapter extends BaseAdapter {
     this.registerEvents(this.client);
 
     try {
-      await this.client.initialize();
+      this.log('connect:initialize attempt=1');
+      await this.initializeClientWithTimeout(this.client, 1);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const normalizedError = this.normalizeConnectError(err);
+      const message = normalizedError.message;
       const isProfileLockError =
         message.includes('already running for') || message.includes('userDataDir');
 
+      if (this.shouldAttemptSelfRecovery(normalizedError) && !isProfileLockError) {
+        this.log(`connect:self-recovery:start reason=${message}`);
+        try {
+          await this.runSoftBootstrapRecovery();
+        } catch (selfRecoveryError) {
+          const normalizedSelfRecoveryError = this.normalizeConnectError(selfRecoveryError);
+          this.log(
+            `connect:self-recovery:failed error=${normalizedSelfRecoveryError.message}`,
+          );
+          throw new Error(
+            `${normalizedSelfRecoveryError.message} Automatic self-recovery was attempted and failed. ` +
+              'Use WhatsApp "Hard Recovery" to reset session data and reconnect.',
+          );
+        }
+
+        this.log(
+          `connect:self-recovery:success elapsedMs=${Date.now() - connectStartedAt}`,
+        );
+        return;
+      }
+
       if (!isProfileLockError) {
-        throw err;
+        this.log(`connect:failed attempt=1 error=${message}`);
+        throw normalizedError;
       }
 
       // Try one recovery path for stale Chromium singleton lock files.
+      this.log(`connect:profile-lock-detected error=${message}`);
       await this.cleanupStaleProfileLocks();
       await this.destroyClient(this.client);
 
@@ -123,18 +208,26 @@ export class WhatsAppAdapter extends BaseAdapter {
       this.registerEvents(this.client);
 
       try {
-        await this.client.initialize();
+        this.log('connect:initialize attempt=2');
+        await this.initializeClientWithTimeout(this.client, 2);
       } catch (retryErr) {
-        const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        const normalizedRetryError = this.normalizeConnectError(retryErr);
+        const retryMessage = normalizedRetryError.message;
+        this.log(`connect:failed attempt=2 error=${retryMessage}`);
         throw new Error(
           `WhatsApp session is locked by another browser process. ${retryMessage}`
         );
       }
     }
+
+    this.log(
+      `connect:initialized elapsedMs=${Date.now() - connectStartedAt} connected=${this._connected}`,
+    );
   }
 
   async disconnect(): Promise<void> {
     if (!this.client) return;
+    this.log('disconnect:start');
 
     try {
       await this.destroyClient(this.client);
@@ -146,6 +239,7 @@ export class WhatsAppAdapter extends BaseAdapter {
       this.qrCode = null;
       this.senderAliasToPhone.clear();
       this.setConnected(false);
+      this.log('disconnect:done');
     }
   }
 
@@ -397,8 +491,12 @@ export class WhatsAppAdapter extends BaseAdapter {
           width: 256,
           margin: 2,
         });
+        this.log(`event:qr generated=${Boolean(this.qrCode)}`);
         this.emit('qr', this.qrCode);
       } catch (err) {
+        this.log(
+          `event:qr error=${err instanceof Error ? err.message : String(err)}`,
+        );
         this.emit('error', new Error(`QR code generation failed: ${err}`));
       }
     });
@@ -409,11 +507,15 @@ export class WhatsAppAdapter extends BaseAdapter {
       const displayName = info?.pushname ?? info?.wid?.user ?? 'WhatsApp';
       const identityName = info?.pushname ?? displayName;
       const identityPhone = normalizeE164Like(info?.wid?.user);
+      this.log(
+        `event:ready displayName=${displayName} identityPhone=${identityPhone ?? '-'}`,
+      );
       this.setConnected(true, displayName, identityName, identityPhone ?? undefined);
     });
 
     client.on('change_state', (stateRaw: unknown) => {
       const state = String(stateRaw || '').toUpperCase();
+      this.log(`event:change_state state=${state || 'UNKNOWN'}`);
       const degradedStates = new Set(['OPENING', 'PAIRING']);
       const reconnectStates = new Set([
         'CONFLICT',
@@ -505,17 +607,20 @@ export class WhatsAppAdapter extends BaseAdapter {
     client.on('disconnected', (reason: string) => {
       this.qrCode = null;
       this.setConnected(false);
+      this.log(`event:disconnected reason=${reason}`);
       this.emit('error', new Error(`WhatsApp disconnected: ${reason}`));
     });
 
     client.on('auth_failure', (message: string) => {
       this.qrCode = null;
       this.setConnected(false);
+      this.log(`event:auth_failure message=${message}`);
       this.emit('error', new Error(`WhatsApp auth failed: ${message}`));
     });
   }
 
   private createClient(): WAWebJS.Client {
+    this.log(`client:create dataPath=${this.sessionDataDir}`);
     const options = {
       authStrategy: new LocalAuth({
         dataPath: this.sessionDataDir,
@@ -523,6 +628,7 @@ export class WhatsAppAdapter extends BaseAdapter {
       puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        protocolTimeout: this.protocolTimeoutMs,
       },
       webVersionCache: {
         type: 'local',
@@ -531,6 +637,79 @@ export class WhatsAppAdapter extends BaseAdapter {
     } as unknown as WAWebJS.ClientOptions;
 
     return new Client(options);
+  }
+
+  private async initializeClientWithTimeout(
+    client: WAWebJS.Client,
+    attempt: number,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        client.initialize(),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => {
+            reject(
+              new Error(
+                `WhatsApp initialization timed out after ${this.connectTimeoutMs}ms. ` +
+                  'Possible causes: web.whatsapp.com unreachable, Chromium launch failure, or blocked session profile.',
+              ),
+            );
+          }, this.connectTimeoutMs);
+        }),
+      ]);
+      this.log(`connect:initialize:success attempt=${attempt} elapsedMs=${Date.now() - startedAt}`);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  private log(message: string): void {
+    process.stderr.write(`[whatsapp-adapter] ${message}\n`);
+  }
+
+  private shouldAttemptSelfRecovery(error: Error): boolean {
+    const message = error.message.toLowerCase();
+    return (
+      message.includes('runtime.callfunctionon timed out') ||
+      message.includes('protocol timeout') ||
+      message.includes('initialization timed out') ||
+      message.includes('target closed') ||
+      message.includes('browser disconnected') ||
+      message.includes('execution context was destroyed')
+    );
+  }
+
+  private async runSoftBootstrapRecovery(): Promise<void> {
+    if (this.client) {
+      await this.destroyClient(this.client);
+    }
+    await this.cleanupStaleProfileLocks();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    this.client = this.createClient();
+    this.registerEvents(this.client);
+    this.log('connect:initialize attempt=2 mode=self-recovery');
+    await this.initializeClientWithTimeout(this.client, 2);
+  }
+
+  private normalizeConnectError(error: unknown): Error {
+    if (error instanceof Error) {
+      const message = error.message;
+      if (message.includes('Runtime.callFunctionOn timed out')) {
+        return new Error(
+          'WhatsApp Chromium bridge stalled (Runtime.callFunctionOn timed out). ' +
+            'This usually means the headless browser is stuck during WhatsApp Web bootstrap. ' +
+            'Close conflicting Chrome/Chromium processes and retry.',
+        );
+      }
+      return error;
+    }
+
+    return new Error(String(error));
   }
 
   private async extractIncomingAttachments(
@@ -1041,16 +1220,6 @@ export class WhatsAppAdapter extends BaseAdapter {
   }
 
   private async cleanupStaleProfileLocks(): Promise<void> {
-    const profileDir = join(this.sessionDataDir, 'session');
-    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-    await Promise.all(
-      lockFiles.map(async (file) => {
-        try {
-          await rm(join(profileDir, file), { force: true });
-        } catch {
-          // ignore cleanup failures, retry path is best-effort
-        }
-      })
-    );
+    await WhatsAppAdapter.cleanupPersistedProfileLocks(this.sessionDataDir);
   }
 }

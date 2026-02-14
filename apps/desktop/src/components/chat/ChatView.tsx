@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { MessageList } from './MessageList';
-import { PermissionWorkbench } from './PermissionWorkbench';
 import { SessionHeader } from './SessionHeader';
 import { WelcomeScreen, type QuickAction } from './WelcomeScreen';
 import { InputArea } from './InputArea';
@@ -41,9 +40,11 @@ export function ChatView() {
     return state.sessions[activeSessionId] ?? null;
   });
   const chatItems = sessionState?.chatItems ?? [];
-  const pendingPermissions = sessionState?.pendingPermissions ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
   const isLoadingMessages = sessionState?.isLoadingMessages ?? false;
+  const hasPendingInteractions =
+    (sessionState?.pendingPermissions.length ?? 0) > 0 ||
+    (sessionState?.pendingQuestions.length ?? 0) > 0;
 
   // Reset chat and load messages when session changes
   // Use a ref to track the current session and abort stale loads
@@ -100,8 +101,8 @@ export function ChatView() {
   const hasActiveSession = Boolean(activeSessionId);
   const isSessionBootstrapping =
     hasActiveSession && (!sessionState || !sessionState.hasLoaded || isLoadingMessages);
-  const showMessageList = hasMessages || isSessionBootstrapping || Boolean(optimisticFirstMessage);
-  const showPermissionWorkbench = Boolean(activeSessionId && pendingPermissions.length > 0);
+  const showMessageList =
+    hasMessages || isSessionBootstrapping || hasPendingInteractions || Boolean(optimisticFirstMessage);
 
   const deriveTitle = (text: string) => {
     const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -377,9 +378,7 @@ export function ChatView() {
 
       {/* Messages, Loading, or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {showPermissionWorkbench && activeSessionId ? (
-          <PermissionWorkbench sessionId={activeSessionId} />
-        ) : showMessageList ? (
+        {showMessageList ? (
           <MessageList optimisticFirstMessage={optimisticFirstMessage} />
         ) : (
           <WelcomeScreen onQuickAction={handleQuickAction} />

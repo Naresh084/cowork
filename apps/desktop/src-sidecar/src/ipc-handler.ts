@@ -2812,19 +2812,59 @@ registerHandler('integration_list_statuses', async () => {
 
 registerHandler('integration_connect', async (params) => {
   const { platform, config } = params as { platform: string; config: Record<string, unknown> };
+  const startedAt = Date.now();
   if (!platform || !isValidIntegrationPlatform(platform)) {
     throw new Error(
       `Invalid platform: ${platform}. Must be one of: ${SUPPORTED_PLATFORM_TYPES.join(', ')}`,
     );
   }
   const safeConfig = config || {};
+  process.stderr.write(
+    `[integration-ipc] connect:start platform=${platform} configKeys=${Object.keys(safeConfig).sort().join(',') || '(none)'}\n`,
+  );
   if (platform === 'imessage' && process.platform !== 'darwin') {
     throw new Error('iMessage integration is only supported on macOS');
   }
   const { integrationBridge } = await import('./integrations/index.js');
-  await integrationBridge.connect(platform, safeConfig);
-  await refreshIntegrationCapabilities(`integration-connect:${platform}`);
-  return integrationBridge.getStatusWithHealth(platform);
+  try {
+    await integrationBridge.connect(platform, safeConfig);
+    await refreshIntegrationCapabilities(`integration-connect:${platform}`);
+    const status = await integrationBridge.getStatusWithHealth(platform);
+    process.stderr.write(
+      `[integration-ipc] connect:done platform=${platform} connected=${status.connected} health=${status.health ?? '-'} elapsedMs=${Date.now() - startedAt}\n`,
+    );
+    return status;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `[integration-ipc] connect:error platform=${platform} elapsedMs=${Date.now() - startedAt} error=${message}\n`,
+    );
+    throw error;
+  }
+});
+
+registerHandler('integration_recover_whatsapp', async (params) => {
+  const startedAt = Date.now();
+  const payload = (params || {}) as { mode?: string };
+  const requestedMode = String(payload.mode || 'soft').toLowerCase();
+  const mode = requestedMode === 'hard' ? 'hard' : 'soft';
+  process.stderr.write(`[integration-ipc] recover-whatsapp:start mode=${mode}\n`);
+
+  const { integrationBridge } = await import('./integrations/index.js');
+  try {
+    const status = await integrationBridge.recoverWhatsApp(mode);
+    await refreshIntegrationCapabilities(`integration-recover-whatsapp:${mode}`);
+    process.stderr.write(
+      `[integration-ipc] recover-whatsapp:done mode=${mode} connected=${status.connected} health=${status.health ?? '-'} elapsedMs=${Date.now() - startedAt}\n`,
+    );
+    return status;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(
+      `[integration-ipc] recover-whatsapp:error mode=${mode} elapsedMs=${Date.now() - startedAt} error=${message}\n`,
+    );
+    throw error;
+  }
 });
 
 registerHandler('integration_disconnect', async (params) => {

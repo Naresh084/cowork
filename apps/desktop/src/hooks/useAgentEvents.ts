@@ -373,6 +373,13 @@ export function useAgentEvents(sessionId: string | null): void {
           requiresReconnect?: boolean;
           lastHealthCheckAt?: number;
         };
+        console.info('[useAgentEvents] integration:status', {
+          platform: statusEvent.platform,
+          connected: statusEvent.connected,
+          health: statusEvent.health,
+          error: statusEvent.error,
+          requiresReconnect: statusEvent.requiresReconnect,
+        });
         useIntegrationStore.getState().updatePlatformStatus({
           platform: statusEvent.platform as PlatformType,
           connected: statusEvent.connected,
@@ -392,6 +399,10 @@ export function useAgentEvents(sessionId: string | null): void {
 
       if (event.type === 'integration:qr') {
         const qrEvent = event as unknown as { qrDataUrl: string };
+        console.info('[useAgentEvents] integration:qr', {
+          hasDataUrl: Boolean(qrEvent.qrDataUrl),
+          qrLength: qrEvent.qrDataUrl?.length ?? 0,
+        });
         useIntegrationStore.getState().setQRCode(qrEvent.qrDataUrl);
         return;
       }

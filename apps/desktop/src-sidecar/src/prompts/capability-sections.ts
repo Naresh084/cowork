@@ -215,7 +215,9 @@ function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): 
     content: [
       '## External CLI Operating Practice',
       `- Available launch tools: ${availableStarts.join(', ')}.`,
-      '- If launch values are already explicit in the user request, do not ask redundant confirmation. Launch directly with explicit arguments.',
+      '- Launch external CLI runs only when the user explicitly asks to use Codex/Claude CLI.',
+      '- For public lookup tasks (profiles/posts/news/docs), prefer `web_search` and `web_fetch` instead of external CLI launch tools.',
+      '- If launch values are already explicit in the user request, launch directly with explicit arguments.',
       '- Ask follow-up questions only when required launch values are missing or ambiguous:',
       '  - `working_directory`',
       '  - `create_if_missing` (default recommendation: `true`)',

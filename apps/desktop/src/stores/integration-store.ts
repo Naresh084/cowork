@@ -22,6 +22,8 @@ export interface IntegrationGeneralSettings {
   sharedSessionWorkingDirectory: string;
 }
 
+export type WhatsAppRecoveryMode = 'soft' | 'hard';
+
 export const DEFAULT_WHATSAPP_DENIAL_MESSAGE =
   'This Cowork bot is private. You are not authorized to chat with it.';
 export const ALLOW_ALL_SENDERS_WILDCARD = '*';
@@ -38,6 +40,7 @@ interface IntegrationState {
   isIntegrationSettingsLoading: boolean;
   isIntegrationSettingsSaving: boolean;
   integrationSettingsError: string | null;
+  isRecoveringWhatsapp: boolean;
 }
 
 interface IntegrationActions {
@@ -52,6 +55,7 @@ interface IntegrationActions {
   loadIntegrationSettings: () => Promise<void>;
   saveIntegrationSettings: (settings: IntegrationGeneralSettings) => Promise<void>;
   sendTestMessage: (platform: PlatformType, message?: string) => Promise<void>;
+  recoverWhatsApp: (mode?: WhatsAppRecoveryMode) => Promise<void>;
   getConnectedPlatforms: () => PlatformType[];
 }
 
@@ -92,9 +96,31 @@ const initialState: IntegrationState = {
   isIntegrationSettingsLoading: false,
   isIntegrationSettingsSaving: false,
   integrationSettingsError: null,
+  isRecoveringWhatsapp: false,
 };
 
 const statusPollTimers: Partial<Record<PlatformType, ReturnType<typeof setInterval>>> = {};
+const INTEGRATION_STORE_LOG_PREFIX = '[integration-store]';
+
+function logIntegrationStoreInfo(message: string, context?: Record<string, unknown>): void {
+  if (context) {
+    console.info(`${INTEGRATION_STORE_LOG_PREFIX} ${message}`, context);
+    return;
+  }
+  console.info(`${INTEGRATION_STORE_LOG_PREFIX} ${message}`);
+}
+
+function logIntegrationStoreWarn(message: string, context?: Record<string, unknown>): void {
+  if (context) {
+    console.warn(`${INTEGRATION_STORE_LOG_PREFIX} ${message}`, context);
+    return;
+  }
+  console.warn(`${INTEGRATION_STORE_LOG_PREFIX} ${message}`);
+}
+
+function createAttemptId(platform: PlatformType): string {
+  return `${platform}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function clearStatusPolling(platform: PlatformType): void {
   const timer = statusPollTimers[platform];
@@ -198,11 +224,26 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
     ...initialState,
 
     connect: async (platform, config) => {
+      const attemptId = createAttemptId(platform);
+      const startedAt = Date.now();
+      logIntegrationStoreInfo('connect:start', {
+        attemptId,
+        platform,
+        configKeys: Object.keys(config || {}).sort(),
+      });
       if (get().isConnecting[platform]) {
+        logIntegrationStoreInfo('connect:ignored-already-connecting', {
+          attemptId,
+          platform,
+        });
         return;
       }
 
       clearStatusPolling(platform);
+      logIntegrationStoreInfo('connect:cleared-existing-polling', {
+        attemptId,
+        platform,
+      });
 
       // Clear previous error and mark as connecting
       set((state) => ({
@@ -214,14 +255,29 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
       }));
 
       try {
+        logIntegrationStoreInfo('connect:invoke-backend', { attemptId, platform });
         const status = await invoke<PlatformStatus | null>('agent_integration_connect', {
           platform,
           config: config || {},
+        });
+        logIntegrationStoreInfo('connect:invoke-backend:resolved', {
+          attemptId,
+          platform,
+          elapsedMs: Date.now() - startedAt,
+          hasStatus: Boolean(status),
+          connected: status?.connected ?? false,
+          health: status?.health,
+          error: status?.error,
         });
         if (status) {
           get().updatePlatformStatus(status);
         }
         await get().refreshStatuses();
+        logIntegrationStoreInfo('connect:refresh-statuses:done', {
+          attemptId,
+          platform,
+          elapsedMs: Date.now() - startedAt,
+        });
 
         // For WhatsApp, QR code arrives via integration:qr event (handled in useAgentEvents).
         // Also do a delayed poll as a fallback in case the event was missed.
@@ -232,22 +288,43 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
             try {
               await get().refreshStatuses();
               const current = get().platforms.whatsapp;
+              if (attempts === 1 || attempts % 5 === 0 || current.connected) {
+                logIntegrationStoreInfo('connect:whatsapp-poll', {
+                  attemptId,
+                  attempts,
+                  connected: current.connected,
+                  hasError: Boolean(current.error),
+                  hasQR: Boolean(get().whatsappQR),
+                });
+              }
               if (current.connected || attempts >= 45) {
                 clearStatusPolling('whatsapp');
                 if (!current.connected) {
-                  set((state) => ({
-                    isConnecting: { ...state.isConnecting, whatsapp: false },
-                  }));
+                  logIntegrationStoreWarn('connect:whatsapp-poll-timeout', {
+                    attemptId,
+                    attempts,
+                    elapsedMs: Date.now() - startedAt,
+                  });
                 }
                 return;
               }
 
               const result = await invoke<{ qrDataUrl: string | null }>('agent_integration_get_qr');
               if (result?.qrDataUrl && !get().whatsappQR) {
+                logIntegrationStoreInfo('connect:whatsapp-poll:qr-fetched', {
+                  attemptId,
+                  attempts,
+                  qrLength: result.qrDataUrl.length,
+                });
                 set({ whatsappQR: result.qrDataUrl });
               }
-            } catch {
-              // QR/status may still arrive via events
+            } catch (pollError) {
+              logIntegrationStoreWarn('connect:whatsapp-poll:error', {
+                attemptId,
+                attempts,
+                error: pollError instanceof Error ? pollError.message : String(pollError),
+              });
+              // QR/status may still arrive via events.
             }
           }, 2000);
         } else {
@@ -257,16 +334,37 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
             try {
               await get().refreshStatuses();
               const current = get().platforms[platform];
+              if (attempts === 1 || attempts % 5 === 0 || current.connected) {
+                logIntegrationStoreInfo('connect:poll', {
+                  attemptId,
+                  platform,
+                  attempts,
+                  connected: current.connected,
+                  hasError: Boolean(current.error),
+                });
+              }
               if (current.connected || attempts >= 20) {
                 clearStatusPolling(platform);
               }
-            } catch {
-              // ignore and keep polling briefly
+            } catch (pollError) {
+              logIntegrationStoreWarn('connect:poll:error', {
+                attemptId,
+                platform,
+                attempts,
+                error: pollError instanceof Error ? pollError.message : String(pollError),
+              });
+              // Ignore and keep polling briefly.
             }
           }, 1000);
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        logIntegrationStoreWarn('connect:error', {
+          attemptId,
+          platform,
+          elapsedMs: Date.now() - startedAt,
+          error: errorMessage,
+        });
         set((state) => ({
           platforms: {
             ...state.platforms,
@@ -278,11 +376,15 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
           isConnecting: { ...state.isConnecting, [platform]: false },
         }));
       } finally {
-        if (platform !== 'whatsapp') {
-          set((state) => ({
-            isConnecting: { ...state.isConnecting, [platform]: false },
-          }));
-        }
+        logIntegrationStoreInfo('connect:finally', {
+          attemptId,
+          platform,
+          elapsedMs: Date.now() - startedAt,
+          clearConnecting: true,
+        });
+        set((state) => ({
+          isConnecting: { ...state.isConnecting, [platform]: false },
+        }));
       }
     },
 
@@ -290,7 +392,66 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
       await get().connect(platform, {});
     },
 
+    recoverWhatsApp: async (mode = 'soft') => {
+      const startedAt = Date.now();
+      const normalizedMode: WhatsAppRecoveryMode = mode === 'hard' ? 'hard' : 'soft';
+      logIntegrationStoreInfo('recover-whatsapp:start', {
+        mode: normalizedMode,
+      });
+      if (get().isRecoveringWhatsapp) {
+        logIntegrationStoreInfo('recover-whatsapp:ignored-already-running', {
+          mode: normalizedMode,
+        });
+        return;
+      }
+
+      set({ isRecoveringWhatsapp: true });
+      try {
+        const status = await invoke<PlatformStatus | null>('agent_integration_recover_whatsapp', {
+          mode: normalizedMode,
+        });
+        logIntegrationStoreInfo('recover-whatsapp:invoke:resolved', {
+          mode: normalizedMode,
+          elapsedMs: Date.now() - startedAt,
+          connected: status?.connected ?? false,
+          health: status?.health,
+          error: status?.error,
+        });
+        if (status) {
+          get().updatePlatformStatus(status);
+        }
+        await get().refreshStatuses();
+        if (normalizedMode === 'hard') {
+          set({ whatsappQR: null });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logIntegrationStoreWarn('recover-whatsapp:error', {
+          mode: normalizedMode,
+          elapsedMs: Date.now() - startedAt,
+          error: message,
+        });
+        set((state) => ({
+          platforms: {
+            ...state.platforms,
+            whatsapp: {
+              ...state.platforms.whatsapp,
+              error: message,
+            },
+          },
+        }));
+        throw error;
+      } finally {
+        set({ isRecoveringWhatsapp: false });
+        logIntegrationStoreInfo('recover-whatsapp:finally', {
+          mode: normalizedMode,
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
+    },
+
     disconnect: async (platform) => {
+      logIntegrationStoreInfo('disconnect:start', { platform });
       clearStatusPolling(platform);
       try {
         await invoke('agent_integration_disconnect', { platform });
@@ -306,7 +467,10 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
           ...(platform === 'whatsapp' ? { whatsappQR: null } : {}),
         }));
       } catch (error) {
-        console.warn(`Failed to disconnect ${platform}:`, error);
+        logIntegrationStoreWarn('disconnect:error', {
+          platform,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     },
 
@@ -314,6 +478,12 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
       try {
         const result = await invoke<unknown>('agent_integration_list_statuses');
         const statuses = normalizeStatusesResponse(result);
+        logIntegrationStoreInfo('refresh-statuses:received', {
+          count: statuses.length,
+          connectedPlatforms: statuses
+            .filter((status) => status.connected)
+            .map((status) => status.platform),
+        });
 
         set((state) => {
           const updated = { ...state.platforms };
@@ -334,11 +504,20 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
           };
         });
       } catch (error) {
-        console.warn('Failed to refresh integration statuses:', error);
+        logIntegrationStoreWarn('refresh-statuses:error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     },
 
     updatePlatformStatus: (status) => {
+      logIntegrationStoreInfo('status:update', {
+        platform: status.platform,
+        connected: status.connected,
+        health: status.health,
+        error: status.error,
+        requiresReconnect: status.requiresReconnect,
+      });
       if (status.connected || status.error) {
         clearStatusPolling(status.platform);
       }
@@ -363,6 +542,10 @@ export const useIntegrationStore = create<IntegrationState & IntegrationActions>
     },
 
     setQRCode: (qr) => {
+      logIntegrationStoreInfo('status:qr-update', {
+        hasQR: Boolean(qr),
+        qrLength: qr?.length ?? 0,
+      });
       set((state) => ({
         whatsappQR: qr,
         isConnecting: { ...state.isConnecting, whatsapp: qr ? false : state.isConnecting.whatsapp },

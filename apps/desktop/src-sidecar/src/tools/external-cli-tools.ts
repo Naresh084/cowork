@@ -176,7 +176,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
   const startCodexCliRun: ToolHandler = {
     name: 'start_codex_cli_run',
     description:
-      'Start a Codex CLI background run with explicit directory/create-if-missing/bypass arguments. If the user already gave clear values, launch directly; otherwise ask only missing/ambiguous follow-ups. Then keep monitoring with external_cli_get_progress until terminal state.',
+      'Start a Codex CLI background run only when the user explicitly asks to launch Codex CLI. Use explicit directory/create-if-missing/bypass arguments. If values are clear, launch directly; otherwise ask only missing/ambiguous follow-ups. For generic web lookup tasks, use web_search/web_fetch instead. Then keep monitoring with external_cli_get_progress until terminal state.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Codex CLI.'),
       working_directory: z
@@ -241,7 +241,7 @@ export function createExternalCliTools(options: ExternalCliToolFactoryOptions): 
   const startClaudeCliRun: ToolHandler = {
     name: 'start_claude_cli_run',
     description:
-      'Start a Claude CLI background run with explicit directory/create-if-missing/bypass arguments. If the user already gave clear values, launch directly; otherwise ask only missing/ambiguous follow-ups. Then keep monitoring with external_cli_get_progress until terminal state.',
+      'Start a Claude CLI background run only when the user explicitly asks to launch Claude CLI. Use explicit directory/create-if-missing/bypass arguments. If values are clear, launch directly; otherwise ask only missing/ambiguous follow-ups. For generic web lookup tasks, use web_search/web_fetch instead. Then keep monitoring with external_cli_get_progress until terminal state.',
     parameters: z.object({
       prompt: z.string().min(1).describe('Detailed prompt to run in Claude CLI.'),
       working_directory: z

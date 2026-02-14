@@ -41,6 +41,33 @@ interface SidebarProps {
   isCollapsed: boolean;
 }
 
+function dedupeSessionsById(sessions: SessionSummary[]): SessionSummary[] {
+  const seenIds = new Set<string>();
+  const deduped: SessionSummary[] = [];
+  for (const session of sessions) {
+    if (!session?.id || seenIds.has(session.id)) {
+      continue;
+    }
+    seenIds.add(session.id);
+    deduped.push(session);
+  }
+  return deduped;
+}
+
+function collectDuplicateSessionIds(sessions: SessionSummary[]): string[] {
+  const seenIds = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const session of sessions) {
+    if (!session?.id) continue;
+    if (seenIds.has(session.id)) {
+      duplicates.add(session.id);
+      continue;
+    }
+    seenIds.add(session.id);
+  }
+  return Array.from(duplicates);
+}
+
 export function Sidebar({ isCollapsed }: SidebarProps) {
   const {
     sessions,
@@ -95,6 +122,16 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
   const [commandsModalOpen, setCommandsModalOpen] = useState(false);
   const [subagentsModalOpen, setSubagentsModalOpen] = useState(false);
   const [connectorsModalOpen, setConnectorsModalOpen] = useState(false);
+  const dedupedSessions = useMemo(() => dedupeSessionsById(sessions), [sessions]);
+
+  useEffect(() => {
+    if (sessions.length <= dedupedSessions.length) return;
+    console.warn('[Sidebar] Duplicate session IDs detected; rendering deduped sessions', {
+      totalSessions: sessions.length,
+      uniqueSessions: dedupedSessions.length,
+      duplicateSessionIds: collectDuplicateSessionIds(sessions),
+    });
+  }, [sessions, dedupedSessions.length]);
 
   // Cron store - use store state so right panel "Create one" / icon also opens the modal
   const activeJobCount = useCronActiveJobCount();
@@ -238,7 +275,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
     >
       {isCollapsed ? (
         <SidebarRail
-          sessions={sessions}
+          sessions={dedupedSessions}
           activeSessionId={activeSessionId}
           onNewTask={handleNewTask}
           onSelectSession={handleSelectSession}
@@ -260,7 +297,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
         />
       ) : (
         <SidebarExpanded
-          sessions={sessions}
+          sessions={dedupedSessions}
           activeSessionId={activeSessionId}
           isLoading={isLoading}
           sessionMenuId={sessionMenuId}
@@ -336,7 +373,7 @@ export function Sidebar({ isCollapsed }: SidebarProps) {
             className="absolute inset-y-0 left-0 z-40"
           >
             <SidebarExpanded
-              sessions={sessions}
+              sessions={dedupedSessions}
               activeSessionId={activeSessionId}
               isLoading={isLoading}
               sessionMenuId={sessionMenuId}
@@ -421,7 +458,10 @@ function SidebarRail({
   sessionListFilters,
   onOpenHelp,
 }: SidebarRailProps) {
-  const filteredSessions = sessions.filter((session) => sessionListFilters[getSessionCategory(session)]);
+  const uniqueSessions = dedupeSessionsById(sessions);
+  const filteredSessions = uniqueSessions.filter(
+    (session) => sessionListFilters[getSessionCategory(session)],
+  );
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
@@ -634,7 +674,8 @@ function SidebarExpanded({
   onOpenHelp,
 }: SidebarExpandedProps) {
   const { userName } = useSettingsStore();
-  const sessionCounts = sessions.reduce(
+  const uniqueSessions = dedupeSessionsById(sessions);
+  const sessionCounts = uniqueSessions.reduce(
     (acc, session) => {
       const category = getSessionCategory(session);
       acc[category] += 1;
@@ -642,8 +683,8 @@ function SidebarExpanded({
     },
     { chat: 0, shared: 0, cron: 0 }
   );
-  const filteredSessions = sessions.filter(
-    (session) => sessionListFilters[getSessionCategory(session)]
+  const filteredSessions = uniqueSessions.filter(
+    (session) => sessionListFilters[getSessionCategory(session)],
   );
   return (
     <motion.div
@@ -740,7 +781,7 @@ function SidebarExpanded({
           <div className="flex items-center justify-center py-8">
             <div className="animate-pulse text-white/40 text-sm">Loading...</div>
           </div>
-        ) : sessions.length === 0 ? (
+        ) : uniqueSessions.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}

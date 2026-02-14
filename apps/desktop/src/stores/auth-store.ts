@@ -111,6 +111,7 @@ export interface RuntimeConfigPayload {
       allowBypassPermissions: boolean;
     };
   };
+  toolOutputTokenLimit?: number;
   specializedModels?: {
     google: {
       imageGeneration: string;
@@ -210,6 +211,7 @@ function buildRuntimeConfig(
     mediaRouting: partial?.mediaRouting,
     sandbox: partial?.sandbox,
     externalCli: partial?.externalCli,
+    toolOutputTokenLimit: partial?.toolOutputTokenLimit,
     specializedModels: partial?.specializedModels,
     activeSoul: partial?.activeSoul ?? state.activeSoul,
     memory: partial?.memory ?? state.memory,

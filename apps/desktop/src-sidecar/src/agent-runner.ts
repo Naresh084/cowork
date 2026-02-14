@@ -336,6 +336,7 @@ interface RuntimeConfigState {
   specializedModels: SpecializedModelsV2Local;
   sandbox: CommandSandboxSettings;
   externalCli: ExternalCliRuntimeConfig;
+  toolOutputTokenLimit: number;
   activeSoul: RuntimeSoulProfile | null;
   memory: {
     enabled: boolean;
@@ -413,6 +414,27 @@ const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
   maxExecutionTimeMs: 30000,
   maxOutputBytes: 1024 * 1024,
 };
+const DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 32000;
+const MIN_TOOL_OUTPUT_TOKEN_LIMIT = 1024;
+const MAX_TOOL_OUTPUT_TOKEN_LIMIT = 262144;
+const TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN = 4;
+type ExternalCliStartToolName = 'start_codex_cli_run' | 'start_claude_cli_run';
+const EXTERNAL_CLI_START_TOOLS = new Set<ExternalCliStartToolName>([
+  'start_codex_cli_run',
+  'start_claude_cli_run',
+]);
+const EXTERNAL_CLI_INTENT_PATTERNS: Record<ExternalCliStartToolName, RegExp[]> = {
+  start_codex_cli_run: [
+    /\bstart_codex_cli_run\b/i,
+    /\b(use|run|start|launch|open|execute)\b.{0,30}\bcodex(?:\s+cli)?\b/i,
+    /\bcodex(?:\s+cli)?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
+  ],
+  start_claude_cli_run: [
+    /\bstart_claude_cli_run\b/i,
+    /\b(use|run|start|launch|open|execute)\b.{0,30}\bclaude(?:\s+(?:cli|code))?\b/i,
+    /\bclaude(?:\s+(?:cli|code))?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
+  ],
+};
 
 const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
   enabled: true,
@@ -429,6 +451,16 @@ const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
     strategy: 'balanced',
   },
 };
+
+function normalizeToolOutputTokenLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT;
+  }
+  return Math.max(
+    MIN_TOOL_OUTPUT_TOKEN_LIMIT,
+    Math.min(MAX_TOOL_OUTPUT_TOKEN_LIMIT, Math.floor(value)),
+  );
+}
 
 function normalizeCommandSandboxSettings(
   value?: Partial<CommandSandboxSettings> | null,
@@ -699,6 +731,7 @@ export class AgentRunner {
       codex: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.codex },
       claude: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.claude },
     },
+    toolOutputTokenLimit: DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
     activeSoul: { ...FALLBACK_SOUL_PROFILE },
     memory: { ...DEFAULT_RUNTIME_MEMORY_SETTINGS },
     specializedModels: {
@@ -1864,6 +1897,9 @@ export class AgentRunner {
         ...(config.externalCli?.claude || {}),
       },
     };
+    const nextToolOutputTokenLimit = normalizeToolOutputTokenLimit(
+      config.toolOutputTokenLimit ?? this.runtimeConfig.toolOutputTokenLimit,
+    );
     const mergedMemory: Partial<RuntimeConfigState['memory']> & {
       consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
     } = {
@@ -1907,6 +1943,7 @@ export class AgentRunner {
       mediaRouting: nextMediaRouting,
       sandbox: nextSandbox,
       externalCli: nextExternalCli,
+      toolOutputTokenLimit: nextToolOutputTokenLimit,
       activeSoul: nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
       memory: nextMemory,
       specializedModels: nextSpecializedModels,
@@ -7719,10 +7756,15 @@ ${stitchGuidance}
           const duration = this.consumeToolDuration(session, toolCallId);
           session.activeTools.delete(toolCallId);
           this.persistRuntimeSnapshot(session);
+          const limitedOutput = this.applyToolOutputTokenLimit(
+            tool.name,
+            toolCallId,
+            result.data,
+          );
           const payload = {
             toolCallId,
             success: result.success,
-            result: result.data,
+            result: limitedOutput,
             error: result.error,
             duration,
             parentToolId,
@@ -7735,7 +7777,7 @@ ${stitchGuidance}
             error: result.error,
             duration,
           });
-          this.recordArtifactForTool(session, tool.name, args, result.data);
+          this.recordArtifactForTool(session, tool.name, args, limitedOutput);
           if (result.success && this.isTodoTool(tool.name)) {
             session.hasTodoStateThisTurn = true;
             session.nonTodoToolCallsSinceTodoUpdate = 0;
@@ -7753,7 +7795,7 @@ ${stitchGuidance}
             toolId: toolCallId,
             name: tool.name,
             status: result.success ? 'success' : 'error',
-            result: result.data,
+            result: limitedOutput,
             error: result.error,
             duration,
           };
@@ -7762,7 +7804,7 @@ ${stitchGuidance}
             this.emitSupplementalToolResultItems(session, tool.name, toolCallId, result.data);
           }
 
-          return result.data ?? result;
+          return limitedOutput ?? result;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
           session.activeTools.delete(toolCallId);
@@ -8012,6 +8054,33 @@ ${stitchGuidance}
           });
         }
 
+        if (this.isExternalCliStartTool(toolName) && !this.shouldAllowExternalCliLaunch(session, toolName)) {
+          const duration = this.consumeToolDuration(session, toolCallId);
+          const errorMsg = this.buildExternalCliLaunchBlockedMessage(toolName);
+          eventEmitter.toolResult(session.id, toolCallPayload, {
+            toolCallId,
+            success: false,
+            result: null,
+            error: errorMsg,
+            duration,
+            parentToolId,
+          });
+          this.checkpointActiveRun(session.id, 'tool_result', {
+            toolCallId,
+            toolName,
+            success: false,
+            error: errorMsg,
+            duration,
+          });
+          emitToolResult('error', null, errorMsg, duration);
+          finishRuntimeTool();
+          return new ToolMessage({
+            content: errorMsg,
+            tool_call_id: toolCallId,
+            name: toolName,
+          });
+        }
+
         if (this.shouldEnforceTodoGuard(session, toolName)) {
           // Advisory-only: keep light telemetry, never block execution on todo state.
           session.nonTodoToolCallsSinceTodoUpdate += 1;
@@ -8117,11 +8186,21 @@ ${stitchGuidance}
         try {
           const result = await handler(request);
           const duration = this.consumeToolDuration(session, toolCallId);
-          const normalized = this.normalizeDeepagentsToolResult(result);
+          const limitedResult = this.applyToolOutputLimitToDeepagentsResult(
+            result,
+            toolName,
+            toolCallId,
+          );
+          const normalized = this.normalizeDeepagentsToolResult(limitedResult);
+          const limitedOutput = this.applyToolOutputTokenLimit(
+            toolName,
+            toolCallId,
+            normalized.output,
+          );
           const payload = {
             toolCallId,
             success: normalized.success,
-            result: normalized.output,
+            result: limitedOutput,
             error: normalized.error,
             duration,
             parentToolId,
@@ -8134,16 +8213,21 @@ ${stitchGuidance}
             error: normalized.error,
             duration,
           });
-          this.recordArtifactForTool(session, toolName, args, normalized.output);
+          this.recordArtifactForTool(session, toolName, args, limitedOutput);
           if (normalized.success && this.isTodoTool(toolName)) {
             session.hasTodoStateThisTurn = true;
             session.nonTodoToolCallsSinceTodoUpdate = 0;
           }
 
           // Emit tool result
-          emitToolResult(normalized.success ? 'success' : 'error', normalized.output, normalized.error, duration);
+          emitToolResult(
+            normalized.success ? 'success' : 'error',
+            limitedOutput,
+            normalized.error,
+            duration,
+          );
 
-          return result;
+          return limitedResult;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
           const payload = {
@@ -8193,6 +8277,48 @@ ${stitchGuidance}
   private isTaskTool(toolName: string): boolean {
     const lower = toolName.toLowerCase();
     return lower === 'task' || lower.includes('spawn_task') || lower.includes('subagent');
+  }
+
+  private isExternalCliStartTool(toolName: string): toolName is ExternalCliStartToolName {
+    return EXTERNAL_CLI_START_TOOLS.has(toolName as ExternalCliStartToolName);
+  }
+
+  private hasExplicitExternalCliLaunchIntent(
+    userText: string | null,
+    toolName: ExternalCliStartToolName,
+  ): boolean {
+    if (!userText) return false;
+    const normalized = userText.trim();
+    if (!normalized) return false;
+    return EXTERNAL_CLI_INTENT_PATTERNS[toolName].some((pattern) => pattern.test(normalized));
+  }
+
+  private shouldAllowExternalCliLaunch(
+    session: ActiveSession,
+    toolName: ExternalCliStartToolName,
+  ): boolean {
+    // Allow recent follow-up answers after an explicit launch request.
+    const recentUserMessages = [...session.chatItems]
+      .reverse()
+      .filter((item): item is UserMessageItem => item.kind === 'user_message')
+      .slice(0, 3);
+
+    for (const item of recentUserMessages) {
+      const text = this.getTextFromMessageContent(item.content as Message['content']);
+      if (this.hasExplicitExternalCliLaunchIntent(text, toolName)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private buildExternalCliLaunchBlockedMessage(toolName: ExternalCliStartToolName): string {
+    const providerLabel = toolName === 'start_codex_cli_run' ? 'Codex CLI' : 'Claude CLI';
+    return [
+      `${providerLabel} launch blocked: \`${toolName}\` is allowed only when the user explicitly asks to launch ${providerLabel}.`,
+      'For discovery/lookups (for example Twitter profiles/posts), use `web_search` and `web_fetch` instead of external CLI launch tools.',
+    ].join(' ');
   }
 
   private getPermissionForDeepagentsTool(
@@ -8275,6 +8401,118 @@ ${stitchGuidance}
     }
 
     return false;
+  }
+
+  private stringifyToolOutputValue(value: unknown): string {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    const seen = new WeakSet<object>();
+    try {
+      const serialized = JSON.stringify(value, (_key, currentValue) => {
+        if (typeof currentValue === 'bigint') {
+          return `${currentValue.toString()}n`;
+        }
+        if (typeof currentValue === 'object' && currentValue !== null) {
+          if (seen.has(currentValue)) {
+            return '[Circular]';
+          }
+          seen.add(currentValue);
+        }
+        return currentValue;
+      });
+      if (typeof serialized === 'string') {
+        return serialized;
+      }
+    } catch {
+      // Fall through to String() conversion.
+    }
+
+    try {
+      return String(value);
+    } catch {
+      return '[unserializable tool output]';
+    }
+  }
+
+  private logToolOutputTruncation(
+    toolName: string,
+    toolCallId: string,
+    originalChars: number,
+    maxChars: number,
+  ): void {
+    const approxOriginalTokens = Math.ceil(originalChars / TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN);
+    console.warn('[tool-output-limit] Truncated tool output before model handoff', {
+      toolName,
+      toolCallId,
+      limitTokens: this.runtimeConfig.toolOutputTokenLimit,
+      approxOriginalTokens,
+      originalChars,
+      maxChars,
+    });
+  }
+
+  private applyToolOutputTokenLimit(
+    toolName: string,
+    toolCallId: string,
+    output: unknown,
+  ): unknown {
+    if (output === null || output === undefined) {
+      return output;
+    }
+
+    const limitTokens = normalizeToolOutputTokenLimit(this.runtimeConfig.toolOutputTokenLimit);
+    const maxChars = limitTokens * TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN;
+    if (maxChars <= 0) {
+      return output;
+    }
+
+    const truncationSuffix = `\n\n[tool output truncated at ${limitTokens} tokens by runtime limit]`;
+
+    if (typeof output === 'string') {
+      if (output.length <= maxChars) {
+        return output;
+      }
+      const allowedChars = Math.max(0, maxChars - truncationSuffix.length);
+      this.logToolOutputTruncation(toolName, toolCallId, output.length, maxChars);
+      return `${output.slice(0, allowedChars)}${truncationSuffix}`;
+    }
+
+    const serialized = this.stringifyToolOutputValue(output);
+    if (serialized.length <= maxChars) {
+      return output;
+    }
+
+    const allowedChars = Math.max(0, maxChars - truncationSuffix.length);
+    this.logToolOutputTruncation(toolName, toolCallId, serialized.length, maxChars);
+    return `${serialized.slice(0, allowedChars)}${truncationSuffix}`;
+  }
+
+  private applyToolOutputLimitToDeepagentsResult<T>(
+    result: T,
+    toolName: string,
+    toolCallId: string,
+  ): T {
+    const toolMessage = this.extractToolMessage(result);
+    if (!toolMessage) {
+      return result;
+    }
+
+    const limitedContent = this.applyToolOutputTokenLimit(
+      toolName,
+      toolCallId,
+      toolMessage.content,
+    );
+    if (limitedContent === toolMessage.content) {
+      return result;
+    }
+
+    (toolMessage as unknown as { content: unknown }).content = limitedContent;
+    return result;
   }
 
   private normalizeDeepagentsToolResult(result: unknown): { success: boolean; output: unknown; error?: string } {

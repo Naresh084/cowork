@@ -128,6 +128,19 @@ interface SessionActions {
   waitForBackend: () => Promise<void>;
 }
 
+function dedupeSessionsById(sessions: SessionSummary[]): SessionSummary[] {
+  const seenIds = new Set<string>();
+  const deduped: SessionSummary[] = [];
+  for (const session of sessions) {
+    if (!session?.id || seenIds.has(session.id)) {
+      continue;
+    }
+    seenIds.add(session.id);
+    deduped.push(session);
+  }
+  return deduped;
+}
+
 export const useSessionStore = create<SessionState & SessionActions>()(
   persist(
     (set, get) => ({
@@ -234,22 +247,21 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             offset,
             query,
           });
-          const incomingSessions = page.sessions.map((session) => ({
-            ...session,
-            executionMode: session.executionMode || 'execute',
-          }));
-          const bootstrapSessions = (bootstrap?.sessions || []).map((session) => ({
-            ...session,
-            executionMode: session.executionMode || 'execute',
-          }));
+          const incomingSessions = dedupeSessionsById(
+            page.sessions.map((session) => ({
+              ...session,
+              executionMode: session.executionMode || 'execute',
+            })),
+          );
+          const bootstrapSessions = dedupeSessionsById(
+            (bootstrap?.sessions || []).map((session) => ({
+              ...session,
+              executionMode: session.executionMode || 'execute',
+            })),
+          );
           const sessions = reset
             ? (incomingSessions.length > 0 ? incomingSessions : bootstrapSessions)
-            : [
-                ...get().sessions,
-                ...incomingSessions.filter(
-                  (incoming) => !get().sessions.some((existing) => existing.id === incoming.id)
-                ),
-              ];
+            : dedupeSessionsById([...get().sessions, ...incomingSessions]);
 
           // SAFETY: If backend returns 0 sessions but we have cached sessions,
           // this might indicate a timing issue - keep cached sessions
@@ -274,7 +286,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             ? sessions.some((s) => s.id === currentActiveId)
             : false;
 
-          let nextSessions = sessions;
+          let nextSessions = dedupeSessionsById(sessions);
 
           // Keep currently active session discoverable even when pagination doesn't include it yet.
           if (!activeSessionExists && currentActiveId && query.trim().length === 0) {
@@ -297,7 +309,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
                 updatedAt: activeSession.updatedAt,
                 lastAccessedAt: activeSession.lastAccessedAt,
               };
-              nextSessions = [activeSummary, ...sessions.filter((session) => session.id !== currentActiveId)];
+              nextSessions = dedupeSessionsById([
+                activeSummary,
+                ...sessions.filter((session) => session.id !== currentActiveId),
+              ]);
               activeSessionExists = true;
             } catch {
               // Session truly doesn't exist
@@ -305,11 +320,11 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           }
 
           set({
-            sessions: nextSessions,
+            sessions: dedupeSessionsById(nextSessions),
             isLoading: false,
             hasLoaded: true,
             sessionsQuery: query,
-            sessionsTotal: Math.max(page.total, bootstrapSessions.length),
+            sessionsTotal: Math.max(page.total, bootstrapSessions.length, nextSessions.length),
             sessionsHasMore: page.hasMore,
             sessionsOffset: page.nextOffset ?? offset + incomingSessions.length,
             bootstrapEventCursor: bootstrap?.eventCursor ?? get().bootstrapEventCursor,
@@ -418,12 +433,16 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             lastAccessedAt: session.lastAccessedAt,
           };
 
-          set((state) => ({
-            sessions: [newSummary, ...state.sessions],
-            activeSessionId: session.id,
-            isLoading: false,
-            sessionsTotal: state.sessionsTotal + 1,
-          }));
+          set((state) => {
+            const alreadyExists = state.sessions.some((existing) => existing.id === session.id);
+            const nextSessions = dedupeSessionsById([newSummary, ...state.sessions]);
+            return {
+              sessions: nextSessions,
+              activeSessionId: session.id,
+              isLoading: false,
+              sessionsTotal: alreadyExists ? state.sessionsTotal : state.sessionsTotal + 1,
+            };
+          });
           useAppStore.getState().setRuntimeConfigNotice(null);
 
           return session.id;
@@ -782,7 +801,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       partialize: (state) => ({
         activeSessionId: state.activeSessionId,
         // Cache session list for faster startup
-        sessions: state.sessions.map(s => ({
+        sessions: dedupeSessionsById(state.sessions).map(s => ({
           id: s.id,
           provider: s.provider,
           executionMode: s.executionMode || 'execute',
@@ -798,6 +817,30 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         branchesBySession: state.branchesBySession,
         activeBranchBySession: state.activeBranchBySession,
       }),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<SessionState> | undefined;
+        const persistedSessions = Array.isArray(persisted?.sessions)
+          ? dedupeSessionsById(
+              persisted.sessions.map((session) => ({
+                ...session,
+                executionMode: session.executionMode || 'execute',
+              })),
+            )
+          : [];
+        const persistedActiveSessionId =
+          typeof persisted?.activeSessionId === 'string' ? persisted.activeSessionId : null;
+        const activeSessionId =
+          persistedActiveSessionId &&
+          persistedSessions.some((session) => session.id === persistedActiveSessionId)
+            ? persistedActiveSessionId
+            : null;
+        return {
+          ...currentState,
+          ...persisted,
+          sessions: persistedSessions,
+          activeSessionId,
+        };
+      },
     }
   )
 );

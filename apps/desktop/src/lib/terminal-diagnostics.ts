@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { isBenignTauriMissingCallbackWarning } from './tauri-callback-guard';
 
 type DiagnosticLevel = 'error' | 'warn' | 'info';
 
@@ -125,6 +126,10 @@ function summarizeConsoleArgs(args: unknown[]): Pick<DiagnosticPayload, 'message
   };
 }
 
+function shouldIgnoreConsoleWarn(message: string): boolean {
+  return isBenignTauriMissingCallbackWarning(message);
+}
+
 export async function reportTerminalDiagnostic(
   level: DiagnosticLevel,
   source: string,
@@ -207,8 +212,11 @@ function installGlobalConsoleProxy(): void {
   const originalError = console.error.bind(console);
 
   console.warn = (...args: unknown[]) => {
-    originalWarn(...args);
     const info = summarizeConsoleArgs(args);
+    if (shouldIgnoreConsoleWarn(info.message)) {
+      return;
+    }
+    originalWarn(...args);
     void reportTerminalDiagnostic('warn', 'console.warn', info.message, info.details, info.contextJson);
   };
 

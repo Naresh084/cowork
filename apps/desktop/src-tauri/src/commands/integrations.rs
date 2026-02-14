@@ -58,6 +58,22 @@ pub async fn agent_integration_connect(
     platform: String,
     config: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    let started_at = std::time::Instant::now();
+    let config_keys = config
+        .as_object()
+        .map(|obj| {
+            let mut keys: Vec<&String> = obj.keys().collect();
+            keys.sort();
+            keys.into_iter()
+                .map(|key| key.as_str())
+                .collect::<Vec<&str>>()
+                .join(",")
+        })
+        .unwrap_or_else(|| "(non-object)".to_string());
+    eprintln!(
+        "[integration-tauri] connect:start platform={} configKeys={}",
+        platform, config_keys
+    );
     ensure_sidecar(&app, &state).await?;
 
     let manager = &state.manager;
@@ -66,7 +82,73 @@ pub async fn agent_integration_connect(
         "config": config,
     });
 
-    manager.send_command("integration_connect", params).await
+    match manager.send_command("integration_connect", params).await {
+        Ok(result) => {
+            eprintln!(
+                "[integration-tauri] connect:done platform={} elapsedMs={}",
+                platform,
+                started_at.elapsed().as_millis()
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            eprintln!(
+                "[integration-tauri] connect:error platform={} elapsedMs={} error={}",
+                platform,
+                started_at.elapsed().as_millis(),
+                error
+            );
+            Err(error)
+        }
+    }
+}
+
+/// Run WhatsApp recovery flow (soft reconnect or hard session reset + reconnect)
+#[tauri::command]
+pub async fn agent_integration_recover_whatsapp(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    mode: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let started_at = std::time::Instant::now();
+    let normalized_mode = match mode.as_deref() {
+        Some("hard") => "hard",
+        _ => "soft",
+    };
+    eprintln!(
+        "[integration-tauri] recover-whatsapp:start mode={}",
+        normalized_mode
+    );
+
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "mode": normalized_mode,
+    });
+
+    match manager
+        .send_command("integration_recover_whatsapp", params)
+        .await
+    {
+        Ok(result) => {
+            eprintln!(
+                "[integration-tauri] recover-whatsapp:done mode={} elapsedMs={}",
+                normalized_mode,
+                started_at.elapsed().as_millis()
+            );
+            Ok(result)
+        }
+        Err(error) => {
+            eprintln!(
+                "[integration-tauri] recover-whatsapp:error mode={} elapsedMs={} error={}",
+                normalized_mode,
+                started_at.elapsed().as_millis(),
+                error
+            );
+            Err(error)
+        }
+    }
 }
 
 /// Disconnect a messaging platform

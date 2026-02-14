@@ -244,6 +244,8 @@ pub struct RuntimeConfigPayload {
     #[serde(default)]
     pub external_cli: serde_json::Value,
     #[serde(default)]
+    pub tool_output_token_limit: Option<i64>,
+    #[serde(default)]
     pub active_soul: serde_json::Value,
     #[serde(default)]
     pub memory: serde_json::Value,

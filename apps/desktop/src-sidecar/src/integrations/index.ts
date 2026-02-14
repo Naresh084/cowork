@@ -15,6 +15,7 @@ import {
 } from './types.js';
 import type { BaseAdapter } from './adapters/base-adapter.js';
 const WILDCARD_ALLOW_ALL = '*';
+type WhatsAppRecoveryMode = 'soft' | 'hard';
 
 // ============================================================================
 // Integration Bridge Service
@@ -53,6 +54,32 @@ export class IntegrationBridgeService {
   constructor() {
     this.router = new MessageRouter();
     this.store = new IntegrationStore();
+  }
+
+  private log(message: string): void {
+    process.stderr.write(`[integration] ${message}\n`);
+  }
+
+  private summarizeConfig(
+    platform: PlatformType,
+    config: Record<string, unknown>,
+  ): string {
+    if (platform === 'whatsapp') {
+      const allowFromCount = Array.isArray(config.allowFrom)
+        ? config.allowFrom.length
+        : 0;
+      const hasSessionDir =
+        typeof config.sessionDataDir === 'string' &&
+        config.sessionDataDir.trim().length > 0;
+      const denialMessageLength =
+        typeof config.denialMessage === 'string'
+          ? config.denialMessage.length
+          : 0;
+      return `allowFromCount=${allowFromCount} hasSessionDataDir=${hasSessionDir} denialMessageLength=${denialMessageLength}`;
+    }
+
+    const keys = Object.keys(config).sort();
+    return `keys=${keys.join(',') || '(none)'}`;
   }
 
   /**
@@ -209,8 +236,13 @@ export class IntegrationBridgeService {
     platform: PlatformType,
     config: Record<string, unknown> = {},
   ): Promise<void> {
+    const connectStartedAt = Date.now();
+    this.log(
+      `connect:start platform=${platform} inputKeys=${Object.keys(config).sort().join(',') || '(none)'}`,
+    );
     // Serialize platform operations to avoid concurrent connect/disconnect races.
     while (this.platformOpInFlight.has(platform)) {
+      this.log(`connect:wait platform=${platform} reason=operation-in-flight`);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     this.platformOpInFlight.add(platform);
@@ -220,6 +252,7 @@ export class IntegrationBridgeService {
     // This prevents profile lock conflicts (e.g. WhatsApp LocalAuth userDataDir in use).
     if (this.adapters.has(platform)) {
       const existing = this.adapters.get(platform)!;
+      this.log(`connect:cleanup-existing platform=${platform}`);
       existing.removeAllListeners();
       this.router.unregisterAdapter(platform);
       try {
@@ -232,6 +265,7 @@ export class IntegrationBridgeService {
 
     if (platform === 'whatsapp') {
       // Chromium profile locks may persist briefly after teardown.
+      this.log('connect:delay platform=whatsapp reason=profile-lock-buffer');
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
@@ -241,17 +275,27 @@ export class IntegrationBridgeService {
       ...existingConfig,
       ...config,
     });
+    this.log(
+      `connect:normalized platform=${platform} ${this.summarizeConfig(platform, normalizedConfig)}`,
+    );
 
     // Wire adapter status events to integration event emitter
     adapter.on('status', (status: PlatformStatus) => {
+      this.log(
+        `event:status platform=${status.platform} connected=${status.connected} error=${status.error ?? '-'}`,
+      );
       eventEmitter.integrationStatus(status);
     });
 
     adapter.on('qr', (qrDataUrl: string) => {
+      this.log(
+        `event:qr platform=${platform} hasDataUrl=${Boolean(qrDataUrl)} length=${qrDataUrl.length}`,
+      );
       eventEmitter.integrationQR(qrDataUrl);
     });
 
     adapter.on('error', (error: Error) => {
+      this.log(`event:error platform=${platform} message=${error.message}`);
       eventEmitter.error(
         undefined,
         `${platform} error: ${error.message}`,
@@ -261,9 +305,17 @@ export class IntegrationBridgeService {
 
     // Attempt connection
     try {
+      this.log(`connect:adapter-call platform=${platform}`);
       await adapter.connect(normalizedConfig);
+      this.log(
+        `connect:adapter-returned platform=${platform} elapsedMs=${Date.now() - connectStartedAt}`,
+      );
     } catch (err) {
       // Clean up the failed adapter
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.log(
+        `connect:adapter-failed platform=${platform} elapsedMs=${Date.now() - connectStartedAt} error=${errorMessage}`,
+      );
       adapter.removeAllListeners();
       try { await adapter.disconnect(); } catch { /* ignore cleanup errors */ }
       throw err;
@@ -279,16 +331,71 @@ export class IntegrationBridgeService {
       enabled: true,
       config: normalizedConfig,
     });
+    this.log(`connect:config-saved platform=${platform}`);
 
     try {
       const statusWithHealth = await this.getStatusWithHealth(platform);
       eventEmitter.integrationStatus(statusWithHealth);
+      this.log(
+        `connect:status-emitted platform=${platform} connected=${statusWithHealth.connected} health=${statusWithHealth.health ?? '-'}`,
+      );
     } catch {
       // Best effort only; status events continue via adapter hooks.
+      this.log(`connect:status-emission-failed platform=${platform}`);
     }
     } finally {
       this.platformOpInFlight.delete(platform);
+      this.log(
+        `connect:done platform=${platform} elapsedMs=${Date.now() - connectStartedAt}`,
+      );
     }
+  }
+
+  async recoverWhatsApp(mode: WhatsAppRecoveryMode = 'soft'): Promise<PlatformStatus> {
+    while (this.platformOpInFlight.has('whatsapp')) {
+      this.log('recover:whatsapp:wait reason=operation-in-flight');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const startedAt = Date.now();
+    const storedConfig = this.store.getConfig('whatsapp')?.config || {};
+    const normalizedConfig = this.normalizePlatformConfig('whatsapp', storedConfig);
+    const sessionDataDir = this.resolveWhatsAppSessionDataDir(normalizedConfig);
+    this.log(
+      `recover:whatsapp:start mode=${mode} sessionDataDir=${sessionDataDir} storedConfigKeys=${Object.keys(storedConfig).sort().join(',') || '(none)'}`,
+    );
+
+    if (mode === 'hard') {
+      const activeAdapter = this.adapters.get('whatsapp') as
+        | (BaseAdapter & { disconnectAndForget?: () => Promise<void> })
+        | undefined;
+
+      if (activeAdapter) {
+        this.log('recover:whatsapp:hard active-adapter found; forcing disconnect and forget');
+        activeAdapter.removeAllListeners();
+        this.router.unregisterAdapter('whatsapp');
+        if (typeof activeAdapter.disconnectAndForget === 'function') {
+          await activeAdapter.disconnectAndForget();
+        } else {
+          await activeAdapter.disconnect();
+          await WhatsAppAdapter.clearPersistedSessionData(sessionDataDir);
+        }
+        this.adapters.delete('whatsapp');
+      } else {
+        this.log('recover:whatsapp:hard no active adapter; clearing persisted session data');
+        await WhatsAppAdapter.clearPersistedSessionData(sessionDataDir);
+      }
+    } else {
+      this.log('recover:whatsapp:soft reconnect path');
+      await WhatsAppAdapter.cleanupPersistedProfileLocks(sessionDataDir);
+    }
+
+    await this.connect('whatsapp', normalizedConfig);
+    const status = await this.getStatusWithHealth('whatsapp');
+    this.log(
+      `recover:whatsapp:done mode=${mode} connected=${status.connected} health=${status.health ?? '-'} elapsedMs=${Date.now() - startedAt}`,
+    );
+    return status;
   }
 
   /** Persist and apply runtime configuration for a platform */
@@ -684,6 +791,10 @@ export class IntegrationBridgeService {
     return sharedSessionWorkingDirectory
       ? { sharedSessionWorkingDirectory }
       : {};
+  }
+
+  private resolveWhatsAppSessionDataDir(config: Record<string, unknown>): string {
+    return WhatsAppAdapter.resolveSessionDataDir(config.sessionDataDir);
   }
 }
 

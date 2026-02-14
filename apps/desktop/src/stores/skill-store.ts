@@ -263,8 +263,27 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
           }
         }
 
-        // Auto-create disabled configs for newly discovered platform skills
-        const existingConfigNames = new Set(installedSkillConfigs.map((c) => c.name));
+        // Refresh config snapshot after stale cleanup.
+        const refreshedConfigs = useSettingsStore.getState().installedSkillConfigs;
+        const existingConfigNames = new Set(refreshedConfigs.map((c) => c.name));
+
+        // Auto-create enabled configs for managed skills discovered on disk but not tracked yet.
+        // This heals settings drift for skills installed outside the current UI flow.
+        const managedSkills = skills.filter((s) => s.source.type === 'managed');
+        for (const skill of managedSkills) {
+          if (!existingConfigNames.has(skill.frontmatter.name)) {
+            addInstalledSkillConfig({
+              id: skill.id,
+              name: skill.frontmatter.name,
+              enabled: true,
+              installedAt: Date.now(),
+              source: 'managed',
+            });
+            existingConfigNames.add(skill.frontmatter.name);
+          }
+        }
+
+        // Auto-create disabled configs for newly discovered platform skills.
         const platformSkills = skills.filter((s) => s.source.type === 'platform');
         for (const skill of platformSkills) {
           if (!existingConfigNames.has(skill.frontmatter.name)) {
@@ -629,18 +648,7 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
     },
 
     getInstalledCount: () => {
-      const { availableSkills } = get();
-      const { installedSkillConfigs } = useSettingsStore.getState();
-      const enabledPlatformNames = new Set(
-        installedSkillConfigs.filter((c) => c.source === 'platform' && c.enabled).map((c) => c.name)
-      );
-
-      // Count managed skills + enabled platform skills
-      return availableSkills.filter((s) => {
-        if (s.source.type === 'managed') return true;
-        if (s.source.type === 'platform' && enabledPlatformNames.has(s.frontmatter.name)) return true;
-        return false;
-      }).length;
+      return get().getInstalledSkills().length;
     },
 
     getEnabledCount: () => {
@@ -661,6 +669,7 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
     isSkillInstalled: (skillId) => {
       const { availableSkills } = get();
       const { installedSkillConfigs } = useSettingsStore.getState();
+      const installedNames = new Set(installedSkillConfigs.map((c) => c.name));
 
       const skill = availableSkills.find((s) => s.id === skillId);
       if (!skill) return false;
@@ -676,7 +685,7 @@ export const useSkillStore = create<SkillStoreState & SkillStoreActions>()(
         (s) => s.source.type === 'managed' && s.frontmatter.name === skill.frontmatter.name
       );
 
-      return managedSkillExists;
+      return managedSkillExists && installedNames.has(skill.frontmatter.name);
     },
 
     isSkillEnabled: (skillId) => {

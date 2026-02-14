@@ -158,7 +158,8 @@ describe('capability-sections', () => {
     expect(externalCli?.content).toContain('`bypassPermission`');
     expect(externalCli?.content).toContain('external_cli_get_progress');
     expect(externalCli?.content).toContain('low=5s');
-    expect(externalCli?.content).toContain('do not ask redundant confirmation');
+    expect(externalCli?.content).toContain('explicitly asks to use Codex/Claude CLI');
+    expect(externalCli?.content).toContain('`web_search`');
   });
 
   it('adds draft-first skill flow guidance when skill generation and scheduling tools are available', () => {

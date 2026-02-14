@@ -5,7 +5,13 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useAuthStore } from '../../stores/auth-store';
-import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
+import {
+  DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
+  MAX_TOOL_OUTPUT_TOKEN_LIMIT,
+  MIN_TOOL_OUTPUT_TOKEN_LIMIT,
+  resolveActiveSoul,
+  useSettingsStore,
+} from '../../stores/settings-store';
 import { useActiveSession } from '../../stores/session-store';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { BackgroundServiceSettings } from './BackgroundServiceSettings';
@@ -138,6 +144,8 @@ export function RuntimeSettings() {
     updateSpecializedModelV2,
     externalCli,
     updateExternalCliSettings,
+    toolOutputTokenLimit,
+    updateSetting,
   } = useSettingsStore();
   const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
   const activeSession = useActiveSession();
@@ -145,6 +153,10 @@ export function RuntimeSettings() {
   const [deepResearchModel, setDeepResearchModel] = useState(
     specializedModelsV2.google.deepResearchAgent,
   );
+  const [toolOutputTokenLimitDraft, setToolOutputTokenLimitDraft] = useState(
+    String(toolOutputTokenLimit),
+  );
+  const [isSavingToolOutputTokenLimit, setIsSavingToolOutputTokenLimit] = useState(false);
   const [externalCliAvailability, setExternalCliAvailability] =
     useState<ExternalCliAvailabilitySnapshot | null>(null);
   const [memoryMigrationReport, setMemoryMigrationReport] = useState<MemoryMigrationReport | null>(
@@ -198,6 +210,10 @@ export function RuntimeSettings() {
     specializedModelsV2.google.deepResearchAgent,
   ]);
 
+  useEffect(() => {
+    setToolOutputTokenLimitDraft(String(toolOutputTokenLimit));
+  }, [toolOutputTokenLimit]);
+
   const hasAiModelChanges = useMemo(
     () =>
       computerUseModel.trim() !== specializedModelsV2.google.computerUse ||
@@ -209,6 +225,13 @@ export function RuntimeSettings() {
       specializedModelsV2.google.deepResearchAgent,
     ],
   );
+  const parsedToolOutputTokenLimit = Number.parseInt(toolOutputTokenLimitDraft.trim(), 10);
+  const toolOutputTokenLimitValid =
+    Number.isFinite(parsedToolOutputTokenLimit) &&
+    parsedToolOutputTokenLimit >= MIN_TOOL_OUTPUT_TOKEN_LIMIT &&
+    parsedToolOutputTokenLimit <= MAX_TOOL_OUTPUT_TOKEN_LIMIT;
+  const hasToolOutputTokenLimitChanges =
+    toolOutputTokenLimitValid && parsedToolOutputTokenLimit !== toolOutputTokenLimit;
 
   const applyRuntime = async () => {
     const settingsState = useSettingsStore.getState();
@@ -225,6 +248,7 @@ export function RuntimeSettings() {
       specializedModels: settingsState.specializedModelsV2,
       sandbox: settingsState.commandSandbox,
       externalCli: settingsState.externalCli,
+      toolOutputTokenLimit: settingsState.toolOutputTokenLimit,
       activeSoul,
     });
   };
@@ -633,6 +657,74 @@ export function RuntimeSettings() {
             ) : null}
           </div>
         ) : null}
+      </div>
+
+      <div className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+        <div>
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-sm font-medium text-white/85">Tool Output Token Limit</h4>
+            <SettingHelpPopover settingId="runtime.toolOutputTokenLimit" />
+          </div>
+          <p className="mt-1 text-xs text-white/40">
+            Caps tool result size before it is sent back to the model. Lower values reduce overflow
+            risk. Default is <code>{DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT}</code> tokens.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs text-white/50">
+            Max tool output tokens ({MIN_TOOL_OUTPUT_TOKEN_LIMIT} - {MAX_TOOL_OUTPUT_TOKEN_LIMIT})
+          </label>
+          <input
+            type="number"
+            min={MIN_TOOL_OUTPUT_TOKEN_LIMIT}
+            max={MAX_TOOL_OUTPUT_TOKEN_LIMIT}
+            step={256}
+            value={toolOutputTokenLimitDraft}
+            onChange={(event) => setToolOutputTokenLimitDraft(event.target.value)}
+            className="w-full rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2 text-sm font-mono text-white/90 placeholder:text-white/30 focus:border-[#1D4ED8]/50 focus:outline-none"
+          />
+          {!toolOutputTokenLimitValid ? (
+            <p className="text-[11px] text-[#FCA5A5]">
+              Enter a value between {MIN_TOOL_OUTPUT_TOKEN_LIMIT} and {MAX_TOOL_OUTPUT_TOKEN_LIMIT}.
+            </p>
+          ) : (
+            <p className="text-[11px] text-white/40">
+              Current runtime limit: <code>{toolOutputTokenLimit}</code> tokens.
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            disabled={!hasToolOutputTokenLimitChanges || isSavingToolOutputTokenLimit}
+            onClick={async () => {
+              if (!toolOutputTokenLimitValid) return;
+              setIsSavingToolOutputTokenLimit(true);
+              try {
+                updateSetting('toolOutputTokenLimit', parsedToolOutputTokenLimit);
+                await applyRuntime();
+                toast.success('Tool output token limit updated');
+              } catch (error) {
+                toast.error(
+                  'Failed to update tool output token limit',
+                  error instanceof Error ? error.message : String(error),
+                );
+              } finally {
+                setIsSavingToolOutputTokenLimit(false);
+              }
+            }}
+            className={cn(
+              'rounded-lg px-4 py-2 text-sm transition-colors',
+              hasToolOutputTokenLimitChanges && !isSavingToolOutputTokenLimit
+                ? 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]'
+                : 'cursor-not-allowed bg-white/[0.06] text-white/30',
+            )}
+          >
+            Save Tool Limit
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">

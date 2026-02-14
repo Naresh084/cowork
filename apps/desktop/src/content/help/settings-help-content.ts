@@ -272,6 +272,19 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     requires_new_session: false,
   },
   {
+    id: 'runtime.toolOutputTokenLimit',
+    title: 'Tool Output Token Limit',
+    description: 'Caps each tool result size before it is returned to the model.',
+    what_it_controls:
+      'Applies a global truncation ceiling to tool outputs to prevent oversized tool payloads from overflowing model context.',
+    when_to_use:
+      'Lower this when you hit token overflow errors from large tool outputs; increase cautiously if tools are over-truncated.',
+    tool_impact: ['all tool calls'],
+    security_notes:
+      'Lower limits reduce denial-of-service risk from verbose outputs but can hide useful detail in large results.',
+    requires_new_session: false,
+  },
+  {
     id: 'integration.exaApiKey',
     title: 'Exa API Key',
     description: 'Credential for Exa-powered web search fallback.',

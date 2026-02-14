@@ -164,6 +164,9 @@ export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   maxInPrompt: 5,
   style: 'balanced',
 };
+export const DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 32000;
+export const MIN_TOOL_OUTPUT_TOKEN_LIMIT = 1024;
+export const MAX_TOOL_OUTPUT_TOKEN_LIMIT = 262144;
 export const DEFAULT_EXTERNAL_CLI_SETTINGS: ExternalCliSettings = {
   codex: {
     enabled: false,
@@ -359,10 +362,21 @@ function normalizeSpecializedModels(models: Partial<SpecializedModels> | undefin
   };
 }
 
+function normalizeToolOutputTokenLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT;
+  }
+  return Math.max(
+    MIN_TOOL_OUTPUT_TOKEN_LIMIT,
+    Math.min(MAX_TOOL_OUTPUT_TOKEN_LIMIT, Math.floor(value)),
+  );
+}
+
 export interface RightPanelSections {
   progress: boolean;
   workingFolder: boolean;
   toolsUsed: boolean;
+  installedSkillsUsed: boolean;
   context: boolean;
   scheduled: boolean;
 }
@@ -398,6 +412,7 @@ interface SettingsState {
   selectedModelByProvider: Partial<Record<ProviderId, string>>;
   temperature: number;
   maxOutputTokens: number;
+  toolOutputTokenLimit: number;
   availableModels: ModelInfo[];
   availableModelsByProvider: Partial<Record<ProviderId, ModelInfo[]>>;
   customModelsByProvider: Partial<Record<ProviderId, string[]>>;
@@ -647,6 +662,7 @@ function buildRuntimeConfigFromSettings(state: SettingsState) {
     mediaRouting: state.mediaRouting,
     sandbox: state.commandSandbox,
     externalCli: state.externalCli,
+    toolOutputTokenLimit: state.toolOutputTokenLimit,
     specializedModels: state.specializedModelsV2,
     activeSoul: toRuntimeSoulProfile(
       resolveActiveSoul(state.souls, state.activeSoulId, state.defaultSoulId),
@@ -673,6 +689,7 @@ const initialState: SettingsState = {
   selectedModelByProvider: {},
   temperature: 0.7,
   maxOutputTokens: 0,
+  toolOutputTokenLimit: DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
   availableModels: [],
   availableModelsByProvider: {},
   customModelsByProvider: {},
@@ -730,6 +747,7 @@ const initialState: SettingsState = {
     progress: true,
     workingFolder: true,
     toolsUsed: true,
+    installedSkillsUsed: true,
     context: true,
     scheduled: true,
   },
@@ -822,6 +840,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             selectedModel: state.selectedModelByProvider[provider] || '',
             availableModels: state.availableModelsByProvider[provider] || [],
           }));
+          return;
+        }
+
+        if (key === 'toolOutputTokenLimit') {
+          set({
+            toolOutputTokenLimit: normalizeToolOutputTokenLimit(value),
+          } as Pick<SettingsState, 'toolOutputTokenLimit'>);
           return;
         }
 
@@ -1826,6 +1851,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         selectedModelByProvider: state.selectedModelByProvider,
         temperature: state.temperature,
         maxOutputTokens: state.maxOutputTokens,
+        toolOutputTokenLimit: state.toolOutputTokenLimit,
         customModelsByProvider: state.customModelsByProvider,
         providerBaseUrls: state.providerBaseUrls,
         specializedModels: state.specializedModels,
@@ -1944,6 +1970,9 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
               ? persistedMemory.style
               : DEFAULT_MEMORY_SETTINGS.style,
         };
+        const validToolOutputTokenLimit = normalizeToolOutputTokenLimit(
+          persisted?.toolOutputTokenLimit,
+        );
         const persistedActiveSoulId =
           typeof persisted?.activeSoulId === 'string' ? persisted.activeSoulId.trim() : '';
         const persistedDefaultSoulId =
@@ -2009,6 +2038,20 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           cron: persistedSessionListFilters?.cron ?? initialState.sessionListFilters.cron,
         };
 
+        const persistedRightPanelSections = persisted?.rightPanelSections;
+        const validRightPanelSections: RightPanelSections = {
+          progress: persistedRightPanelSections?.progress ?? initialState.rightPanelSections.progress,
+          workingFolder:
+            persistedRightPanelSections?.workingFolder ??
+            initialState.rightPanelSections.workingFolder,
+          toolsUsed: persistedRightPanelSections?.toolsUsed ?? initialState.rightPanelSections.toolsUsed,
+          installedSkillsUsed:
+            persistedRightPanelSections?.installedSkillsUsed ??
+            initialState.rightPanelSections.installedSkillsUsed,
+          context: persistedRightPanelSections?.context ?? initialState.rightPanelSections.context,
+          scheduled: persistedRightPanelSections?.scheduled ?? initialState.rightPanelSections.scheduled,
+        };
+
         const persistedAutomationListFilters = persisted?.automationListFilters;
         const validAutomationListFilters: AutomationListFilters = {
           pending: persistedAutomationListFilters?.pending ?? initialState.automationListFilters.pending,
@@ -2034,12 +2077,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           mediaRoutingCustomized,
           externalSearchProvider: validExternalSearchProvider,
           memory: validMemory,
+          toolOutputTokenLimit: validToolOutputTokenLimit,
           activeSoulId: persistedActiveSoulId || DEFAULT_SOUL_ID,
           defaultSoulId: persistedDefaultSoulId || DEFAULT_SOUL_ID,
           permissionDefaults: mergedPermissionDefaults,
           commandSandbox: validCommandSandbox,
           externalCli: validExternalCli,
           installedCommandConfigs: migratedCommandConfigs,
+          rightPanelSections: validRightPanelSections,
           sessionListFilters: validSessionListFilters,
           automationListFilters: validAutomationListFilters,
         };

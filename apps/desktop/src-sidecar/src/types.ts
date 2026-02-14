@@ -517,6 +517,7 @@ export interface RuntimeConfig {
   specializedModels?: SpecializedModelsV2;
   sandbox?: CommandSandboxSettings;
   externalCli?: ExternalCliRuntimeConfig;
+  toolOutputTokenLimit?: number;
   activeSoul?: RuntimeSoulProfile | null;
   memory?: RuntimeMemorySettings;
 }

@@ -151,22 +151,40 @@ const TOOL_CATEGORIES: Record<string, string> = {
   subagent: 'Agent',
 };
 
+function resolveToolPath(args?: Record<string, unknown>): string | null {
+  if (!args) return null;
+
+  const rawPath = (args.path || args.file_path || args.filePath || args.file) as string | undefined;
+  if (typeof rawPath !== 'string' || !rawPath.trim()) return null;
+
+  // Normalize separators so both Unix and Windows paths are supported.
+  return rawPath.replace(/\\/g, '/');
+}
+
+/**
+ * Extract skill name from a tool path if it points to a SKILL.md file.
+ */
+export function extractSkillNameFromArgs(args?: Record<string, unknown>): string | null {
+  const path = resolveToolPath(args);
+  if (!path) return null;
+
+  // Preferred pattern for managed/bundled skills.
+  const managedMatch = path.match(/\/skills\/([^/]+)\/SKILL\.md$/i);
+  if (managedMatch) return managedMatch[1];
+
+  // Fallback for custom skill directories.
+  const genericMatch = path.match(/\/([^/]+)\/SKILL\.md$/i);
+  if (genericMatch) return genericMatch[1];
+
+  return null;
+}
+
 /**
  * Check if a file path is a skill file read
  */
 function isSkillPath(args?: Record<string, unknown>): { isSkill: boolean; skillName: string | null } {
-  if (!args) return { isSkill: false, skillName: null };
-
-  const path = (args.path || args.file_path || args.filePath || args.file) as string | undefined;
-  if (!path) return { isSkill: false, skillName: null };
-
-  // Check for /skills/skillname/SKILL.md pattern
-  const skillMatch = path.match(/\/skills\/([^/]+)\/SKILL\.md$/i);
-  if (skillMatch) {
-    return { isSkill: true, skillName: skillMatch[1] };
-  }
-
-  return { isSkill: false, skillName: null };
+  const skillName = extractSkillNameFromArgs(args);
+  return { isSkill: Boolean(skillName), skillName };
 }
 
 export function getToolMeta(name: string, args?: Record<string, unknown>) {
@@ -231,15 +249,10 @@ export function getPrimaryArg(toolName: string, args: Record<string, unknown>): 
 
   // Check for skill reads - show skill name instead of full path
   if (lowerName.includes('file') || lowerName.includes('read') || lowerName.includes('write')) {
-    const path = (args.path || args.file_path || args.filePath || args.file) as string | undefined;
-    if (path) {
-      // Check if it's a skill path - show friendly name
-      const skillMatch = path.match(/\/skills\/([^/]+)\/SKILL\.md$/i);
-      if (skillMatch) {
-        return `Loading skill instructions...`;
-      }
+    if (extractSkillNameFromArgs(args)) {
+      return `Loading skill instructions...`;
     }
-    return path || null;
+    return resolveToolPath(args);
   }
 
   if (lowerName.includes('bash') || lowerName.includes('shell') || lowerName.includes('command')) {
