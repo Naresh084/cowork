@@ -18,7 +18,6 @@ import { HelpCenterModal } from '../help/HelpCenterModal';
 import { GuidedTourOverlay } from '../help/GuidedTourOverlay';
 import { useCapabilityStore } from '../../stores/capability-store';
 import { WorkflowBuilder } from '../workflow/WorkflowBuilder';
-import { PermissionDialogContainer } from '../dialogs/PermissionDialog';
 import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
 
 // Lazy load SettingsView for code splitting
@@ -165,9 +164,6 @@ export function MainLayout() {
 
       {/* Toast notifications */}
       <ToastContainer />
-
-      {/* Permission queue modal */}
-      <PermissionDialogContainer />
 
       {/* Preview Modal */}
       <PreviewModal

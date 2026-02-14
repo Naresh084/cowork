@@ -5,6 +5,7 @@ import { z } from 'zod';
 // ============================================================================
 
 export * from './skill.js';
+export * from './skill-generation.js';
 
 // ============================================================================
 // Command Types (re-exported from command.ts)

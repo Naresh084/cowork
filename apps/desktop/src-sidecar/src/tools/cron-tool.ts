@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
 import { CronExpressionParser } from 'cron-parser';
 import { cronService } from '../cron/index.js';
-import type { CronSchedule, PlatformType } from '@gemini-cowork/shared';
+import type { CronSchedule, PlatformType, SkillBinding } from '@gemini-cowork/shared';
 import { workflowService } from '../workflow/index.js';
 import { WORKFLOWS_ENABLED } from '../config/feature-flags.js';
 import {
@@ -173,6 +173,13 @@ export type ResolveScheduledTaskDefaultNotificationTarget = (
 export type ResolveScheduledTaskPermissionBootstrap = (
   sessionId: string,
 ) => SessionPermissionBootstrap | null;
+
+export type ResolveScheduledTaskSkillBindings = (input: {
+  sessionId: string;
+  prompt: string;
+  taskName: string;
+  maxSkills?: number;
+}) => Promise<SkillBinding[]>;
 
 /**
  * Convert user-friendly schedule to internal CronSchedule
@@ -405,6 +412,39 @@ function buildDefaultNotificationInstruction(
   ].join('\n');
 }
 
+function skillNameFromId(skillId: string): string {
+  if (!skillId.includes(':')) {
+    return skillId.trim();
+  }
+  const [, ...rest] = skillId.split(':');
+  return rest.join(':').trim();
+}
+
+function buildSkillExecutionInstruction(skillBindings: SkillBinding[]): string {
+  const bindings = skillBindings.filter((binding) => binding.skillId.trim().length > 0);
+  if (bindings.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    'Skill execution requirement for this scheduled task:',
+    '- You MUST load and apply all required skills before running any workflow steps.',
+  ];
+
+  for (const binding of bindings) {
+    const skillName = binding.skillName || skillNameFromId(binding.skillId);
+    lines.push(`- Mandatory skill: /skills/${skillName}/SKILL.md`);
+  }
+
+  lines.push(
+    '- Read each skill first and follow its workflow/scripts/references exactly.',
+    '- Include a short "Skill used: <skill-name>" line for every mandatory skill in the final output.',
+    '- If any mandatory skill cannot be loaded, return an explicit error and stop.',
+  );
+
+  return lines.join('\n');
+}
+
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -415,6 +455,7 @@ function buildDefaultNotificationInstruction(
 export function createScheduleTaskTool(
   resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
   resolvePermissionBootstrap?: ResolveScheduledTaskPermissionBootstrap,
+  resolveSkillBindings?: ResolveScheduledTaskSkillBindings,
 ): ToolHandler {
   return {
     name: 'schedule_task',
@@ -511,7 +552,27 @@ Schedule types:
           shouldApplyDefaultDelivery && context.sessionId && resolver
             ? resolver(context.sessionId)
             : null;
-        const promptSections = [prompt.trim(), temporalInstruction];
+
+        const skillBindings = context.sessionId && resolveSkillBindings
+          ? await resolveSkillBindings({
+              sessionId: context.sessionId,
+              prompt,
+              taskName: name,
+            })
+          : [];
+        const skillInstruction = buildSkillExecutionInstruction(skillBindings);
+
+        if (resolveSkillBindings && skillBindings.length === 0) {
+          throw new Error(
+            'Scheduled task requires at least one generated skill binding but none were created.',
+          );
+        }
+
+        const promptSections = [prompt.trim()];
+        if (skillInstruction) {
+          promptSections.push(skillInstruction);
+        }
+        promptSections.push(temporalInstruction);
         if (defaultNotificationTarget) {
           promptSections.push(buildDefaultNotificationInstruction(defaultNotificationTarget));
         }
@@ -547,6 +608,12 @@ Schedule types:
                 promptTemplate: effectivePrompt,
                 workingDirectory: workingDirectory || context.workingDirectory,
                 maxTurns,
+                ...(skillBindings.length > 0
+                  ? {
+                      skillBinding: skillBindings[0],
+                      skillBindings,
+                    }
+                  : {}),
               },
             },
             { id: 'end', type: 'end', name: 'End', config: {} },
@@ -599,11 +666,13 @@ Schedule types:
                   chatId: defaultNotificationTarget.chatId ?? null,
                 }
               : null,
+            skillBindings,
             inheritedPermissionPolicy: Boolean(encodedPermissionsProfile),
             message:
               `Scheduled task "${name}" created successfully.` +
               `${maxRuns ? ` Will run ${maxRuns} time${maxRuns > 1 ? 's' : ''} then auto-stop.` : ''}` +
               `${nextRunAbsolute ? ` Next run target: ${nextRunAbsolute}.` : ''}` +
+              `${skillBindings.length > 0 ? ` Using ${skillBindings.length} mandatory skill${skillBindings.length > 1 ? 's' : ''}.` : ''}` +
               `${encodedPermissionsProfile ? ' Session permission grants were inherited for this automation.' : ''}` +
               `${defaultNotificationTarget ? ` Default delivery set to ${platformDisplayName(defaultNotificationTarget.platform)}${defaultNotificationTarget.chatId ? ` (${defaultNotificationTarget.chatId})` : ''}.` : ''}` +
               ' Managed by the automation runtime.',
@@ -862,9 +931,14 @@ Actions:
 export function createCronTools(
   resolveDefaultNotificationTarget?: ResolveScheduledTaskDefaultNotificationTarget,
   resolvePermissionBootstrap?: ResolveScheduledTaskPermissionBootstrap,
+  resolveSkillBindings?: ResolveScheduledTaskSkillBindings,
 ): ToolHandler[] {
   return [
-    createScheduleTaskTool(resolveDefaultNotificationTarget, resolvePermissionBootstrap),
+    createScheduleTaskTool(
+      resolveDefaultNotificationTarget,
+      resolvePermissionBootstrap,
+      resolveSkillBindings,
+    ),
     createManageScheduledTaskTool(),
   ];
 }

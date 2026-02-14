@@ -386,6 +386,57 @@ export class SkillService {
   }
 
   /**
+   * Ensure a bundled default skill is present in managed storage.
+   * This is used for platform bootstrap skills (for example: skill-creator).
+   */
+  async ensureDefaultManagedSkillInstalled(skillName: string): Promise<{
+    skillId: string;
+    installed: boolean;
+  }> {
+    const normalized = skillName.trim();
+    if (!normalized) {
+      throw new Error('skillName is required');
+    }
+
+    const managedSkillId = `managed:${normalized}`;
+    const targetDir = join(this.managedSkillsDir, normalized);
+
+    if (existsSync(targetDir)) {
+      const existingStatus = await this.reconcileExistingManagedInstall(targetDir, normalized);
+      if (existingStatus === 'valid' || existingStatus === 'repaired') {
+        this.clearCache();
+        return {
+          skillId: managedSkillId,
+          installed: false,
+        };
+      }
+
+      throw new Error(
+        `Existing managed skill "${normalized}" is invalid or tampered. ` +
+        'Remove it from ~/.cowork/skills and retry bootstrap installation.',
+      );
+    }
+
+    const discovered = await this.discoverAll();
+    const bundled = discovered.find(
+      (candidate) => (
+        candidate.source.type === 'bundled'
+        && candidate.frontmatter.name === normalized
+      ),
+    );
+
+    if (!bundled) {
+      throw new Error(`Bundled default skill "${normalized}" not found`);
+    }
+
+    await this.installSkill(bundled.id);
+    return {
+      skillId: managedSkillId,
+      installed: true,
+    };
+  }
+
+  /**
    * Uninstall a skill from managed directory
    */
   async uninstallSkill(skillId: string): Promise<void> {

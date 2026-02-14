@@ -170,4 +170,93 @@ describe('cron-tool schedule_task temporal grounding', () => {
     expect(promptTemplate).toContain('send_notification_telegram');
     expect(promptTemplate).not.toContain('Delivery requirement for this scheduled task:');
   });
+
+  it('injects mandatory skill instructions and binding metadata for scheduled execution', async () => {
+    const createDraftSpy = vi
+      .spyOn(workflowService, 'createDraft')
+      .mockImplementation((input: unknown) => ({ id: 'wf_skill', ...(input as object) }) as never);
+    vi.spyOn(workflowService, 'publish').mockReturnValue({
+      id: 'wf_skill',
+      version: 1,
+      name: 'Skill Bound Task',
+    } as never);
+    vi.spyOn(workflowService, 'listScheduledTasks').mockReturnValue([] as never);
+
+    const now = Date.now();
+    const tool = createScheduleTaskTool(
+      undefined,
+      undefined,
+      async () => ([
+        {
+          skillId: 'managed:incident-monitoring',
+          skillName: 'incident-monitoring',
+          bindingMode: 'instruction_only',
+          createdAt: now,
+          createdFromSessionId: 'session_test',
+        },
+        {
+          skillId: 'managed:slack-briefing',
+          skillName: 'slack-briefing',
+          bindingMode: 'instruction_only',
+          createdAt: now,
+          createdFromSessionId: 'session_test',
+        },
+      ]),
+    );
+
+    const result = await tool.execute(
+      {
+        name: 'Skill Bound Task',
+        prompt: 'Watch incidents and send concise updates.',
+        schedule: {
+          type: 'interval',
+          every: 30,
+        },
+      },
+      baseContext,
+    );
+
+    expect(result.success).toBe(true);
+    const draftInput = createDraftSpy.mock.calls[0]?.[0] as {
+      nodes: Array<{
+        type: string;
+        config: {
+          promptTemplate?: string;
+          skillBinding?: { skillId: string };
+          skillBindings?: Array<{ skillId: string }>;
+        };
+      }>;
+    };
+
+    const stepConfig = draftInput.nodes.find((node) => node.type === 'agent_step')?.config;
+    const promptTemplate = stepConfig?.promptTemplate || '';
+    expect(promptTemplate).toContain('Mandatory skill: /skills/incident-monitoring/SKILL.md');
+    expect(promptTemplate).toContain('Mandatory skill: /skills/slack-briefing/SKILL.md');
+    expect(promptTemplate).toContain('Skill used: <skill-name>');
+    expect(stepConfig?.skillBinding?.skillId).toBe('managed:incident-monitoring');
+    expect(stepConfig?.skillBindings).toHaveLength(2);
+  });
+
+  it('fails closed when schedule skill binding resolver returns no skills', async () => {
+    const tool = createScheduleTaskTool(
+      undefined,
+      undefined,
+      async () => ([]),
+    );
+
+    const result = await tool.execute(
+      {
+        name: 'No Skill Task',
+        prompt: 'Run this recurring monitor.',
+        schedule: {
+          type: 'interval',
+          every: 15,
+        },
+      },
+      baseContext,
+    );
+
+    expect(result.success).toBe(false);
+    expect(String(result.error || '')).toContain('requires at least one generated skill binding');
+  });
 });

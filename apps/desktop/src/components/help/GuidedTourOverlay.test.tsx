@@ -47,20 +47,20 @@ describe('GuidedTourOverlay', () => {
 
   it('auto-skips missing targets', async () => {
     document.body.innerHTML = `
-      <div data-tour-id=\"onboarding-provider-block\" style=\"width:120px;height:40px;\"></div>
+      <div data-tour-id=\"settings-tab-provider\" style=\"width:120px;height:40px;\"></div>
     `;
 
     render(<GuidedTourOverlay />);
 
     act(() => {
-      useHelpStore.getState().startTour('onboarding', true);
+      useHelpStore.getState().startTour('settings', true);
     });
 
     await waitFor(() => {
       expect(useHelpStore.getState().activeTourStepIndex).toBe(1);
     }, { timeout: 2000 });
 
-    expect(await screen.findByText('Provider and Key')).toBeInTheDocument();
+    expect(await screen.findByText('Provider Tab')).toBeInTheDocument();
   });
 
   it('replays a completed tour from the beginning', async () => {

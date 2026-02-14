@@ -109,6 +109,9 @@ fn main() {
             commands::skills::agent_check_skill_eligibility,
             commands::skills::agent_get_skill_content,
             commands::skills::agent_create_skill,
+            commands::skills::agent_draft_skill_from_session,
+            commands::skills::agent_create_skill_from_session,
+            commands::skills::agent_ensure_default_skill_creator_installed,
             // Cron commands
             commands::cron::cron_list_jobs,
             commands::cron::cron_get_job,

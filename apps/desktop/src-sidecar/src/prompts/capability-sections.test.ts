@@ -108,10 +108,12 @@ describe('capability-sections', () => {
     );
 
     const mode = sections.find((section) => section.key === 'mode_guardrails');
+    const skills = sections.find((section) => section.key === 'skill_operating_practice');
     const scheduling = sections.find((section) => section.key === 'scheduling_delivery_defaults');
 
     expect(mode?.content).toContain('Plan mode is active');
     expect(mode?.content).toContain('<proposed_plan>');
+    expect(skills?.content).toContain('Scheduling tools are unavailable in this runtime;');
     expect(scheduling?.content).toContain('Scheduling tools are unavailable in this session type.');
   });
 
@@ -157,5 +159,46 @@ describe('capability-sections', () => {
     expect(externalCli?.content).toContain('external_cli_get_progress');
     expect(externalCli?.content).toContain('low=5s');
     expect(externalCli?.content).toContain('do not ask redundant confirmation');
+  });
+
+  it('adds draft-first skill flow guidance when skill generation and scheduling tools are available', () => {
+    const sections = buildCapabilitySections(
+      createContext({
+        toolHandlers: [
+          createTool('draft_skill_from_conversation', 'Draft skill from chat'),
+          createTool('create_skill_from_conversation', 'Create skill from chat'),
+          createTool('schedule_task', 'Create scheduled task'),
+        ],
+        capabilitySnapshot: {
+          ...createContext().capabilitySnapshot,
+          toolAccess: [
+            {
+              toolName: 'draft_skill_from_conversation',
+              enabled: true,
+              reason: 'Available',
+              policyAction: 'ask',
+            },
+            {
+              toolName: 'create_skill_from_conversation',
+              enabled: true,
+              reason: 'Available',
+              policyAction: 'ask',
+            },
+            {
+              toolName: 'schedule_task',
+              enabled: true,
+              reason: 'Available',
+              policyAction: 'ask',
+            },
+          ],
+        },
+      }),
+    );
+
+    const skillPractice = sections.find((section) => section.key === 'skill_operating_practice');
+    expect(skillPractice).toBeDefined();
+    expect(skillPractice?.content).toContain('`draft_skill_from_conversation`');
+    expect(skillPractice?.content).toContain('`create_skill_from_conversation`');
+    expect(skillPractice?.content).toContain('`Skill used: <name>`');
   });
 });

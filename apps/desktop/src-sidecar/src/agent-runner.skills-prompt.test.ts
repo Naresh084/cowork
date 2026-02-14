@@ -14,15 +14,18 @@ describe('agent-runner skills prompt loading', () => {
 
   it('uses compact native skill prompt when synced skills are enabled', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
-    runner.enabledSkillIds = new Set(['skill-zeta', 'skill-alpha']);
+    runner.enabledSkillIds = new Set(['managed:skill-zeta', 'managed:skill-alpha']);
+
+    vi.spyOn(skillService, 'getInstalledSkillIds')
+      .mockResolvedValue(['managed:skill-zeta', 'managed:skill-alpha']);
 
     vi.spyOn(skillService, 'getSkill')
       .mockResolvedValueOnce({
-        id: 'skill-zeta',
+        id: 'managed:skill-zeta',
         frontmatter: { name: 'Zeta' },
       } as unknown as Awaited<ReturnType<typeof skillService.getSkill>>)
       .mockResolvedValueOnce({
-        id: 'skill-alpha',
+        id: 'managed:skill-alpha',
         frontmatter: { name: 'Alpha' },
       } as unknown as Awaited<ReturnType<typeof skillService.getSkill>>);
 

@@ -87,6 +87,8 @@ import type {
   DeepMemoryImportBundleParams,
   DeepMemoryMigrationReportParams,
   BenchmarkRunSuiteParams,
+  DraftSkillFromSessionParams,
+  CreateSkillFromSessionParams,
   RuntimeConfig,
   // AGENTS.md params
   AgentsMdLoadParams,
@@ -1155,6 +1157,40 @@ registerHandler('create_skill', async (params) => {
   });
 
   return { skillId };
+});
+
+registerHandler('draft_skill_from_session', async (params) => {
+  const p = params as unknown as DraftSkillFromSessionParams;
+  if (!p.sessionId) {
+    throw new Error('sessionId is required');
+  }
+
+  return agentRunner.draftSkillFromSession({
+    sessionId: p.sessionId,
+    goal: p.goal,
+    purpose: p.purpose,
+    workingDirectory: p.workingDirectory,
+    maxSkills: p.maxSkills,
+  });
+});
+
+registerHandler('create_skill_from_session', async (params) => {
+  const p = params as unknown as CreateSkillFromSessionParams;
+  if (!p.sessionId) {
+    throw new Error('sessionId is required');
+  }
+
+  return agentRunner.createSkillFromSession({
+    sessionId: p.sessionId,
+    goal: p.goal,
+    purpose: p.purpose,
+    workingDirectory: p.workingDirectory,
+    maxSkills: p.maxSkills,
+  });
+});
+
+registerHandler('ensure_default_skill_creator_installed', async () => {
+  return agentRunner.ensureDefaultSkillCreatorInstalled();
 });
 
 // ============================================================================

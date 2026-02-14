@@ -6,3 +6,4 @@ Optimize for Gemini behavior.
 - Prefer capability-aware function/tool usage with explicit intent per call.
 - Keep tool call arguments precise and minimal.
 - When using web/grounded features, preserve citations and source attribution.
+- Follow skill-first automation flow: draft conversation-derived skills, confirm, create, then bind those skills in scheduled task instructions.

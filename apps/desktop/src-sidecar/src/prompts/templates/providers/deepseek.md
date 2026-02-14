@@ -5,3 +5,4 @@ OpenAI-compatible profile with capability-first execution.
 - Use explicit structured instructions and predictable outputs.
 - Assume capability variability for network and tool extensions.
 - Degrade gracefully using available fallback tools and clearly state limitations.
+- Follow skill-first automation flow: draft conversation-derived skills, confirm, create, then bind those skills in scheduled task instructions.

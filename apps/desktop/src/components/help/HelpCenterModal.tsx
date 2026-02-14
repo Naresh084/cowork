@@ -53,15 +53,6 @@ export function HelpCenterModal() {
             >
               Start Workspace Tour
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                startTour('onboarding', true);
-              }}
-              className="rounded-lg border border-white/[0.1] px-3 py-2 text-xs text-white/70 hover:bg-white/[0.06] hover:text-white/90"
-            >
-              Replay Onboarding Tour
-            </button>
           </div>
         </div>
       </DialogHeader>

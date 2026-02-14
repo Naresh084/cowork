@@ -272,6 +272,10 @@ Scheduling model:
 
 - New recurring automation flows are workflow-backed.
 - `schedule_task` creates workflow-backed definitions.
+- Scheduled workflows are skill-first: runtime derives managed skills from current session conversation and injects mandatory skill-use instructions in the scheduled agent step.
+- You can preview/create reusable skills explicitly with:
+  - `draft_skill_from_conversation`
+  - `create_skill_from_conversation`
 - Legacy cron entries can still coexist during transition periods.
 
 ## 5. Runtime Apply vs New Session

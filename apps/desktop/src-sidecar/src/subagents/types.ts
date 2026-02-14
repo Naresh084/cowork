@@ -60,6 +60,9 @@ export interface SubagentManifest {
   /** Optional model override (e.g., "gemini-1.5-pro") */
   model?: string;
 
+  /** Optional skill names or /skills/* paths available to this subagent */
+  skills?: string[];
+
   /** Sort order (higher = first) */
   priority?: number;
 
@@ -82,6 +85,7 @@ export interface SubagentConfig {
   description: string;
   systemPrompt: string;
   model?: string;
+  skills?: string[];
 }
 
 /**
@@ -129,6 +133,7 @@ export interface CreateSubagentParams {
   tags?: string[];
   tools?: string[];
   model?: string;
+  skills?: string[];
 }
 
 /**

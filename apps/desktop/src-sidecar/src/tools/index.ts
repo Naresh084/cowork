@@ -8,3 +8,4 @@ export { createCronTools, createScheduleTaskTool, createManageScheduledTaskTool 
 export { createNotificationTools } from './notification-tools.js';
 export { createExternalCliTools } from './external-cli-tools.js';
 export { createWorkflowTools } from './workflow-tool.js';
+export { createConversationSkillTools } from './skill-conversation-tools.js';

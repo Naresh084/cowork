@@ -243,6 +243,22 @@ export interface BenchmarkRunSuiteParams {
   profile?: string;
 }
 
+export interface DraftSkillFromSessionParams {
+  sessionId: string;
+  goal?: string;
+  purpose?: 'manual_skill' | 'scheduled_task';
+  workingDirectory?: string;
+  maxSkills?: number;
+}
+
+export interface CreateSkillFromSessionParams {
+  sessionId: string;
+  goal?: string;
+  purpose?: 'manual_skill' | 'scheduled_task';
+  workingDirectory?: string;
+  maxSkills?: number;
+}
+
 // ============================================================================
 // Command System Parameters (New)
 // ============================================================================

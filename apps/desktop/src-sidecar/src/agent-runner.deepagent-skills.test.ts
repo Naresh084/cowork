@@ -8,6 +8,10 @@ type MutableRunner = AgentRunner & {
     skills: string[] | undefined;
     syncSkillIds: string[];
   }>;
+  resolveSubagentSkillSources: (
+    declaredSubagentSkills: string[] | undefined,
+    installedSkillSources: string[] | undefined,
+  ) => string[];
 };
 
 describe('agent-runner deepagent skill config', () => {
@@ -15,18 +19,18 @@ describe('agent-runner deepagent skill config', () => {
     vi.restoreAllMocks();
   });
 
-  it('enables /skills source when managed skills exist even without enabled skill IDs', async () => {
+  it('enables /skills source with all installed managed skills when no enabled skill IDs exist', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set();
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue(['managed:planner']);
 
     const config = await runner.resolveDeepAgentSkillConfig();
-    expect(config.skills).toEqual(['/skills/']);
-    expect(config.syncSkillIds).toEqual([]);
+    expect(config.skills).toEqual(['/skills/planner']);
+    expect(config.syncSkillIds).toEqual(['managed:planner']);
   });
 
-  it('deduplicates sync skill IDs and ignores blank values', async () => {
+  it('deduplicates enabled skill IDs and keeps only installed managed skill IDs', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set([
       'managed:planner',
@@ -36,11 +40,22 @@ describe('agent-runner deepagent skill config', () => {
       'platform:web-search',
     ]);
 
+    vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue(['managed:planner', 'managed:writer']);
+
+    const config = await runner.resolveDeepAgentSkillConfig();
+    expect(config.skills).toEqual(['/skills/planner']);
+    expect(config.syncSkillIds).toEqual(['managed:planner']);
+  });
+
+  it('disables /skills source when enabled skill IDs are not installed as managed skills', async () => {
+    const runner = new AgentRunner() as unknown as MutableRunner;
+    runner.enabledSkillIds = new Set(['platform:web-search']);
+
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue([]);
 
     const config = await runner.resolveDeepAgentSkillConfig();
-    expect(config.skills).toEqual(['/skills/']);
-    expect(config.syncSkillIds).toEqual(['managed:planner', 'platform:web-search']);
+    expect(config.skills).toBeUndefined();
+    expect(config.syncSkillIds).toEqual([]);
   });
 
   it('disables /skills source when no enabled or installed skills exist', async () => {
@@ -63,5 +78,23 @@ describe('agent-runner deepagent skill config', () => {
     const config = await runner.resolveDeepAgentSkillConfig();
     expect(config.skills).toBeUndefined();
     expect(config.syncSkillIds).toEqual([]);
+  });
+
+  it('maps declared subagent skill names to /skills/* and filters to installed set', () => {
+    const runner = new AgentRunner() as unknown as MutableRunner;
+    const resolved = runner.resolveSubagentSkillSources(
+      ['bird', '/skills/planner', 'skills/invalid', ''],
+      ['/skills/bird', '/skills/planner'],
+    );
+    expect(resolved).toEqual(['/skills/bird', '/skills/planner']);
+  });
+
+  it('inherits installed skill sources when subagent has no explicit skills', () => {
+    const runner = new AgentRunner() as unknown as MutableRunner;
+    const resolved = runner.resolveSubagentSkillSources(
+      undefined,
+      ['/skills/bird'],
+    );
+    expect(resolved).toEqual(['/skills/bird']);
   });
 });

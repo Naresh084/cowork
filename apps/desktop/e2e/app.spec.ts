@@ -12,7 +12,7 @@ test.describe('Cowork App', () => {
   });
 
   test.describe('Onboarding Flow', () => {
-    test('should show API key input on first visit', async ({ page }) => {
+    test('should show simple setup fields on first visit', async ({ page }) => {
       // Clear any stored API key
       await page.evaluate(() => {
         localStorage.clear();
@@ -21,29 +21,10 @@ test.describe('Cowork App', () => {
       await page.goto('/');
 
       // Should show onboarding
+      await expect(page.locator('text=Name')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('text=Provider')).toBeVisible({ timeout: 10000 });
       await expect(page.locator('text=API Key')).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should validate API key format', async ({ page }) => {
-      await page.evaluate(() => {
-        localStorage.clear();
-      });
-
-      await page.goto('/');
-
-      // Wait for onboarding to load
-      await page.waitForSelector('input[type="password"], input[placeholder*="key"]', { timeout: 10000 });
-
-      // Enter invalid API key
-      const input = page.locator('input[type="password"], input[placeholder*="key"]');
-      await input.fill('invalid-key');
-
-      // Try to submit
-      const submitButton = page.locator('button:has-text("Continue"), button:has-text("Save"), button[type="submit"]');
-      await submitButton.click();
-
-      // Should show error
-      await expect(page.locator('text=Invalid')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible({ timeout: 10000 });
     });
   });
 

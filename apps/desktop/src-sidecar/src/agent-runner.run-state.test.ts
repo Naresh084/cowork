@@ -8,6 +8,7 @@ type MutableRunner = AgentRunner & {
   writeRunCheckpoint: (...args: unknown[]) => void;
   appendRunTimelineEvent: (...args: unknown[]) => void;
   getSessionRunState: (session: any) => string;
+  updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
 };
 
 function createRunner(): MutableRunner {
@@ -154,5 +155,29 @@ describe('agent-runner run state machine', () => {
     expect(runner.activeRunBySession.has(session.id)).toBe(false);
     expect(runner.writeRunCheckpoint).toHaveBeenCalled();
     expect(runner.appendRunTimelineEvent).toHaveBeenCalled();
+  });
+
+  it('blocks working directory changes while a run is active', async () => {
+    const runner = createRunner();
+    const session = createSession('session-6', {
+      workingDirectory: '/tmp/old-dir',
+      type: 'main',
+      provider: 'google',
+      executionMode: 'execute',
+      title: null,
+      model: 'gemini-test',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      lastAccessedAt: Date.now(),
+      chatItems: [],
+      abortController: new AbortController(),
+    });
+    runner.sessions = new Map([[session.id, session]]);
+    runner.runs = new Map();
+    runner.activeRunBySession = new Map();
+
+    await expect(
+      runner.updateSessionWorkingDirectory(session.id, '/tmp/new-dir'),
+    ).rejects.toThrow('Cannot change working directory while run is');
   });
 });

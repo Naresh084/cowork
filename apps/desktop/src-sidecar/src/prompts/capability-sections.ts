@@ -154,6 +154,49 @@ function buildModeGuardrailsSection(context: PromptBuildContext): PromptTemplate
   };
 }
 
+function buildSkillOperatingPracticeSection(context: PromptBuildContext): PromptTemplateSection {
+  const toolNames = new Set(context.toolHandlers.map((tool) => tool.name));
+  const hasDraftSkillTool = toolNames.has('draft_skill_from_conversation');
+  const hasCreateSkillTool = toolNames.has('create_skill_from_conversation');
+  const hasScheduleTaskTool = toolNames.has('schedule_task');
+
+  const lines: string[] = [
+    '## Skill Operating Practice',
+    '- Prefer reusable skills when workflow quality depends on repeatability, strict constraints, or stable multi-step orchestration.',
+    '- Mine current-session conversation for durable signals before creating a skill: repeated intent, required tools, constraints, and output contract.',
+    '- Preserve durable knowledge in skills and remove temporary turn-only context from generated instructions.',
+    '- If the workflow has independent tracks, create multiple focused skills rather than one overloaded skill.',
+    '- Generated skills should include: trigger description, when-to-use / when-not-to-use guidance, deterministic workflow steps, and output quality checks.',
+    '- Proactively suggest creating a skill when repeated manual requests, repeated correction loops, or recurring automation intent appears.',
+  ];
+
+  if (hasDraftSkillTool && hasCreateSkillTool) {
+    lines.push(
+      '- Use draft-first skill flow: `draft_skill_from_conversation` -> concise preview -> explicit user confirmation -> `create_skill_from_conversation`.',
+    );
+  } else {
+    lines.push(
+      '- If conversation skill tools are unavailable in this runtime, state that limitation and continue with the best available fallback.',
+    );
+  }
+
+  if (hasScheduleTaskTool) {
+    lines.push(
+      '- For scheduled automations, bind generated skill(s) into the execution prompt and require explicit skill usage instructions.',
+    );
+    lines.push(
+      '- Skill binding is instruction-level: require loading `/skills/<name>/SKILL.md`, following its workflow, and reporting `Skill used: <name>` in run output.',
+    );
+  } else {
+    lines.push('- Scheduling tools are unavailable in this runtime; skip automation creation and continue with non-scheduled execution.');
+  }
+
+  return {
+    key: 'skill_operating_practice',
+    content: lines.join('\n'),
+  };
+}
+
 function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): PromptTemplateSection | null {
   const toolNames = new Set(context.toolHandlers.map((tool) => tool.name));
   const hasCodexStart = toolNames.has('start_codex_cli_run');
@@ -229,6 +272,7 @@ export function buildCapabilitySections(context: PromptBuildContext): PromptTemp
   const sections: PromptTemplateSection[] = [
     buildEffectiveEnvironmentSection(context),
     buildModeGuardrailsSection(context),
+    buildSkillOperatingPracticeSection(context),
     ...(externalCliSection ? [externalCliSection] : []),
     buildAvailableToolsSection(context),
     buildUnavailableToolsSection(context),

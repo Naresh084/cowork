@@ -483,6 +483,7 @@ export class SubagentService {
       systemPrompt: params.systemPrompt,
       tools: params.tools,
       model: params.model,
+      skills: params.skills,
       priority: 0,
       source: 'custom',
     };
@@ -504,7 +505,12 @@ export class SubagentService {
   /**
    * Get subagent configs for DeepAgent system (replaces hardcoded getSubagentConfigs)
    */
-  async getSubagentConfigs(sessionModel?: string): Promise<SubagentConfig[]> {
+  async getSubagentConfigs(
+    sessionModel?: string,
+    workingDirectory?: string,
+  ): Promise<SubagentConfig[]> {
+    await this.discoverAll(workingDirectory);
+
     // Only return INSTALLED subagents
     const installed = await this.getInstalledSubagentNames();
     const configs: SubagentConfig[] = [];
@@ -512,11 +518,17 @@ export class SubagentService {
     for (const name of installed) {
       const subagent = this.subagentCache.get(name);
       if (subagent) {
+        const normalizedSkills = Array.isArray(subagent.manifest.skills)
+          ? subagent.manifest.skills
+              .map((skill) => (typeof skill === 'string' ? skill.trim() : ''))
+              .filter((skill) => skill.length > 0)
+          : [];
         configs.push({
           name: subagent.manifest.name,
           description: subagent.manifest.description,
           systemPrompt: subagent.manifest.systemPrompt,
           model: subagent.manifest.model || sessionModel,
+          ...(normalizedSkills.length > 0 ? { skills: normalizedSkills } : {}),
         });
       }
     }

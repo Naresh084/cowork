@@ -12,6 +12,10 @@ import type {
   SessionType,
   PlatformType,
   ToolEvaluationResult,
+  SkillGenerationDraft,
+  SkillGenerationRequest,
+  SkillGenerationResult,
+  SkillBinding,
 } from '@gemini-cowork/shared';
 import {
   SUPPORTED_PLATFORM_TYPES,
@@ -35,7 +39,7 @@ import type {
   DesignItem,
   ErrorItem,
 } from '@gemini-cowork/shared';
-import { createDeepAgent } from 'deepagents';
+import { createDeepAgent, FilesystemBackend, CompositeBackend } from 'deepagents';
 import { createMiddleware } from 'langchain';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { ToolMessage } from '@langchain/core/messages';
@@ -52,7 +56,16 @@ import { existsSync } from 'fs';
 import { basename, extname, join, isAbsolute, resolve, sep } from 'path';
 import { homedir, userInfo, hostname, arch, release, cpus, totalmem } from 'os';
 import { eventEmitter } from './event-emitter.js';
-import { createResearchTools, createComputerUseTools, createMediaTools, createGroundingTools, createCronTools, createExternalCliTools, createWorkflowTools } from './tools/index.js';
+import {
+  createResearchTools,
+  createComputerUseTools,
+  createMediaTools,
+  createGroundingTools,
+  createCronTools,
+  createExternalCliTools,
+  createWorkflowTools,
+  createConversationSkillTools,
+} from './tools/index.js';
 import { createNotificationTools } from './tools/notification-tools.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
@@ -68,7 +81,7 @@ import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-
 import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@gemini-cowork/mcp';
 import type { AgentsMdConfig } from './agents-md/types.js';
 import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
-import { buildSubagentPromptSection, getSubagentConfigs } from './middleware/subagent-prompts.js';
+import { createSubagentService } from './subagents/index.js';
 import { SystemPromptBuilder } from './prompts/system-prompt-builder.js';
 import type { ToolCallContext } from '@gemini-cowork/shared';
 import type {
@@ -116,6 +129,7 @@ import { BENCHMARK_SUITES } from './benchmark/suites/index.js';
 import {
   type SessionPermissionBootstrap,
 } from './permission-bootstrap.js';
+import { SkillGenerationService } from './skill-generation-service.js';
 import {
   BenchmarkRepository,
   DatabaseConnection,
@@ -735,9 +749,19 @@ export class AgentRunner {
     reasons: ['No benchmark suite has been executed yet.'],
     evaluatedAt: Date.now(),
   };
+  private skillGenerationService: SkillGenerationService;
 
   constructor() {
     // Session-based Chrome instances are created on-demand by ChromeCDPDriver.forSession()
+    this.skillGenerationService = new SkillGenerationService((sessionId) => {
+      const session = this.sessions.get(sessionId);
+      if (!session) return null;
+      return {
+        sessionId: session.id,
+        workingDirectory: session.workingDirectory,
+        chatItems: [...session.chatItems],
+      };
+    });
   }
 
   /**
@@ -778,6 +802,12 @@ export class AgentRunner {
       setCheckpointerDataDir(appDataDir);
       this.persistence = new SessionPersistence(appDataDir);
       await this.persistence.initialize();
+      try {
+        await skillService.ensureDefaultManagedSkillInstalled('skill-creator');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[skills] Failed to ensure default skill-creator install: ${reason}`);
+      }
       this.externalCliRunManager = new ExternalCliRunManager({
         appDataDir,
         discoveryService: this.externalCliDiscoveryService,
@@ -3079,6 +3109,93 @@ export class AgentRunner {
     }
   }
 
+  async ensureDefaultSkillCreatorInstalled(): Promise<{
+    skillId: string;
+    installed: boolean;
+  }> {
+    return skillService.ensureDefaultManagedSkillInstalled('skill-creator');
+  }
+
+  async draftSkillFromSession(input: {
+    sessionId: string;
+    goal?: string;
+    purpose?: SkillGenerationRequest['purpose'];
+    workingDirectory?: string;
+    maxSkills?: number;
+  }): Promise<SkillGenerationDraft> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    return this.skillGenerationService.draftFromSession({
+      sessionId: input.sessionId,
+      purpose: input.purpose || 'manual_skill',
+      goal: input.goal,
+      workingDirectory: input.workingDirectory || session.workingDirectory,
+      mode: 'draft',
+      maxSkills: input.maxSkills ?? 3,
+    });
+  }
+
+  async createSkillFromSession(input: {
+    sessionId: string;
+    goal?: string;
+    purpose?: SkillGenerationRequest['purpose'];
+    workingDirectory?: string;
+    maxSkills?: number;
+  }): Promise<SkillGenerationResult> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    const result = await this.skillGenerationService.createFromSession({
+      sessionId: input.sessionId,
+      purpose: input.purpose || 'manual_skill',
+      goal: input.goal,
+      workingDirectory: input.workingDirectory || session.workingDirectory,
+      mode: 'create',
+      maxSkills: input.maxSkills ?? 3,
+    });
+
+    if (result.createdSkills.length > 0) {
+      for (const binding of result.createdSkills) {
+        this.enabledSkillIds.add(binding.skillId);
+      }
+    }
+
+    return result;
+  }
+
+  private async createScheduledTaskSkillBindings(input: {
+    sessionId: string;
+    prompt: string;
+    taskName: string;
+    maxSkills?: number;
+  }): Promise<SkillBinding[]> {
+    const session = this.sessions.get(input.sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${input.sessionId}`);
+    }
+
+    const goal = [
+      `Scheduled task name: ${input.taskName}`,
+      `Execution objective: ${input.prompt}`,
+      'Generate detailed reusable skills for this recurring automation and enforce their usage.',
+    ].join('\n');
+
+    const created = await this.createSkillFromSession({
+      sessionId: input.sessionId,
+      purpose: 'scheduled_task',
+      goal,
+      workingDirectory: session.workingDirectory,
+      maxSkills: input.maxSkills,
+    });
+
+    return created.createdSkills;
+  }
+
   /**
    * Update approval mode for a session.
    */
@@ -3195,6 +3312,12 @@ export class AgentRunner {
     executionMode: ExecutionMode = 'execute',
     permissionBootstrap?: SessionPermissionBootstrap,
   ): Promise<SessionInfo> {
+    const normalizedWorkingDirectory = resolve(
+      (typeof workingDirectory === 'string' && workingDirectory.trim())
+        ? workingDirectory.trim()
+        : process.cwd(),
+    );
+
     const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
     const providerKey = this.getProviderApiKey(selectedProvider);
     const requiresProviderKey = type !== 'integration';
@@ -3233,7 +3356,7 @@ export class AgentRunner {
       type,
       provider: selectedProvider,
       executionMode,
-      workingDirectory,
+      workingDirectory: normalizedWorkingDirectory,
       baseUrlSnapshot: this.getProviderBaseUrl(selectedProvider),
       model: actualModel,
       title: title || null,
@@ -3295,7 +3418,7 @@ export class AgentRunner {
       executionMode: session.executionMode,
       title: session.title,
       firstMessage: null,
-      workingDirectory,
+      workingDirectory: normalizedWorkingDirectory,
       model: actualModel,
       createdAt: now,
       updatedAt: now,
@@ -5642,8 +5765,33 @@ export class AgentRunner {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    const oldWorkingDirectory = session.workingDirectory;
-    session.workingDirectory = workingDirectory;
+    const normalizedWorkingDirectory = resolve(
+      (typeof workingDirectory === 'string' && workingDirectory.trim())
+        ? workingDirectory.trim()
+        : process.cwd(),
+    );
+    const oldWorkingDirectory = resolve(session.workingDirectory);
+    if (normalizedWorkingDirectory === oldWorkingDirectory) {
+      return;
+    }
+
+    const runState = this.getSessionRunState(session);
+    if (
+      runState === 'running'
+      || runState === 'queued'
+      || runState === 'waiting_permission'
+      || runState === 'waiting_question'
+      || runState === 'retrying'
+      || runState === 'stopping'
+      || runState === 'paused'
+      || runState === 'recovered'
+    ) {
+      throw new Error(
+        `Cannot change working directory while run is ${runState}. Wait for idle/completion and retry.`,
+      );
+    }
+
+    session.workingDirectory = normalizedWorkingDirectory;
     session.updatedAt = Date.now();
 
     // Refresh agent with updated working directory
@@ -5836,8 +5984,7 @@ export class AgentRunner {
       : '';
 
     const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
-    const subagentConfigs = getSubagentConfigs(session.model);
-    const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
+    const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
     const skillBlock = await this.buildSkillsPrompt(session);
     const mcpPrompt = this.buildMcpPrompt();
     const soulPrompt = this.buildSoulPromptSection();
@@ -6137,6 +6284,33 @@ ${sandboxConstraintsSection}
 ## Additional Tools
 ${additionalToolsSection}
 
+## Skill Creation with Conversation-Derived Drafts
+
+Skills are reusable operating contracts. Prefer them when work is recurring, quality-sensitive, multi-step, or repeatedly corrected.
+
+### Skill Creation Rules
+1. **Draft first**: call \`draft_skill_from_conversation\` before creating a skill.
+2. **Preview and confirm**: show a concise draft summary and ask for explicit user confirmation.
+3. **Create only after confirmation**: then call \`create_skill_from_conversation\`.
+4. **Support multiple focused skills** when conversation intent contains independent workflow tracks.
+5. **Current-session mining only**: extract durable intent, constraints, required tools, and output contract from current-session conversation.
+6. **Context hygiene**: remove temporary chatter/noise; keep durable instructions in the generated skill.
+
+### Skill Quality Checklist
+- Trigger description is specific and concise.
+- Includes "when to use" and "when not to use".
+- Workflow is deterministic and includes completion checks.
+- Repeated deterministic code belongs in \`scripts/\`; long domain detail belongs in \`references/\`.
+- Default generated-skill trust assumptions are draft/unverified unless explicitly raised.
+
+### When to Suggest Creating a Skill
+Proactively suggest skill creation when current-session conversation shows one or more:
+- repeated manual requests with similar shape
+- repeated correction loops on the same workflow
+- strict formatting/schema/report requirements
+- stable multi-tool orchestration steps
+- recurring monitoring/reporting intent
+
 ## Scheduled Tasks with schedule_task
 
 Workflows are first-class automations. From main chat you can:
@@ -6152,8 +6326,9 @@ Use \`schedule_task\` as the fast path when the user asks for a recurring automa
 1. **ALWAYS create ONE schedule_task** for any repeating request. NEVER create multiple separate tasks.
 2. **Use maxRuns** to limit how many times a task runs. If the user says "do X every Y minutes for N times", create ONE task with \`schedule: { type: "interval", every: Y }, maxRuns: N\`. The task automatically stops after N runs.
 3. **Include tool names in prompts**. The task runs in an isolated session - tell it which tools to use (e.g., "Use web_search to search the web").
-4. **Make prompts self-contained**. The isolated agent has no memory of the current conversation. Include ALL context it needs.
-5. **Default delivery channel rule**. If a scheduled task request comes from a shared integration session, default delivery to the same originating platform/channel unless the user explicitly chooses another destination. Ask a clarifying question only when no origin is available and no channel was specified.
+4. **Skill-first scheduling is mandatory**. For schedule requests, first call \`draft_skill_from_conversation\`, show the draft summary, ask for confirmation, then call \`create_skill_from_conversation\`, and only then call \`schedule_task\`.
+5. **Make prompts self-contained and skill-bound**. The isolated agent has no memory of the current conversation; include complete execution context and explicit mandatory-skill usage instructions.
+6. **Default delivery channel rule**. If a scheduled task request comes from a shared integration session, default delivery to the same originating platform/channel unless the user explicitly chooses another destination. Ask a clarifying question only when no origin is available and no channel was specified.
 
 ### When to Suggest Scheduling
 Proactively suggest scheduling when the user:
@@ -6168,10 +6343,12 @@ Proactively suggest scheduling when the user:
 - When you detect a likely recurring workflow from the latest message + recent conversation history, proactively suggest automation and ask a direct confirmation question before creating it.
 - Use a short confirmation question such as: "Should I create an automation for this?"
 - If the user clearly asked to schedule already ("set up a cron job", "schedule this", "run every..."), you may create directly.
+- Even when creating directly, still run the internal skill flow first: \`draft_skill_from_conversation\` -> confirmation -> \`create_skill_from_conversation\` -> \`schedule_task\`.
 
 ### How schedule_task Works
 - Creates a workflow-backed automation that runs automatically on the configured schedule.
-- The \`prompt\` field is the FULL instruction executed each time - make it detailed and self-contained.
+- The \`prompt\` field is the execution objective. The runtime will synthesize detailed managed skill(s) from conversation context and inject mandatory skill-usage instructions into the execution prompt.
+- Skill usage can include multiple mandatory skills when the conversation contains multiple workflow tracks.
 - The isolated agent has access to ALL the same tools as you: search, file operations, media, grounding, connectors, AND notification tools for connected messaging platforms. If a messaging platform is connected at the time the task runs, the workflow run can use matching \`send_notification_<platform>\` tools to deliver results.
 - When the user asks to send results to a connected platform (e.g., "send to WhatsApp", "notify me on Slack", "post in Teams"), include that instruction in the prompt using the matching notification tool.
 - If the current request includes integration origin context, use that origin platform/channel as the default scheduled-task delivery target.
@@ -6359,7 +6536,7 @@ Use workflow-specific tools when the request is about workflow definitions or wo
 
     if (session.type === 'isolated' || session.type === 'cron') {
       basePrompt = basePrompt.replace(
-        /\n## Scheduled Tasks with schedule_task[\s\S]*?\n## Important Reminders/,
+        /\n## Skill Creation with Conversation-Derived Drafts[\s\S]*?\n## Important Reminders/,
         '\n## Important Reminders'
       );
     }
@@ -6412,8 +6589,7 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
     const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
 
     // Subagent prompts
-    const subagentConfigs = getSubagentConfigs(session.model);
-    const subagentPrompt = buildSubagentPromptSection(subagentConfigs);
+    const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
 
     // Legacy skill prompts
     const skillBlock = await this.buildSkillsPrompt(session);
@@ -6595,14 +6771,26 @@ ${stitchGuidance}
     return parts.join('\n');
   }
 
+  private async buildInstalledSubagentPrompt(session: ActiveSession): Promise<string> {
+    try {
+      const service = createSubagentService(this.appDataDir || undefined);
+      await service.initialize();
+      const configs = await service.getSubagentConfigs(session.model, session.workingDirectory);
+      return service.buildSubagentPromptSection(configs);
+    } catch {
+      return '';
+    }
+  }
+
   private async buildSkillsPrompt(session: ActiveSession): Promise<string> {
     // Prefer DeepAgents native skill loading to avoid duplicating full skill content
     // in the system prompt. This keeps prompt size smaller and aligns with tool-driven
     // skill retrieval.
-    if (this.enabledSkillIds.size > 0) {
+    const deepAgentSkillConfig = await this.resolveDeepAgentSkillConfig();
+    if (deepAgentSkillConfig.syncSkillIds.length > 0) {
       try {
         const names: string[] = [];
-        for (const skillId of this.enabledSkillIds) {
+        for (const skillId of deepAgentSkillConfig.syncSkillIds) {
           const skill = await skillService.getSkill(skillId);
           if (!skill) continue;
           names.push(skill.frontmatter.name || skill.id);
@@ -6820,16 +7008,16 @@ ${stitchGuidance}
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
 
     // Determine skills paths for DeepAgents.
-    // Expose /skills/ whenever either explicit session skills are enabled or
-    // installed managed skills are available.
+    // Expose /skills/ only when there are managed installed skills selected
+    // for this session (or all managed installed skills when nothing is explicitly selected).
     const deepAgentSkillConfig = await this.resolveDeepAgentSkillConfig();
     const skillsParam = deepAgentSkillConfig.skills;
-    const syncedSkillFiles =
-      deepAgentSkillConfig.syncSkillIds.length > 0
-        ? await skillService.syncSkillsForAgent(deepAgentSkillConfig.syncSkillIds)
-        : undefined;
-
     const skillsDir = this.getSkillsDirectory();
+    const deepAgentSubagents = await this.resolveDeepAgentSubagents(
+      session.model,
+      session.workingDirectory,
+      skillsParam,
+    );
 
     // Determine AGENTS.md paths for DeepAgents built-in memory loading
     const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
@@ -6845,16 +7033,37 @@ ${stitchGuidance}
       middleware: [this.createToolMiddleware(session)],
       recursionLimit: RECURSION_LIMIT,
       skills: skillsParam,
+      subagents: deepAgentSubagents.length > 0 ? deepAgentSubagents : undefined,
       checkpointer: getCheckpointer(),
       memory: memoryPaths,
-      backend: () => new CoworkBackend(
-        session.workingDirectory,
-        session.id,
-        () => this.getBackendAllowedScopes(session),
-        skillsDir,
-        () => this.getSessionSandboxSettings(session),
-        syncedSkillFiles,
-      ),
+      backend: () => {
+        const sandboxBackend = new CoworkBackend(
+          session.workingDirectory,
+          session.id,
+          () => this.getBackendAllowedScopes(session),
+          undefined,
+          () => this.getSessionSandboxSettings(session),
+        );
+
+        // Route all filesystem operations through DeepAgents FilesystemBackend rooted
+        // to the session working directory, while keeping command execution on sandboxBackend.
+        const routeBackends: Record<string, FilesystemBackend> = {
+          '/': new FilesystemBackend({
+            rootDir: resolve(session.workingDirectory),
+            virtualMode: true,
+          }),
+        };
+
+        if (skillsParam && skillsParam.length > 0) {
+          // Route /skills/* through DeepAgents FilesystemBackend rooted at ~/.cowork/skills.
+          routeBackends['/skills/'] = new FilesystemBackend({
+            rootDir: skillsDir,
+            virtualMode: true,
+          });
+        }
+
+        return new CompositeBackend(sandboxBackend, routeBackends);
+      },
     });
 
     return agent;
@@ -6889,7 +7098,7 @@ ${stitchGuidance}
     skills: string[] | undefined;
     syncSkillIds: string[];
   }> {
-    const syncSkillIds = Array.from(
+    const normalizedEnabledSkillIds = Array.from(
       new Set(
         [...this.enabledSkillIds]
           .map((skillId) => (typeof skillId === 'string' ? skillId.trim() : ''))
@@ -6904,14 +7113,145 @@ ${stitchGuidance}
       installedSkillIds = [];
     }
 
-    const hasInstalledSkills = installedSkillIds.some(
-      (skillId) => typeof skillId === 'string' && skillId.trim().length > 0,
+    const normalizedInstalledSkillIds = Array.from(
+      new Set(
+        installedSkillIds
+          .map((skillId) => (typeof skillId === 'string' ? skillId.trim() : ''))
+          .filter((skillId) => skillId.length > 0),
+      ),
+    );
+    const installedSkillIdSet = new Set(normalizedInstalledSkillIds);
+    const syncSkillIds = normalizedEnabledSkillIds.length > 0
+      ? normalizedEnabledSkillIds.filter((skillId) => installedSkillIdSet.has(skillId))
+      : normalizedInstalledSkillIds;
+    const skillSourcePaths = Array.from(
+      new Set(
+        syncSkillIds
+          .map((skillId) => {
+            const [prefix, ...rest] = skillId.split(':');
+            if (prefix !== 'managed') {
+              return '';
+            }
+            const skillName = rest.join(':').trim();
+            return skillName ? `/skills/${skillName}` : '';
+          })
+          .filter((path) => path.length > 0),
+      ),
     );
 
     return {
-      skills: syncSkillIds.length > 0 || hasInstalledSkills ? ['/skills/'] : undefined,
+      skills: skillSourcePaths.length > 0 ? skillSourcePaths : undefined,
       syncSkillIds,
     };
+  }
+
+  private async resolveDeepAgentSubagents(
+    sessionModel: string,
+    workingDirectory: string,
+    skillSourcePaths?: string[],
+  ): Promise<Array<{
+    name: string;
+    description: string;
+    systemPrompt: string;
+    model?: string;
+    skills?: string[];
+  }>> {
+    try {
+      const service = createSubagentService(this.appDataDir || undefined);
+      await service.initialize();
+      const subagentConfigs = await service.getSubagentConfigs(sessionModel, workingDirectory);
+
+      return subagentConfigs
+        .filter((config) => (
+          typeof config.name === 'string'
+          && config.name.trim().length > 0
+          && typeof config.description === 'string'
+          && config.description.trim().length > 0
+          && typeof config.systemPrompt === 'string'
+          && config.systemPrompt.trim().length > 0
+        ))
+        .map((config) => {
+          const scopedSkills = this.resolveSubagentSkillSources(
+            config.skills,
+            skillSourcePaths,
+          );
+
+          return {
+            name: config.name.trim(),
+            description: config.description.trim(),
+            systemPrompt: config.systemPrompt,
+            ...(typeof config.model === 'string' && config.model.trim().length > 0
+              ? { model: config.model.trim() }
+              : {}),
+            ...(scopedSkills.length > 0
+              ? { skills: scopedSkills }
+              : {}),
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  private resolveSubagentSkillSources(
+    declaredSubagentSkills: string[] | undefined,
+    installedSkillSources: string[] | undefined,
+  ): string[] {
+    const installed = Array.isArray(installedSkillSources)
+      ? Array.from(
+          new Set(
+            installedSkillSources
+              .map((value) => this.normalizeDeepAgentSkillSourcePath(value))
+              .filter((value): value is string => value !== null),
+          ),
+        )
+      : [];
+
+    const installedSet = new Set(installed);
+
+    const declared = Array.isArray(declaredSubagentSkills)
+      ? Array.from(
+          new Set(
+            declaredSubagentSkills
+              .map((value) => this.normalizeDeepAgentSkillSourcePath(value))
+              .filter((value): value is string => value !== null),
+          ),
+        )
+      : [];
+
+    if (declared.length === 0) {
+      return installed;
+    }
+
+    if (installedSet.size === 0) {
+      return [];
+    }
+
+    return declared.filter((value) => installedSet.has(value));
+  }
+
+  private normalizeDeepAgentSkillSourcePath(value: string | undefined): string | null {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized.startsWith('/skills/')) {
+      return normalized.replace(/\/+$/, '');
+    }
+
+    if (normalized.startsWith('skills/')) {
+      return `/${normalized.replace(/\/+$/, '')}`;
+    }
+
+    const sanitized = normalized
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '');
+    if (!sanitized) {
+      return null;
+    }
+
+    return `/skills/${sanitized}`;
   }
 
   private getCurrentIntegrationOrigin(
@@ -7147,6 +7487,24 @@ ${stitchGuidance}
       },
     );
 
+    const conversationSkillTools =
+      session.type === 'isolated' || session.type === 'cron'
+        ? []
+        : createConversationSkillTools({
+            draftFromConversation: async (input) => this.draftSkillFromSession({
+              sessionId: input.sessionId,
+              goal: input.goal,
+              purpose: input.purpose,
+              maxSkills: input.maxSkills,
+            }),
+            createFromConversation: async (input) => this.createSkillFromSession({
+              sessionId: input.sessionId,
+              goal: input.goal,
+              purpose: input.purpose,
+              maxSkills: input.maxSkills,
+            }),
+          });
+
     const cronTools =
       session.type === 'isolated' || session.type === 'cron'
         ? []
@@ -7155,6 +7513,7 @@ ${stitchGuidance}
               this.getDefaultScheduledTaskNotificationTarget(sourceSessionId),
             (sourceSessionId) =>
               this.getSessionPermissionBootstrap(sourceSessionId),
+            async (input) => this.createScheduledTaskSkillBindings(input),
           );
 
     const workflowTools =
@@ -7193,6 +7552,7 @@ ${stitchGuidance}
       ...mcpTools,
       ...connectorTools,
       ...notificationTools,
+      ...conversationSkillTools,
       ...cronTools,
       ...workflowTools,
       ...externalCliTools,

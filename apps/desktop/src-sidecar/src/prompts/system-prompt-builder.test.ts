@@ -96,6 +96,7 @@ describe('system-prompt-builder', () => {
     expect(result.diagnostics.providerTemplateKey).toContain(`providers/${provider}.md`);
     expect(result.prompt).toContain('## Effective Environment');
     expect(result.prompt).toContain('## Tool Autonomy Policy: Conservative');
+    expect(result.prompt).toContain('## Skill Operating Practice');
   });
 
   it('uses plan-mode template and keeps deterministic output for fixed input', () => {

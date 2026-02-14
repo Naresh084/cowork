@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { MessageList } from './MessageList';
+import { PermissionWorkbench } from './PermissionWorkbench';
 import { SessionHeader } from './SessionHeader';
 import { WelcomeScreen, type QuickAction } from './WelcomeScreen';
 import { InputArea } from './InputArea';
@@ -40,6 +41,7 @@ export function ChatView() {
     return state.sessions[activeSessionId] ?? null;
   });
   const chatItems = sessionState?.chatItems ?? [];
+  const pendingPermissions = sessionState?.pendingPermissions ?? [];
   const isStreaming = sessionState?.isStreaming ?? false;
   const isLoadingMessages = sessionState?.isLoadingMessages ?? false;
 
@@ -99,6 +101,7 @@ export function ChatView() {
   const isSessionBootstrapping =
     hasActiveSession && (!sessionState || !sessionState.hasLoaded || isLoadingMessages);
   const showMessageList = hasMessages || isSessionBootstrapping || Boolean(optimisticFirstMessage);
+  const showPermissionWorkbench = Boolean(activeSessionId && pendingPermissions.length > 0);
 
   const deriveTitle = (text: string) => {
     const trimmed = text.trim().replace(/\s+/g, ' ');
@@ -374,7 +377,9 @@ export function ChatView() {
 
       {/* Messages, Loading, or Welcome Screen */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {showMessageList ? (
+        {showPermissionWorkbench && activeSessionId ? (
+          <PermissionWorkbench sessionId={activeSessionId} />
+        ) : showMessageList ? (
           <MessageList optimisticFirstMessage={optimisticFirstMessage} />
         ) : (
           <WelcomeScreen onQuickAction={handleQuickAction} />

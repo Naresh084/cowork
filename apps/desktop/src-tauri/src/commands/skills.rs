@@ -255,3 +255,64 @@ pub async fn agent_create_skill(
 
     Ok(skill_id)
 }
+
+#[tauri::command]
+pub async fn agent_draft_skill_from_session(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    purpose: Option<String>,
+    goal: Option<String>,
+    working_directory: Option<String>,
+    max_skills: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "purpose": purpose,
+        "goal": goal,
+        "workingDirectory": working_directory,
+        "maxSkills": max_skills,
+    });
+
+    manager.send_command("draft_skill_from_session", params).await
+}
+
+#[tauri::command]
+pub async fn agent_create_skill_from_session(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    purpose: Option<String>,
+    goal: Option<String>,
+    working_directory: Option<String>,
+    max_skills: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "purpose": purpose,
+        "goal": goal,
+        "workingDirectory": working_directory,
+        "maxSkills": max_skills,
+    });
+
+    manager.send_command("create_skill_from_session", params).await
+}
+
+#[tauri::command]
+pub async fn agent_ensure_default_skill_creator_installed(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<serde_json::Value, String> {
+    ensure_sidecar(&app, &state).await?;
+
+    let manager = &state.manager;
+    manager
+        .send_command("ensure_default_skill_creator_installed", serde_json::json!({}))
+        .await
+}

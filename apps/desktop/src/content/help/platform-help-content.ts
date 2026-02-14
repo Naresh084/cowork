@@ -167,43 +167,6 @@ export const HELP_ARTICLE_BY_ID: Record<string, HelpArticle> = HELP_ARTICLES.red
 
 export const GUIDED_TOURS: GuidedTourDefinition[] = [
   {
-    id: 'onboarding',
-    title: 'Onboarding Tour',
-    description: 'Walk through setup mode, provider configuration, media routing, capability setup, and workflow-first automation.',
-    steps: [
-      {
-        id: 'onboarding-step-setup-mode',
-        title: 'Choose Setup Mode',
-        description: 'Pick Fast Path for quick start or Deep Dive for full guided configuration with workflow automation context.',
-        targetId: 'onboarding-setup-mode',
-      },
-      {
-        id: 'onboarding-step-provider',
-        title: 'Provider and Key',
-        description: 'Set provider, key, and model. This defines your core runtime behavior.',
-        targetId: 'onboarding-provider-block',
-      },
-      {
-        id: 'onboarding-step-media',
-        title: 'Media Routing',
-        description: 'Control which backend powers image and video generation tools.',
-        targetId: 'onboarding-media-block',
-      },
-      {
-        id: 'onboarding-step-capability',
-        title: 'Capabilities and Runtime Extensions',
-        description: 'Set capability policy defaults, search fallback, research models, and extension keys.',
-        targetId: 'onboarding-capability-block',
-      },
-      {
-        id: 'onboarding-step-review',
-        title: 'Review and Finish',
-        description: 'Confirm your setup, then continue with workflows/automations from the main app.',
-        targetId: 'onboarding-review-block',
-      },
-    ],
-  },
-  {
     id: 'settings',
     title: 'Settings Tour',
     description: 'Learn provider, media, capabilities, runtime, integrations, and remote access with impact-aware guidance.',

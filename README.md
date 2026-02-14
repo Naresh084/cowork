@@ -59,6 +59,7 @@ Current platform scope:
 - Visual workflow builder with trigger editing, step editing, publish/run actions, and run timeline inspection
 - Scheduler UI shows both legacy cron entries and workflow schedules in one automation surface
 - `schedule_task` routes new recurring automations into workflow-backed definitions
+- Scheduled automations are skill-first: conversation-derived managed skills are generated and bound as mandatory execution instructions
 
 ### Developer and Ops
 
@@ -199,6 +200,7 @@ This prevents "known missing key" runtime failures by avoiding registration when
 - `create_workflow` / `update_workflow` / `publish_workflow`
 - `run_workflow` / `manage_workflow` / `get_workflow_runs`
 - `schedule_task` (workflow-backed automation creation)
+- `draft_skill_from_conversation` / `create_skill_from_conversation`
 - plus file/system/integration tooling
 
 ---
@@ -240,6 +242,7 @@ Optional:
 - Use the Workflows view for visual graph editing, trigger configuration, and run inspection.
 - Use Automations for mixed schedule visibility (legacy cron + workflow schedules).
 - New recurring automation requests through `schedule_task` are workflow-backed.
+- `schedule_task` now performs internal skill-first binding: it derives one or more reusable managed skills from current conversation context and injects mandatory skill-use instructions into scheduled execution prompts.
 
 ## Plan Mode Workflow
 
@@ -521,6 +524,7 @@ Auto-update note:
 - [docs/INSTALLATION.md](docs/INSTALLATION.md): install and first launch
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): developer workflow
 - [docs/CONNECTORS.md](docs/CONNECTORS.md): connectors setup
+- [docs/skills/auto-skill-generation.md](docs/skills/auto-skill-generation.md): conversation-derived skill synthesis and skill-first scheduling
 - [AGENTS.md](AGENTS.md): architecture and internal development conventions
 
 ---
