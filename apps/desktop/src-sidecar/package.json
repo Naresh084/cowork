@@ -40,7 +40,7 @@
     "@langchain/openai": "^1.2.7",
     "langchain": "^1.2.24",
     "@slack/socket-mode": "^2.0.0",
-    "@slack/web-api": "^7.0.0",
+    "@slack/web-api": "^7.14.1",
     "chrome-remote-interface": "^0.33.3",
     "cron-parser": "^5.5.0",
     "deepagents": "^1.7.6",
