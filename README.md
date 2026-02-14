@@ -22,6 +22,12 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-beta-yellow?style=flat-square" alt="Beta" />
+</p>
+
+> **Note:** Cowork is currently in **beta**. Expect breaking changes, incomplete features, and rough edges. Feedback and contributions are welcome!
+
+<p align="center">
   <a href="https://github.com/Naresh084/cowork/releases/latest">Download</a> &middot;
   <a href="docs/GET_STARTED.md">Get Started</a> &middot;
   <a href="docs/DEVELOPMENT.md">Development</a> &middot;
