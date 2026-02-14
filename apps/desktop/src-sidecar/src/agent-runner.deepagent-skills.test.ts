@@ -22,11 +22,12 @@ describe('agent-runner deepagent skill config', () => {
   it('enables /skills source with all installed managed skills when no enabled skill IDs exist', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set();
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue(['managed:planner']);
 
     const config = await runner.resolveDeepAgentSkillConfig();
-    expect(config.skills).toEqual(['/skills/planner']);
+    expect(config.skills).toEqual(['/skills/']);
     expect(config.syncSkillIds).toEqual(['managed:planner']);
   });
 
@@ -39,17 +40,19 @@ describe('agent-runner deepagent skill config', () => {
       '  ',
       'platform:web-search',
     ]);
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue(['managed:planner', 'managed:writer']);
 
     const config = await runner.resolveDeepAgentSkillConfig();
-    expect(config.skills).toEqual(['/skills/planner']);
+    expect(config.skills).toEqual(['/skills/']);
     expect(config.syncSkillIds).toEqual(['managed:planner']);
   });
 
   it('disables /skills source when enabled skill IDs are not installed as managed skills', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set(['platform:web-search']);
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue([]);
 
@@ -61,6 +64,7 @@ describe('agent-runner deepagent skill config', () => {
   it('disables /skills source when no enabled or installed skills exist', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set();
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockResolvedValue([]);
 
@@ -72,6 +76,7 @@ describe('agent-runner deepagent skill config', () => {
   it('fails closed when installed-skill discovery throws and no enabled skills exist', async () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set();
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
 
     vi.spyOn(skillService, 'getInstalledSkillIds').mockRejectedValue(new Error('discovery failed'));
 
@@ -84,9 +89,9 @@ describe('agent-runner deepagent skill config', () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     const resolved = runner.resolveSubagentSkillSources(
       ['bird', '/skills/planner', 'skills/invalid', ''],
-      ['/skills/bird', '/skills/planner'],
+      ['/skills/'],
     );
-    expect(resolved).toEqual(['/skills/bird', '/skills/planner']);
+    expect(resolved).toEqual(['/skills/']);
   });
 
   it('inherits installed skill sources when subagent has no explicit skills', () => {

@@ -16,6 +16,7 @@ describe('agent-runner skills prompt loading', () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     runner.enabledSkillIds = new Set(['managed:skill-zeta', 'managed:skill-alpha']);
 
+    vi.spyOn(skillService, 'autoRepairManagedSkills').mockResolvedValue({ scanned: 0, repaired: 0 });
     vi.spyOn(skillService, 'getInstalledSkillIds')
       .mockResolvedValue(['managed:skill-zeta', 'managed:skill-alpha']);
 

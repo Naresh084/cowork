@@ -647,6 +647,85 @@ ${skillContents.join('\n\n---\n\n')}
   }
 
   /**
+   * Self-heal managed SKILL.md files so DeepAgents can parse them reliably.
+   * Repairs missing/invalid frontmatter or name mismatch against directory name.
+   */
+  async autoRepairManagedSkills(): Promise<{ scanned: number; repaired: number }> {
+    if (!existsSync(this.managedSkillsDir)) {
+      return { scanned: 0, repaired: 0 };
+    }
+
+    let scanned = 0;
+    let repaired = 0;
+    let entries: Array<{ isDirectory: () => boolean; name: string }> = [];
+    try {
+      entries = await readdir(this.managedSkillsDir, { withFileTypes: true });
+    } catch {
+      return { scanned: 0, repaired: 0 };
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) {
+        continue;
+      }
+      scanned += 1;
+
+      const skillName = entry.name;
+      const skillDir = join(this.managedSkillsDir, skillName);
+      const skillMdPath = join(skillDir, SKILL_MARKDOWN_FILE);
+      if (!existsSync(skillMdPath)) {
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = await readFile(skillMdPath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const normalized = this.normalizeSkillContentForRepair(content);
+      const parsed = parseFrontmatter(normalized);
+      const shouldRepair = !parsed
+        || typeof parsed.name !== 'string'
+        || parsed.name.trim() !== skillName
+        || typeof parsed.description !== 'string'
+        || parsed.description.trim().length === 0;
+
+      if (!shouldRepair) {
+        if (normalized !== content) {
+          try {
+            await writeFile(skillMdPath, normalized, 'utf-8');
+            await this.writePackSignature(skillDir, skillName);
+            repaired += 1;
+          } catch {
+            // Best effort normalization only.
+          }
+        }
+        continue;
+      }
+
+      const body = this.extractSkillBody(normalized);
+      const description = this.inferSkillDescription(body, skillName);
+      const rewritten = this.buildCanonicalSkillMarkdown(skillName, description, body);
+
+      try {
+        await writeFile(skillMdPath, rewritten, 'utf-8');
+        await this.writePackSignature(skillDir, skillName);
+        repaired += 1;
+      } catch {
+        // Best effort repair only.
+      }
+    }
+
+    if (repaired > 0) {
+      this.clearCache();
+    }
+
+    return { scanned, repaired };
+  }
+
+  /**
    * Check if a skill is installed (in managed dir)
    */
   async isInstalled(skillName: string): Promise<boolean> {
@@ -661,6 +740,50 @@ ${skillContents.join('\n\n---\n\n')}
     this.skillCache.clear();
     this.contentCache.clear();
     this.discoveryCache = null;
+  }
+
+  private normalizeSkillContentForRepair(content: string): string {
+    const normalized = content.replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    if (lines.length === 0) {
+      return normalized;
+    }
+
+    const numberedCount = lines.filter((line) => /^\s*\d+\t/.test(line)).length;
+    if (numberedCount / lines.length < 0.6) {
+      return normalized;
+    }
+
+    return lines.map((line) => line.replace(/^\s*\d+\t/, '')).join('\n');
+  }
+
+  private extractSkillBody(content: string): string {
+    const match = content.match(/^---\s*\n[\s\S]*?\n---\s*\n?/);
+    if (!match) {
+      return content.trimStart();
+    }
+    return content.slice(match[0].length).trimStart();
+  }
+
+  private inferSkillDescription(body: string, skillName: string): string {
+    const firstNonEmpty = body
+      .split('\n')
+      .map((line) => line.replace(/^#+\s*/, '').trim())
+      .find((line) => line.length > 0);
+
+    if (firstNonEmpty) {
+      return firstNonEmpty.slice(0, 300);
+    }
+
+    return `Use this skill for ${skillName} related tasks.`;
+  }
+
+  private buildCanonicalSkillMarkdown(name: string, description: string, body: string): string {
+    const escapedDescription = description
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"');
+    const cleanedBody = body.trimStart();
+    return `---\nname: ${name}\ndescription: "${escapedDescription}"\n---\n\n${cleanedBody}\n`;
   }
 
   private shouldEnforcePackSignature(sourceType: SkillSourceType): boolean {

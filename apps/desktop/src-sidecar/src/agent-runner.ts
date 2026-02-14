@@ -7106,6 +7106,12 @@ ${stitchGuidance}
       ),
     );
 
+    try {
+      await skillService.autoRepairManagedSkills();
+    } catch {
+      // Best effort repair only.
+    }
+
     let installedSkillIds: string[] = [];
     try {
       installedSkillIds = await skillService.getInstalledSkillIds();
@@ -7124,23 +7130,18 @@ ${stitchGuidance}
     const syncSkillIds = normalizedEnabledSkillIds.length > 0
       ? normalizedEnabledSkillIds.filter((skillId) => installedSkillIdSet.has(skillId))
       : normalizedInstalledSkillIds;
-    const skillSourcePaths = Array.from(
-      new Set(
-        syncSkillIds
-          .map((skillId) => {
-            const [prefix, ...rest] = skillId.split(':');
-            if (prefix !== 'managed') {
-              return '';
-            }
-            const skillName = rest.join(':').trim();
-            return skillName ? `/skills/${skillName}` : '';
-          })
-          .filter((path) => path.length > 0),
-      ),
-    );
+    const hasManagedSkills = syncSkillIds.some((skillId) => {
+      const [prefix, ...rest] = skillId.split(':');
+      if (prefix !== 'managed') {
+        return false;
+      }
+      return rest.join(':').trim().length > 0;
+    });
 
     return {
-      skills: skillSourcePaths.length > 0 ? skillSourcePaths : undefined,
+      // DeepAgents expects skill SOURCE DIRECTORIES. We expose installed managed
+      // skills via the /skills/ source root.
+      skills: hasManagedSkills ? ['/skills/'] : undefined,
       syncSkillIds,
     };
   }
@@ -7208,6 +7209,12 @@ ${stitchGuidance}
       : [];
 
     const installedSet = new Set(installed);
+    if (installedSet.has('/skills/')) {
+      // When main agent uses source-root loading, keep subagents aligned to that
+      // source. Subset filtering by individual skill directory is not reliable
+      // in DeepAgents source semantics.
+      return ['/skills/'];
+    }
 
     const declared = Array.isArray(declaredSubagentSkills)
       ? Array.from(
@@ -7234,6 +7241,10 @@ ${stitchGuidance}
     const normalized = typeof value === 'string' ? value.trim() : '';
     if (!normalized) {
       return null;
+    }
+
+    if (normalized === '/skills' || normalized === '/skills/') {
+      return '/skills/';
     }
 
     if (normalized.startsWith('/skills/')) {
