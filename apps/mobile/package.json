@@ -18,7 +18,7 @@
     "buffer": "^6.0.3",
     "expo": "^52.0.30",
     "expo-camera": "~16.0.18",
-    "expo-file-system": "~18.0.12",
+    "expo-file-system": "~19.0.21",
     "expo-image-picker": "~16.0.6",
     "expo-secure-store": "~14.0.1",
     "expo-status-bar": "~2.0.1",
