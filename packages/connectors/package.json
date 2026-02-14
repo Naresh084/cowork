@@ -21,7 +21,7 @@
   "dependencies": {
     "@gemini-cowork/shared": "workspace:*",
     "@gemini-cowork/auth": "workspace:*",
-    "zod": "^3.23.8"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
