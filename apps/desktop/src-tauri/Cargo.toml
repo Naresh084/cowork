@@ -2,9 +2,9 @@
 name = "cowork"
 version = "0.1.0"
 description = "AI-powered coding assistant desktop app"
-authors = ["Cowork"]
+authors = ["Naresh"]
 license = "MIT"
-repository = ""
+repository = "https://github.com/Naresh084/cowork"
 edition = "2021"
 
 [build-dependencies]
