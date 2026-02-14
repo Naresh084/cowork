@@ -1,5 +1,5 @@
 name: "\U0001F4E6 Release"
-run-name: "\U0001F4E6 Release v${{ github.event.inputs.version || github.ref_name }}"
+run-name: "\U0001F4E6 Release ${{ github.ref_name }}"
 
 on:
   push:

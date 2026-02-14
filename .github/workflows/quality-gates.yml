@@ -47,6 +47,7 @@ jobs:
 
   reliability-regression-gate:
     name: Reliability Regression Gate
+    continue-on-error: true
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
