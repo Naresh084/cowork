@@ -1,5 +1,5 @@
 name: "\u2705 Quality Gates"
-run-name: "\u2705 Quality · ${{ github.event.head_commit.message || github.ref_name }}"
+run-name: "\u2705 Quality · ${{ github.ref_name }}"
 
 on:
   push:

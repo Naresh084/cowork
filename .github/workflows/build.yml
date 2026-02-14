@@ -1,5 +1,5 @@
 name: "\U0001F527 Build"
-run-name: "\U0001F527 Build · ${{ github.event.head_commit.message || github.ref_name }}"
+run-name: "\U0001F527 Build · ${{ github.ref_name }}"
 
 on:
   push:
