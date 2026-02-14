@@ -109,7 +109,7 @@ export interface SpecializedModels {
 export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
   imageGeneration: 'imagen-4.0-generate-001',
   videoGeneration: 'veo-3.1-generate-preview',
-  computerUse: 'gemini-2.5-computer-use-preview-10-2025',
+  computerUse: 'gemini-3-flash-preview',
   deepResearchAgent: 'deep-research-pro-preview-12-2025',
 };
 
@@ -325,6 +325,9 @@ const SPECIALIZED_MODEL_MIGRATIONS: Record<keyof SpecializedModels, Record<strin
   },
   computerUse: {
     'gemini-2.5-computer-use-preview': 'gemini-2.5-computer-use-preview-10-2025',
+    'gemini-2.5-computer-use-preview-10-2025': 'gemini-2.5-computer-use-preview-10-2025',
+    'gemini-3-pro-preview': 'gemini-3-pro-preview',
+    'gemini-3-flash-preview': 'gemini-3-flash-preview',
   },
   deepResearchAgent: {},
 };

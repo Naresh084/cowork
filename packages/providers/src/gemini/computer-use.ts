@@ -48,7 +48,7 @@ export async function runComputerUseStep(
   const screenshot = await session.page.screenshot({ type: 'png' });
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-computer-use-preview-10-2025',
+    model: 'gemini-3-flash-preview',
     contents: [
       {
         role: 'user',

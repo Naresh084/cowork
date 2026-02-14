@@ -51,7 +51,7 @@ async function runGoogleSearch(apiKey: string, modelId: string, query: string): 
 }> {
   const ai = new GoogleGenAI({ apiKey });
   const response = await ai.models.generateContent({
-    model: modelId || 'gemini-2.0-flash',
+    model: modelId || 'gemini-3-flash-preview',
     contents: `Search and provide current information about: ${query}`,
     config: {
       tools: [{ googleSearch: {} }],
@@ -172,7 +172,7 @@ async function runGoogleUrlFetch(
     : `Fetch this page and summarize its key content with useful details:\n${url}`;
 
   const response = await ai.models.generateContent({
-    model: modelId || 'gemini-2.0-flash',
+    model: modelId || 'gemini-3-flash-preview',
     contents: userPrompt,
     config: {
       tools: [{ urlContext: {} }],
@@ -497,7 +497,7 @@ export function createGroundingTools(
     }
 
     const provider = getActiveProvider();
-    const modelId = model || getSessionModel() || 'gemini-2.0-flash';
+    const modelId = model || getSessionModel() || 'gemini-3-flash-preview';
 
     let nativeError: string | null = null;
     try {
@@ -578,14 +578,14 @@ export function createGroundingTools(
           error: `Search failed and no fallback key is available${nativeError ? `: ${nativeError}` : '.'}`,
         };
       }
-      const fallbackResult = await runGoogleSearch(googleKey, 'gemini-2.0-flash', query);
+      const fallbackResult = await runGoogleSearch(googleKey, 'gemini-3-flash-preview', query);
       return {
         success: true,
         data: {
           ...fallbackResult,
           providerUsed: 'google',
           fallbackUsed: true,
-          model: 'gemini-2.0-flash',
+          model: 'gemini-3-flash-preview',
         },
       };
     } catch (googleError) {
@@ -602,7 +602,7 @@ export function createGroundingTools(
     }
 
     const provider = getActiveProvider();
-    const modelId = model || getSessionModel() || 'gemini-2.0-flash';
+    const modelId = model || getSessionModel() || 'gemini-3-flash-preview';
 
     try {
       if (provider === 'anthropic') {
@@ -652,28 +652,28 @@ export function createGroundingTools(
         };
       }
 
-      const result = await runGoogleUrlFetch(googleKey, 'gemini-2.0-flash', url, prompt);
+      const result = await runGoogleUrlFetch(googleKey, 'gemini-3-flash-preview', url, prompt);
       return {
         success: true,
         data: {
           ...result,
           providerUsed: 'google',
           fallbackUsed: provider !== 'google',
-          model: 'gemini-2.0-flash',
+          model: 'gemini-3-flash-preview',
         },
       };
     } catch (error) {
       if (provider === 'glm') {
         const googleKey = getGoogleApiKey() || getProviderApiKey('google');
         if (googleKey && error instanceof CapabilityError) {
-          const fallbackResult = await runGoogleUrlFetch(googleKey, 'gemini-2.0-flash', url, prompt);
+          const fallbackResult = await runGoogleUrlFetch(googleKey, 'gemini-3-flash-preview', url, prompt);
           return {
             success: true,
             data: {
               ...fallbackResult,
               providerUsed: 'google',
               fallbackUsed: true,
-              model: 'gemini-2.0-flash',
+              model: 'gemini-3-flash-preview',
             },
           };
         }

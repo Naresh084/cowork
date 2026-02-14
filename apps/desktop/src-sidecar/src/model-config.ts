@@ -11,21 +11,21 @@
 // Default models - used when environment variables are not set
 const DEFAULT_MODELS = {
   // Search and grounding
-  SEARCH_MODEL: 'gemini-2.0-flash',
+  SEARCH_MODEL: 'gemini-3-flash-preview',
 
   // Deep research
   DEEP_RESEARCH_AGENT: 'deep-research-pro-preview-12-2025',
 
   // Image generation and editing
   IMAGE_GENERATION_MODEL: 'imagen-4.0-generate-001',
-  IMAGE_EDITING_MODEL: 'imagen-3.0-capability-001',
+  IMAGE_EDITING_MODEL: 'imagen-4.0-generate-001',
 
   // Video generation and analysis
   VIDEO_GENERATION_MODEL: 'veo-3.1-generate-preview',
-  VIDEO_ANALYSIS_MODEL: 'gemini-2.5-pro',
+  VIDEO_ANALYSIS_MODEL: 'gemini-3-flash-preview',
 
   // Computer use / browser automation
-  COMPUTER_USE_MODEL: 'gemini-2.5-computer-use-preview-10-2025',
+  COMPUTER_USE_MODEL: 'gemini-3-flash-preview',
 
   // Default chat/agent model
   DEFAULT_AGENT_MODEL: 'gemini-3-flash-preview',
