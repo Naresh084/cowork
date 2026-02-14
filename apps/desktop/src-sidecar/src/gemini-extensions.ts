@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { readdir, readFile } from 'fs/promises';
 import { join, dirname, isAbsolute, resolve } from 'path';
 import { homedir } from 'os';
-import type { MCPServerConfig } from '@gemini-cowork/mcp';
+import type { MCPServerConfig } from '@cowork/mcp';
 
 export interface GeminiExtensionsResult {
   servers: Array<MCPServerConfig & { id: string }>;

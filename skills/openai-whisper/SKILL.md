@@ -4,7 +4,7 @@ description: "Local speech-to-text with the Whisper CLI (no API key)."
 homepage: https://openai.com/research/whisper
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎤",
     "version": "1.0.0",
     "category": "creative"

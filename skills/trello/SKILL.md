@@ -4,7 +4,7 @@ description: "Manage Trello boards, lists, and cards via the Trello REST API."
 homepage: https://developer.atlassian.com/cloud/trello/rest/
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📋",
     "version": "1.0.0",
     "category": "productivity"

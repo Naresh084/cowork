@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Trash2, Check, X, AlertTriangle, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { SkillManifest, SkillEligibility } from '@gemini-cowork/shared';
+import type { SkillManifest, SkillEligibility } from '@cowork/shared';
 import { useSkillStore } from '../../stores/skill-store';
 import { SkillLifecycleBadges } from './SkillLifecycleBadges';
 

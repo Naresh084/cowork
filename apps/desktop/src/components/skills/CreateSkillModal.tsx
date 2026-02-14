@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Wand2, Plus, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useSkillStore } from '../../stores/skill-store';
-import type { SkillCategory } from '@gemini-cowork/shared';
+import type { SkillCategory } from '@cowork/shared';
 
 interface CreateSkillModalProps {
   isOpen: boolean;

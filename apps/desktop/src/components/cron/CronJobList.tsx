@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDown, ChevronRight, Calendar, Play, Pause, RotateCcw, GitBranch, Trash2 } from 'lucide-react';
@@ -7,7 +10,7 @@ import { useCronStore } from '@/stores/cron-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { useAppStore } from '@/stores/app-store';
 import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
-import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@gemini-cowork/shared';
+import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@cowork/shared';
 
 interface JobSectionProps {
   title: string;

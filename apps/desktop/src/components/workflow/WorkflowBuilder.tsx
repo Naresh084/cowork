@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { useWorkflowStore } from '@/stores/workflow-store';
 import { useSettingsStore } from '@/stores/settings-store';
@@ -7,7 +10,7 @@ import type {
   WorkflowNode,
   WorkflowSchedule,
   WorkflowTrigger,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { WorkflowRunPanel } from './WorkflowRunPanel';
 import { WorkflowInspector } from './WorkflowInspector';
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, clearMockInvokeResponses, setMockInvokeResponse } from '../test/mocks/tauri-core';
 import { useConnectorStore } from './connector-store';
@@ -6,7 +9,7 @@ import { useCommandStore } from './command-store';
 import { useSubagentStore } from './subagent-store';
 import { useSettingsStore } from './settings-store';
 
-const WORKING_DIRECTORY = '/tmp/geminicowork';
+const WORKING_DIRECTORY = '/tmp/cowork';
 
 function resetDiscoveryStores(): void {
   useConnectorStore.getState().reset();

@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import { join } from 'path';
 import { homedir } from 'os';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { GoogleGenAI, RawReferenceImage } from '@google/genai';
-import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
 
 function getExtension(mimeType?: string, fallback = 'bin'): string {
   if (!mimeType) return fallback;

@@ -9,7 +9,7 @@ category: memory
 icon: brain
 priority: 85
 metadata:
-  author: gemini-cowork
+  author: cowork
   version: "1.0.0"
   emoji: 🧠
 ---

@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, clearMockInvokeResponses, setMockInvokeResponse } from '../test/mocks/tauri-core';
 import { useSkillStore } from './skill-store';
 import { useSettingsStore } from './settings-store';
-import type { SkillManifest } from '@gemini-cowork/shared';
+import type { SkillManifest } from '@cowork/shared';
 
-const WORKING_DIRECTORY = '/tmp/geminicowork';
+const WORKING_DIRECTORY = '/tmp/cowork';
 
 function createManagedSkill(name: string): SkillManifest {
   return {

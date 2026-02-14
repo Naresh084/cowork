@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type { CommandManifest } from '../../stores/command-store';
 import { useCommandStore } from '../../stores/command-store';
 import { useSettingsStore } from '../../stores/settings-store';

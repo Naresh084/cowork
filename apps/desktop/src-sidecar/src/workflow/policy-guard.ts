@@ -1,4 +1,7 @@
-import type { SessionType, ToolCallContext } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { SessionType, ToolCallContext } from '@cowork/shared';
 import { toolPolicyService } from '../tool-policy.js';
 
 export interface WorkflowPolicyGuardInput {

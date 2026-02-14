@@ -21,7 +21,7 @@
 ## Project Structure
 
 ```
-geminicowork/
+cowork/
 │
 ├── apps/
 │   └── desktop/                    # Main Tauri desktop application
@@ -195,7 +195,7 @@ geminicowork/
 ┌─────────────┼───────────────────────────────────────────────────────────────┐
 │             │                 SHARED PACKAGES                               │
 │   ┌─────────▼─────────┐  ┌─────────────────┐  ┌─────────────────┐          │
-│   │ @gemini-cowork/   │  │ @gemini-cowork/ │  │ @gemini-cowork/ │          │
+│   │ @cowork/   │  │ @cowork/ │  │ @cowork/ │          │
 │   │ providers         │  │ core            │  │ shared          │          │
 │   │ • GeminiProvider  │  │ • CoworkAgent   │  │ • Types         │          │
 │   │ • DeepResearch    │  │ • FileTools     │  │ • Errors        │          │
@@ -465,8 +465,8 @@ pnpm test
 ### Run Specific Package Tests
 
 ```bash
-pnpm test --filter=@gemini-cowork/core
-pnpm test --filter=@gemini-cowork/providers
+pnpm test --filter=@cowork/core
+pnpm test --filter=@cowork/providers
 ```
 
 ### Run Desktop Tests

@@ -1,4 +1,7 @@
-import type { ToolHandler } from '@gemini-cowork/core';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { ToolHandler } from '@cowork/core';
 import type {
   PromptTemplateSection,
   ToolAutonomyLevel,

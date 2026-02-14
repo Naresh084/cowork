@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 use crate::commands::agent::{ensure_sidecar_started_public, AgentState};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};

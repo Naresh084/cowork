@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter.js';
 import { SlackAdapter } from './adapters/slack-adapter.js';
 import { TelegramAdapter } from './adapters/telegram-adapter.js';
@@ -159,7 +162,7 @@ export class IntegrationBridgeService {
 
     // Intercept chat:item events for segment/media routing.
     const originalChatItem = eventEmitter.chatItem.bind(eventEmitter);
-    eventEmitter.chatItem = (sessionId: string, item: import('@gemini-cowork/shared').ChatItem) => {
+    eventEmitter.chatItem = (sessionId: string, item: import('@cowork/shared').ChatItem) => {
       originalChatItem(sessionId, item);
       this.router.onChatItem(sessionId, item);
     };
@@ -169,7 +172,7 @@ export class IntegrationBridgeService {
     eventEmitter.chatItemUpdate = (
       sessionId: string,
       itemId: string,
-      updates: Partial<import('@gemini-cowork/shared').ChatItem>,
+      updates: Partial<import('@cowork/shared').ChatItem>,
     ) => {
       originalChatUpdate(sessionId, itemId, updates);
       this.router.onChatItemUpdate(sessionId, itemId, updates);

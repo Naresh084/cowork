@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * CronService - Main entry point for cron scheduling system
  *
@@ -8,7 +11,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { CronJob, CronRun } from '@gemini-cowork/shared';
+import type { CronJob, CronRun } from '@cowork/shared';
 import { cronStore } from './store.js';
 import { cronScheduler } from './scheduler.js';
 import { cronExecutor } from './executor.js';

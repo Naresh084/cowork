@@ -1,8 +1,11 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   WorkflowDefinition,
   WorkflowEdge,
   WorkflowValidationReport,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 export interface CompiledWorkflow {
   definition: WorkflowDefinition;

@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import { useToolPolicyStore } from '@/stores/tool-policy-store';
-import type { ToolProfile } from '@gemini-cowork/shared';
-import { TOOL_GROUP_DEFINITIONS, TOOL_PROFILES } from '@gemini-cowork/shared';
+import type { ToolProfile } from '@cowork/shared';
+import { TOOL_GROUP_DEFINITIONS, TOOL_PROFILES } from '@cowork/shared';
 
 type ToolAction = 'allow' | 'ask' | 'deny';
 

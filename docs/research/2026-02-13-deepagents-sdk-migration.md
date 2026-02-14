@@ -72,20 +72,20 @@ Migrate the DeepAgents SDK integration to the latest JS release and align skill/
 - Extended duplicate-path assertions in `deepagents-backend.test.ts` so stale managed-copy content is not returned by `grepRaw('/skills/')`.
 ## Files Changed
 
-- `/Users/naresh/Work/Personal/geminicowork/apps/desktop/src-sidecar/package.json`
-- `/Users/naresh/Work/Personal/geminicowork/apps/desktop/src-sidecar/src/agent-runner.ts`
-- `/Users/naresh/Work/Personal/geminicowork/apps/desktop/src-sidecar/src/deepagents-backend.ts`
-- `/Users/naresh/Work/Personal/geminicowork/apps/desktop/src-sidecar/src/deepagents-backend.test.ts`
-- `/Users/naresh/Work/Personal/geminicowork/pnpm-lock.yaml`
+- `/Users/naresh/Work/Personal/cowork/apps/desktop/src-sidecar/package.json`
+- `/Users/naresh/Work/Personal/cowork/apps/desktop/src-sidecar/src/agent-runner.ts`
+- `/Users/naresh/Work/Personal/cowork/apps/desktop/src-sidecar/src/deepagents-backend.ts`
+- `/Users/naresh/Work/Personal/cowork/apps/desktop/src-sidecar/src/deepagents-backend.test.ts`
+- `/Users/naresh/Work/Personal/cowork/pnpm-lock.yaml`
 
 ## Validation
 
 Executed successfully:
 
 ```bash
-pnpm --filter @gemini-cowork/sidecar typecheck
-pnpm --filter @gemini-cowork/desktop typecheck
-pnpm --filter @gemini-cowork/sidecar test -- src/deepagents-backend.test.ts src/agent-runner.skills-prompt.test.ts src/agent-runner.integration-stream.test.ts src/agent-runner.run-resume.test.ts src/agent-runner.release-gate.test.ts src/benchmark/runner.regression.test.ts
+pnpm --filter @cowork/sidecar typecheck
+pnpm --filter @cowork/desktop typecheck
+pnpm --filter @cowork/sidecar test -- src/deepagents-backend.test.ts src/agent-runner.skills-prompt.test.ts src/agent-runner.integration-stream.test.ts src/agent-runner.run-resume.test.ts src/agent-runner.release-gate.test.ts src/benchmark/runner.regression.test.ts
 pnpm audit --audit-level high --prod
 ```
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * CronStore - File-based persistence for cron jobs
  *
@@ -7,7 +10,7 @@
  *   runs/{jobId}.jsonl - Run history per job (JSONL format)
  */
 
-import type { CronJob, CronRun, CreateCronJobInput, RunQueryOptions } from '@gemini-cowork/shared';
+import type { CronJob, CronRun, CreateCronJobInput, RunQueryOptions } from '@cowork/shared';
 import {
   ensureCronDir,
   getCronJobsPath,

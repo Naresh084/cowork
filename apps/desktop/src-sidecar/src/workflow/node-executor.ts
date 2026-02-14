@@ -1,4 +1,7 @@
-import type { WorkflowNode } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { WorkflowNode } from '@cowork/shared';
 import { resolveTemplateString, resolveTemplateValue } from './template-resolver.js';
 
 export interface NodeExecutionContext {

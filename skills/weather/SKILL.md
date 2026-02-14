@@ -4,7 +4,7 @@ description: "Get current weather and forecasts (no API key required)."
 homepage: https://wttr.in/:help
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "version": "1.0.0",
     "emoji": "🌤️",
     "category": "custom",

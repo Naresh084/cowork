@@ -4,7 +4,7 @@ description: "Batch-generate images via OpenAI Images API. Random prompt sampler
 homepage: https://platform.openai.com/docs/api-reference/images
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🖼️",
     "version": "1.0.0",
     "category": "custom"

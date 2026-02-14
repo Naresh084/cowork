@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Path utilities for data storage locations
  * All data is stored in ~/.cowork/

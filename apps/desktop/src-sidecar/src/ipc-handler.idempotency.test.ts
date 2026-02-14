@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it } from 'vitest';
 import { handleRequest } from './ipc-handler.js';
 import type { IPCRequest } from './types.js';

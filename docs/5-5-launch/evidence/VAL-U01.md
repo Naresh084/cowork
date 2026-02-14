@@ -8,7 +8,7 @@
 
 ```bash
 cd apps/desktop/src-sidecar && pnpm test src/providers/gemini-provider.taxonomy.test.ts
-pnpm --filter @gemini-cowork/providers test -- src/gemini/gemini-provider.test.ts
+pnpm --filter @cowork/providers test -- src/gemini/gemini-provider.test.ts
 ```
 
 ## Acceptance Mapping

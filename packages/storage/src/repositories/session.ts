@@ -1,5 +1,8 @@
-import type { Session } from '@gemini-cowork/shared';
-import { generateSessionId, now, StorageError } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Session } from '@cowork/shared';
+import { generateSessionId, now, StorageError } from '@cowork/shared';
 import type { DatabaseConnection } from '../database.js';
 
 // ============================================================================

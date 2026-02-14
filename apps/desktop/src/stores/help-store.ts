@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { GUIDED_TOUR_BY_ID } from '@/content/help/platform-help-content';

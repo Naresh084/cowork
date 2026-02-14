@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 export type ExternalCliErrorCode =
   | 'CLI_NOT_INSTALLED'
   | 'CLI_DISABLED_IN_SETTINGS'

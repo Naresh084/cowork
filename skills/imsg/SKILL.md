@@ -4,7 +4,7 @@ description: "iMessage/SMS CLI for listing chats, history, watch, and sending."
 homepage: https://imsg.to
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "💬",
     "version": "1.0.0",
     "category": "productivity"

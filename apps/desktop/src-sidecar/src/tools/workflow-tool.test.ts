@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createExecuteWorkflowPackTool, createRunWorkflowTool } from './workflow-tool.js';
 import { workflowService } from '../workflow/index.js';

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -11,10 +14,10 @@ use std::fs;
 use std::path::PathBuf;
 
 const APP_DIR_NAME: &str = "cowork";
-const LEGACY_APP_DIR_NAME: &str = "gemini-cowork";
+const LEGACY_APP_DIR_NAME: &str = "cowork";
 const LEGACY_CREDENTIALS_FILE: &str = "credentials.json";
 const ENCRYPTED_VAULT_FILE: &str = "credentials.vault.json";
-const CONNECTOR_SECRET_SERVICE: &str = "gemini-cowork.connector-secrets";
+const CONNECTOR_SECRET_SERVICE: &str = "cowork.connector-secrets";
 const CONNECTOR_SECRET_ACCOUNT: &str = "sidecar-master-key";
 const CREDENTIAL_BACKEND_ENV_VAR: &str = "COWORK_CREDENTIAL_BACKEND";
 

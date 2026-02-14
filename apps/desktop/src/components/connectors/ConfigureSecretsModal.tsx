@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Eye, EyeOff, ExternalLink, Loader2, Key } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { ConnectorManifest } from '@gemini-cowork/shared';
+import type { ConnectorManifest } from '@cowork/shared';
 import { useConnectorStore } from '../../stores/connector-store';
 import { getConnectorIcon } from './connector-icons';
 

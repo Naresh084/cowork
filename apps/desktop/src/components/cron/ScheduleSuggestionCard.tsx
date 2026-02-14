@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Loader2, Check } from 'lucide-react';
@@ -5,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/app-store';
 import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
-import type { CreateWorkflowDraftInput, WorkflowDefinition, WorkflowSchedule } from '@gemini-cowork/shared';
+import type { CreateWorkflowDraftInput, WorkflowDefinition, WorkflowSchedule } from '@cowork/shared';
 
 interface ScheduleSuggestionCardProps {
   taskName: string;

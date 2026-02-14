@@ -4,7 +4,7 @@ description: "Summarize or extract text/transcripts from URLs, podcasts, and loc
 homepage: https://summarize.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📄",
     "version": "1.0.0",
     "category": "custom"

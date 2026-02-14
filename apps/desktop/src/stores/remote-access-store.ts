@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from '@/components/ui/Toast';

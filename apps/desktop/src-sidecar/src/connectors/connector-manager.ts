@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Connector Manager
  *
@@ -6,7 +9,7 @@
  * secret injection, status tracking, and tool aggregation.
  */
 
-import { MCPClientManager, type MCPServerConfig, type MCPTool, type MCPResource, type MCPPrompt } from '@gemini-cowork/mcp';
+import { MCPClientManager, type MCPServerConfig, type MCPTool, type MCPResource, type MCPPrompt } from '@cowork/mcp';
 import type {
   ConnectorManifest,
   ConnectorStatus,
@@ -14,7 +17,7 @@ import type {
   MCPResource as ConnectorMCPResource,
   MCPPrompt as ConnectorMCPPrompt,
   MCPApp,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import type { SecretService } from './secret-service.js';
 
 // ============================================================================

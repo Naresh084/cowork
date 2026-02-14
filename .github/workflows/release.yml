@@ -1,4 +1,4 @@
-name: 'Release'
+name: Release
 
 on:
   push:
@@ -8,32 +8,42 @@ on:
     inputs:
       version:
         description: 'Version to release (e.g., 0.1.0)'
-        required: false
+        required: true
         type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+env:
+  NODE_VERSION: 20
+  PNPM_VERSION: 9
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
       version: ${{ steps.get-version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -47,19 +57,30 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Verify synchronized versions
-        run: pnpm version:check -- --version "${{ steps.get-version.outputs.version }}"
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Create Release
         id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.get-version.outputs.version }}
-          release_name: Cowork v${{ steps.get-version.outputs.version }}
+          name: Cowork v${{ steps.get-version.outputs.version }}
           draft: true
-          prerelease: false
+          prerelease: ${{ github.event.inputs.prerelease || false }}
+          generate_release_notes: true
           body: |
             ## Cowork v${{ steps.get-version.outputs.version }}
 
@@ -67,21 +88,19 @@ jobs:
 
             | Platform | Download |
             |----------|----------|
-            | Windows (64-bit) | `Cowork_${{ steps.get-version.outputs.version }}_x64-setup.exe` |
             | macOS (Apple Silicon) | `Cowork_${{ steps.get-version.outputs.version }}_aarch64.dmg` |
             | macOS (Intel) | `Cowork_${{ steps.get-version.outputs.version }}_x64.dmg` |
+            | Windows (64-bit) | `Cowork_${{ steps.get-version.outputs.version }}_x64-setup.exe` |
             | Linux (AppImage) | `Cowork_${{ steps.get-version.outputs.version }}_amd64.AppImage` |
             | Linux (Debian) | `Cowork_${{ steps.get-version.outputs.version }}_amd64.deb` |
 
-            ### Installation
-
-            See the [Installation Guide](https://github.com/AiCodingBattle/geminicowork/blob/main/docs/INSTALLATION.md) for detailed instructions.
-
             ### What's Changed
 
-            - Cross-platform support for Windows, macOS, and Linux
-            - Automatic updates
-            - Secure credential storage on all platforms
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Installation
+
+            See the [Installation Guide](https://github.com/Naresh084/cowork/blob/main/docs/INSTALLATION.md) for detailed instructions.
 
   build-sidecar:
     needs: create-release
@@ -114,12 +133,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Install dependencies
         run: pnpm install
@@ -183,12 +202,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: ${{ env.PNPM_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -203,11 +222,8 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Verify synchronized versions
-        run: pnpm version:check -- --version "${{ needs.create-release.outputs.version }}"
-
       - name: Sync desktop icons
-        run: pnpm --filter @gemini-cowork/desktop icon:sync
+        run: pnpm --filter @cowork/desktop icon:sync
 
       - name: Download sidecar artifact
         uses: actions/download-artifact@v4
@@ -242,10 +258,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
           projectPath: apps/desktop
+          updaterJsonKeepUniversal: true
 
   publish-release:
     needs: [create-release, build-tauri]

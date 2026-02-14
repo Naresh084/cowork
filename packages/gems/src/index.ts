@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 
 // ============================================================================
@@ -53,7 +56,7 @@ export interface GemRegistryEntry {
 export class GemRegistry {
   private registryUrl: string;
 
-  constructor(registryUrl = 'https://gems.gemini-cowork.dev/api') {
+  constructor(registryUrl = 'https://gems.cowork.dev/api') {
     this.registryUrl = registryUrl;
   }
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type { PromptBuildContext, PromptBuildResult, PromptTemplateSection } from './types.js';
 import { getProviderTemplateKey } from './provider-map.js';
 import { renderTemplate, mergePromptBlocks } from './render.js';

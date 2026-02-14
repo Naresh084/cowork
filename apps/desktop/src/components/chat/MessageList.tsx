@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import React, { useEffect, useRef, useState, useMemo, useCallback, Suspense } from 'react';
 import { cn } from '../../lib/utils';
 import {
@@ -22,7 +25,7 @@ import { CodeBlock } from './CodeBlock';
 import { AskUserQuestion } from './AskUserQuestion';
 import { SourcesCitation } from './SourcesCitation';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Message, MessageContentPart, ChatItem } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart, ChatItem } from '@cowork/shared';
 import { BrandMark } from '../icons/BrandMark';
 import { getToolMeta } from './tool-metadata';
 import { TaskToolCard } from './TaskToolCard';

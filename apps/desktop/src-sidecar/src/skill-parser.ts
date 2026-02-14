@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Skill Parser Service
  *
@@ -12,7 +15,7 @@ import type {
   InstallOption,
   OpenClawFrontmatter,
   OpenClawMetadata,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 // Simple YAML frontmatter parser (avoiding external dependency)
 // Handles basic YAML structure with nested objects

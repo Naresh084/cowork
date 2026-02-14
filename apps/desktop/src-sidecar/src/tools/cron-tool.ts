@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Cron Tools - Agent tools for creating and managing scheduled tasks
  *
@@ -7,10 +10,10 @@
  */
 
 import { z } from 'zod';
-import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
 import { CronExpressionParser } from 'cron-parser';
 import { cronService } from '../cron/index.js';
-import type { CronSchedule, PlatformType, SkillBinding } from '@gemini-cowork/shared';
+import type { CronSchedule, PlatformType, SkillBinding } from '@cowork/shared';
 import { workflowService } from '../workflow/index.js';
 import { WORKFLOWS_ENABLED } from '../config/feature-flags.js';
 import {

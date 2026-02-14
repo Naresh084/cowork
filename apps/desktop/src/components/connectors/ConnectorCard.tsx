@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { ConnectorManifest } from '@gemini-cowork/shared';
+import type { ConnectorManifest } from '@cowork/shared';
 import { getConnectorIcon } from './connector-icons';
 
 interface ConnectorCardProps {

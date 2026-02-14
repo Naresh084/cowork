@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { EventEmitter } from 'events';
 import { stat } from 'fs/promises';
 import { existsSync } from 'fs';
-import type { ChatItem } from '@gemini-cowork/shared';
+import type { ChatItem } from '@cowork/shared';
 import type {
   IncomingMessage,
   IntegrationMediaPayload,

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Loader2 } from 'lucide-react';
 import { useSubagentStore, useIsLoadingSubagents } from '../../stores/subagent-store';
 import { useSessionStore } from '../../stores/session-store';

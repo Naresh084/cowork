@@ -9,7 +9,7 @@
 ## Verification Commands
 
 ```bash
-pnpm --filter @gemini-cowork/storage test
+pnpm --filter @cowork/storage test
 cd apps/desktop/src-sidecar && pnpm test src/memory/memory-service.migration.test.ts
 ```
 

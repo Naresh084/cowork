@@ -4,7 +4,7 @@ description: "X/Twitter CLI for reading, searching, posting, and engagement via 
 homepage: https://bird.fast
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🐦",
     "version": "1.0.0",
     "category": "development"

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Database
 export {
   DatabaseConnection,
@@ -34,7 +37,7 @@ export type {
   MessageContentPart,
   PermissionRequest,
   PermissionDecision,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 // Convenience function to create all repositories
 import { DatabaseConnection, getDatabase, type DatabaseOptions } from './database.js';

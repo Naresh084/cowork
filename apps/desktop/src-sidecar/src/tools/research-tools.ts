@@ -1,9 +1,12 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import { join } from 'path';
 import { homedir } from 'os';
 import { mkdir, writeFile } from 'fs/promises';
-import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
-import { runDeepResearch } from '@gemini-cowork/providers';
+import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
+import { runDeepResearch } from '@cowork/providers';
 import { eventEmitter } from '../event-emitter.js';
 
 interface ResearchEvidenceItem {

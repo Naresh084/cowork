@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   AIProvider,
   CanonicalProviderId,
@@ -7,8 +10,8 @@ import type {
   ProviderConfig,
   StreamGenerateRequest,
 } from './types.js';
-import { AuthenticationError, generateMessageId, now, ProviderError } from '@gemini-cowork/shared';
-import type { Message, MessageContentPart, StreamChunk, ToolDefinition, ToolParameter } from '@gemini-cowork/shared';
+import { AuthenticationError, generateMessageId, now, ProviderError } from '@cowork/shared';
+import type { Message, MessageContentPart, StreamChunk, ToolDefinition, ToolParameter } from '@cowork/shared';
 import { listModels, validateCredentials } from './model-service.js';
 import { getProviderDefaultBaseUrl } from './provider-registry.js';
 

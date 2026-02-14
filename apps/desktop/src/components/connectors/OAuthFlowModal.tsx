@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ExternalLink, Copy, Check, Loader2, KeyRound, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import type { ConnectorManifest } from '@gemini-cowork/shared';
+import type { ConnectorManifest } from '@cowork/shared';
 import { getConnectorIcon } from './connector-icons';
 
 // ============================================================================

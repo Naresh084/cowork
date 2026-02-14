@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { platform } from 'os';
 import { resolve } from 'path';
@@ -10,7 +13,7 @@ import type {
 } from './types.js';
 import { DEFAULT_SANDBOX_CONFIG } from './types.js';
 import { CommandValidator } from './validator.js';
-import { PermissionError, ToolError } from '@gemini-cowork/shared';
+import { PermissionError, ToolError } from '@cowork/shared';
 
 let cachedSandboxExecAvailable: boolean | null = null;
 

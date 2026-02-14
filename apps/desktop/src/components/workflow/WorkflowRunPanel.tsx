@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
-import type { WorkflowEvent, WorkflowNodeRun, WorkflowRun, WorkflowRunStatus } from '@gemini-cowork/shared';
+import type { WorkflowEvent, WorkflowNodeRun, WorkflowRun, WorkflowRunStatus } from '@cowork/shared';
 import { useWorkflowStore } from '@/stores/workflow-store';
 
 interface WorkflowRunPanelProps {

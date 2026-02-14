@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -6,7 +9,7 @@ import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { useToolPolicyStore } from '@/stores/tool-policy-store';
 import { ToolPolicySettings } from './ToolPolicySettings';
-import type { ToolRule } from '@gemini-cowork/shared';
+import type { ToolRule } from '@cowork/shared';
 
 export function CapabilitySettings() {
   const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);

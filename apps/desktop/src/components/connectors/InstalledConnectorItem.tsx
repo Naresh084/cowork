@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import {
   CheckCircle,
   XCircle,
@@ -10,7 +13,7 @@ import {
   PowerOff,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { ConnectorState, ConnectorStatus } from '@gemini-cowork/shared';
+import type { ConnectorState, ConnectorStatus } from '@cowork/shared';
 import { useConnectorStore } from '../../stores/connector-store';
 import { getConnectorIcon } from './connector-icons';
 

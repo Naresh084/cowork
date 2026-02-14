@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it } from 'vitest';
-import type { MemoryAtom, MemoryQueryResult } from '@gemini-cowork/shared';
+import type { MemoryAtom, MemoryQueryResult } from '@cowork/shared';
 import { DatabaseConnection } from '../src/database.js';
 import { MemoryAtomRepository } from '../src/repositories/memory-atom.js';
 import { MemoryQueryRepository } from '../src/repositories/memory-query.js';

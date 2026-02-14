@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   AuthConfig,
   AuthState,
@@ -10,7 +13,7 @@ import type {
 import { STORAGE_KEYS } from './types.js';
 import { ApiKeyAuth } from './api-key/api-key-auth.js';
 import { OAuthService, runOAuthFlow } from './oauth/oauth-service.js';
-import { AuthenticationError, now } from '@gemini-cowork/shared';
+import { AuthenticationError, now } from '@cowork/shared';
 
 // ============================================================================
 // Auth Manager

@@ -1,5 +1,8 @@
-import type { ToolHandler } from '@gemini-cowork/core';
-import type { PlatformType, SessionType } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { ToolHandler } from '@cowork/core';
+import type { PlatformType, SessionType } from '@cowork/shared';
 import type { ExecutionMode, ProviderId } from '../types.js';
 
 export type PromptProviderId = ProviderId;

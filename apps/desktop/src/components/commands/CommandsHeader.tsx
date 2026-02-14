@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Search, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCommandStore, type CommandCategory } from '../../stores/command-store';

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { createAgent } from './agent.js';
@@ -6,7 +9,7 @@ import type {
   StreamGenerateRequest,
   StreamChunk,
   GenerateResponse,
-} from '@gemini-cowork/providers';
+} from '@cowork/providers';
 
 const noopProvider: AIProvider = {
   id: 'google',

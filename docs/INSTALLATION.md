@@ -26,7 +26,7 @@
 
 ### Windows
 
-1. Download `Gemini-Cowork_X.X.X_x64-setup.exe` from the [latest release](https://github.com/AiCodingBattle/geminicowork/releases/latest)
+1. Download `Gemini-Cowork_X.X.X_x64-setup.exe` from the [latest release](https://github.com/Naresh084/cowork/releases/latest)
 2. Run the installer
 3. If Windows SmartScreen appears, click "More info" then "Run anyway"
 4. Follow the installation wizard
@@ -49,7 +49,7 @@
 #### AppImage (Universal)
 ```bash
 # Download
-wget https://github.com/AiCodingBattle/geminicowork/releases/latest/download/Gemini-Cowork_X.X.X_amd64.AppImage
+wget https://github.com/Naresh084/cowork/releases/latest/download/Gemini-Cowork_X.X.X_amd64.AppImage
 
 # Make executable
 chmod +x Gemini-Cowork_X.X.X_amd64.AppImage
@@ -61,7 +61,7 @@ chmod +x Gemini-Cowork_X.X.X_amd64.AppImage
 #### Debian/Ubuntu (.deb)
 ```bash
 # Download
-wget https://github.com/AiCodingBattle/geminicowork/releases/latest/download/Gemini-Cowork_X.X.X_amd64.deb
+wget https://github.com/Naresh084/cowork/releases/latest/download/Gemini-Cowork_X.X.X_amd64.deb
 
 # Install
 sudo dpkg -i Gemini-Cowork_X.X.X_amd64.deb
@@ -73,7 +73,7 @@ sudo apt-get install -f
 #### Fedora/RHEL (.rpm)
 ```bash
 # Download
-wget https://github.com/AiCodingBattle/geminicowork/releases/latest/download/Gemini-Cowork_X.X.X_x86_64.rpm
+wget https://github.com/Naresh084/cowork/releases/latest/download/Gemini-Cowork_X.X.X_x86_64.rpm
 
 # Install
 sudo rpm -i Gemini-Cowork_X.X.X_x86_64.rpm
@@ -155,10 +155,10 @@ Drag Gemini Cowork from Applications to Trash.
 ### Linux
 ```bash
 # Debian/Ubuntu
-sudo apt remove gemini-cowork
+sudo apt remove cowork
 
 # Fedora
-sudo dnf remove gemini-cowork
+sudo dnf remove cowork
 
 # AppImage: Simply delete the file
 ```

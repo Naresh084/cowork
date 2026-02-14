@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
-import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
 import type {
   SkillGenerationDraft,
   SkillGenerationResult,
   SkillGenerationPurpose,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 export type DraftSkillFromConversation = (input: {
   sessionId: string;

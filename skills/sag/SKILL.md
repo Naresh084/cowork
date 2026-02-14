@@ -4,7 +4,7 @@ description: "ElevenLabs text-to-speech with mac-style say UX."
 homepage: https://sag.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🔍",
     "version": "1.0.0",
     "category": "custom"

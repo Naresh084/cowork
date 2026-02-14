@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ChatItem } from '@gemini-cowork/shared';
+import type { ChatItem } from '@cowork/shared';
 import type { PlatformType } from './types.js';
 import { eventEmitter } from '../event-emitter.js';
 import { BaseAdapter } from './adapters/base-adapter.js';

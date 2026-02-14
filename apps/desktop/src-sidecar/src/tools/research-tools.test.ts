@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'fs/promises';
 import { join } from 'path';
@@ -7,7 +10,7 @@ const { runDeepResearchMock } = vi.hoisted(() => ({
   runDeepResearchMock: vi.fn(),
 }));
 
-vi.mock('@gemini-cowork/providers', () => ({
+vi.mock('@cowork/providers', () => ({
   runDeepResearch: runDeepResearchMock,
 }));
 

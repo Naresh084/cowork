@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { randomUUID } from 'crypto';
-import type { MemoryAtom } from '@gemini-cowork/shared';
+import type { MemoryAtom } from '@cowork/shared';
 import type { MemoryConsolidationPolicy, MemoryConsolidationResult } from './types.js';
 
 interface ConsolidationDependencies {

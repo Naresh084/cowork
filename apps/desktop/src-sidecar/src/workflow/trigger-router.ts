@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 const MAX_TIMEOUT_MS = 2147483647;
 const DEFAULT_MIN_CONFIDENCE = 0.2;
 const DEFAULT_ACTIVATION_THRESHOLD = 0.72;

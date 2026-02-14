@@ -62,7 +62,7 @@ jobs:
         run: pnpm validate:connectors
 
       - name: Sync desktop icons
-        run: pnpm --filter @gemini-cowork/desktop icon:sync
+        run: pnpm --filter @cowork/desktop icon:sync
 
       - name: Build sidecar
         run: pnpm build

@@ -4,7 +4,7 @@ description: "Manage Apple Reminders via the `remindctl` CLI on macOS (list, add
 homepage: https://github.com/steipete/remindctl
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "⏰",
     "version": "1.0.0",
     "category": "productivity"

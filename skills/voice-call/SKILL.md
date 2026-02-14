@@ -3,7 +3,7 @@ name: voice-call
 description: "Start voice calls via the Gemini Cowork voice-call plugin."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📞",
     "version": "1.0.0",
     "category": "custom"
@@ -17,8 +17,8 @@ Use the voice-call plugin to start or inspect calls (Twilio, Telnyx, Plivo, or m
 ## CLI
 
 ```bash
-geminicowork voicecall call --to "+15555550123" --message "Hello from Gemini Cowork"
-geminicowork voicecall status --call-id <id>
+cowork voicecall call --to "+15555550123" --message "Hello from Gemini Cowork"
+cowork voicecall status --call-id <id>
 ```
 
 ## Tool

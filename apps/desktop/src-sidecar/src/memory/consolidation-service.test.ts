@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it } from 'vitest';
-import type { MemoryAtom } from '@gemini-cowork/shared';
+import type { MemoryAtom } from '@cowork/shared';
 import { createMemoryConsolidationService } from './consolidation-service.js';
 
 function atom(

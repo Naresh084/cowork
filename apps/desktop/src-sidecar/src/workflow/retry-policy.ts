@@ -1,4 +1,7 @@
-import type { WorkflowRetryPolicy, WorkflowRetryProfile } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { WorkflowRetryPolicy, WorkflowRetryProfile } from '@cowork/shared';
 
 const BASELINE_RETRY_PROFILES: Record<WorkflowRetryProfile, WorkflowRetryPolicy> = {
   fast_safe: {

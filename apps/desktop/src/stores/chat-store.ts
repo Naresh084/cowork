@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,7 +10,7 @@ import type {
   PermissionRequest as BasePermissionRequest,
   ChatItem,
   ContextUsage,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import type { Task, Artifact } from './agent-store';
 import { useAgentStore } from './agent-store';
 import { useSessionStore } from './session-store';

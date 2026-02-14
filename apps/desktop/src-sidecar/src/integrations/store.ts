@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -6,7 +9,7 @@ import {
   SUPPORTED_PLATFORM_TYPES,
   type PlatformType,
   type PlatformConfig,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { DEFAULT_WHATSAPP_DENIAL_MESSAGE } from './types.js';
 
 const CONFIG_DIR = join(homedir(), '.cowork', 'integrations');

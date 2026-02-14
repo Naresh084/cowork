@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Loader2, Shield, ShieldOff, Smartphone } from 'lucide-react';
 import { useRemoteAccessStore } from '@/stores/remote-access-store';

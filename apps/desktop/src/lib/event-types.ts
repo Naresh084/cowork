@@ -1,4 +1,7 @@
-import type { Message, PermissionRequest, ChatItem } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Message, PermissionRequest, ChatItem } from '@cowork/shared';
 import type { Task, Artifact } from '../stores/agent-store';
 
 /**

@@ -4,7 +4,7 @@ description: "Extract frames or short clips from videos using ffmpeg."
 homepage: https://ffmpeg.org
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎬",
     "version": "1.0.0",
     "category": "custom"

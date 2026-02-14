@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { agentRunner } from './agent-runner.js';
 import { loadGeminiExtensions } from './gemini-extensions.js';
 import { skillService } from './skill-service.js';
@@ -9,7 +12,7 @@ import {
   type CommandCategory,
   type PlatformType,
   type SecretDefinition,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { cronService } from './cron/index.js';
 import { workflowService } from './workflow/index.js';
 import { heartbeatService } from './heartbeat/service.js';
@@ -44,7 +47,7 @@ import type {
   WorkflowScheduledTaskSummary,
   WorkflowRunStatus,
   WorkflowValidationReport,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { createHash } from 'crypto';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {

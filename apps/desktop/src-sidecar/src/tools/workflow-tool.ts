@@ -1,12 +1,15 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
-import type { ToolHandler, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolResult } from '@cowork/core';
 import { workflowService } from '../workflow/index.js';
 import type {
   CreateWorkflowFromPromptInput,
   CreateWorkflowDraftInput,
   UpdateWorkflowDraftInput,
   WorkflowRunStatus,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 type WorkflowToolOperation =
   | 'create_workflow'

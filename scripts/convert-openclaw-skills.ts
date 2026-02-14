@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 #!/usr/bin/env npx tsx
 
 /**
@@ -8,7 +11,7 @@
  * 1. Reads all skills from the OpenClaw skills directory
  * 2. Parses each SKILL.md file
  * 3. Converts the frontmatter from OpenClaw format to standard format
- * 4. Copies the converted skills to the geminicowork skills directory
+ * 4. Copies the converted skills to the cowork skills directory
  */
 
 import { readdir, readFile, writeFile, mkdir, cp, stat } from 'fs/promises';
@@ -222,7 +225,7 @@ function convertToStandardFormat(parsed: ParsedFrontmatter): string {
 
   // Build standard metadata
   const metadata: Record<string, unknown> = {
-    author: 'geminicowork',
+    author: 'cowork',
     version: '1.0.0',
   };
 

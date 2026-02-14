@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { readFile } from 'fs/promises';
 import WebSocket from 'ws';
 import { BaseAdapter } from './base-adapter.js';
@@ -345,8 +348,8 @@ export class DiscordAdapter extends BaseAdapter {
           DISCORD_INTENTS.MESSAGE_CONTENT,
         properties: {
           os: process.platform,
-          browser: 'gemini-cowork',
-          device: 'gemini-cowork',
+          browser: 'cowork',
+          device: 'cowork',
         },
       },
     };

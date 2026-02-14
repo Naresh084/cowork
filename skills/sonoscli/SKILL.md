@@ -4,7 +4,7 @@ description: "Control Sonos speakers (discover/status/play/volume/group)."
 homepage: https://sonoscli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🔈",
     "version": "1.0.0",
     "category": "custom"

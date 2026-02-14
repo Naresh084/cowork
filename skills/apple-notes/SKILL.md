@@ -4,7 +4,7 @@ description: "Manage Apple Notes via the `memo` CLI on macOS (create, view, edit
 homepage: https://github.com/antoniorodr/memo
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🍎",
     "version": "1.0.0",
     "category": "productivity"

@@ -1,9 +1,12 @@
-import type { ToolHandler, ToolContext } from '@gemini-cowork/core';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { ToolHandler, ToolContext } from '@cowork/core';
 import {
   createProvider,
   getModelContextWindow,
   setModelContextWindows,
-} from '@gemini-cowork/providers';
+} from '@cowork/providers';
 import type {
   Message,
   PermissionRequest,
@@ -16,7 +19,7 @@ import type {
   SkillGenerationRequest,
   SkillGenerationResult,
   SkillBinding,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import {
   SUPPORTED_PLATFORM_TYPES,
   generateId,
@@ -24,7 +27,7 @@ import {
   now,
   generateChatItemId,
   sanitizeProviderErrorMessage,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import type {
   ChatItem,
   UserMessageItem,
@@ -38,7 +41,7 @@ import type {
   ReportItem,
   DesignItem,
   ErrorItem,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { createDeepAgent, FilesystemBackend, CompositeBackend } from 'deepagents';
 import { createMiddleware } from 'langchain';
 import { DynamicStructuredTool } from '@langchain/core/tools';
@@ -49,7 +52,7 @@ import {
   isOsSandboxAvailable,
   isReadOnlySafeCommand,
   type CommandSandboxSettings,
-} from '@gemini-cowork/sandbox';
+} from '@cowork/sandbox';
 import { z } from 'zod';
 import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -78,12 +81,12 @@ import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middl
 import { createMemoryService, type MemoryService } from './memory/memory-service.js';
 import { createMemoryExtractor, type MemoryExtractor } from './memory/memory-extractor.js';
 import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-md-service.js';
-import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@gemini-cowork/mcp';
+import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@cowork/mcp';
 import type { AgentsMdConfig } from './agents-md/types.js';
 import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
 import { createSubagentService } from './subagents/index.js';
 import { SystemPromptBuilder } from './prompts/system-prompt-builder.js';
-import type { ToolCallContext } from '@gemini-cowork/shared';
+import type { ToolCallContext } from '@cowork/shared';
 import type {
   PromptBuildContext,
   PromptBuildDiagnostics,
@@ -135,7 +138,7 @@ import {
   DatabaseConnection,
   RunCheckpointRepository,
   SessionBranchRepository,
-} from '@gemini-cowork/storage';
+} from '@cowork/storage';
 
 const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 

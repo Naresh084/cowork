@@ -1,4 +1,7 @@
-import type { Message, PermissionRequest, PermissionDecision, SessionType } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Message, PermissionRequest, PermissionDecision, SessionType } from '@cowork/shared';
 
 // Re-export types for use in persistence types
 export type { Message, SessionType };
@@ -330,7 +333,7 @@ export interface SessionInfo {
 
 export interface SessionDetails extends SessionInfo {
   messages: Message[];               // Kept for Rust IPC compat (derived from chatItems)
-  chatItems: import('@gemini-cowork/shared').ChatItem[];  // V2: sole source of truth
+  chatItems: import('@cowork/shared').ChatItem[];  // V2: sole source of truth
   tasks: Task[];
   artifacts: Artifact[];
   contextUsage?: { usedTokens: number; maxTokens: number; percentUsed: number };

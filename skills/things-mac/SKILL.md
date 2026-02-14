@@ -4,7 +4,7 @@ description: "Manage Things 3 via the `things` CLI on macOS (add/update projects
 homepage: https://github.com/ossianhempel/things3-cli
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "✅",
     "version": "1.0.0",
     "category": "productivity"

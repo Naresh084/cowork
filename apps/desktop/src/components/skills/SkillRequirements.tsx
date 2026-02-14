@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Check, X, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { SkillRequirements as SkillRequirementsType, SkillEligibility, InstallOption } from '@gemini-cowork/shared';
+import type { SkillRequirements as SkillRequirementsType, SkillEligibility, InstallOption } from '@cowork/shared';
 import { toast } from '../ui/Toast';
 
 interface SkillRequirementsProps {

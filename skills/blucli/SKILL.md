@@ -4,7 +4,7 @@ description: "BluOS CLI (blu) for discovery, playback, grouping, and volume."
 homepage: https://blucli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🦷",
     "version": "1.0.0",
     "category": "automation"

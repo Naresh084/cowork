@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -12,7 +15,7 @@ import type {
   MCPEvent,
   MCPEventHandler,
 } from './types.js';
-import { generateId, now } from '@gemini-cowork/shared';
+import { generateId, now } from '@cowork/shared';
 
 // ============================================================================
 // MCP Client Manager
@@ -91,7 +94,7 @@ export class MCPClientManager {
       }
 
       const client = new Client(
-        { name: 'gemini-cowork', version: '0.1.0' },
+        { name: 'cowork', version: '0.1.0' },
         { capabilities: {} }
       );
 

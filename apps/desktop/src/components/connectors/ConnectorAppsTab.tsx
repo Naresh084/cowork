@@ -1,8 +1,11 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState, useEffect, useCallback } from 'react';
 import { AppWindow, Loader2, RefreshCw, Plug } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { MCPAppViewer } from './MCPAppViewer';
-import type { MCPApp } from '@gemini-cowork/shared';
+import type { MCPApp } from '@cowork/shared';
 
 // ============================================================================
 // ConnectorAppsTab Component

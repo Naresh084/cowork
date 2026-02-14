@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { mkdir, readFile, writeFile, rename, rm, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -19,7 +22,7 @@ import type {
   ToolStartItem,
   ToolResultItem,
   ContextUsage,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 // Schema version for migrations
 // v1: Separate messages.json, tools.json

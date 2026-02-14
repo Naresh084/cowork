@@ -4,7 +4,7 @@ description: "Search GIF providers with CLI/TUI, download results, and extract s
 homepage: https://gifgrep.com
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎞️",
     "version": "1.0.0",
     "category": "research"

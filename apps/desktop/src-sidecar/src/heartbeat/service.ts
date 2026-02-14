@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * HeartbeatService - Periodic wake-ups and system event processing
  *
@@ -14,7 +17,7 @@ import type {
   HeartbeatStatus,
   SystemEvent,
   WakeMode,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { EventQueue } from './event-queue.js';
 import {
   readJsonFile,

@@ -3,7 +3,7 @@ name: tmux
 description: "Remote-control tmux sessions for interactive CLIs by sending keystrokes and scraping pane output."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🖥️",
     "version": "1.0.0",
     "category": "development"
@@ -17,10 +17,10 @@ Use tmux only when you need an interactive TTY. Prefer exec background mode for 
 ## Quickstart (isolated socket, exec tool)
 
 ```bash
-SOCKET_DIR="${GEMINICOWORK_TMUX_SOCKET_DIR:-${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/geminicowork-tmux-sockets}}"
+SOCKET_DIR="${GEMINICOWORK_TMUX_SOCKET_DIR:-${CLAWDBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/cowork-tmux-sockets}}"
 mkdir -p "$SOCKET_DIR"
-SOCKET="$SOCKET_DIR/geminicowork.sock"
-SESSION=geminicowork-python
+SOCKET="$SOCKET_DIR/cowork.sock"
+SESSION=cowork-python
 
 tmux -S "$SOCKET" new -d -s "$SESSION" -n shell
 tmux -S "$SOCKET" send-keys -t "$SESSION":0.0 -- 'PYTHON_BASIC_REPL=1 python3 -q' Enter
@@ -38,7 +38,7 @@ To monitor:
 ## Socket convention
 
 - Use `GEMINICOWORK_TMUX_SOCKET_DIR` (legacy `CLAWDBOT_TMUX_SOCKET_DIR` also supported).
-- Default socket path: `"$GEMINICOWORK_TMUX_SOCKET_DIR/geminicowork.sock"`.
+- Default socket path: `"$GEMINICOWORK_TMUX_SOCKET_DIR/cowork.sock"`.
 
 ## Targeting panes and naming
 

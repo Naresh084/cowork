@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Eye, EyeOff, Key, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';

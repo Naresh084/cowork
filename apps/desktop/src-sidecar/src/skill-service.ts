@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Skill Service
  *
@@ -15,7 +18,7 @@ import type {
   SkillManifest,
   SkillSource,
   SkillSourceType,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { parseFrontmatter, parseSkillMarkdown } from './skill-parser.js';
 import { checkSkillEligibility } from './eligibility-checker.js';
 

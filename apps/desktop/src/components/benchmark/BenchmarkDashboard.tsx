@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useMemo } from 'react';
 import { Activity, BarChart3, Loader2, Play, ShieldCheck, TrendingUp } from 'lucide-react';
 import { useBenchmarkStore } from '@/stores/benchmark-store';

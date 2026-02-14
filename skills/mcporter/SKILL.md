@@ -4,7 +4,7 @@ description: "Use the mcporter CLI to list, configure, auth, and call MCP server
 homepage: http://mcporter.dev
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🚢",
     "version": "1.0.0",
     "category": "devops"

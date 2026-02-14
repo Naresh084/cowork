@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * MemoryMiddleware - Deep Agents Middleware for Memory Integration
  *
  * Injects relevant memories into system prompt and auto-extracts memories
  */
 
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart } from '@cowork/shared';
 import type { MemoryService } from './memory-service.js';
 import type { MemoryExtractor } from './memory-extractor.js';
 import type { ScoredMemory, Memory } from './types.js';

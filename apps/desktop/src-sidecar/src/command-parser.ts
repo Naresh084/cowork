@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Command Parser Service
  *
  * Parses COMMAND.md files with YAML frontmatter and markdown body.
  */
 
-import type { CommandFrontmatter, CommandMetadata, CommandCategory } from '@gemini-cowork/shared';
+import type { CommandFrontmatter, CommandMetadata, CommandCategory } from '@cowork/shared';
 import { extractFrontmatter } from './skill-parser.js';
 
 /**

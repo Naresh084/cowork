@@ -4,7 +4,7 @@ description: "Control Philips Hue lights/scenes via the OpenHue CLI."
 homepage: https://www.openhue.io/cli
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "💡",
     "version": "1.0.0",
     "category": "automation"

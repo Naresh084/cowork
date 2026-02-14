@@ -4,7 +4,7 @@ description: "Generate or edit images via Gemini 3 Pro Image (Nano Banana Pro)."
 homepage: https://ai.google.dev/
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🍌",
     "version": "1.0.0",
     "category": "automation"
@@ -36,7 +36,7 @@ uv run {baseDir}/scripts/generate_image.py --prompt "combine these into one scen
 API key
 
 - `GEMINI_API_KEY` env var
-- Or set `skills."nano-banana-pro".apiKey` / `skills."nano-banana-pro".env.GEMINI_API_KEY` in `~/.geminicowork/geminicowork.json`
+- Or set `skills."nano-banana-pro".apiKey` / `skills."nano-banana-pro".env.GEMINI_API_KEY` in `~/.cowork/cowork.json`
 
 Notes
 

@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Search, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSkillStore } from '../../stores/skill-store';
-import type { SkillCategory } from '@gemini-cowork/shared';
+import type { SkillCategory } from '@cowork/shared';
 
 const CATEGORIES: Array<{ value: SkillCategory | 'all'; label: string }> = [
   { value: 'all', label: 'All' },

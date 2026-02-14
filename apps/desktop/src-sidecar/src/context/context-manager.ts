@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * ContextManager - Context Window Management
  *
  * Manages context window size and compression
  */
 
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart } from '@cowork/shared';
 
 /**
  * Extract text content from a message.

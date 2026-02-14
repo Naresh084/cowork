@@ -332,7 +332,7 @@ Current notable behavior:
 ## Repository Layout
 
 ```text
-geminicowork/
+cowork/
 ├── apps/
 │   └── desktop/
 │       ├── src/                  # React frontend
@@ -370,8 +370,8 @@ geminicowork/
 ### Install and Run (Monorepo)
 
 ```bash
-git clone https://github.com/AiCodingBattle/geminicowork.git
-cd geminicowork
+git clone https://github.com/Naresh084/cowork.git
+cd cowork
 
 pnpm install
 

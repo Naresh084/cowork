@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   OAuthConfig,
   OAuthTokens,
@@ -9,7 +12,7 @@ import type {
 import { OAUTH_SCOPES, OAUTH_REDIRECT_URI, STORAGE_KEYS } from '../types.js';
 import { generatePKCE, encodeStateData, decodeStateData, generateState } from './pkce.js';
 import { startOAuthCallbackServer } from './server.js';
-import { AuthenticationError, isExpired } from '@gemini-cowork/shared';
+import { AuthenticationError, isExpired } from '@cowork/shared';
 
 // ============================================================================
 // OAuth Service

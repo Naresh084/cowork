@@ -4,7 +4,7 @@ description: "Query Google Places API (New) via the goplaces CLI for text search
 homepage: https://github.com/steipete/goplaces
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📍",
     "version": "1.0.0",
     "category": "custom"

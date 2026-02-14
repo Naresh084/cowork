@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import { GoogleGenAI, Environment } from '@google/genai';
 import { chromium, type Browser, type Page } from 'playwright';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import type { ToolHandler, ToolContext, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
 import { ChromeCDPDriver } from './chrome-cdp-driver.js';
 import { eventEmitter } from '../event-emitter.js';
 import type { ProviderId } from '../types.js';

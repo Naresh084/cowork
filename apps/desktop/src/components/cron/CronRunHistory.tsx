@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
@@ -10,7 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCronStore } from '@/stores/cron-store';
-import type { CronRun } from '@gemini-cowork/shared';
+import type { CronRun } from '@cowork/shared';
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);

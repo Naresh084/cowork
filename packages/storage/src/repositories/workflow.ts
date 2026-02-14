@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   CreateWorkflowDraftInput,
   UpdateWorkflowDraftInput,
   WorkflowDefinition,
   WorkflowStatus,
-} from '@gemini-cowork/shared';
-import { generateId, now, StorageError } from '@gemini-cowork/shared';
+} from '@cowork/shared';
+import { generateId, now, StorageError } from '@cowork/shared';
 import type { DatabaseConnection } from '../database.js';
 
 interface WorkflowRow {

@@ -4,7 +4,7 @@ description: "Edit PDFs with natural-language instructions using the nano-pdf CL
 homepage: https://pypi.org/project/nano-pdf/
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📑",
     "version": "1.0.0",
     "category": "custom"

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 use crate::sidecar::resolve_sidecar_dir;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -231,7 +234,7 @@ fn resolve_daemon_exec_spec() -> Result<DaemonExecSpec, String> {
         let daemon_script = sidecar_dir.join("dist").join("daemon.js");
         if !daemon_script.exists() {
             return Err(format!(
-                "Daemon script not found at {:?}. Build sidecar first with `pnpm --filter @gemini-cowork/sidecar build`.",
+                "Daemon script not found at {:?}. Build sidecar first with `pnpm --filter @cowork/sidecar build`.",
                 daemon_script
             ));
         }

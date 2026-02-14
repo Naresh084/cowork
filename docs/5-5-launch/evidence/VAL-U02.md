@@ -8,7 +8,7 @@
 
 ```bash
 cd apps/desktop/src-sidecar && pnpm test src/workflow/retry-policy.profile.test.ts src/ipc-handler.idempotency.test.ts
-pnpm --filter @gemini-cowork/sandbox test -- src/validator.test.ts src/executor.test.ts
+pnpm --filter @cowork/sandbox test -- src/validator.test.ts src/executor.test.ts
 ```
 
 ## Acceptance Mapping

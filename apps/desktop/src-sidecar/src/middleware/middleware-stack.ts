@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Middleware Stack Configuration
  *
  * Full middleware stack for Deep Agents integration
  */
 
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, MessageContentPart } from '@cowork/shared';
 import type { MemoryService } from '../memory/memory-service.js';
 import type { MemoryExtractor } from '../memory/memory-extractor.js';
 import type { AgentsMdConfig } from '../agents-md/types.js';

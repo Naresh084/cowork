@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 use crate::commands::credentials;
 use std::fs;
 
@@ -784,7 +787,7 @@ pub async fn auth_logout_and_cleanup() -> Result<LogoutCleanupResult, String> {
 pub async fn auth_get_security_posture() -> Result<SecurityPostureStatus, String> {
     let config_root = dirs::config_dir().ok_or("Could not determine config directory".to_string())?;
     let current_config_dir = config_root.join("cowork");
-    let legacy_config_dir = config_root.join("gemini-cowork");
+    let legacy_config_dir = config_root.join("cowork");
 
     let credentials_vault_present = current_config_dir.join("credentials.vault.json").exists();
     let connector_vault_present = current_config_dir.join("secrets.vault.json").exists();

@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import { createInterface } from 'readline';
-import { generateId } from '@gemini-cowork/shared';
+import { generateId } from '@cowork/shared';
 import type {
   ExternalCliAdapter,
   ExternalCliAdapterCallbacks,
@@ -308,7 +311,7 @@ export class CodexAppServerAdapter implements ExternalCliAdapter {
 
     await this.sendRequest('initialize', {
       clientInfo: {
-        name: 'gemini-cowork',
+        name: 'cowork',
         version: '0.1.0',
       },
     });

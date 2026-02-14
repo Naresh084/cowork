@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * EventQueue - Priority queue for system events
  *
@@ -5,7 +8,7 @@
  * Within same priority, FIFO order is maintained
  */
 
-import type { SystemEvent, SystemEventType, EventPriority } from '@gemini-cowork/shared';
+import type { SystemEvent, SystemEventType, EventPriority } from '@cowork/shared';
 
 /**
  * Priority values for sorting (higher = more urgent)

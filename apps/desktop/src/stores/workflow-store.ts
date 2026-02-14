@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type {
@@ -10,7 +13,7 @@ import type {
   WorkflowRun,
   WorkflowScheduledTaskSummary,
   WorkflowRunStatus,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 const DEFAULT_RUN_STREAM_INTERVAL_MS = 1500;
 const SCHEDULE_OVERDUE_STALL_MS = 5 * 60 * 1000;

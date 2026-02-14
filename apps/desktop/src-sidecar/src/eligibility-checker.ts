@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Eligibility Checker Service
  *
@@ -11,7 +14,7 @@ import type {
   SkillEligibility,
   InstallOption,
   SkillManifest,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { getRequirements, getInstallOptions } from './skill-parser.js';
 
 const execFileAsync = promisify(execFile);

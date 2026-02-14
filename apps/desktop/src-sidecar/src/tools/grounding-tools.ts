@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import { GoogleGenAI } from '@google/genai';
-import type { ToolHandler, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolResult } from '@cowork/core';
 import type { ProviderId } from '../types.js';
 
 type SearchSource = {
@@ -196,7 +199,7 @@ async function runOpenAICompatibleSearch(
     Authorization: `Bearer ${apiKey}`,
   };
   if (provider === 'openrouter') {
-    headers['HTTP-Referer'] = 'https://gemini-cowork.local';
+    headers['HTTP-Referer'] = 'https://cowork.local';
     headers['X-Title'] = 'Gemini Cowork';
   }
 

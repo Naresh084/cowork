@@ -82,6 +82,13 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1MEJFODcwNzAyRUQ0REIKUldUYjFDNXdjT2dMVlZzOWNmSnlxMXRvUXZuWi9wYkltM3dLeTVqUUdNTXY3UjE4Wk16U0xmRXcK",
+      "endpoints": [
+        "https://github.com/Naresh084/cowork/releases/latest/download/latest.json"
+      ],
+      "dialog": true
     }
   }
 }

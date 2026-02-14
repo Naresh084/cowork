@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { EventEmitter } from 'events';
 import { join } from 'path';
 import { CronExpressionParser } from 'cron-parser';
@@ -14,9 +17,9 @@ import type {
   WorkflowSchedule,
   WorkflowTrigger,
   WorkflowValidationReport,
-} from '@gemini-cowork/shared';
-import { DatabaseConnection, WorkflowEventRepository, WorkflowRepository, WorkflowRunRepository } from '@gemini-cowork/storage';
-import { generateId } from '@gemini-cowork/shared';
+} from '@cowork/shared';
+import { DatabaseConnection, WorkflowEventRepository, WorkflowRepository, WorkflowRunRepository } from '@cowork/storage';
+import { generateId } from '@cowork/shared';
 import type { AgentRunner } from '../agent-runner.js';
 import { compileWorkflowDefinition, validateWorkflowDefinition } from './compiler.js';
 import { WorkflowEngine } from './engine.js';

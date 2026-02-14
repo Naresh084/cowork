@@ -1,4 +1,7 @@
-import type { Message } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Message } from '@cowork/shared';
 import { createSemanticMemoryExtractor } from './semantic-memory-extractor.js';
 
 function message(role: Message['role'], content: string): Message {

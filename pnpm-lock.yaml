@@ -60,16 +60,16 @@ importers:
       '@fontsource/sora':
         specifier: ^5.0.20
         version: 5.2.8
-      '@gemini-cowork/auth':
+      '@cowork/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@gemini-cowork/core':
+      '@cowork/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@gemini-cowork/providers':
+      '@cowork/providers':
         specifier: workspace:*
         version: link:../../packages/providers
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@tauri-apps/api':
@@ -193,22 +193,22 @@ importers:
 
   apps/desktop/src-sidecar:
     dependencies:
-      '@gemini-cowork/core':
+      '@cowork/core':
         specifier: workspace:*
         version: link:../../../packages/core
-      '@gemini-cowork/mcp':
+      '@cowork/mcp':
         specifier: workspace:*
         version: link:../../../packages/mcp
-      '@gemini-cowork/providers':
+      '@cowork/providers':
         specifier: workspace:*
         version: link:../../../packages/providers
-      '@gemini-cowork/sandbox':
+      '@cowork/sandbox':
         specifier: workspace:*
         version: link:../../../packages/sandbox
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
-      '@gemini-cowork/storage':
+      '@cowork/storage':
         specifier: workspace:*
         version: link:../../../packages/storage
       '@google/genai':
@@ -360,7 +360,7 @@ importers:
 
   packages/auth:
     dependencies:
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -376,10 +376,10 @@ importers:
 
   packages/connectors:
     dependencies:
-      '@gemini-cowork/auth':
+      '@cowork/auth':
         specifier: workspace:*
         version: link:../auth
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -395,13 +395,13 @@ importers:
 
   packages/core:
     dependencies:
-      '@gemini-cowork/providers':
+      '@cowork/providers':
         specifier: workspace:*
         version: link:../providers
-      '@gemini-cowork/sandbox':
+      '@cowork/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -420,7 +420,7 @@ importers:
 
   packages/gems:
     dependencies:
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -436,7 +436,7 @@ importers:
 
   packages/mcp:
     dependencies:
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       '@modelcontextprotocol/sdk':
@@ -455,10 +455,10 @@ importers:
 
   packages/providers:
     dependencies:
-      '@gemini-cowork/auth':
+      '@cowork/auth':
         specifier: workspace:*
         version: link:../auth
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       '@google/genai':
@@ -486,7 +486,7 @@ importers:
 
   packages/sandbox:
     dependencies:
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       zod:
@@ -515,7 +515,7 @@ importers:
 
   packages/storage:
     dependencies:
-      '@gemini-cowork/shared':
+      '@cowork/shared':
         specifier: workspace:*
         version: link:../shared
       better-sqlite3:

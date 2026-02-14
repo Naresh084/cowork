@@ -1,5 +1,5 @@
 {
-  "name": "@gemini-cowork/sidecar",
+  "name": "@cowork/sidecar",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -26,12 +26,12 @@
     "pkg:daemon:linux-x64": "pkg dist/daemon.js --target node20-linux-x64 --output ../src-tauri/binaries/cowork-agentd-x86_64-unknown-linux-gnu"
   },
   "dependencies": {
-    "@gemini-cowork/core": "workspace:*",
-    "@gemini-cowork/mcp": "workspace:*",
-    "@gemini-cowork/providers": "workspace:*",
-    "@gemini-cowork/sandbox": "workspace:*",
-    "@gemini-cowork/shared": "workspace:*",
-    "@gemini-cowork/storage": "workspace:*",
+    "@cowork/core": "workspace:*",
+    "@cowork/mcp": "workspace:*",
+    "@cowork/providers": "workspace:*",
+    "@cowork/sandbox": "workspace:*",
+    "@cowork/shared": "workspace:*",
+    "@cowork/storage": "workspace:*",
     "@google/genai": "^1.33.0",
     "@google/generative-ai": "^0.24.0",
     "@langchain/core": "^1.1.24",

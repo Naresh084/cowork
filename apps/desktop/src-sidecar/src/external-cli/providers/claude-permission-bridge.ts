@@ -1,8 +1,11 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { generateId } from '@gemini-cowork/shared';
+import { generateId } from '@cowork/shared';
 import type {
   ExternalCliPendingInteraction,
   ExternalCliResponsePayload,

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import {
   GoogleGenerativeAI,
   SchemaType,
@@ -16,7 +19,7 @@ import type {
   GenerateResponse,
   StreamGenerateRequest,
 } from '../types.js';
-import type { Message, ToolDefinition, StreamChunk, MessageContentPart } from '@gemini-cowork/shared';
+import type { Message, ToolDefinition, StreamChunk, MessageContentPart } from '@cowork/shared';
 import {
   generateMessageId,
   now,
@@ -24,7 +27,7 @@ import {
   AuthenticationError,
   NetworkError,
   sanitizeProviderErrorMessage,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { GEMINI_MODELS, DEFAULT_MODEL, getGeminiModel, fetchGeminiModels, setModelContextWindows } from './models.js';
 
 type GeminiErrorCategory =

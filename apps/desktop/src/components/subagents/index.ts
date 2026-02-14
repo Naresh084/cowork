@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 export { SubagentManager } from './SubagentManager';
 export { SubagentsHeader } from './SubagentsHeader';
 export { AvailableSubagentsTab } from './AvailableSubagentsTab';

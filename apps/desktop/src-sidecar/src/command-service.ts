@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Command Service
  *
@@ -15,7 +18,7 @@ import type {
   CommandSource,
   CommandSourceType,
   CommandCategory,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import { parseCommandMarkdown, buildCommandMarkdown } from './command-parser.js';
 
 // Get the directory of this file for bundled commands path

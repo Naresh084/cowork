@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Connector OAuth Service
  *
@@ -17,7 +20,7 @@ import {
   type OAuthProviderConfig,
 } from './oauth-config.js';
 import type { SecretService } from './secret-service.js';
-import type { OAuthFlowType } from '@gemini-cowork/shared';
+import type { OAuthFlowType } from '@cowork/shared';
 
 // ============================================================================
 // Types

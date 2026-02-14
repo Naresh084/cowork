@@ -1,5 +1,5 @@
 {
-  "name": "@gemini-cowork/connectors",
+  "name": "@cowork/connectors",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,8 +19,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gemini-cowork/shared": "workspace:*",
-    "@gemini-cowork/auth": "workspace:*",
+    "@cowork/shared": "workspace:*",
+    "@cowork/auth": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

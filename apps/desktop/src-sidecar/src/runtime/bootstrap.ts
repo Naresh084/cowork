@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { eventEmitter, STDOUT_EVENT_SINK_ID } from '../event-emitter.js';
 import { handleRequest } from '../ipc-handler.js';
 import { remoteAccessService } from '../remote-access/service.js';

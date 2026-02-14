@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState, useCallback } from 'react';
 import { X, Send, Pencil, Clock, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';

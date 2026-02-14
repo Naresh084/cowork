@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   CreateWorkflowDraftInput,
   CreateWorkflowFromPromptInput,
   WorkflowSchedule,
   WorkflowTrigger,
-} from '@gemini-cowork/shared';
-import { generateId } from '@gemini-cowork/shared';
+} from '@cowork/shared';
+import { generateId } from '@cowork/shared';
 import { detectSchedulingIntent } from '../suggestion-detector.js';
 
 const DAY_TO_CRON: Record<string, number> = {

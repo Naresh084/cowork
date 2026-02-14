@@ -4,7 +4,7 @@ description: "Create, search, and manage Bear notes via grizzly CLI."
 homepage: https://bear.app
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🐻",
     "version": "1.0.0",
     "category": "productivity"

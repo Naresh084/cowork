@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { resolve, isAbsolute, normalize, sep } from 'path';
 import { realpathSync, lstatSync, existsSync } from 'fs';
 import { spawnSync } from 'child_process';

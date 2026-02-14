@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Trash2, Check, Loader2, FolderOpen } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Subagent, SubagentCategory } from '../../stores/subagent-store';

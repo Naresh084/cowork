@@ -1,5 +1,5 @@
 {
-  "name": "gemini-cowork",
+  "name": "cowork",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "typecheck": "turbo run typecheck",
     "validate:connectors": "node scripts/validate-connectors.mjs",
     "skills:healthcheck": "node scripts/skills-healthcheck.mjs",
-    "icons:sync": "pnpm --filter @gemini-cowork/desktop icon:sync",
+    "icons:sync": "pnpm --filter @cowork/desktop icon:sync",
     "version:check": "node scripts/version-sync.mjs check",
     "version:sync": "node scripts/version-sync.mjs sync"
   },

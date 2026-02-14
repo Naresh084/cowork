@@ -18,7 +18,7 @@ Status: Frozen for release candidate branch
 ## Verification
 
 ```bash
-pnpm --filter @gemini-cowork/desktop typecheck
-pnpm --filter @gemini-cowork/sidecar typecheck
+pnpm --filter @cowork/desktop typecheck
+pnpm --filter @cowork/sidecar typecheck
 cd apps/desktop/src-tauri && cargo check --quiet
 ```

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * MemoryService - DB-backed long-term memory management
  *
@@ -14,13 +17,13 @@ import {
   DatabaseConnection,
   MemoryAtomRepository,
   MemoryQueryRepository,
-} from '@gemini-cowork/storage';
+} from '@cowork/storage';
 import type {
   MemoryAtom,
   MemoryFeedback,
   MemoryQueryOptions,
   MemoryQueryResult,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import type {
   CreateMemoryInput,
   Memory,

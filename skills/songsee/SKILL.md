@@ -4,7 +4,7 @@ description: "Generate spectrograms and feature-panel visualizations from audio 
 homepage: https://github.com/steipete/songsee
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎶",
     "version": "1.0.0",
     "category": "custom"

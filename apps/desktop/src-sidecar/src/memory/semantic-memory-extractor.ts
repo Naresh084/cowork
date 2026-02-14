@@ -1,4 +1,7 @@
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Message, MessageContentPart } from '@cowork/shared';
 import {
   DEFAULT_EXTRACTION_CONFIG,
   type ExtractedMemory,

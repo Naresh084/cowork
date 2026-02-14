@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it, vi } from 'vitest';
 import { createExternalCliTools } from './external-cli-tools.js';
 import type { ExternalCliRunManager } from '../external-cli/run-manager.js';

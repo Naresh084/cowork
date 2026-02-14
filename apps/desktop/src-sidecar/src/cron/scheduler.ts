@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * CronScheduler - Timer-based job scheduling
  *
@@ -10,7 +13,7 @@
 
 import { EventEmitter } from 'events';
 import { CronExpressionParser } from 'cron-parser';
-import type { CronJob } from '@gemini-cowork/shared';
+import type { CronJob } from '@cowork/shared';
 import { cronStore } from './store.js';
 import type { CronExecutor } from './executor.js';
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Core UI Components
 export { Button, type ButtonProps } from './Button';
 export { Input, Textarea, type InputProps, type TextareaProps } from './Input';

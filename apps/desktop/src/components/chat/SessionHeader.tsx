@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { ChevronDown, Edit2, Trash2, Share2, Plug, Shield, AlertTriangle, Check, Eye } from 'lucide-react';
 import { cn } from '@/lib/utils';

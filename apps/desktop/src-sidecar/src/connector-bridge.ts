@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Connector Bridge
  *
@@ -6,7 +9,7 @@
  */
 
 import { ConnectorManager, getSecretService } from './connectors/index.js';
-import type { ConnectorManifest, MCPTool as ConnectorMCPTool } from '@gemini-cowork/shared';
+import type { ConnectorManifest, MCPTool as ConnectorMCPTool } from '@cowork/shared';
 
 export interface ConnectorTool {
   name: string;

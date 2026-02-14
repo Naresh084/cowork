@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type { AuthStorage } from '../types.js';
 import { STORAGE_KEYS } from '../types.js';
-import { AuthenticationError } from '@gemini-cowork/shared';
+import { AuthenticationError } from '@cowork/shared';
 
 // ============================================================================
 // API Key Authentication

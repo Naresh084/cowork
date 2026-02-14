@@ -4,7 +4,7 @@ description: "Capture frames or clips from RTSP/ONVIF cameras."
 homepage: https://camsnap.ai
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📷",
     "version": "1.0.0",
     "category": "creative"

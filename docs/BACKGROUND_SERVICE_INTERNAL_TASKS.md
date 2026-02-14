@@ -210,8 +210,8 @@ Run this command set for every task unless explicitly not applicable:
 
 - `pnpm typecheck`
 - `pnpm lint`
-- `pnpm test --filter @gemini-cowork/core`
-- `pnpm test --filter @gemini-cowork/providers`
+- `pnpm test --filter @cowork/core`
+- `pnpm test --filter @cowork/providers`
 - `cd apps/desktop && pnpm vitest`
 
 Run targeted additions when transport/service code changes:

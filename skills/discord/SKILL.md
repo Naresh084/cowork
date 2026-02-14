@@ -3,7 +3,7 @@ name: discord
 description: "Use when you need to control Discord from Gemini Cowork via the discord tool: send messages, react, post or upload stickers, upload emojis, run polls, manage threads/pins/search, create/edit/delete channels and categories, fetch permissions or member/role/channel info, or handle moderation actions in Discord DMs or channels."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "version": "1.0.0",
     "emoji": "🎮",
     "category": "productivity",
@@ -95,7 +95,7 @@ Message context lines include `discord message id` and `channel` fields you can 
 {
   "action": "stickerUpload",
   "guildId": "999",
-  "name": "geminicowork_wave",
+  "name": "cowork_wave",
   "description": "Gemini Cowork waving hello",
   "tags": "👋",
   "mediaUrl": "file:///tmp/wave.png"

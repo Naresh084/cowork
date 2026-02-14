@@ -1,5 +1,5 @@
 {
-  "name": "@gemini-cowork/storage",
+  "name": "@cowork/storage",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -21,7 +21,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@gemini-cowork/shared": "workspace:*",
+    "@cowork/shared": "workspace:*",
     "better-sqlite3": "^11.6.0",
     "zod": "^3.23.8"
   },

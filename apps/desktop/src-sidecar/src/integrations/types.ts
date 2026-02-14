@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   PlatformType,
   PlatformStatus,
@@ -5,8 +8,8 @@ import type {
   OutgoingMessage,
   PlatformConfig,
   PlatformMessageAttachment,
-} from '@gemini-cowork/shared';
-import { SUPPORTED_PLATFORM_TYPES } from '@gemini-cowork/shared';
+} from '@cowork/shared';
+import { SUPPORTED_PLATFORM_TYPES } from '@cowork/shared';
 
 // Re-export shared types for convenience within integrations
 export type {

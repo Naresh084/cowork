@@ -4,7 +4,7 @@ description: "Control Eight Sleep pods (status, temperature, alarms, schedules).
 homepage: https://eightctl.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "😴",
     "version": "1.0.0",
     "category": "automation"

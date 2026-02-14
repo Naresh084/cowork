@@ -1,5 +1,8 @@
-import type { Message, MessageRole, MessageContentPart } from '@gemini-cowork/shared';
-import { generateMessageId, now, StorageError } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { Message, MessageRole, MessageContentPart } from '@cowork/shared';
+import { generateMessageId, now, StorageError } from '@cowork/shared';
 import type { DatabaseConnection } from '../database.js';
 
 // ============================================================================

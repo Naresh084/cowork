@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import CDP from 'chrome-remote-interface';
 import type { Client } from 'chrome-remote-interface';
 import { getOrCreateSessionChrome } from './chrome-launcher.js';

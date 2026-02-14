@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   WorkflowDefinition,
   WorkflowNode,
@@ -5,8 +8,8 @@ import type {
   WorkflowRun,
   WorkflowRetryProfile,
   WorkflowRetryPolicy,
-} from '@gemini-cowork/shared';
-import type { WorkflowEventRepository, WorkflowRunRepository } from '@gemini-cowork/storage';
+} from '@cowork/shared';
+import type { WorkflowEventRepository, WorkflowRunRepository } from '@cowork/storage';
 import { compileWorkflowDefinition, type CompiledWorkflow } from './compiler.js';
 import { WorkflowNodeExecutor } from './node-executor.js';
 import { computeRetryDelay, resolveRetryPolicy, sleep } from './retry-policy.js';

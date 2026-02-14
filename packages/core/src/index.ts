@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Types
 export type {
   AgentConfig,
@@ -18,5 +21,5 @@ export type {
 export { CoworkAgent, createAgent } from './agent.js';
 
 // Re-export from providers for convenience
-export type { AIProvider, GenerateRequest, GenerateResponse, StreamChunk } from '@gemini-cowork/providers';
-export { createGeminiProvider, GEMINI_MODELS } from '@gemini-cowork/providers';
+export type { AIProvider, GenerateRequest, GenerateResponse, StreamChunk } from '@cowork/providers';
+export { createGeminiProvider, GEMINI_MODELS } from '@cowork/providers';

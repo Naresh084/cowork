@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { parseSidecarEventEnvelope, subscribeToAgentEvents } from '../lib/agent-events';
@@ -9,7 +12,7 @@ import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
 import { useBenchmarkStore, type BenchmarkScorecard } from '../stores/benchmark-store';
 import { toast } from '../components/ui/Toast';
-import type { PlatformType } from '@gemini-cowork/shared';
+import type { PlatformType } from '@cowork/shared';
 import { createStartupIssue } from '../lib/startup-recovery';
 
 function isRecord(val: unknown): val is Record<string, unknown> {
@@ -527,7 +530,7 @@ export function useAgentEvents(sessionId: string | null): void {
           },
           turnId,
           timestamp: Date.now(),
-        } as import('@gemini-cowork/shared').ChatItem);
+        } as import('@cowork/shared').ChatItem);
       };
 
       switch (event.type) {
@@ -876,7 +879,7 @@ export function useAgentEvents(sessionId: string | null): void {
                 ? `Research evidence updated: ${event.totalSources} sources ranked (avg confidence ${Math.round(event.avgConfidence * 100)}%).`
                 : 'Research evidence updated: no sources detected.',
             timestamp: event.timestamp,
-          } as import('@gemini-cowork/shared').ChatItem);
+          } as import('@cowork/shared').ChatItem);
           break;
 
         case 'browser:progress':
@@ -1013,7 +1016,7 @@ export function useAgentEvents(sessionId: string | null): void {
             details: event.details,
             turnId: chat.getSessionState(eventSessionId).activeTurnId,
             timestamp: Date.now(),
-          } as import('@gemini-cowork/shared').ChatItem);
+          } as import('@cowork/shared').ChatItem);
           break;
         }
 

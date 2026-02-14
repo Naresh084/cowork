@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Re-export all tools from this directory
 export { createResearchTools, createDeepResearchTool } from './research-tools.js';
 export { createComputerUseTools, createComputerUseTool } from './computer-use-tools.js';

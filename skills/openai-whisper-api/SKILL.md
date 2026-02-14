@@ -4,7 +4,7 @@ description: "Transcribe audio via OpenAI Audio Transcriptions API (Whisper)."
 homepage: https://platform.openai.com/docs/guides/speech-to-text
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎙️",
     "version": "1.0.0",
     "category": "custom"
@@ -37,7 +37,7 @@ Defaults:
 
 ## API key
 
-Set `OPENAI_API_KEY`, or configure it in `~/.geminicowork/geminicowork.json`:
+Set `OPENAI_API_KEY`, or configure it in `~/.cowork/cowork.json`:
 
 ```json5
 {

@@ -4,7 +4,7 @@ description: "Terminal Spotify playback/search via spogo (preferred) or spotify_
 homepage: https://www.spotify.com
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎵",
     "version": "1.0.0",
     "category": "automation"

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * CronExecutor - Executes cron jobs in isolated sessions
  *
@@ -5,7 +8,7 @@
  * - Isolated: Creates fresh session, runs agent, returns result
  */
 
-import type { CronJob, CronRun } from '@gemini-cowork/shared';
+import type { CronJob, CronRun } from '@cowork/shared';
 import type { AgentRunner } from '../agent-runner.js';
 
 /**

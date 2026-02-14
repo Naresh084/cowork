@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Types
 export type {
   ProviderId,
@@ -79,7 +82,7 @@ export type {
   ToolDefinition,
   GenerationConfig,
   StreamChunk,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 // Factory function to create providers
 import type { AIProvider, ProviderId, ProviderConfig } from './types.js';

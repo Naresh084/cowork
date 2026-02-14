@@ -3,7 +3,7 @@ name: sherpa-onnx-tts
 description: "Local text-to-speech via sherpa-onnx (offline, no cloud)"
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🔊",
     "version": "1.0.0",
     "category": "custom"
@@ -16,10 +16,10 @@ Local TTS using the sherpa-onnx offline CLI.
 
 ## Install
 
-1. Download the runtime for your OS (extracts into `~/.geminicowork/tools/sherpa-onnx-tts/runtime`)
-2. Download a voice model (extracts into `~/.geminicowork/tools/sherpa-onnx-tts/models`)
+1. Download the runtime for your OS (extracts into `~/.cowork/tools/sherpa-onnx-tts/runtime`)
+2. Download a voice model (extracts into `~/.cowork/tools/sherpa-onnx-tts/models`)
 
-Update `~/.geminicowork/geminicowork.json`:
+Update `~/.cowork/cowork.json`:
 
 ```json5
 {
@@ -27,8 +27,8 @@ Update `~/.geminicowork/geminicowork.json`:
     entries: {
       "sherpa-onnx-tts": {
         env: {
-          SHERPA_ONNX_RUNTIME_DIR: "~/.geminicowork/tools/sherpa-onnx-tts/runtime",
-          SHERPA_ONNX_MODEL_DIR: "~/.geminicowork/tools/sherpa-onnx-tts/models/vits-piper-en_US-lessac-high",
+          SHERPA_ONNX_RUNTIME_DIR: "~/.cowork/tools/sherpa-onnx-tts/runtime",
+          SHERPA_ONNX_MODEL_DIR: "~/.cowork/tools/sherpa-onnx-tts/models/vits-piper-en_US-lessac-high",
         },
       },
     },

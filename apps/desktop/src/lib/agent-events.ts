@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { listen, type UnlistenFn, type Event } from '@tauri-apps/api/event';
 import type {
   AgentEvent,

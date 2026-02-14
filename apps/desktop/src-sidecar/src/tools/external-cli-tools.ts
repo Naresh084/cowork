@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import { isAbsolute, resolve } from 'path';
-import type { ToolHandler, ToolResult } from '@gemini-cowork/core';
+import type { ToolHandler, ToolResult } from '@cowork/core';
 import type { ExternalCliRunManager } from '../external-cli/run-manager.js';
 import type { ExternalCliRunOrigin } from '../external-cli/types.js';
 import { ExternalCliError } from '../external-cli/errors.js';

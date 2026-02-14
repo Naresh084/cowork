@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Globe2, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {

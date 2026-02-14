@@ -1,4 +1,7 @@
-import type { PlatformType } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { PlatformType } from '@cowork/shared';
 
 export type ExternalCliProvider = 'codex' | 'claude';
 

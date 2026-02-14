@@ -4,7 +4,7 @@ This document is the execution source of truth for migrating Cowork from an app-
 
 ## Companion Internal Runbook
 
-Use `/Users/naresh/Work/Personal/geminicowork/docs/BACKGROUND_SERVICE_INTERNAL_TASKS.md` for atomic internal implementation tasks, dependencies, evidence requirements, and rollout drills for each phase.
+Use `/Users/naresh/Work/Personal/cowork/docs/BACKGROUND_SERVICE_INTERNAL_TASKS.md` for atomic internal implementation tasks, dependencies, evidence requirements, and rollout drills for each phase.
 
 ## Program Goals
 
@@ -571,7 +571,7 @@ Use `/Users/naresh/Work/Personal/geminicowork/docs/BACKGROUND_SERVICE_INTERNAL_T
   - Files:
     - `apps/desktop/src-sidecar/package.json`
   - Verification:
-    - `pnpm --filter @gemini-cowork/sidecar build` emits daemon artifacts.
+    - `pnpm --filter @cowork/sidecar build` emits daemon artifacts.
 
 - [ ] `P9-T002` (`WS-OPS`) Add daemon binaries/resources in Tauri bundling config.
   - Files:

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type {
   AIProvider,
   GenerateRequest,
@@ -7,8 +10,8 @@ import type {
   StreamGenerateRequest,
 } from './types.js';
 import { listModels, validateCredentials } from './model-service.js';
-import { AuthenticationError, generateMessageId, now, ProviderError } from '@gemini-cowork/shared';
-import type { MessageContentPart, StreamChunk } from '@gemini-cowork/shared';
+import { AuthenticationError, generateMessageId, now, ProviderError } from '@cowork/shared';
+import type { MessageContentPart, StreamChunk } from '@cowork/shared';
 import { getProviderDefaultBaseUrl } from './provider-registry.js';
 
 function toAnthropicText(content: string | MessageContentPart[]): string {

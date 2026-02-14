@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Secret Service
  *
@@ -12,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
-import type { SecretDefinition } from '@gemini-cowork/shared';
+import type { SecretDefinition } from '@cowork/shared';
 
 // ============================================================================
 // Types
@@ -91,16 +94,16 @@ function getConfigDir(): string {
 
 function getLegacyConfigDir(): string {
   if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'gemini-cowork');
+    return path.join(os.homedir(), 'Library', 'Application Support', 'cowork');
   }
   if (process.platform === 'win32') {
     return path.join(
       process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-      'gemini-cowork'
+      'cowork'
     );
   }
   const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  return path.join(xdg, 'gemini-cowork');
+  return path.join(xdg, 'cowork');
 }
 
 function defaultFallbackKeyMaterial(): string {

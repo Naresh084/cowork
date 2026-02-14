@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { createInterface } from 'readline';
 import { request as httpRequest } from 'http';
 import { URL } from 'url';

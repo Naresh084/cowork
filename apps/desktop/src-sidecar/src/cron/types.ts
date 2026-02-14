@@ -1,8 +1,11 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Internal cron types for sidecar implementation
  */
 
-import type { CronSchedule } from '@gemini-cowork/shared';
+import type { CronSchedule } from '@cowork/shared';
 
 /**
  * Input for creating a new cron job

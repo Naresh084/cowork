@@ -10,7 +10,7 @@ icon: trash-2
 priority: 80
 action: clear_chat
 metadata:
-  author: gemini-cowork
+  author: cowork
   version: "1.0.0"
   emoji: 🗑️
 ---

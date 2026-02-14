@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type { AgentEventType } from './types.js';
-import type { ChatItem } from '@gemini-cowork/shared';
-import { sanitizeProviderErrorMessage } from '@gemini-cowork/shared';
+import type { ChatItem } from '@cowork/shared';
+import { sanitizeProviderErrorMessage } from '@cowork/shared';
 
 const EVENT_SCHEMA_VERSION = 1;
 

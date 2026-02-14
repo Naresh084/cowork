@@ -4,7 +4,7 @@ description: "Foodora-only CLI for checking past orders and active order status 
 homepage: https://ordercli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🛒",
     "version": "1.0.0",
     "category": "custom"

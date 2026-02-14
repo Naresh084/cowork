@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { readdir, readFile, writeFile, stat, realpath, mkdir } from 'fs/promises';
 import { join, normalize, isAbsolute, resolve, dirname, sep, extname } from 'path';
 import micromatch from 'micromatch';
-import { CommandExecutor, type CommandSandboxSettings } from '@gemini-cowork/sandbox';
+import { CommandExecutor, type CommandSandboxSettings } from '@cowork/sandbox';
 import type {
   SandboxBackendProtocol,
   FileInfo,

@@ -2151,10 +2151,10 @@ Use this file as the authoritative implementation diary.
   - None.
 - Decisions made:
   - Executed verification sweep without reopening scope:
-    - `pnpm --filter @gemini-cowork/sidecar typecheck`
-    - `pnpm --filter @gemini-cowork/desktop typecheck`
-    - `pnpm --filter @gemini-cowork/sidecar test -- src/benchmark/runner.regression.test.ts src/benchmark/suites/twin-track-core.test.ts src/agent-runner.release-gate.test.ts`
-    - `pnpm --filter @gemini-cowork/desktop exec playwright test e2e/onboarding.spec.ts e2e/reliability.spec.ts e2e/memory.spec.ts e2e/branching.spec.ts e2e/workflow.spec.ts e2e/browser-operator.spec.ts --project=chromium --config=playwright.reliability.local.config.ts`
+    - `pnpm --filter @cowork/sidecar typecheck`
+    - `pnpm --filter @cowork/desktop typecheck`
+    - `pnpm --filter @cowork/sidecar test -- src/benchmark/runner.regression.test.ts src/benchmark/suites/twin-track-core.test.ts src/agent-runner.release-gate.test.ts`
+    - `pnpm --filter @cowork/desktop exec playwright test e2e/onboarding.spec.ts e2e/reliability.spec.ts e2e/memory.spec.ts e2e/branching.spec.ts e2e/workflow.spec.ts e2e/browser-operator.spec.ts --project=chromium --config=playwright.reliability.local.config.ts`
     - `pnpm audit --audit-level high --prod`
 - Risks opened:
   - No high/critical security findings; remaining advisories are low/moderate maintenance items.

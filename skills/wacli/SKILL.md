@@ -4,7 +4,7 @@ description: "Send WhatsApp messages to other people or search/sync WhatsApp his
 homepage: https://wacli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📱",
     "version": "1.0.0",
     "category": "custom"

@@ -4,7 +4,7 @@ description: "Monitor blogs and RSS/Atom feeds for updates using the blogwatcher
 homepage: https://github.com/Hyaxia/blogwatcher
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📰",
     "version": "1.0.0",
     "category": "research"

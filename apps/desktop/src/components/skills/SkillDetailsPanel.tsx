@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect } from 'react';
 import { X, ExternalLink, Download, Trash2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';

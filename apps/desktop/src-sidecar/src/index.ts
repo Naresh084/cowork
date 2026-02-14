@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { runClaudePermissionMcpServer } from './external-cli/providers/claude-permission-mcp-server.js';
 import { bootstrapRuntime } from './runtime/bootstrap.js';
 import { StdioRuntimeTransport } from './runtime/transports/stdio.js';

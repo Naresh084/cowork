@@ -1,10 +1,13 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthenticationError,
   NetworkError,
   ProviderError,
   type Message,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 import type { ProviderConfig } from '../types.js';
 import { GeminiProvider } from './gemini-provider.js';
 import * as modelCatalog from './models.js';

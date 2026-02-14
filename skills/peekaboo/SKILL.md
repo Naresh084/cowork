@@ -4,7 +4,7 @@ description: "Capture and automate macOS UI with the Peekaboo CLI."
 homepage: https://peekaboo.boo
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "👀",
     "version": "1.0.0",
     "category": "creative"

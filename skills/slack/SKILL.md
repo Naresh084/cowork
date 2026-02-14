@@ -3,7 +3,7 @@ name: slack
 description: "Use when you need to control Slack from Gemini Cowork via the slack tool, including reacting to messages or pinning/unpinning items in Slack channels or DMs."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "version": "1.0.0",
     "emoji": "💬",
     "category": "productivity",

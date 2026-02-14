@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { cn } from '@/lib/utils';
-import type { PlatformType } from '@gemini-cowork/shared';
+import type { PlatformType } from '@cowork/shared';
 
 interface PlatformStatusBadgeProps {
   platform: PlatformType;

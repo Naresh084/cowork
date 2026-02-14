@@ -3,7 +3,7 @@ name: skill-creator
 description: "Create or update AgentSkills. Use when designing, structuring, or packaging skills with scripts, references, and assets."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🛠️",
     "version": "1.0.0",
     "category": "custom"

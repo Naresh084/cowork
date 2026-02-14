@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import type { StartupIssue } from '../stores/app-store';
 
 const AUTH_KEYWORDS = ['api key', 'unauthorized', 'authentication', '401', 'forbidden', 'invalid key'];

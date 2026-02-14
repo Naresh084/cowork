@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState } from 'react';
 import { Calendar, Play, Clock, ExternalLink, Pause, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -6,7 +9,7 @@ import { useCronStore } from '../../stores/cron-store';
 import { useAppStore } from '../../stores/app-store';
 import { motion } from 'framer-motion';
 import { WORKFLOWS_ENABLED } from '@/lib/feature-flags';
-import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@gemini-cowork/shared';
+import type { CronJob, WorkflowSchedule, WorkflowScheduledTaskSummary } from '@cowork/shared';
 
 function formatNextRun(timestamp?: number): string {
   if (!timestamp) return 'Not scheduled';

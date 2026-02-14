@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Building2,
@@ -25,7 +28,7 @@ import { TelegramSettings } from './TelegramSettings';
 import { DiscordSettings } from './DiscordSettings';
 import { IMessageSettings } from './IMessageSettings';
 import { TeamsSettings } from './TeamsSettings';
-import type { PlatformType } from '@gemini-cowork/shared';
+import type { PlatformType } from '@cowork/shared';
 
 type IntegrationTabId =
   | 'general'

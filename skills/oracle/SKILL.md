@@ -4,7 +4,7 @@ description: "Best practices for using the oracle CLI (prompt + file bundling, e
 homepage: https://askoracle.dev
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🔮",
     "version": "1.0.0",
     "category": "custom"

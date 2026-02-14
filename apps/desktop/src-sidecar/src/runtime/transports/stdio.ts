@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { createInterface, type Interface } from 'node:readline';
 import type { IPCRequest } from '../../types.js';
 import type { RuntimeRequestHandler, RuntimeTransport } from '../transport.js';

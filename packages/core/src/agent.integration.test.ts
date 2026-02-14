@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createAgent } from './agent.js';
@@ -7,8 +10,8 @@ import type {
   GenerateResponse,
   StreamChunk,
   StreamGenerateRequest,
-} from '@gemini-cowork/providers';
-import type { Message, MessageContentPart } from '@gemini-cowork/shared';
+} from '@cowork/providers';
+import type { Message, MessageContentPart } from '@cowork/shared';
 
 function createProvider(generateImpl: (request: GenerateRequest) => Promise<GenerateResponse>): AIProvider {
   return {

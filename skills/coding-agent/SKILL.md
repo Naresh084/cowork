@@ -3,7 +3,7 @@ name: coding-agent
 description: "Run Codex CLI, Claude Code, OpenCode, or Pi Coding Agent via background process for programmatic control."
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🤖",
     "version": "1.0.0",
     "category": "development"
@@ -235,7 +235,7 @@ git worktree remove /tmp/issue-99
 6. **vanilla for reviewing** - no special flags needed
 7. **Parallel is OK** - run many Codex processes at once for batch work
 8. **NEVER start Codex in ~/clawd/** - it'll read your soul docs and get weird ideas about the org chart!
-9. **NEVER checkout branches in ~/Projects/geminicowork/** - that's the LIVE Gemini Cowork instance!
+9. **NEVER checkout branches in ~/Projects/cowork/** - that's the LIVE Gemini Cowork instance!
 
 ---
 
@@ -263,7 +263,7 @@ For long-running background tasks, append a wake trigger to your prompt so Gemin
 ... your task here.
 
 When completely finished, run this command to notify me:
-geminicowork gateway wake --text "Done: [brief summary of what was built]" --mode now
+cowork gateway wake --text "Done: [brief summary of what was built]" --mode now
 ```
 
 **Example:**
@@ -271,7 +271,7 @@ geminicowork gateway wake --text "Done: [brief summary of what was built]" --mod
 ```bash
 bash pty:true workdir:~/project background:true command:"codex --yolo exec 'Build a REST API for todos.
 
-When completely finished, run: geminicowork gateway wake --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
+When completely finished, run: cowork gateway wake --text \"Done: Built todos REST API with CRUD endpoints\" --mode now'"
 ```
 
 This triggers an immediate wake event — Skippy gets pinged in seconds, not 10 minutes.

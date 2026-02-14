@@ -95,10 +95,10 @@ packages/
 pnpm test
 
 # Run sidecar tests
-pnpm --filter @gemini-cowork/sidecar test
+pnpm --filter @cowork/sidecar test
 
 # Run specific test file
-pnpm --filter @gemini-cowork/sidecar test -- src/agent-runner.run-state.test.ts
+pnpm --filter @cowork/sidecar test -- src/agent-runner.run-state.test.ts
 ```
 
 ## Reporting Issues

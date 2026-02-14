@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 const TEMPLATE_RE = /\{\{\s*([a-zA-Z0-9_.\[\]]+)\s*\}\}/g;
 
 export function getPathValue(source: Record<string, unknown>, path: string): unknown {

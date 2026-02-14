@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Connector Service
  *
@@ -17,7 +20,7 @@ import {
   type ConnectorSource,
   type ConnectorSourceType,
   type ConnectorCategory,
-} from '@gemini-cowork/shared';
+} from '@cowork/shared';
 
 // Debug flag for verbose connector logging
 const DEBUG_CONNECTORS = process.env.DEBUG_CONNECTORS === 'true';

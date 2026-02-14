@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { MessageList } from './MessageList';
 import { SessionHeader } from './SessionHeader';

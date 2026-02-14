@@ -1,5 +1,8 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it, vi } from 'vitest';
-import type { ToolContext } from '@gemini-cowork/core';
+import type { ToolContext } from '@cowork/core';
 import { createNotificationTools } from './notification-tools.js';
 
 const context: ToolContext = {

@@ -4,7 +4,7 @@ description: "Search for places (restaurants, cafes, etc.) via Google Places API
 homepage: https://github.com/Hyaxia/local_places
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🗺️",
     "version": "1.0.0",
     "category": "custom"

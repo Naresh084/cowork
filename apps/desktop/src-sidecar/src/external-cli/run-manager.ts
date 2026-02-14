@@ -1,7 +1,10 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { EventEmitter } from 'events';
 import { mkdir, stat } from 'fs/promises';
 import { resolve } from 'path';
-import { generateId } from '@gemini-cowork/shared';
+import { generateId } from '@cowork/shared';
 import { parseNaturalLanguageResponse } from './nl-response-parser.js';
 import { ExternalCliRunStateStore } from './run-state-store.js';
 import { ExternalCliDiscoveryService } from './discovery-service.js';

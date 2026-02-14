@@ -9,7 +9,7 @@ category: utility
 icon: help-circle
 priority: 90
 metadata:
-  author: gemini-cowork
+  author: cowork
   version: "1.0.0"
   emoji: ❓
 ---

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -29,12 +32,12 @@ function ensureBuildArtifacts() {
   const requiredArtifacts = [
     {
       path: join(rootDir, 'apps', 'desktop', 'src-sidecar', 'dist', 'index.js'),
-      command: ['--filter', '@gemini-cowork/sidecar', 'build'],
+      command: ['--filter', '@cowork/sidecar', 'build'],
       description: 'Building desktop sidecar',
     },
     {
       path: join(rootDir, 'packages', 'shared', 'dist', 'index.js'),
-      command: ['--filter', '@gemini-cowork/shared', 'build'],
+      command: ['--filter', '@cowork/shared', 'build'],
       description: 'Building shared package',
     },
   ];

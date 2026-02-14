@@ -35,8 +35,8 @@ sudo apt-get install -y \
 
 ```bash
 # Clone repository
-git clone https://github.com/AiCodingBattle/geminicowork.git
-cd geminicowork
+git clone https://github.com/Naresh084/cowork.git
+cd cowork
 
 # Install dependencies
 pnpm install
@@ -80,7 +80,7 @@ git push origin v0.1.0
 ## Project Structure
 
 ```
-geminicowork/
+cowork/
 ├── apps/
 │   └── desktop/
 │       ├── src/              # React frontend
@@ -161,12 +161,12 @@ Workflow-focused validation:
 
 ```bash
 # Sidecar workflow logic
-pnpm --filter @gemini-cowork/sidecar typecheck
-pnpm --filter @gemini-cowork/sidecar test
+pnpm --filter @cowork/sidecar typecheck
+pnpm --filter @cowork/sidecar test
 
 # Desktop workflow UI and stores
-pnpm --filter @gemini-cowork/desktop typecheck
-pnpm --filter @gemini-cowork/desktop test
+pnpm --filter @cowork/desktop typecheck
+pnpm --filter @cowork/desktop test
 
 # Rust command bridge
 cd apps/desktop/src-tauri && cargo check
@@ -192,7 +192,7 @@ cd apps/desktop/src-tauri && cargo check
 Generate signing keys for the updater:
 ```bash
 # Generate key pair
-tauri signer generate -w ~/.tauri/geminicowork.key
+tauri signer generate -w ~/.tauri/cowork.key
 ```
 
 Add to GitHub repository secrets:

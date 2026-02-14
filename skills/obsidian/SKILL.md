@@ -4,7 +4,7 @@ description: "Work with Obsidian vaults (plain Markdown notes) and automate via 
 homepage: https://help.obsidian.md
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "💎",
     "version": "1.0.0",
     "category": "productivity"

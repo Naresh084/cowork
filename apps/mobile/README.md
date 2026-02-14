@@ -14,7 +14,7 @@ Companion iOS/Android app for remote Cowork access via QR pairing.
 ## Dev
 
 ```bash
-pnpm --filter @gemini-cowork/mobile dev
+pnpm --filter @cowork/mobile dev
 ```
 
 ## Pairing flow

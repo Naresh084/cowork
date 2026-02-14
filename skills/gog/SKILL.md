@@ -4,7 +4,7 @@ description: "Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets,
 homepage: https://gogcli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "🎮",
     "version": "1.0.0",
     "category": "development"

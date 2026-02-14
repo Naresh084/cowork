@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import React, { Suspense } from 'react';
 import { cn } from '../../lib/utils';
 import { motion } from 'framer-motion';

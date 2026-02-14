@@ -9,7 +9,7 @@ category: setup
 icon: file-plus
 priority: 100
 metadata:
-  author: gemini-cowork
+  author: cowork
   version: "1.0.0"
   emoji: 🚀
 ---

@@ -4,7 +4,7 @@ description: "Reorder Foodora orders + track ETA/status with ordercli. Never con
 homepage: https://ordercli.sh
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "version": "1.0.0",
     "emoji": "🍔",
     "category": "automation",

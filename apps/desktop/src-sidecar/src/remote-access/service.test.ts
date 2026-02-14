@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -60,7 +63,7 @@ describe('remote-access initialize', () => {
     service.tunnelHealthRefreshPromise = deferred.promise;
     const loadConfigSpy = vi.spyOn(service, 'loadConfig').mockImplementation(async () => undefined);
 
-    const initializePromise = service.initialize('/tmp/geminicowork-sidecar-test');
+    const initializePromise = service.initialize('/tmp/cowork-sidecar-test');
     const resolution = await Promise.race([
       initializePromise.then(() => 'initialized'),
       new Promise<'timed_out'>((resolve) => {

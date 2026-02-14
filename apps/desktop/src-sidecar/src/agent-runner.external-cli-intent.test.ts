@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { describe, expect, it } from 'vitest';
 import { AgentRunner } from './agent-runner.js';
 
@@ -55,7 +58,7 @@ describe('agent-runner external cli intent guard', () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     const session = createSessionWithUserMessages([
       'Please use Codex CLI for this task.',
-      '/Users/naresh/Work/Personal/geminicowork',
+      '/Users/naresh/Work/Personal/cowork',
     ]);
 
     expect(runner.shouldAllowExternalCliLaunch(session, 'start_codex_cli_run')).toBe(true);
@@ -65,7 +68,7 @@ describe('agent-runner external cli intent guard', () => {
     const runner = new AgentRunner() as unknown as MutableRunner;
     const session = createSessionWithUserMessages([
       'Use web search to find this profile.',
-      '/Users/naresh/Work/Personal/geminicowork',
+      '/Users/naresh/Work/Personal/cowork',
     ]);
 
     expect(runner.shouldAllowExternalCliLaunch(session, 'start_codex_cli_run')).toBe(false);

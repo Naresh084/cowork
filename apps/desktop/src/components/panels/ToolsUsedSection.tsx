@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { useMemo } from 'react';
 import { Wrench } from 'lucide-react';
 import { useChatStore, type ToolExecution } from '../../stores/chat-store';
@@ -70,7 +73,7 @@ export function ToolsUsedSection() {
   const nonDefaultTools = useMemo(() => {
     const seen = new Set<string>();
     const toolItems = chatItems.filter(
-      (ci): ci is import('@gemini-cowork/shared').ToolStartItem => ci.kind === 'tool_start'
+      (ci): ci is import('@cowork/shared').ToolStartItem => ci.kind === 'tool_start'
     );
     const asToolExecutions: ToolExecution[] = toolItems
       .filter(item => isNonDefaultTool(item.name))

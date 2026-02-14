@@ -4,7 +4,7 @@ description: "Notion API for creating and managing pages, databases, and blocks.
 homepage: https://developers.notion.com
 license: MIT
 metadata: {
-    "author": "geminicowork",
+    "author": "cowork",
     "emoji": "📝",
     "version": "1.0.0",
     "category": "productivity"

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import '@fontsource/sora/400.css';

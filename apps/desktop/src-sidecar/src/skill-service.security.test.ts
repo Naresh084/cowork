@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import * as fs from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import * as os from 'os';

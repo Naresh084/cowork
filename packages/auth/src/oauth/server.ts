@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import type { OAuthCallbackResult } from '../types.js';
 import { OAUTH_CALLBACK_PORT, OAUTH_REDIRECT_URI } from '../types.js';

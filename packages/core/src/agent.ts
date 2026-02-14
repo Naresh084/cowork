@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { z } from 'zod';
 import type {
   Agent,
@@ -11,9 +14,9 @@ import type {
   ToolContext,
   PermissionHandler,
 } from './types.js';
-import type { Message, ToolDefinition, PermissionDecision, MessageContentPart } from '@gemini-cowork/shared';
-import { generateId, generateMessageId, now } from '@gemini-cowork/shared';
-import type { AIProvider, GenerateRequest } from '@gemini-cowork/providers';
+import type { Message, ToolDefinition, PermissionDecision, MessageContentPart } from '@cowork/shared';
+import { generateId, generateMessageId, now } from '@cowork/shared';
+import type { AIProvider, GenerateRequest } from '@cowork/providers';
 
 // ============================================================================
 // Cowork Agent

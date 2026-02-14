@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { AlertTriangle, CheckCircle2, ClipboardCopy, Info } from 'lucide-react';
 import { toast } from '@/components/ui/Toast';
 import type { RemoteDiagnosticEntry } from '@/stores/remote-access-store';

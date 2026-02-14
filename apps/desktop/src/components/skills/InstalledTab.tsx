@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { Package } from 'lucide-react';
 import { useSkillStore } from '../../stores/skill-store';
 import { useSettingsStore } from '../../stores/settings-store';

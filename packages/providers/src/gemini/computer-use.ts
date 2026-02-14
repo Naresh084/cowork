@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 import { GoogleGenAI, Environment } from '@google/genai';
 import { chromium, type Browser, type Page } from 'playwright';
 

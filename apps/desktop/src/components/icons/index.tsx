@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
 /**
  * Centralized icon exports from lucide-react.
  * Import icons from this file for consistent usage across the app.

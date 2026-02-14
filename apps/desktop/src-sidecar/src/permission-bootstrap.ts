@@ -1,4 +1,7 @@
-import type { PermissionDecision } from '@gemini-cowork/shared';
+// Copyright (c) 2026 Naresh. All rights reserved.
+// Licensed under the MIT License. See LICENSE file for details.
+
+import type { PermissionDecision } from '@cowork/shared';
 import type { ApprovalMode } from './types.js';
 
 export interface SessionPermissionBootstrap {
