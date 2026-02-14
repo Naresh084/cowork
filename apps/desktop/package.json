@@ -21,7 +21,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@assistant-ui/react": "^0.7.0",
+    "@assistant-ui/react": "^0.12.10",
     "@cyntler/react-doc-viewer": "^1.17.1",
     "@fontsource/jetbrains-mono": "^5.0.19",
     "@fontsource/sora": "^5.0.20",
@@ -34,13 +34,13 @@
     "@tauri-apps/plugin-notification": "^2.0.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-process": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.0.0",
     "@xpert-ai/a2ui-react": "^0.0.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^11.15.0",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^0.564.0",
     "mammoth": "^1.11.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -54,7 +54,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.40.0",
+    "@playwright/test": "^1.58.2",
     "@tauri-apps/cli": "^2.10.0",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^14.2.0",

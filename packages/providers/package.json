@@ -24,9 +24,9 @@
   "dependencies": {
     "@gemini-cowork/shared": "workspace:*",
     "@gemini-cowork/auth": "workspace:*",
-    "@google/generative-ai": "^0.21.0",
-    "@google/genai": "^1.33.0",
-    "playwright": "^1.40.0",
+    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.41.0",
+    "playwright": "^1.58.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
