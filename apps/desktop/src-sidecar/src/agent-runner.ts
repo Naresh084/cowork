@@ -356,7 +356,7 @@ const FALLBACK_SOUL_PROFILE: RuntimeSoulProfile = {
 
 const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
   google: {
-    imageGeneration: 'imagen-4.0-generate-001',
+    imageGeneration: 'gemini-3-pro-image-preview',
     videoGeneration: 'veo-3.1-generate-preview',
     computerUse: 'gemini-3-flash-preview',
     deepResearchAgent: 'deep-research-pro-preview-12-2025',

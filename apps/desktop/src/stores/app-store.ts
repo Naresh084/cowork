@@ -8,8 +8,8 @@ export type AppView = 'chat' | 'settings' | 'workflows';
 export type SettingsTab =
   | 'provider'
   | 'media'
+  | 'specialized'
   | 'runtime'
-  | 'benchmarks'
   | 'integrations'
   | 'souls'
   | 'remote';

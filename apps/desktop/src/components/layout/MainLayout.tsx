@@ -29,9 +29,9 @@ const SettingsView = React.lazy(() => import('../settings/SettingsView').then(m 
 const SETTINGS_TAB_LABELS = {
   provider: 'provider',
   media: 'media',
+  specialized: 'specialized models',
   capabilities: 'capabilities',
   runtime: 'runtime',
-  benchmarks: 'benchmarks',
   integrations: 'integrations',
   remote: 'remote',
   souls: 'souls',

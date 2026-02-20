@@ -1,23 +1,15 @@
 // Copyright (c) 2026 Naresh. All rights reserved.
 // Licensed under the MIT License. See LICENSE file for details.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, Copy, Eye, EyeOff, Key, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  BASE_URL_EDITABLE_PROVIDERS,
-  PROVIDERS,
-  useAuthStore,
-  type ProviderId,
-} from '@/stores/auth-store';
+import { useAuthStore } from '@/stores/auth-store';
 import { resolveActiveSoul, useSettingsStore } from '@/stores/settings-store';
 import { toast } from '@/components/ui/Toast';
-import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
 import { useCapabilityStore } from '@/stores/capability-store';
 
-const PROVIDER_LABELS: Record<ProviderId, string> = {
-  google: 'Google',
-};
+const PROVIDER_LABEL = 'Google';
 
 function maskKey(value: string | null): string {
   if (!value) return 'Not configured';
@@ -188,68 +180,25 @@ function KeyCard({ title, description, value, placeholder, isSaving, onSave, onC
 
 export function ApiKeysSettings() {
   const {
-    activeProvider,
     providerApiKeys,
-    providerBaseUrls,
     isLoading,
     setProviderApiKey,
     clearProviderApiKey,
     validateProviderConnection,
     applyRuntimeConfig,
   } = useAuthStore();
-  const {
-    setActiveProvider: setProviderInSettings,
-    setProviderBaseUrl,
-    fetchProviderModels,
-    commandSandbox,
-    setCommandSandbox,
-  } = useSettingsStore();
+  const { fetchProviderModels } = useSettingsStore();
   const refreshCapabilitySnapshot = useCapabilityStore((state) => state.refreshSnapshot);
 
-  const activeProviderKey = providerApiKeys[activeProvider] || null;
-  const providerBaseUrl = providerBaseUrls[activeProvider] || '';
-  const baseUrlEditable = BASE_URL_EDITABLE_PROVIDERS.includes(activeProvider);
-
-  const [baseUrlDraft, setBaseUrlDraft] = useState(providerBaseUrl);
-  const [sandboxModeDraft, setSandboxModeDraft] = useState(commandSandbox.mode);
-  const [allowNetworkDraft, setAllowNetworkDraft] = useState(commandSandbox.allowNetwork);
-  const [allowProcessSpawnDraft, setAllowProcessSpawnDraft] = useState(commandSandbox.allowProcessSpawn);
-  const [allowedPathsDraft, setAllowedPathsDraft] = useState(commandSandbox.allowedPaths.join('\n'));
-  const [deniedPathsDraft, setDeniedPathsDraft] = useState(commandSandbox.deniedPaths.join('\n'));
-  const [trustedCommandsDraft, setTrustedCommandsDraft] = useState(commandSandbox.trustedCommands.join('\n'));
-  const [timeoutDraft, setTimeoutDraft] = useState(String(commandSandbox.maxExecutionTimeMs));
-  const [outputBytesDraft, setOutputBytesDraft] = useState(String(commandSandbox.maxOutputBytes));
-
-  useEffect(() => {
-    setSandboxModeDraft(commandSandbox.mode);
-    setAllowNetworkDraft(commandSandbox.allowNetwork);
-    setAllowProcessSpawnDraft(commandSandbox.allowProcessSpawn);
-    setAllowedPathsDraft(commandSandbox.allowedPaths.join('\n'));
-    setDeniedPathsDraft(commandSandbox.deniedPaths.join('\n'));
-    setTrustedCommandsDraft(commandSandbox.trustedCommands.join('\n'));
-    setTimeoutDraft(String(commandSandbox.maxExecutionTimeMs));
-    setOutputBytesDraft(String(commandSandbox.maxOutputBytes));
-  }, [commandSandbox]);
-
-  const parseList = (value: string) =>
-    value
-      .split(/\r?\n|,/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-
-  const handleProviderSwitch = async (provider: ProviderId) => {
-    await setProviderInSettings(provider);
-    setBaseUrlDraft(useAuthStore.getState().providerBaseUrls[provider] || '');
-    await refreshCapabilitySnapshot();
-  };
+  const activeProviderKey = providerApiKeys.google || null;
 
   const handleProviderKeySave = async (value: string) => {
-    const isValid = await validateProviderConnection(activeProvider, value, providerBaseUrls[activeProvider]);
+    const isValid = await validateProviderConnection('google', value);
     if (!isValid) {
-      throw new Error(`Failed to validate ${PROVIDER_LABELS[activeProvider]} connection`);
+      throw new Error(`Failed to validate ${PROVIDER_LABEL} connection`);
     }
-    await setProviderApiKey(activeProvider, value);
-    await fetchProviderModels(activeProvider);
+    await setProviderApiKey('google', value);
+    await fetchProviderModels('google');
     const settingsState = useSettingsStore.getState();
     const activeSoul = resolveActiveSoul(
       settingsState.souls,
@@ -257,7 +206,7 @@ export function ApiKeysSettings() {
       settingsState.defaultSoulId,
     );
     await applyRuntimeConfig({
-      activeProvider,
+      activeProvider: 'google',
       providerBaseUrls: settingsState.providerBaseUrls,
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
@@ -267,79 +216,25 @@ export function ApiKeysSettings() {
     await refreshCapabilitySnapshot();
   };
 
-  const handleBaseUrlSave = async () => {
-    await setProviderBaseUrl(activeProvider, baseUrlDraft);
-    await fetchProviderModels(activeProvider);
-    await refreshCapabilitySnapshot();
-  };
-
-  const handleSaveSandbox = async () => {
-    if (
-      sandboxModeDraft === 'danger-full-access' &&
-      commandSandbox.mode !== 'danger-full-access'
-    ) {
-      const confirmed = window.confirm(
-        'Enable danger-full-access? This removes sandbox protections for command execution.',
-      );
-      if (!confirmed) return;
-    }
-
-    await setCommandSandbox({
-      mode: sandboxModeDraft,
-      allowNetwork: allowNetworkDraft,
-      allowProcessSpawn: allowProcessSpawnDraft,
-      allowedPaths: parseList(allowedPathsDraft),
-      deniedPaths: parseList(deniedPathsDraft),
-      trustedCommands: parseList(trustedCommandsDraft),
-      maxExecutionTimeMs: Number(timeoutDraft) || commandSandbox.maxExecutionTimeMs,
-      maxOutputBytes: Number(outputBytesDraft) || commandSandbox.maxOutputBytes,
-    });
-    await refreshCapabilitySnapshot();
-    toast.success('Command sandbox settings saved');
-  };
-
   return (
     <div className="space-y-4" data-tour-id="settings-provider-section">
       <div>
-        <h3 className="text-sm font-medium text-white/90">Provider Settings</h3>
+        <h3 className="text-sm font-medium text-white/90">API Key</h3>
         <p className="mt-1 text-xs text-white/40">
-          Choose your active chat provider and configure provider-specific credentials and base URL.
+          Configure the Google provider key used by chat and tool execution.
         </p>
       </div>
 
-      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-xs text-white/55 uppercase tracking-wide">Active provider</label>
-          <SettingHelpPopover settingId="provider.activeProvider" />
-        </div>
-        <select
-          value={activeProvider}
-          onChange={(event) => void handleProviderSwitch(event.target.value as ProviderId)}
-          className="app-select"
-        >
-          {PROVIDERS.map((provider) => (
-            <option key={provider} value={provider}>
-              {PROVIDER_LABELS[provider]}
-            </option>
-          ))}
-        </select>
-        <p className="text-[11px] text-white/45">Used by tools: chat, web_search, web_fetch, computer_use</p>
-      </div>
-
       <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-white/45">Key controls provider authentication for all provider-backed tools.</p>
-          <SettingHelpPopover settingId="provider.apiKey" />
-        </div>
         <KeyCard
-          title={`${PROVIDER_LABELS[activeProvider]} Provider Key`}
+          title={`${PROVIDER_LABEL} Provider Key`}
           description="Used for chat, tool calls, and provider-native capabilities."
           value={activeProviderKey}
-          placeholder={`Enter ${PROVIDER_LABELS[activeProvider]} API key`}
+          placeholder={`Enter ${PROVIDER_LABEL} API key`}
           isSaving={isLoading}
           onSave={handleProviderKeySave}
           onClear={async () => {
-            await clearProviderApiKey(activeProvider);
+            await clearProviderApiKey('google');
             const settingsState = useSettingsStore.getState();
             const activeSoul = resolveActiveSoul(
               settingsState.souls,
@@ -347,7 +242,7 @@ export function ApiKeysSettings() {
               settingsState.defaultSoulId,
             );
             await applyRuntimeConfig({
-              activeProvider,
+              activeProvider: 'google',
               providerBaseUrls: settingsState.providerBaseUrls,
               mediaRouting: settingsState.mediaRouting,
               specializedModels: settingsState.specializedModelsV2,
@@ -357,190 +252,11 @@ export function ApiKeysSettings() {
             await refreshCapabilitySnapshot();
           }}
         />
-        <p className="text-[11px] text-white/45">Used by tools: chat, web_search, google_grounded_search, computer_use</p>
-      </div>
-
-      {baseUrlEditable ? (
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
-          <div>
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-medium text-white/90">Provider Base URL</h4>
-              <SettingHelpPopover settingId="provider.baseUrl" />
-            </div>
-            <p className="mt-1 text-xs text-white/45">
-              Override API base URL for compatible endpoints.
-            </p>
-          </div>
-          <input
-            type="text"
-            value={baseUrlDraft}
-            onChange={(event) => setBaseUrlDraft(event.target.value)}
-            placeholder="https://..."
-            className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-          />
-          <button
-            type="button"
-            onClick={() => void handleBaseUrlSave()}
-            className="px-3 py-2 rounded-lg text-sm bg-[#1D4ED8] text-white hover:bg-[#3B82F6] transition-colors"
-          >
-            Save Base URL
-          </button>
-          <p className="text-[11px] text-white/45">Used by tools: chat, provider-native web tools, computer_use</p>
-        </div>
-      ) : null}
-
-      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-medium text-white/90">Chat Model Selection</h4>
-          <SettingHelpPopover settingId="provider.chatModel" />
-        </div>
-        <p className="text-xs text-white/45">
-          Choose the default model from the chat input model selector. Model changes are applied to new sessions.
-        </p>
-        <p className="text-[11px] text-white/45">Used by tools: chat, planning, provider-native reasoning tools</p>
       </div>
 
       <div className="p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
         <p className="text-xs text-[#93C5FD]">
-          Provider key changes usually apply immediately. Provider/base URL/model changes can require a new chat
-          session to fully switch active runtime clients.
-        </p>
-      </div>
-
-      <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-medium text-white/90">Command Sandboxing</h4>
-          <SettingHelpPopover settingId="provider.commandSandbox.mode" />
-        </div>
-        <p className="text-xs text-white/45">
-          Controls hard command execution limits. Applies immediately for subsequent shell tool calls.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Sandbox mode</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.mode" />
-            </div>
-            <select
-              value={sandboxModeDraft}
-              onChange={(event) => setSandboxModeDraft(event.target.value as typeof sandboxModeDraft)}
-              className="app-select"
-            >
-              <option value="read-only">read-only</option>
-              <option value="workspace-write">workspace-write</option>
-              <option value="danger-full-access">danger-full-access</option>
-            </select>
-          </label>
-
-          <div className="grid grid-cols-1 gap-2">
-            <label className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0B0C10] border border-white/[0.08] text-sm text-white/80">
-              <span className="inline-flex items-center gap-2">
-                Network access
-                <SettingHelpPopover settingId="provider.commandSandbox.allowNetwork" />
-              </span>
-              <input
-                type="checkbox"
-                checked={allowNetworkDraft}
-                onChange={(event) => setAllowNetworkDraft(event.target.checked)}
-                className="accent-[#1D4ED8]"
-              />
-            </label>
-            <label className="flex items-center justify-between px-3 py-2 rounded-lg bg-[#0B0C10] border border-white/[0.08] text-sm text-white/80">
-              <span className="inline-flex items-center gap-2">
-                Process spawn
-                <SettingHelpPopover settingId="provider.commandSandbox.allowProcessSpawn" />
-              </span>
-              <input
-                type="checkbox"
-                checked={allowProcessSpawnDraft}
-                onChange={(event) => setAllowProcessSpawnDraft(event.target.checked)}
-                className="accent-[#1D4ED8]"
-              />
-            </label>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Allowed paths</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.allowedPaths" />
-            </div>
-            <textarea
-              value={allowedPathsDraft}
-              onChange={(event) => setAllowedPathsDraft(event.target.value)}
-              rows={4}
-              placeholder="/path/one&#10;/path/two"
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            />
-          </label>
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Denied paths</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.deniedPaths" />
-            </div>
-            <textarea
-              value={deniedPathsDraft}
-              onChange={(event) => setDeniedPathsDraft(event.target.value)}
-              rows={4}
-              placeholder="/etc&#10;/System&#10;/usr"
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            />
-          </label>
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Trusted commands</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.trustedCommands" />
-            </div>
-            <textarea
-              value={trustedCommandsDraft}
-              onChange={(event) => setTrustedCommandsDraft(event.target.value)}
-              rows={4}
-              placeholder="git status&#10;git diff&#10;ls"
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            />
-          </label>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Max execution time (ms)</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.maxExecutionTimeMs" />
-            </div>
-            <input
-              type="number"
-              min={1000}
-              value={timeoutDraft}
-              onChange={(event) => setTimeoutDraft(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            />
-          </label>
-          <label className="space-y-1">
-            <div className="flex items-center justify-between gap-2 text-xs text-white/55 uppercase tracking-wide">
-              <span>Max output bytes</span>
-              <SettingHelpPopover settingId="provider.commandSandbox.maxOutputBytes" />
-            </div>
-            <input
-              type="number"
-              min={1024}
-              value={outputBytesDraft}
-              onChange={(event) => setOutputBytesDraft(event.target.value)}
-              className="w-full px-3 py-2 rounded-lg text-sm bg-[#0B0C10] border border-white/[0.08] text-white/90 focus:outline-none focus:border-[#1D4ED8]/50"
-            />
-          </label>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void handleSaveSandbox()}
-          className="px-3 py-2 rounded-lg text-sm bg-[#1D4ED8] text-white hover:bg-[#3B82F6] transition-colors"
-        >
-          Save Command Sandbox
-        </button>
-        <p className="text-[11px] text-white/45">
-          Tool impact: execute/Bash shell tools. Changes apply immediately and usually do not require a new session.
+          API key changes apply immediately. Start a new chat session if you want a clean runtime reset.
         </p>
       </div>
     </div>

@@ -275,15 +275,13 @@ function KeyField({
 }
 
 export function GeneralSettings() {
+  const googleImageModelOptions = ['gemini-3-pro-image-preview', 'gemini-2.5-flash-image'] as const;
   const routing = useMediaRoutingSettings();
   const specializedModelsV2 = useSpecializedModelsV2();
   const { setMediaRouting, updateSpecializedModelV2, updateSetting } = useSettingsStore();
   const {
-    googleApiKey,
     falApiKey,
     isLoading,
-    setGoogleApiKey,
-    clearGoogleApiKey,
     setFalApiKey,
     clearFalApiKey,
     applyRuntimeConfig,
@@ -356,24 +354,39 @@ export function GeneralSettings() {
       .slice(0, 50);
   }, [falCatalog, falSearch]);
 
-  const falEnabledModels = useMemo(
-    () => localModels.fal.enabledModels || [localModels.fal.imageGeneration, localModels.fal.videoGeneration],
-    [localModels.fal.enabledModels, localModels.fal.imageGeneration, localModels.fal.videoGeneration],
+  const falCatalogIds = useMemo(() => new Set(falCatalog.map((model) => model.id)), [falCatalog]);
+
+  const falEnabledModels = useMemo(() => {
+    if (!falApiKey) return [];
+    const raw = Array.isArray(localModels.fal.enabledModels) ? localModels.fal.enabledModels : [];
+    const unique = Array.from(new Set(raw.map((modelId) => modelId.trim()).filter(Boolean)));
+    return unique.filter((modelId) => falCatalogIds.has(modelId));
+  }, [falApiKey, localModels.fal.enabledModels, falCatalogIds]);
+
+  const falImageCatalogOptions = useMemo(
+    () => falCatalog.filter((model) => model.capability !== 'video').map((model) => model.id),
+    [falCatalog],
   );
 
-  const falImageCandidates = useMemo(() => {
-    const known = new Set(falEnabledModels);
-    return falCatalog
-      .filter((model) => known.has(model.id) && model.capability !== 'video')
-      .map((model) => model.id);
-  }, [falCatalog, falEnabledModels]);
+  const falVideoCatalogOptions = useMemo(
+    () => falCatalog.filter((model) => model.capability !== 'image').map((model) => model.id),
+    [falCatalog],
+  );
 
-  const falVideoCandidates = useMemo(() => {
-    const known = new Set(falEnabledModels);
-    return falCatalog
-      .filter((model) => known.has(model.id) && model.capability !== 'image')
-      .map((model) => model.id);
-  }, [falCatalog, falEnabledModels]);
+  const usesGoogleImage = localRouting.imageBackend === 'google';
+  const usesGoogleVideo = localRouting.videoBackend === 'google';
+  const usesGoogleModels = usesGoogleImage || usesGoogleVideo;
+  const usesFalImage = localRouting.imageBackend === 'fal';
+  const usesFalVideo = localRouting.videoBackend === 'fal';
+  const usesFalModels = usesFalImage || usesFalVideo;
+  const selectedFalImageModel =
+    falImageCatalogOptions.includes(localModels.fal.defaultImageModelId || localModels.fal.imageGeneration)
+      ? (localModels.fal.defaultImageModelId || localModels.fal.imageGeneration)
+      : (falImageCatalogOptions[0] || '');
+  const selectedFalVideoModel =
+    falVideoCatalogOptions.includes(localModels.fal.defaultVideoModelId || localModels.fal.videoGeneration)
+      ? (localModels.fal.defaultVideoModelId || localModels.fal.videoGeneration)
+      : (falVideoCatalogOptions[0] || '');
 
   const applyRuntime = async () => {
     const state = useSettingsStore.getState();
@@ -397,17 +410,40 @@ export function GeneralSettings() {
         await setMediaRouting(localRouting);
       }
 
-      const keysToSyncGoogle: Array<keyof SpecializedModelsV2['google']> = ['imageGeneration', 'videoGeneration'];
-      const keysToSyncFal: Array<keyof SpecializedModelsV2['fal']> = ['imageGeneration', 'videoGeneration'];
+      const nextFalImageModel =
+        usesFalImage && selectedFalImageModel
+          ? selectedFalImageModel
+          : localModels.fal.imageGeneration;
+      const nextFalVideoModel =
+        usesFalVideo && selectedFalVideoModel
+          ? selectedFalVideoModel
+          : localModels.fal.videoGeneration;
+      const nextFalEnabledModels = Array.from(
+        new Set([
+          ...(localModels.fal.enabledModels || []),
+          ...(nextFalImageModel ? [nextFalImageModel] : []),
+          ...(nextFalVideoModel ? [nextFalVideoModel] : []),
+        ]),
+      ).filter((modelId) => !falApiKey || falCatalogIds.has(modelId));
+
+      const keysToSyncGoogle: Array<keyof SpecializedModelsV2['google']> = [
+        'imageGeneration',
+        'videoGeneration',
+      ];
+      const keysToSyncFal: Array<'imageGeneration' | 'videoGeneration'> = ['imageGeneration', 'videoGeneration'];
 
       for (const key of keysToSyncGoogle) {
         if (localModels.google[key] !== specializedModelsV2.google[key]) {
           await updateSpecializedModelV2('google', key, localModels.google[key]);
         }
       }
+      const nextFalModelsForSync = {
+        imageGeneration: nextFalImageModel,
+        videoGeneration: nextFalVideoModel,
+      };
       for (const key of keysToSyncFal) {
-        if (localModels.fal[key] !== specializedModelsV2.fal[key]) {
-          await updateSpecializedModelV2('fal', key, localModels.fal[key] as string);
+        if (nextFalModelsForSync[key] !== specializedModelsV2.fal[key]) {
+          await updateSpecializedModelV2('fal', key, nextFalModelsForSync[key] as string);
         }
       }
 
@@ -415,9 +451,11 @@ export function GeneralSettings() {
         ...useSettingsStore.getState().specializedModelsV2,
         fal: {
           ...localModels.fal,
-          enabledModels: Array.from(new Set(localModels.fal.enabledModels || [])).filter(Boolean),
-          defaultImageModelId: localModels.fal.defaultImageModelId?.trim() || localModels.fal.imageGeneration,
-          defaultVideoModelId: localModels.fal.defaultVideoModelId?.trim() || localModels.fal.videoGeneration,
+          imageGeneration: nextFalImageModel,
+          videoGeneration: nextFalVideoModel,
+          enabledModels: nextFalEnabledModels.filter(Boolean),
+          defaultImageModelId: localModels.fal.defaultImageModelId?.trim() || nextFalImageModel,
+          defaultVideoModelId: localModels.fal.defaultVideoModelId?.trim() || nextFalVideoModel,
         },
       });
 
@@ -442,7 +480,7 @@ export function GeneralSettings() {
 
   const addFalEnabledModel = (modelId: string) => {
     const trimmed = modelId.trim();
-    if (!trimmed) return;
+    if (!trimmed || !falCatalogIds.has(trimmed)) return;
     setLocalModels((prev) => ({
       ...prev,
       fal: {
@@ -487,82 +525,109 @@ export function GeneralSettings() {
         settingId="media.videoBackend"
       />
 
-      <KeyField
-        label="Google Media API Key"
-        description="Used when media backend is Google."
-        placeholder="Enter Google API key"
-        value={googleApiKey}
-        onSave={async (value) => {
-          await setGoogleApiKey(value);
-          await applyRuntime();
-          toast.success('Google media key saved');
-          await refreshCapabilitySnapshot();
-        }}
-        onClear={async () => {
-          await clearGoogleApiKey();
-          await applyRuntime();
-          toast.success('Google media key removed');
-          await refreshCapabilitySnapshot();
-        }}
-        isLoading={isLoading}
-        settingId="media.googleApiKey"
-      />
-
-      <KeyField
-        label="Fal Media API Key"
-        description="Used when media backend is Fal for image and video generation."
-        placeholder="Enter Fal API key"
-        value={falApiKey}
-        onSave={async (value) => {
-          await setFalApiKey(value);
-          await applyRuntime();
-          toast.success('Fal media key saved');
-          await refreshCapabilitySnapshot();
-        }}
-        onClear={async () => {
-          await clearFalApiKey();
-          await applyRuntime();
-          toast.success('Fal media key removed');
-          await refreshCapabilitySnapshot();
-        }}
-        isLoading={isLoading}
-        settingId="media.falApiKey"
-      />
-
-      <ModelSettingField
-        icon={<Image className="w-4 h-4" />}
-        label="Google image model"
-        description="Applied when image backend is Google."
-        value={localModels.google.imageGeneration}
-        defaultValue={DEFAULT_SPECIALIZED_MODELS_V2.google.imageGeneration}
-        onChange={(value) =>
-          setLocalModels((prev) => ({ ...prev, google: { ...prev.google, imageGeneration: value } }))
-        }
-        settingId="media.googleImageModel"
-      />
-
-      <ModelSettingField
-        icon={<Video className="w-4 h-4" />}
-        label="Google video model"
-        description="Applied when video backend is Google."
-        value={localModels.google.videoGeneration}
-        defaultValue={DEFAULT_SPECIALIZED_MODELS_V2.google.videoGeneration}
-        onChange={(value) =>
-          setLocalModels((prev) => ({ ...prev, google: { ...prev.google, videoGeneration: value } }))
-        }
-        settingId="media.googleVideoModel"
-      />
-
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h4 className="text-sm font-medium text-white/90">Fal Model Catalog</h4>
-            <p className="text-xs text-white/45">Search Fal models and add them to your enabled list.</p>
+      {usesGoogleModels ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-medium text-white/90">Google Media Models</h4>
+              <p className="text-xs text-white/45">
+                Uses your primary Google provider key from API Keys settings.
+              </p>
+            </div>
           </div>
-          <SettingHelpPopover settingId="media.falModelCatalog" />
-        </div>
 
-        {falApiKey ? (
+          {usesGoogleImage ? (
+            <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-white/[0.06] flex items-center justify-center text-white/60">
+                    <Image className="w-4 h-4" />
+                  </div>
+                  <div className="text-sm font-medium text-white/90">Google image model</div>
+                </div>
+                <SettingHelpPopover settingId="media.googleImageModel" />
+              </div>
+              <select
+                value={
+                  googleImageModelOptions.includes(localModels.google.imageGeneration as (typeof googleImageModelOptions)[number])
+                    ? localModels.google.imageGeneration
+                    : 'gemini-3-pro-image-preview'
+                }
+                onChange={(event) =>
+                  setLocalModels((prev) => ({ ...prev, google: { ...prev.google, imageGeneration: event.target.value } }))
+                }
+                className="app-select"
+              >
+                {googleImageModelOptions.map((modelId) => (
+                  <option key={modelId} value={modelId}>
+                    {modelId}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-white/40">
+                Allowed Google image models: <code>gemini-3-pro-image-preview</code>, <code>gemini-2.5-flash-image</code>.
+              </p>
+            </div>
+          ) : null}
+
+          {usesGoogleVideo ? (
+            <ModelSettingField
+              icon={<Video className="w-4 h-4" />}
+              label="Google video model"
+              description="Applied when video backend is Google."
+              value={localModels.google.videoGeneration}
+              defaultValue={DEFAULT_SPECIALIZED_MODELS_V2.google.videoGeneration}
+              onChange={(value) =>
+                setLocalModels((prev) => ({ ...prev, google: { ...prev.google, videoGeneration: value } }))
+              }
+              settingId="media.googleVideoModel"
+            />
+          ) : null}
+
+        </div>
+      ) : null}
+
+      {usesFalModels ? (
+        <KeyField
+          label="Fal Media API Key"
+          description="Used when media backend is Fal for image and video generation."
+          placeholder="Enter Fal API key"
+          value={falApiKey}
+          onSave={async (value) => {
+            await setFalApiKey(value);
+            await applyRuntime();
+            toast.success('Fal media key saved');
+            await refreshCapabilitySnapshot();
+          }}
+          onClear={async () => {
+            await clearFalApiKey();
+            await applyRuntime();
+            toast.success('Fal media key removed');
+            await refreshCapabilitySnapshot();
+          }}
+          isLoading={isLoading}
+          settingId="media.falApiKey"
+        />
+      ) : null}
+
+      {usesFalModels && !falApiKey ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <p className="text-xs text-white/55">
+            Add a Fal API key to load Fal image and video models.
+          </p>
+        </div>
+      ) : null}
+
+      {usesFalModels && Boolean(falApiKey) ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-medium text-white/90">Fal Model Catalog</h4>
+              <p className="text-xs text-white/45">Search Fal models and add them to your enabled list.</p>
+            </div>
+            <SettingHelpPopover settingId="media.falModelCatalog" />
+          </div>
+
           <>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
@@ -578,7 +643,7 @@ export function GeneralSettings() {
             {falCatalogLoading ? <p className="text-xs text-white/45">Loading Fal models…</p> : null}
             {falCatalogError ? (
               <p className="text-xs text-[#FCA5A5]">
-                Could not fetch Fal catalog ({falCatalogError}). You can still enter model IDs manually below.
+                Could not fetch Fal catalog ({falCatalogError}).
               </p>
             ) : null}
 
@@ -605,108 +670,85 @@ export function GeneralSettings() {
               )}
             </div>
           </>
-        ) : (
-          <p className="text-xs text-white/45">Set a Fal API key to load the model catalog.</p>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
-        <h4 className="text-sm font-medium text-white/90">Enabled Fal Models</h4>
-        <div className="flex flex-wrap gap-2">
-          {falEnabledModels.map((modelId) => (
-            <span key={modelId} className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] bg-[#0B0C10] px-2 py-1 text-[11px] text-white/80">
-              <span className="font-mono">{modelId}</span>
-              <button type="button" onClick={() => removeFalEnabledModel(modelId)} className="text-white/50 hover:text-white">
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
         </div>
-        <input
-          type="text"
-          placeholder="Add model id manually (press Enter)"
-          className="w-full rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2 text-sm text-white/90 focus:border-[#1D4ED8]/50 focus:outline-none"
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return;
-            event.preventDefault();
-            const target = event.target as HTMLInputElement;
-            addFalEnabledModel(target.value);
-            target.value = '';
-          }}
-        />
-      </div>
+      ) : null}
 
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
+      {usesFalModels && Boolean(falApiKey) ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
+          <h4 className="text-sm font-medium text-white/90">Enabled Fal Models</h4>
+          <div className="flex flex-wrap gap-2">
+            {falEnabledModels.map((modelId) => (
+              <span key={modelId} className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] bg-[#0B0C10] px-2 py-1 text-[11px] text-white/80">
+                <span className="font-mono">{modelId}</span>
+                <button type="button" onClick={() => removeFalEnabledModel(modelId)} className="text-white/50 hover:text-white">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+            {falEnabledModels.length === 0 ? (
+              <span className="text-xs text-white/45">No Fal models enabled yet.</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {usesFalModels && Boolean(falApiKey) ? (
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-3">
         <h4 className="text-sm font-medium text-white/90">Fal Defaults</h4>
 
-        <label className="block text-xs text-white/55">Default Fal image model</label>
-        <select
-          value={localModels.fal.defaultImageModelId || localModels.fal.imageGeneration}
-          onChange={(event) =>
-            setLocalModels((prev) => ({
-              ...prev,
-              fal: {
-                ...prev.fal,
-                defaultImageModelId: event.target.value,
-                imageGeneration: event.target.value,
-              },
-            }))
-          }
-          className="app-select"
-        >
-          {Array.from(new Set([...(falImageCandidates.length ? falImageCandidates : falEnabledModels), localModels.fal.imageGeneration])).map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
+          {usesFalImage ? (
+            <>
+              <label className="block text-xs text-white/55">Default Fal image model</label>
+              <select
+                value={selectedFalImageModel}
+                onChange={(event) =>
+                  setLocalModels((prev) => ({
+                    ...prev,
+                    fal: {
+                      ...prev.fal,
+                      defaultImageModelId: event.target.value,
+                      imageGeneration: event.target.value,
+                    },
+                  }))
+                }
+                className="app-select"
+              >
+                {falImageCatalogOptions.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
 
-        <label className="block text-xs text-white/55">Default Fal video model</label>
-        <select
-          value={localModels.fal.defaultVideoModelId || localModels.fal.videoGeneration}
-          onChange={(event) =>
-            setLocalModels((prev) => ({
-              ...prev,
-              fal: {
-                ...prev.fal,
-                defaultVideoModelId: event.target.value,
-                videoGeneration: event.target.value,
-              },
-            }))
-          }
-          className="app-select"
-        >
-          {Array.from(new Set([...(falVideoCandidates.length ? falVideoCandidates : falEnabledModels), localModels.fal.videoGeneration])).map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
-
-        <ModelSettingField
-          icon={<Image className="w-4 h-4" />}
-          label="Manual Fal image model"
-          description="Fallback manual model ID if catalog is unavailable."
-          value={localModels.fal.imageGeneration}
-          defaultValue={DEFAULT_SPECIALIZED_MODELS_V2.fal.imageGeneration}
-          onChange={(value) =>
-            setLocalModels((prev) => ({ ...prev, fal: { ...prev.fal, imageGeneration: value } }))
-          }
-          settingId="media.falImageModel"
-        />
-
-        <ModelSettingField
-          icon={<Video className="w-4 h-4" />}
-          label="Manual Fal video model"
-          description="Fallback manual model ID if catalog is unavailable."
-          value={localModels.fal.videoGeneration}
-          defaultValue={DEFAULT_SPECIALIZED_MODELS_V2.fal.videoGeneration}
-          onChange={(value) =>
-            setLocalModels((prev) => ({ ...prev, fal: { ...prev.fal, videoGeneration: value } }))
-          }
-          settingId="media.falVideoModel"
-        />
+          {usesFalVideo ? (
+            <>
+              <label className="block text-xs text-white/55">Default Fal video model</label>
+              <select
+                value={selectedFalVideoModel}
+                onChange={(event) =>
+                  setLocalModels((prev) => ({
+                    ...prev,
+                    fal: {
+                      ...prev.fal,
+                      defaultVideoModelId: event.target.value,
+                      videoGeneration: event.target.value,
+                    },
+                  }))
+                }
+                className="app-select"
+              >
+                {falVideoCatalogOptions.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
       </div>
+      ) : null}
 
       <div className="flex items-start gap-3 p-4 rounded-xl bg-[#1D4ED8]/10 border border-[#1D4ED8]/20">
         <Info className="w-4 h-4 text-[#93C5FD] flex-shrink-0 mt-0.5" />

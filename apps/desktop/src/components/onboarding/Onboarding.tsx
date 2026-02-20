@@ -52,7 +52,7 @@ export function Onboarding() {
         await setProviderApiKey(provider, trimmedProviderKey);
       }
 
-      updateSetting('uxProfile', 'simple');
+      updateSetting('uxProfile', 'pro');
       updateSetting('userName', trimmedName);
 
       const settingsState = useSettingsStore.getState();

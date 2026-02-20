@@ -242,8 +242,6 @@ pub struct RuntimeConfigPayload {
     pub thinking_level: Option<String>,
     #[serde(default)]
     pub active_soul: serde_json::Value,
-    #[serde(default)]
-    pub memory: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

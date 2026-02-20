@@ -111,7 +111,7 @@ export interface SpecializedModels {
 }
 
 export const DEFAULT_SPECIALIZED_MODELS: SpecializedModels = {
-  imageGeneration: 'imagen-4.0-generate-001',
+  imageGeneration: 'gemini-3-pro-image-preview',
   videoGeneration: 'veo-3.1-generate-preview',
   computerUse: 'gemini-3-flash-preview',
   deepResearchAgent: 'deep-research-pro-preview-12-2025',
@@ -291,11 +291,7 @@ export const DEFAULT_SPECIALIZED_MODELS_V2: SpecializedModelsV2 = {
 };
 
 const SPECIALIZED_MODEL_MIGRATIONS: Record<keyof SpecializedModels, Record<string, string>> = {
-  imageGeneration: {
-    'imagen-3.0-generate-001': 'imagen-4.0-generate-001',
-    'imagen-3.0-generate-002': 'imagen-4.0-generate-001',
-    'imagen-3.0-capability-001': 'imagen-4.0-generate-001',
-  },
+  imageGeneration: {},
   videoGeneration: {
     'veo-2.0-generate-001': 'veo-3.1-generate-preview',
     'veo-3.0-generate-preview': 'veo-3.1-generate-preview',
@@ -330,7 +326,10 @@ function normalizeSpecializedModelValue(
     return DEFAULT_SPECIALIZED_MODELS.videoGeneration;
   }
 
-  if (key === 'imageGeneration' && migrated.startsWith('imagen-3.')) {
+  if (key === 'imageGeneration') {
+    if (migrated === 'gemini-3-pro-image-preview' || migrated === 'gemini-2.5-flash-image') {
+      return migrated;
+    }
     return DEFAULT_SPECIALIZED_MODELS.imageGeneration;
   }
 
@@ -669,7 +668,6 @@ function buildRuntimeConfigFromSettings(state: SettingsState) {
   return {
     activeProvider: state.activeProvider,
     providerBaseUrls: state.providerBaseUrls,
-    memory: state.memory,
     mediaRouting: state.mediaRouting,
     sandbox: state.commandSandbox,
     toolOutputTokenLimit: state.toolOutputTokenLimit,
@@ -689,7 +687,7 @@ const initialState: SettingsState = {
 
   // General
   defaultWorkingDirectory: '',
-  uxProfile: 'simple',
+  uxProfile: 'pro',
   theme: 'dark',
   fontSize: 'medium',
   showLineNumbers: true,
@@ -1896,11 +1894,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           persisted?.thinkingLevel,
           initialState.thinkingLevel,
         );
-        const persistedUxProfile = persisted?.uxProfile;
-        const validUxProfile: UxProfile =
-          persistedUxProfile === 'pro' || persistedUxProfile === 'simple'
-            ? persistedUxProfile
-            : initialState.uxProfile;
+        const validUxProfile: UxProfile = 'pro';
         const mergedPermissionDefaults: PermissionDefaults = {
           ...defaultPermissions,
           ...(persisted?.permissionDefaults || {}),
@@ -1916,27 +1910,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           ['google', 'gemini'].includes(persistedActiveProvider)
             ? (persistedActiveProvider as ProviderId)
             : initialState.activeProvider;
-        const persistedMemory = persisted?.memory;
-        const validMemory: MemorySettings = {
-          enabled:
-            typeof persistedMemory?.enabled === 'boolean'
-              ? persistedMemory.enabled
-              : DEFAULT_MEMORY_SETTINGS.enabled,
-          autoExtract:
-            typeof persistedMemory?.autoExtract === 'boolean'
-              ? persistedMemory.autoExtract
-              : DEFAULT_MEMORY_SETTINGS.autoExtract,
-          maxInPrompt:
-            typeof persistedMemory?.maxInPrompt === 'number' && persistedMemory.maxInPrompt > 0
-              ? Math.max(1, Math.min(20, Math.floor(persistedMemory.maxInPrompt)))
-              : DEFAULT_MEMORY_SETTINGS.maxInPrompt,
-          style:
-            persistedMemory?.style === 'conservative' ||
-            persistedMemory?.style === 'balanced' ||
-            persistedMemory?.style === 'aggressive'
-              ? persistedMemory.style
-              : DEFAULT_MEMORY_SETTINGS.style,
-        };
         const validToolOutputTokenLimit = normalizeToolOutputTokenLimit(
           persisted?.toolOutputTokenLimit,
         );
@@ -2041,7 +2014,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           specializedModelsV2: validSpecializedModelsV2,
           mediaRouting: resolvedMediaRouting,
           mediaRoutingCustomized,
-          memory: validMemory,
           toolOutputTokenLimit: validToolOutputTokenLimit,
           activeSoulId: persistedActiveSoulId || DEFAULT_SOUL_ID,
           defaultSoulId: persistedDefaultSoulId || DEFAULT_SOUL_ID,
