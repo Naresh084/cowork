@@ -4,7 +4,6 @@
 import type { ToolHandler } from '@cowork/core';
 import type {
   PromptBuildContext,
-  PromptCapabilityToolAccessEntry,
   PromptTemplateSection,
 } from './types.js';
 
@@ -19,14 +18,6 @@ function toolDescriptionMap(toolHandlers: ToolHandler[]): Map<string, string> {
     map.set(tool.name, firstLine(tool.description || '').replace(/\s+/g, ' '));
   }
   return map;
-}
-
-function findToolAccess(
-  list: PromptCapabilityToolAccessEntry[],
-  toolName: string,
-): PromptCapabilityToolAccessEntry | undefined {
-  const normalized = toolName.toLowerCase();
-  return list.find((entry) => entry.toolName.toLowerCase() === normalized);
 }
 
 function buildEffectiveEnvironmentSection(context: PromptBuildContext): PromptTemplateSection {
@@ -52,7 +43,7 @@ function buildEffectiveEnvironmentSection(context: PromptBuildContext): PromptTe
       `- Sandbox Network: ${capabilitySnapshot.sandbox.networkAllowed ? 'allowed' : 'blocked'}`,
       `- Sandbox Enforcement: ${capabilitySnapshot.sandbox.osEnforced ? 'OS + validator' : 'validator-only'}`,
       `- Allowed Roots (sample): ${rootsPreview}`,
-      `- Tool Policy Profile: ${capabilitySnapshot.policyProfile}`,
+      `- Approval Mode: ${capabilitySnapshot.approvalMode}`,
       `- Media Routing: image=${capabilitySnapshot.mediaRouting.imageBackend}, video=${capabilitySnapshot.mediaRouting.videoBackend}`,
     ].join('\n'),
   };
@@ -63,13 +54,11 @@ function buildAvailableToolsSection(context: PromptBuildContext): PromptTemplate
   const descriptions = toolDescriptionMap(context.toolHandlers);
 
   const lines = names.map((name) => {
-    const access = findToolAccess(context.capabilitySnapshot.toolAccess, name);
-    const policy = access ? `policy=${access.policyAction}` : 'policy=ask';
     const desc = descriptions.get(name);
     if (desc) {
-      return `- \`${name}\` (${policy}): ${desc}`;
+      return `- \`${name}\`: ${desc}`;
     }
-    return `- \`${name}\` (${policy})`;
+    return `- \`${name}\``;
   });
 
   if (lines.length === 0) lines.push('- None');
@@ -89,7 +78,7 @@ function buildUnavailableToolsSection(context: PromptBuildContext): PromptTempla
   const lines: string[] = [];
   for (const entry of restricted) {
     if (available.has(entry.toolName.toLowerCase())) continue;
-    lines.push(`- \`${entry.toolName}\`: ${entry.reason} (policy=${entry.policyAction})`);
+    lines.push(`- \`${entry.toolName}\`: ${entry.reason}`);
   }
 
   if (lines.length === 0) {
@@ -151,7 +140,7 @@ function buildModeGuardrailsSection(context: PromptBuildContext): PromptTemplate
     key: 'mode_guardrails',
     content: [
       '## Mode Guardrails',
-      '- Execute mode is active: implementation is allowed within policy and sandbox constraints.',
+      '- Execute mode is active: implementation is allowed within approval and sandbox constraints.',
       '- Non-trivial or high-impact actions should include a concise intent statement before execution.',
     ].join('\n'),
   };
@@ -200,42 +189,6 @@ function buildSkillOperatingPracticeSection(context: PromptBuildContext): Prompt
   };
 }
 
-function buildExternalCliOperatingPracticeSection(context: PromptBuildContext): PromptTemplateSection | null {
-  const toolNames = new Set(context.toolHandlers.map((tool) => tool.name));
-  const hasCodexStart = toolNames.has('start_codex_cli_run');
-  const hasClaudeStart = toolNames.has('start_claude_cli_run');
-
-  if (!hasCodexStart && !hasClaudeStart) {
-    return null;
-  }
-
-  const availableStarts: string[] = [];
-  if (hasCodexStart) availableStarts.push('`start_codex_cli_run`');
-  if (hasClaudeStart) availableStarts.push('`start_claude_cli_run`');
-
-  return {
-    key: 'external_cli_operating_practice',
-    content: [
-      '## External CLI Operating Practice',
-      `- Available launch tools: ${availableStarts.join(', ')}.`,
-      '- Launch external CLI runs only when the user explicitly asks to use Codex/Claude CLI.',
-      '- For public lookup tasks (profiles/posts/news/docs), prefer `web_search` and `web_fetch` instead of external CLI launch tools.',
-      '- If launch values are already explicit in the user request, launch directly with explicit arguments.',
-      '- Ask follow-up questions only when required launch values are missing or ambiguous:',
-      '  - `working_directory`',
-      '  - `create_if_missing` (default recommendation: `true`)',
-      '  - `bypassPermission` (default recommendation: `false`)',
-      '- If the user omitted directory, ask whether to use the current session working directory.',
-      '- If requested directory is missing, default to creating it automatically by setting `create_if_missing=true` unless user explicitly asks not to create directories.',
-      '- If user asks for bypass but settings disallow it, explain and ask whether to continue with bypass disabled.',
-      '- After launch, keep monitoring with `external_cli_get_progress` until terminal status (`completed`, `failed`, `cancelled`, `interrupted`).',
-      '- Adaptive polling cadence should be auto-derived from task complexity: low=5s, medium=10s, high=60s.',
-      '- If status is `waiting_user`, ask user/respond and then resume polling.',
-      '- After confirmations, call the start tool with explicit structured arguments only.',
-    ].join('\n'),
-  };
-}
-
 function buildSchedulingDefaultsSection(context: PromptBuildContext): PromptTemplateSection {
   const lines: string[] = ['## Scheduling Delivery Defaults'];
 
@@ -272,19 +225,51 @@ function buildNotesSection(context: PromptBuildContext): PromptTemplateSection |
   };
 }
 
+function buildSchedulingInstructionsSection(context: PromptBuildContext): PromptTemplateSection | null {
+  const toolNames = new Set(context.toolHandlers.map((t) => t.name));
+  if (!toolNames.has('schedule_task')) return null;
+
+  return {
+    key: 'scheduling_instructions',
+    content: [
+      '## Scheduling Instructions',
+      '',
+      '### Schedule Expressions (Cron Syntax)',
+      '- `"0 9 * * 1-5"` — Weekdays at 9:00 AM',
+      '- `"*/30 * * * *"` — Every 30 minutes',
+      '- `"0 0 1 * *"` — First day of each month at midnight',
+      '- `"0 */6 * * *"` — Every 6 hours',
+      '- `"0 18 * * 5"` — Fridays at 6:00 PM',
+      '',
+      '### Execution Prompt Rules',
+      '1. Scheduled task prompts MUST be completely self-contained. They cannot reference prior conversation context.',
+      '2. Include explicit success criteria and error handling instructions in the execution prompt.',
+      '3. If the task should deliver results, include a `send_notification_<platform>` instruction with the target channel.',
+      '',
+      '### Skill Binding in Scheduled Tasks',
+      '- When creating scheduled tasks that use a skill, include explicit instructions to load and follow the skill.',
+      '- Format: "Load /skills/<name>/SKILL.md, follow its workflow, and report \'Skill used: <name>\' in output."',
+      '',
+      '### Constraints',
+      '- Scheduled tasks run in isolated sessions with no access to the originating conversation.',
+      '- Each run is independent — do not assume state persists between scheduled runs unless using /memories/.',
+    ].join('\n'),
+  };
+}
+
 export function buildCapabilitySections(context: PromptBuildContext): PromptTemplateSection[] {
-  const externalCliSection = buildExternalCliOperatingPracticeSection(context);
   const sections: PromptTemplateSection[] = [
     buildEffectiveEnvironmentSection(context),
     buildModeGuardrailsSection(context),
     buildSkillOperatingPracticeSection(context),
-    ...(externalCliSection ? [externalCliSection] : []),
     buildAvailableToolsSection(context),
     buildUnavailableToolsSection(context),
     buildIntegrationsSection(context),
     buildSchedulingDefaultsSection(context),
   ];
 
+  const scheduling = buildSchedulingInstructionsSection(context);
+  if (scheduling) sections.push(scheduling);
   const notes = buildNotesSection(context);
   if (notes) sections.push(notes);
   return sections;

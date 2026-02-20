@@ -210,42 +210,6 @@ CREATE TABLE IF NOT EXISTS workflow_run_locks (
   expires_at INTEGER NOT NULL
 );
 
--- Memory atoms (normalized long-term memory store)
-CREATE TABLE IF NOT EXISTS memory_atoms (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL DEFAULT 'default',
-  session_id TEXT,
-  run_id TEXT,
-  atom_type TEXT NOT NULL DEFAULT 'semantic',
-  content TEXT NOT NULL,
-  summary TEXT,
-  keywords TEXT NOT NULL DEFAULT '[]',
-  provenance TEXT NOT NULL DEFAULT '{}',
-  confidence REAL NOT NULL DEFAULT 0.5,
-  sensitivity TEXT NOT NULL DEFAULT 'normal',
-  pinned INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  expires_at INTEGER
-);
-
-CREATE INDEX IF NOT EXISTS idx_memory_atoms_project ON memory_atoms(project_id);
-CREATE INDEX IF NOT EXISTS idx_memory_atoms_session ON memory_atoms(session_id);
-CREATE INDEX IF NOT EXISTS idx_memory_atoms_updated_at ON memory_atoms(updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS memory_edges (
-  id TEXT PRIMARY KEY,
-  from_atom_id TEXT NOT NULL,
-  to_atom_id TEXT NOT NULL,
-  edge_type TEXT NOT NULL,
-  weight REAL NOT NULL DEFAULT 1.0,
-  metadata TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_memory_edges_from_to ON memory_edges(from_atom_id, to_atom_id);
-CREATE INDEX IF NOT EXISTS idx_memory_edges_type ON memory_edges(edge_type);
-
 CREATE TABLE IF NOT EXISTS memory_query_logs (
   id TEXT PRIMARY KEY,
   session_id TEXT,
@@ -542,39 +506,6 @@ export class DatabaseConnection {
 
       if (fromVersion < 3) {
         this.db.exec(`
-          CREATE TABLE IF NOT EXISTS memory_atoms (
-            id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL DEFAULT 'default',
-            session_id TEXT,
-            run_id TEXT,
-            atom_type TEXT NOT NULL DEFAULT 'semantic',
-            content TEXT NOT NULL,
-            summary TEXT,
-            keywords TEXT NOT NULL DEFAULT '[]',
-            provenance TEXT NOT NULL DEFAULT '{}',
-            confidence REAL NOT NULL DEFAULT 0.5,
-            sensitivity TEXT NOT NULL DEFAULT 'normal',
-            pinned INTEGER NOT NULL DEFAULT 0,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            expires_at INTEGER
-          );
-          CREATE INDEX IF NOT EXISTS idx_memory_atoms_project ON memory_atoms(project_id);
-          CREATE INDEX IF NOT EXISTS idx_memory_atoms_session ON memory_atoms(session_id);
-          CREATE INDEX IF NOT EXISTS idx_memory_atoms_updated_at ON memory_atoms(updated_at DESC);
-
-          CREATE TABLE IF NOT EXISTS memory_edges (
-            id TEXT PRIMARY KEY,
-            from_atom_id TEXT NOT NULL,
-            to_atom_id TEXT NOT NULL,
-            edge_type TEXT NOT NULL,
-            weight REAL NOT NULL DEFAULT 1.0,
-            metadata TEXT NOT NULL DEFAULT '{}',
-            created_at INTEGER NOT NULL
-          );
-          CREATE INDEX IF NOT EXISTS idx_memory_edges_from_to ON memory_edges(from_atom_id, to_atom_id);
-          CREATE INDEX IF NOT EXISTS idx_memory_edges_type ON memory_edges(edge_type);
-
           CREATE TABLE IF NOT EXISTS memory_query_logs (
             id TEXT PRIMARY KEY,
             session_id TEXT,

@@ -6,23 +6,13 @@ import type { StartupIssue } from '../stores/app-store';
 const AUTH_KEYWORDS = ['api key', 'unauthorized', 'authentication', '401', 'forbidden', 'invalid key'];
 const CAPABILITY_KEYWORDS = [
   'capability',
-  'tool policy',
-  'permission policy',
-  'policy profile',
   'capability table',
 ];
 const RUNTIME_KEYWORDS = [
   'stitch',
-  'external search',
-  'fallback',
-  'exa',
-  'tavily',
   'computer use',
   'deep research',
   'model override',
-  'external cli',
-  'codex cli',
-  'claude cli',
   'runtime extension',
 ];
 const INTEGRATION_KEYWORDS = [
@@ -60,7 +50,7 @@ export function inferRecoveryTab(title: string, message: string): StartupIssue['
   }
 
   if (hasAnyKeyword(content, CAPABILITY_KEYWORDS)) {
-    return { view: 'settings', settingsTab: 'capabilities' };
+    return { view: 'settings', settingsTab: 'runtime' };
   }
 
   if (hasAnyKeyword(content, REMOTE_KEYWORDS)) {

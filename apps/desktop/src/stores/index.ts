@@ -58,45 +58,6 @@ export {
   type FontSize,
 } from './settings-store';
 
-// Memory Store (Deep Agents)
-export {
-  useMemoryStore,
-  useMemories,
-  useMemoryGroups,
-  useIsLoadingMemory,
-  useIsCreatingMemory,
-  useIsDeletingMemory,
-  useSelectedGroup,
-  useMemorySearchQuery,
-  useSelectedMemoryId,
-  useMemoryError,
-  useDeepQueryResult,
-  useDeepQueryAtoms,
-  useDeepQueryLoading,
-  useDeepFeedbackLog,
-  useDeepFeedbackSubmitting,
-  useLastDeepFeedback,
-  useLastDeepQueryAt,
-  // Legacy compatibility
-  useMemoryEntries,
-  useMemoryEntriesByCategory,
-  useIsMemoryDirty,
-  type Memory,
-  type MemoryEntry,
-  type MemoryGroup,
-  type MemorySource,
-  type ScoredMemory,
-  type DeepMemoryFeedbackType,
-  type DeepMemoryQueryOptions,
-  type DeepMemoryQueryEvidence,
-  type DeepMemoryAtom,
-  type DeepMemoryQueryResult,
-  type DeepMemoryFeedback,
-  type DeepMemoryAtomView,
-  type CreateMemoryInput,
-  type UpdateMemoryInput,
-} from './memory-store';
-
 // Command Store (Marketplace-style)
 export {
   useCommandStore,

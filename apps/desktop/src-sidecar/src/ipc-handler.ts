@@ -16,11 +16,9 @@ import {
 import { cronService } from './cron/index.js';
 import { workflowService } from './workflow/index.js';
 import { heartbeatService } from './heartbeat/service.js';
-import { toolPolicyService } from './tool-policy.js';
 import { remoteAccessService } from './remote-access/service.js';
 import type { RemoteTunnelMode } from './remote-access/types.js';
 import { eventEmitter } from './event-emitter.js';
-import { MemoryService, createMemoryService } from './memory/index.js';
 import { AgentsMdService, createAgentsMdService, createProjectScanner } from './agents-md/index.js';
 import { SubagentService, createSubagentService } from './subagents/index.js';
 import { connectorService } from './connectors/connector-service.js';
@@ -35,10 +33,6 @@ import type {
   CreateWorkflowDraftInput,
   CreateWorkflowFromPromptInput,
   SystemEvent,
-  ToolPolicy,
-  ToolRule,
-  ToolProfile,
-  SessionType,
   UpdateWorkflowDraftInput,
   WorkflowDefinition,
   WorkflowEvent,
@@ -48,7 +42,6 @@ import type {
   WorkflowRunStatus,
   WorkflowValidationReport,
 } from '@cowork/shared';
-import { createHash } from 'crypto';
 import type { CreateCronJobInput, UpdateCronJobInput, RunQueryOptions, CronServiceStatus } from './cron/types.js';
 import type {
   IPCRequest,
@@ -70,25 +63,7 @@ import type {
   GetSessionChunkParams,
   ListSessionsPageParams,
   DeleteSessionParams,
-  LoadMemoryParams,
-  SaveMemoryParams,
-  MemoryEntry,
   SetModelsParams,
-  // New Deep Memory System params
-  MemoryCreateParams,
-  MemoryReadParams,
-  MemoryUpdateParams,
-  MemoryDeleteParams,
-  MemoryListParams,
-  MemorySearchParams,
-  MemoryGetRelevantParams,
-  MemoryGroupCreateParams,
-  MemoryGroupDeleteParams,
-  DeepMemoryQueryParams,
-  DeepMemoryFeedbackParams,
-  DeepMemoryExportBundleParams,
-  DeepMemoryImportBundleParams,
-  DeepMemoryMigrationReportParams,
   BenchmarkRunSuiteParams,
   DraftSkillFromSessionParams,
   CreateSkillFromSessionParams,
@@ -98,8 +73,8 @@ import type {
   AgentsMdGenerateParams,
   AgentsMdUpdateSectionParams,
 } from './types.js';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { dirname, join } from 'path';
+import { readFile, writeFile } from 'fs/promises';
+import { join } from 'path';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 
@@ -107,7 +82,6 @@ import { homedir } from 'os';
 // Service Instances (lazily initialized per working directory)
 // ============================================================================
 
-const memoryServices: Map<string, MemoryService> = new Map();
 const agentsMdServices: Map<string, AgentsMdService> = new Map();
 let subagentService: SubagentService | null = null;
 let appDataDirectory: string | null = null;
@@ -156,48 +130,6 @@ async function getConnectorOAuthService(): Promise<ConnectorOAuthService> {
 }
 
 /**
- * Get or create a MemoryService for the given working directory.
- */
-async function getMemoryService(workingDirectory: string): Promise<MemoryService> {
-  const dir = workingDirectory || homedir();
-  let service = memoryServices.get(dir);
-  if (!service) {
-    service = createMemoryService(dir, { appDataDir: appDataDirectory || undefined });
-    await service.initialize();
-    memoryServices.set(dir, service);
-  }
-  return service;
-}
-
-function resolveMemoryWorkingDirectory(projectIdOrPath: string): string {
-  if (!projectIdOrPath) return homedir();
-  if (existsSync(projectIdOrPath)) {
-    return projectIdOrPath;
-  }
-
-  const session = agentRunner.getSession(projectIdOrPath);
-  if (session?.workingDirectory) {
-    return session.workingDirectory;
-  }
-
-  const targetProjectId = projectIdOrPath.trim();
-  if (targetProjectId.startsWith('project_')) {
-    const sessions = agentRunner.listSessions();
-    for (const candidate of sessions) {
-      const digest = createHash('sha256')
-        .update(candidate.workingDirectory.toLowerCase())
-        .digest('hex')
-        .slice(0, 16);
-      if (`project_${digest}` === targetProjectId) {
-        return candidate.workingDirectory;
-      }
-    }
-  }
-
-  return projectIdOrPath;
-}
-
-/**
  * Get or create an AgentsMdService for the given working directory.
  */
 function getAgentsMdService(workingDirectory: string): AgentsMdService {
@@ -239,8 +171,6 @@ const SECURITY_AUDIT_COMMANDS = new Set([
   'set_runtime_config',
   'set_approval_mode',
   'set_execution_mode',
-  'set_tool_policy_profile',
-  'set_tool_policy',
   'configure_connector_secrets',
   'connect_connector',
   'disconnect_connector',
@@ -472,11 +402,6 @@ registerHandler('get_capability_snapshot', async (params) => {
   return agentRunner.getCapabilitySnapshot(sessionId);
 });
 
-registerHandler('get_external_cli_availability', async (params) => {
-  const forceRefresh = Boolean((params as { forceRefresh?: boolean } | undefined)?.forceRefresh);
-  return agentRunner.getExternalCliAvailability(forceRefresh);
-});
-
 registerHandler('debug_preview_system_prompt', async (params) => {
   const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined;
   return agentRunner.previewSystemPrompt(sessionId);
@@ -571,7 +496,7 @@ registerHandler('respond_permission', async (params) => {
   if (!p.sessionId || !p.permissionId || !p.decision) {
     throw new Error('sessionId, permissionId, and decision are required');
   }
-  agentRunner.respondToPermission(p.sessionId, p.permissionId, p.decision);
+  await agentRunner.respondToPermission(p.sessionId, p.permissionId, p.decision);
   return { success: true };
 });
 
@@ -827,50 +752,6 @@ registerHandler('get_context_usage', async (params) => {
   return agentRunner.getContextUsage(p.sessionId);
 });
 
-// Load memory from GEMINI.md
-registerHandler('load_memory', async (params) => {
-  const p = params as unknown as LoadMemoryParams;
-  if (!p.workingDirectory) throw new Error('workingDirectory is required');
-  const workingDirectory = p.workingDirectory;
-  const memoryPath = join(workingDirectory, 'GEMINI.md');
-
-  if (!existsSync(memoryPath)) {
-    return { entries: [] };
-  }
-
-  try {
-    const content = await readFile(memoryPath, 'utf-8');
-    const entries = parseGeminiMd(content);
-    return { entries };
-  } catch (error) {
-    throw new Error(`Failed to load memory: ${error instanceof Error ? error.message : String(error)}`);
-  }
-});
-
-// Save memory to GEMINI.md
-registerHandler('save_memory', async (params) => {
-  const p = params as unknown as SaveMemoryParams;
-  if (!p.workingDirectory || !p.entries) {
-    throw new Error('workingDirectory and entries are required');
-  }
-  const memoryPath = join(p.workingDirectory, 'GEMINI.md');
-  const entries = p.entries;
-
-  try {
-    // Ensure directory exists
-    const dir = dirname(memoryPath);
-    if (!existsSync(dir)) {
-      await mkdir(dir, { recursive: true });
-    }
-
-    const content = generateGeminiMd(entries);
-    await writeFile(memoryPath, content, 'utf-8');
-    return { success: true };
-  } catch (error) {
-    throw new Error(`Failed to save memory: ${error instanceof Error ? error.message : String(error)}`);
-  }
-});
-
 // Ping (for health checks)
 registerHandler('ping', async () => {
   return { pong: true, timestamp: Date.now() };
@@ -898,6 +779,17 @@ registerHandler('daemon_ready', async () => {
 
 registerHandler('agent_get_bootstrap_state', async () => {
   return agentRunner.getBootstrapState(eventEmitter.getCurrentSequence());
+});
+
+registerHandler('get_session_state', async (params) => {
+  const p = params as { sessionId: string };
+  return agentRunner.getSessionState(p.sessionId);
+});
+
+registerHandler('get_session_state_history', async (params) => {
+  const p = params as { sessionId: string; limit?: number };
+  const limit = typeof p.limit === 'number' ? p.limit : 10;
+  return agentRunner.getSessionStateHistory(p.sessionId, limit);
 });
 
 registerHandler('agent_get_events_since', async (params) => {
@@ -1278,97 +1170,6 @@ registerHandler('create_command', async (params) => {
 });
 
 // ============================================================================
-// GEMINI.md Parsing
-// ============================================================================
-
-const CATEGORY_HEADERS: Record<string, MemoryEntry['category']> = {
-  'project context': 'project',
-  'preferences': 'preferences',
-  'code patterns': 'patterns',
-  'additional context': 'context',
-  'custom': 'custom',
-};
-
-function parseGeminiMd(content: string): MemoryEntry[] {
-  const entries: MemoryEntry[] = [];
-  const lines = content.split('\n');
-
-  let currentCategory: MemoryEntry['category'] = 'project';
-  let entryId = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Check for category headers
-    const headerMatch = line.match(/^##\s+(.+)$/i);
-    if (headerMatch) {
-      const headerText = headerMatch[1].toLowerCase();
-      for (const [key, category] of Object.entries(CATEGORY_HEADERS)) {
-        if (headerText.includes(key)) {
-          currentCategory = category;
-          break;
-        }
-      }
-      continue;
-    }
-
-    // Check for list items
-    const listMatch = line.match(/^[-*]\s+(.+)$/);
-    if (listMatch) {
-      entries.push({
-        id: `mem_${entryId++}`,
-        category: currentCategory,
-        content: listMatch[1],
-        createdAt: Date.now(),
-        source: 'user',
-      });
-    }
-  }
-
-  return entries;
-}
-
-function generateGeminiMd(entries: MemoryEntry[]): string {
-  const sections: Record<MemoryEntry['category'], string[]> = {
-    project: [],
-    preferences: [],
-    patterns: [],
-    context: [],
-    custom: [],
-  };
-
-  // Group entries by category
-  for (const entry of entries) {
-    sections[entry.category].push(`- ${entry.content}`);
-  }
-
-  // Build markdown
-  const lines: string[] = ['# Project Memory', ''];
-
-  if (sections.project.length > 0) {
-    lines.push('## Project Context', ...sections.project, '');
-  }
-
-  if (sections.preferences.length > 0) {
-    lines.push('## Preferences', ...sections.preferences, '');
-  }
-
-  if (sections.patterns.length > 0) {
-    lines.push('## Code Patterns', ...sections.patterns, '');
-  }
-
-  if (sections.context.length > 0) {
-    lines.push('## Additional Context', ...sections.context, '');
-  }
-
-  if (sections.custom.length > 0) {
-    lines.push('## Custom', ...sections.custom, '');
-  }
-
-  return lines.join('\n');
-}
-
-// ============================================================================
 // Cron Command Handlers
 // ============================================================================
 
@@ -1699,484 +1500,8 @@ registerHandler('heartbeat_get_events', async (): Promise<SystemEvent[]> => {
 });
 
 // ============================================================================
-// Tool Policy Command Handlers
-// ============================================================================
-
-// Get current policy
-registerHandler('policy_get', async (): Promise<ToolPolicy> => {
-  await toolPolicyService.initialize();
-  return toolPolicyService.getPolicy();
-});
-
-// Update policy
-registerHandler('policy_update', async (params): Promise<ToolPolicy> => {
-  await toolPolicyService.initialize();
-  const updates = params as Partial<ToolPolicy>;
-  return toolPolicyService.updatePolicy(updates);
-});
-
-// Set profile
-registerHandler('policy_set_profile', async (params): Promise<ToolPolicy> => {
-  const { profile } = params as { profile: ToolProfile };
-  if (!profile) throw new Error('profile is required');
-  await toolPolicyService.initialize();
-  return toolPolicyService.setProfile(profile);
-});
-
-// Add rule
-registerHandler('policy_add_rule', async (params): Promise<ToolRule> => {
-  await toolPolicyService.initialize();
-  const rule = params as Omit<ToolRule, 'priority'>;
-  return toolPolicyService.addRule(rule);
-});
-
-// Remove rule
-registerHandler('policy_remove_rule', async (params): Promise<void> => {
-  const { index } = params as { index: number };
-  if (index === undefined) throw new Error('index is required');
-  await toolPolicyService.initialize();
-  await toolPolicyService.removeRule(index);
-});
-
-// Evaluate tool (for testing/preview)
-registerHandler('policy_evaluate', async (params) => {
-  const { toolName, arguments: args, sessionId, sessionType, provider } = params as {
-    toolName: string;
-    arguments: Record<string, unknown>;
-    sessionId: string;
-    sessionType: string;
-    provider?: string;
-  };
-  if (!toolName || !sessionId || !sessionType) {
-    throw new Error('toolName, sessionId, and sessionType are required');
-  }
-  await toolPolicyService.initialize();
-  return toolPolicyService.evaluate({
-    toolName,
-    arguments: args || {},
-    sessionId,
-    sessionType: sessionType as SessionType,
-    provider,
-  });
-});
-
-// Register MCP tools
-registerHandler('policy_register_mcp_tools', async (params): Promise<void> => {
-  const { tools } = params as { tools: string[] };
-  if (!tools) throw new Error('tools array is required');
-  await toolPolicyService.initialize();
-  toolPolicyService.registerMcpTools(tools);
-});
-
-// Reset policy to defaults
-registerHandler('policy_reset', async (): Promise<ToolPolicy> => {
-  await toolPolicyService.initialize();
-  return toolPolicyService.setProfile('coding'); // Reset to default profile
-});
-
-// ============================================================================
 // Chrome Extension Command Handlers
 // ============================================================================
-
-// ============================================================================
-// Deep Memory System Command Handlers (New)
-// ============================================================================
-
-// Initialize memory service for a working directory
-registerHandler('deep_memory_init', async (params) => {
-  const p = params as unknown as { workingDirectory: string };
-  if (!p.workingDirectory) {
-    throw new Error('workingDirectory is required');
-  }
-  await getMemoryService(p.workingDirectory);
-  return { success: true };
-});
-
-registerHandler('deep_memory_get_migration_report', async (params) => {
-  const p = params as unknown as DeepMemoryMigrationReportParams;
-  const workingDirectory = p.workingDirectory || resolveMemoryWorkingDirectory(p.projectId || '');
-  if (!workingDirectory) {
-    throw new Error('workingDirectory or projectId is required');
-  }
-  const service = await getMemoryService(workingDirectory);
-  return {
-    report: service.getMigrationReport(),
-  };
-});
-
-// Create a new memory
-registerHandler('deep_memory_create', async (params) => {
-  const p = params as unknown as MemoryCreateParams;
-  const input = ((params as { input?: Partial<MemoryCreateParams> }).input || p) as Partial<MemoryCreateParams>;
-  if (!p.workingDirectory || !input.title || !input.content || !input.group) {
-    throw new Error('workingDirectory, title, content, and group are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const memory = await service.create({
-    title: input.title,
-    content: input.content,
-    group: input.group,
-    tags: input.tags || [],
-    source: input.source || 'manual',
-    confidence: input.confidence,
-  });
-  return memory;
-});
-
-// Read a memory by ID
-registerHandler('deep_memory_read', async (params) => {
-  const p = params as unknown as MemoryReadParams;
-  if (!p.workingDirectory || !p.memoryId) {
-    throw new Error('workingDirectory and memoryId are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const memory = await service.read(p.memoryId);
-  if (!memory) {
-    throw new Error(`Memory not found: ${p.memoryId}`);
-  }
-  return memory;
-});
-
-// Update a memory
-registerHandler('deep_memory_update', async (params) => {
-  const p = params as unknown as MemoryUpdateParams;
-  const payload = params as { id?: string; memoryId?: string; updates?: Partial<MemoryUpdateParams>; workingDirectory?: string };
-  const memoryId = p.memoryId || payload.id;
-  const updates = payload.updates || p;
-  if (!p.workingDirectory || !memoryId) {
-    throw new Error('workingDirectory and memoryId are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const memory = await service.update(memoryId, {
-    title: updates.title,
-    content: updates.content,
-    group: updates.group,
-    tags: updates.tags,
-  });
-  if (!memory) {
-    throw new Error(`Memory not found: ${memoryId}`);
-  }
-  return memory;
-});
-
-// Delete a memory
-registerHandler('deep_memory_delete', async (params) => {
-  const p = params as unknown as MemoryDeleteParams;
-  if (!p.workingDirectory || !p.memoryId) {
-    throw new Error('workingDirectory and memoryId are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const success = await service.delete(p.memoryId);
-  return { success };
-});
-
-// List all memories or by group
-registerHandler('deep_memory_list', async (params) => {
-  const p = params as unknown as MemoryListParams;
-  if (!p.workingDirectory) {
-    throw new Error('workingDirectory is required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  if (p.group) {
-    const memories = await service.getMemoriesByGroup(p.group);
-    return { memories };
-  }
-  const memories = await service.getAll();
-  return { memories };
-});
-
-// Search memories
-registerHandler('deep_memory_search', async (params) => {
-  const p = params as unknown as MemorySearchParams;
-  if (!p.workingDirectory || !p.query) {
-    throw new Error('workingDirectory and query are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const memories = await service.search({ query: p.query, limit: p.limit || 20 });
-  return { memories };
-});
-
-// Get relevant memories for context
-registerHandler('deep_memory_get_relevant', async (params) => {
-  const p = params as unknown as MemoryGetRelevantParams;
-  if (!p.workingDirectory || !p.context) {
-    throw new Error('workingDirectory and context are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const memories = await service.getRelevantMemories(p.context, p.limit || 5);
-  return { memories };
-});
-
-registerHandler('deep_memory_query', async (params) => {
-  const p = params as unknown as DeepMemoryQueryParams;
-  if (!p.sessionId || !p.query) {
-    throw new Error('sessionId and query are required');
-  }
-  const session = agentRunner.getSession(p.sessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${p.sessionId}`);
-  }
-
-  const workingDirectory = session.workingDirectory || homedir();
-  const service = await getMemoryService(workingDirectory);
-  const result = await service.deepQuery(p.sessionId, p.query, p.options || {});
-
-  eventEmitter.emit('memory:retrieved', p.sessionId, {
-    queryId: result.queryId,
-    query: p.query,
-    count: result.atoms.length,
-    limit: result.options.limit,
-  });
-
-  return result;
-});
-
-registerHandler('deep_memory_feedback', async (params) => {
-  const p = params as unknown as DeepMemoryFeedbackParams;
-  if (!p.sessionId || !p.queryId || !p.atomId || !p.feedback) {
-    throw new Error('sessionId, queryId, atomId, and feedback are required');
-  }
-  const session = agentRunner.getSession(p.sessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${p.sessionId}`);
-  }
-
-  const service = await getMemoryService(session.workingDirectory || homedir());
-  const entry = await service.applyFeedback({
-    sessionId: p.sessionId,
-    queryId: p.queryId,
-    atomId: p.atomId,
-    feedback: p.feedback,
-    note: p.note,
-  });
-
-  eventEmitter.emit('memory:consolidated', p.sessionId, {
-    queryId: p.queryId,
-    atomId: p.atomId,
-    feedback: p.feedback,
-  });
-
-  return { success: true, entry };
-});
-
-registerHandler('deep_memory_export_bundle', async (params) => {
-  const p = params as unknown as DeepMemoryExportBundleParams;
-  if (!p.projectId || !p.path) {
-    throw new Error('projectId and path are required');
-  }
-
-  const workingDirectory = resolveMemoryWorkingDirectory(p.projectId);
-  const service = await getMemoryService(workingDirectory);
-  const memories = await service.getAll();
-  const bundle = {
-    version: 1,
-    projectId: p.projectId,
-    encrypted: Boolean(p.encrypted),
-    exportedAt: Date.now(),
-    memories,
-  };
-
-  await writeFile(p.path, JSON.stringify(bundle, null, 2), 'utf-8');
-  return {
-    success: true,
-    path: p.path,
-    count: memories.length,
-    encrypted: false,
-    note: p.encrypted ? 'Encrypted export will be added in a follow-up hardening task.' : undefined,
-  };
-});
-
-registerHandler('deep_memory_import_bundle', async (params) => {
-  const p = params as unknown as DeepMemoryImportBundleParams;
-  if (!p.projectId || !p.path) {
-    throw new Error('projectId and path are required');
-  }
-
-  const mergeMode = p.mergeMode || 'merge';
-  const workingDirectory = resolveMemoryWorkingDirectory(p.projectId);
-  const service = await getMemoryService(workingDirectory);
-  const raw = await readFile(p.path, 'utf-8');
-  const parsed = JSON.parse(raw) as {
-    memories?: Array<{
-      title?: string;
-      content?: string;
-      group?: string;
-      tags?: string[];
-      source?: 'manual' | 'auto';
-      confidence?: number;
-    }>;
-  };
-  const memories = Array.isArray(parsed.memories) ? parsed.memories : [];
-  let imported = 0;
-
-  if (mergeMode === 'replace') {
-    const existing = await service.getAll();
-    for (const memory of existing) {
-      await service.delete(memory.id);
-    }
-  }
-
-  for (const memory of memories) {
-    if (!memory.title || !memory.content || !memory.group) {
-      continue;
-    }
-    await service.create({
-      title: memory.title,
-      content: memory.content,
-      group: memory.group,
-      tags: memory.tags || [],
-      source: memory.source || 'manual',
-      confidence: memory.confidence,
-    });
-    imported += 1;
-  }
-
-  return {
-    success: true,
-    mergeMode,
-    imported,
-    skipped: memories.length - imported,
-  };
-});
-
-// List memory groups
-registerHandler('deep_memory_list_groups', async (params) => {
-  const p = params as unknown as { workingDirectory: string };
-  if (!p.workingDirectory) {
-    throw new Error('workingDirectory is required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const groups = await service.listGroups();
-  return { groups };
-});
-
-// Create a memory group
-registerHandler('deep_memory_create_group', async (params) => {
-  const p = params as unknown as MemoryGroupCreateParams;
-  const payload = params as { workingDirectory?: string; groupName?: string; name?: string };
-  const groupName = payload.groupName || payload.name;
-  if (!p.workingDirectory || !groupName) {
-    throw new Error('workingDirectory and groupName are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  await service.createGroup(groupName);
-  return { success: true };
-});
-
-// Delete a memory group
-registerHandler('deep_memory_delete_group', async (params) => {
-  const p = params as unknown as MemoryGroupDeleteParams;
-  const payload = params as { workingDirectory?: string; groupName?: string; name?: string };
-  const groupName = payload.groupName || payload.name;
-  if (!p.workingDirectory || !groupName) {
-    throw new Error('workingDirectory and groupName are required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  await service.deleteGroup(groupName);
-  return { success: true };
-});
-
-// Build memory prompt section for injection
-registerHandler('deep_memory_build_prompt', async (params) => {
-  const p = params as unknown as { workingDirectory: string; sessionContext?: string };
-  if (!p.workingDirectory) {
-    throw new Error('workingDirectory is required');
-  }
-  const service = await getMemoryService(p.workingDirectory);
-  const promptSection = await service.buildMemoryPromptSection(p.sessionContext);
-  return { promptSection };
-});
-
-registerHandler('memory_retrieve_pack', async (params) => {
-  const payload = params as { sessionId?: string; query?: string; options?: Record<string, unknown> };
-  if (!payload.sessionId || !payload.query) {
-    throw new Error('sessionId and query are required');
-  }
-  const session = agentRunner.getSession(payload.sessionId);
-  if (!session) {
-    throw new Error(`Session not found: ${payload.sessionId}`);
-  }
-  const service = await getMemoryService(session.workingDirectory || homedir());
-  return service.deepQuery(payload.sessionId, payload.query, payload.options || {});
-});
-
-registerHandler('memory_write_atoms', async (params) => {
-  const payload = params as {
-    workingDirectory?: string;
-    atoms?: Array<{ title?: string; content?: string; group?: string; tags?: string[]; source?: 'manual' | 'auto' }>;
-  };
-  if (!payload.workingDirectory || !Array.isArray(payload.atoms)) {
-    throw new Error('workingDirectory and atoms array are required');
-  }
-  const service = await getMemoryService(payload.workingDirectory);
-  let written = 0;
-  for (const atom of payload.atoms) {
-    if (!atom.title || !atom.content || !atom.group) continue;
-    await service.create({
-      title: atom.title,
-      content: atom.content,
-      group: atom.group,
-      tags: atom.tags || [],
-      source: atom.source || 'manual',
-    });
-    written += 1;
-  }
-  return { success: true, written, skipped: payload.atoms.length - written };
-});
-
-registerHandler('memory_consolidate', async (params) => {
-  const payload = params as {
-    sessionId?: string;
-    strategy?: 'balanced' | 'aggressive' | 'conservative';
-    force?: boolean;
-    redundancyThreshold?: number;
-    decayFactor?: number;
-    minConfidence?: number;
-    staleAfterHours?: number;
-    intervalMinutes?: number;
-  };
-
-  const session = payload.sessionId ? agentRunner.getSession(payload.sessionId) : null;
-  const workingDirectory = session?.workingDirectory || homedir();
-  const service = await getMemoryService(workingDirectory);
-  const result = await service.maybeRunPeriodicConsolidation({
-    enabled: true,
-    strategy: payload.strategy,
-    force: payload.force,
-    redundancyThreshold: payload.redundancyThreshold,
-    decayFactor: payload.decayFactor,
-    minConfidence: payload.minConfidence,
-    staleAfterHours: payload.staleAfterHours,
-    intervalMinutes: payload.intervalMinutes,
-  });
-
-  const effective = result || {
-    strategy: payload.strategy || 'balanced',
-    completedAt: Date.now(),
-    skipped: true,
-  };
-
-  eventEmitter.emit('memory:consolidated', payload.sessionId, {
-    strategy: effective.strategy,
-    timestamp: effective.completedAt,
-    stats: result
-      ? {
-          beforeCount: result.beforeCount,
-          afterCount: result.afterCount,
-          removedCount: result.removedCount,
-          mergedCount: result.mergedCount,
-          decayedCount: result.decayedCount,
-          redundancyReduction: result.redundancyReduction,
-          recallRetention: result.recallRetention,
-        }
-      : undefined,
-  });
-
-  return {
-    success: true,
-    ...effective,
-  };
-});
 
 registerHandler('workflow_pack_execute', async (params) => {
   const payload = params as {

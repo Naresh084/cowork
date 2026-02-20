@@ -29,12 +29,6 @@ export * from './cron.js';
 export * from './heartbeat.js';
 
 // ============================================================================
-// Tool Policy Types (re-exported from tool-policy.ts)
-// ============================================================================
-
-export * from './tool-policy.js';
-
-// ============================================================================
 // ChatItem Types (re-exported from chat-item.ts)
 // ============================================================================
 
@@ -51,12 +45,6 @@ export * from './connector.js';
 // ============================================================================
 
 export * from './workflow.js';
-
-// ============================================================================
-// Memory Types (re-exported from memory.ts)
-// ============================================================================
-
-export * from './memory.js';
 
 // ============================================================================
 // Branch Types (re-exported from branch.ts)
@@ -314,9 +302,6 @@ export const PermissionRequestSchema = z.object({
   reason: z.string().optional(),
   toolCallId: z.string().optional(),
   toolName: z.string().optional(),
-  policyAction: z.enum(['allow', 'ask', 'deny']).optional(),
-  policyReason: z.string().optional(),
-  policyReasonCode: z.string().optional(),
 });
 
 export type PermissionRequest = z.infer<typeof PermissionRequestSchema>;
@@ -436,7 +421,8 @@ export interface EventEmitter {
 // Enhanced Session Types
 // ============================================================================
 
-// Note: SessionType is exported from tool-policy.ts
+export const SessionTypeSchema = z.enum(['main', 'isolated', 'cron', 'ephemeral', 'integration']);
+export type SessionType = z.infer<typeof SessionTypeSchema>;
 
 /**
  * Compaction strategy for sessions

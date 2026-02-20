@@ -18,8 +18,7 @@ import type { ExecutionMode } from '../../stores/session-store';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/Dialog';
 
 const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: string }> = [
-  { id: 'auto', label: 'Auto', description: 'Ask only when needed' },
-  { id: 'read_only', label: 'Read-only', description: 'No writes or commands' },
+  { id: 'ask', label: 'Ask', description: 'Ask before sensitive actions' },
   { id: 'full', label: 'Full', description: 'Allow local actions' },
 ];
 
@@ -201,7 +200,7 @@ export function SessionHeader() {
 
   const handleModeChange = (mode: ApprovalMode) => {
     if (mode === approvalMode) return;
-    if (mode === 'auto') {
+    if (mode === 'ask') {
       updateSetting('approvalMode', mode);
       return;
     }
@@ -233,8 +232,7 @@ export function SessionHeader() {
   };
 
   const modeStyles: Record<ApprovalMode, { active: string; ring: string }> = {
-    auto: { active: 'bg-[#1D4ED8] text-white', ring: 'bg-[#1D4ED8]/15 text-[#93C5FD]' },
-    read_only: { active: 'bg-[#F5C400] text-[#1A1A1E]', ring: 'bg-[#F5C400]/15 text-[#F5C400]' },
+    ask: { active: 'bg-[#1D4ED8] text-white', ring: 'bg-[#1D4ED8]/15 text-[#93C5FD]' },
     full: { active: 'bg-[#FF5449] text-white', ring: 'bg-[#FF5449]/15 text-[#FF5449]' },
   };
 
@@ -519,20 +517,20 @@ export function SessionHeader() {
           <DialogDescription>
             {pendingMode === 'full'
               ? 'Full mode allows local file writes and command execution. Only enable if you trust the task.'
-              : 'Read-only mode blocks writes and command execution. Use this when you want safe inspection only.'}
+              : 'Ask mode prompts before sensitive actions and is recommended for most sessions.'}
           </DialogDescription>
         </DialogHeader>
         <div className="px-6 pb-2">
           <div
             className={cn(
               'flex items-start gap-3 rounded-xl p-3 text-sm',
-              pendingMode === 'full' ? modeStyles.full.ring : modeStyles.read_only.ring
+              pendingMode === 'full' ? modeStyles.full.ring : modeStyles.ask.ring
             )}
           >
             <AlertTriangle className="w-4 h-4 mt-0.5" />
             <div>
               <p className="font-medium">
-                {pendingMode === 'full' ? 'Higher impact actions enabled.' : 'Writes and commands will be blocked.'}
+                {pendingMode === 'full' ? 'Higher impact actions enabled.' : 'Sensitive actions require approval.'}
               </p>
               <p className="text-xs text-white/50 mt-1">
                 You can switch back anytime from the header.
@@ -553,7 +551,7 @@ export function SessionHeader() {
               'px-4 py-2 rounded-lg text-sm font-medium',
               pendingMode === 'full'
                 ? 'bg-[#FF5449] text-white hover:bg-[#E54840]'
-                : 'bg-[#F5C400] text-[#1A1A1E] hover:bg-[#E0B400]'
+                : 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]'
             )}
           >
             Confirm

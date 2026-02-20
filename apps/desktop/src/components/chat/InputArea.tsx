@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { BrandMark } from '../icons/BrandMark';
 import { cn } from '@/lib/utils';
-import { useSettingsStore } from '../../stores/settings-store';
+import { useSettingsStore, type ThinkingLevel } from '../../stores/settings-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useCommandStore, type SlashCommand } from '../../stores/command-store';
 import { useChatStore, type Attachment, type ExtendedPermissionRequest } from '../../stores/chat-store';
@@ -60,6 +60,12 @@ const PERMISSION_ACTION_OPTIONS: PermissionActionOption[] = [
   },
 ];
 const EMPTY_PENDING_PERMISSIONS: ExtendedPermissionRequest[] = [];
+
+const THINKING_LEVEL_OPTIONS: Array<{ value: ThinkingLevel; label: string }> = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
 
 function sortPendingPermissions(
   pendingPermissions: ExtendedPermissionRequest[],
@@ -148,8 +154,10 @@ export function InputArea({
     selectedModel,
     availableModels,
     modelsLoading,
+    thinkingLevel,
     activeProvider,
     setSelectedModelForProvider,
+    setThinkingLevel,
     addCustomModelForProvider,
     defaultWorkingDirectory,
     updateSetting: updateSettings,
@@ -162,6 +170,7 @@ export function InputArea({
   const respondToPermission = useChatStore((state) => state.respondToPermission);
 
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [thinkingSelectorOpen, setThinkingSelectorOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   const modelSearchRef = useRef<HTMLInputElement>(null);
   const [folderSelectorOpen, setFolderSelectorOpen] = useState(false);
@@ -173,6 +182,7 @@ export function InputArea({
   const permissionActionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const modelListRef = useRef<HTMLDivElement | null>(null);
   const modelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const thinkingBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -317,8 +327,13 @@ export function InputArea({
           description: 'Custom model',
           inputTokenLimit: 0,
           outputTokenLimit: 0,
+          thinking: false,
+          supportedGenerationMethods: [],
         }
       : displayModels[0]);
+  const currentModelSupportsThinking = Boolean(currentModel?.thinking);
+  const currentThinkingOption =
+    THINKING_LEVEL_OPTIONS.find((option) => option.value === thinkingLevel) || THINKING_LEVEL_OPTIONS[1];
 
   useEffect(() => {
     if (!modelSelectorOpen) {
@@ -331,6 +346,12 @@ export function InputArea({
       modelListRef.current.scrollTop = modelListRef.current.scrollHeight;
     }
   }, [modelSelectorOpen]);
+
+  useEffect(() => {
+    if (!currentModelSupportsThinking) {
+      setThinkingSelectorOpen(false);
+    }
+  }, [currentModelSupportsThinking]);
 
   // Auto-focus textarea on mount
   useEffect(() => {
@@ -1258,6 +1279,83 @@ export function InputArea({
                   document.body
                 )}
               </div>
+
+              {currentModelSupportsThinking && (
+                <div className="relative">
+                  <motion.button
+                    ref={thinkingBtnRef}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setThinkingSelectorOpen(!thinkingSelectorOpen)}
+                    className={cn(
+                      'flex items-center gap-1.5 px-2 py-0.5 rounded-full',
+                      'bg-white/[0.04] border border-white/[0.08]',
+                      'text-white/60 hover:text-white/90 hover:bg-white/[0.08]',
+                      'text-[10px] transition-colors'
+                    )}
+                  >
+                    <span>Thinking</span>
+                    <span className="text-white/35">{currentThinkingOption.label}</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </motion.button>
+
+                  {thinkingSelectorOpen && createPortal(
+                    <AnimatePresence>
+                      {thinkingSelectorOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-[90]"
+                            onClick={() => setThinkingSelectorOpen(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, y: 5, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 5, scale: 0.95 }}
+                            className={cn(
+                              'fixed z-[95] w-44 rounded-xl overflow-hidden',
+                              'bg-[#1A1A1E] border border-white/[0.08]',
+                              'shadow-2xl shadow-black/40'
+                            )}
+                            style={(() => {
+                              const rect = thinkingBtnRef.current?.getBoundingClientRect();
+                              if (!rect) return {};
+                              return {
+                                bottom: window.innerHeight - rect.top + 8,
+                                right: window.innerWidth - rect.right,
+                              };
+                            })()}
+                          >
+                            <div className="px-1.5 py-1.5">
+                              {THINKING_LEVEL_OPTIONS.map((option) => (
+                                <button
+                                  key={option.value}
+                                  onClick={() => {
+                                    void setThinkingLevel(option.value);
+                                    setThinkingSelectorOpen(false);
+                                  }}
+                                  className={cn(
+                                    'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm',
+                                    'transition-colors',
+                                    thinkingLevel === option.value
+                                      ? 'bg-[#1D4ED8]/20 text-[#93C5FD]'
+                                      : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
+                                  )}
+                                >
+                                  <span className="flex-1 text-left">{option.label}</span>
+                                  {thinkingLevel === option.value && (
+                                    <span className="w-2 h-2 rounded-full bg-[#1D4ED8]" />
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>,
+                    document.body
+                  )}
+                </div>
+              )}
           </div>
         </motion.div>
             </>

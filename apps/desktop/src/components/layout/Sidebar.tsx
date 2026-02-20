@@ -462,9 +462,11 @@ function SidebarRail({
   onOpenHelp,
 }: SidebarRailProps) {
   const uniqueSessions = dedupeSessionsById(sessions);
-  const filteredSessions = uniqueSessions.filter(
-    (session) => sessionListFilters[getSessionCategory(session)],
-  );
+  const filteredSessions = uniqueSessions.filter((session) => {
+    const category = getSessionCategory(session);
+    if (category === 'cron') return false;
+    return sessionListFilters[category];
+  });
   return (
     <motion.div
       initial={{ opacity: 0, x: -10 }}
@@ -681,14 +683,18 @@ function SidebarExpanded({
   const sessionCounts = uniqueSessions.reduce(
     (acc, session) => {
       const category = getSessionCategory(session);
-      acc[category] += 1;
+      if (category !== 'cron') {
+        acc[category] += 1;
+      }
       return acc;
     },
-    { chat: 0, shared: 0, cron: 0 }
+    { chat: 0, shared: 0 }
   );
-  const filteredSessions = uniqueSessions.filter(
-    (session) => sessionListFilters[getSessionCategory(session)],
-  );
+  const filteredSessions = uniqueSessions.filter((session) => {
+    const category = getSessionCategory(session);
+    if (category === 'cron') return false;
+    return sessionListFilters[category];
+  });
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -738,7 +744,6 @@ function SidebarExpanded({
           {([
             { key: 'chat', label: 'Chat' },
             { key: 'shared', label: 'Shared' },
-            { key: 'cron', label: 'Cron' },
           ] as const).map((item) => {
             const isActive = sessionListFilters[item.key];
             return (

@@ -5,13 +5,10 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { useSessionStore } from './session-store';
 
-export type PolicyAction = 'allow' | 'ask' | 'deny';
-
 export interface ToolAccessEntry {
   toolName: string;
   enabled: boolean;
   reason: string;
-  policyAction: PolicyAction;
 }
 
 export interface IntegrationAccessEntry {
@@ -21,11 +18,11 @@ export interface IntegrationAccessEntry {
 }
 
 export interface CapabilitySnapshot {
-  provider: string;
+  provider: 'google';
   executionMode?: 'execute' | 'plan';
   mediaRouting: {
-    imageBackend: 'google' | 'openai' | 'fal';
-    videoBackend: 'google' | 'openai' | 'fal';
+    imageBackend: 'google' | 'fal';
+    videoBackend: 'google' | 'fal';
   };
   sandbox: {
     mode: 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -36,15 +33,12 @@ export interface CapabilitySnapshot {
   keyStatus: {
     providerKeyConfigured: boolean;
     googleKeyConfigured: boolean;
-    openaiKeyConfigured: boolean;
     falKeyConfigured: boolean;
-    exaKeyConfigured: boolean;
-    tavilyKeyConfigured: boolean;
     stitchKeyConfigured: boolean;
   };
   toolAccess: ToolAccessEntry[];
   integrationAccess: IntegrationAccessEntry[];
-  policyProfile: string;
+  approvalMode: 'ask' | 'full';
   notes: string[];
 }
 
@@ -60,18 +54,19 @@ interface CapabilityActions {
   clearError: () => void;
 }
 
-function toPolicyAction(value: unknown): PolicyAction {
-  if (value === 'allow' || value === 'ask' || value === 'deny') {
-    return value;
-  }
-  return 'ask';
-}
-
-function toMediaBackend(value: unknown): 'google' | 'openai' | 'fal' {
-  if (value === 'openai' || value === 'fal' || value === 'google') {
+function toMediaBackend(value: unknown): 'google' | 'fal' {
+  if (value === 'fal' || value === 'google') {
     return value;
   }
   return 'google';
+}
+
+function toProvider(value: unknown): 'google' {
+  return value === 'google' || value === 'gemini' ? 'google' : 'google';
+}
+
+function toApprovalMode(value: unknown): 'ask' | 'full' {
+  return value === 'full' ? 'full' : 'ask';
 }
 
 function toSandboxMode(
@@ -106,7 +101,7 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
   const notesRaw = Array.isArray(root.notes) ? root.notes : [];
 
   return {
-    provider: asString(root.provider, 'google'),
+    provider: toProvider(root.provider),
     executionMode:
       root.executionMode === 'plan' || root.executionMode === 'execute'
         ? root.executionMode
@@ -128,10 +123,7 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
     keyStatus: {
       providerKeyConfigured: asBoolean(keyStatus.providerKeyConfigured),
       googleKeyConfigured: asBoolean(keyStatus.googleKeyConfigured),
-      openaiKeyConfigured: asBoolean(keyStatus.openaiKeyConfigured),
       falKeyConfigured: asBoolean(keyStatus.falKeyConfigured),
-      exaKeyConfigured: asBoolean(keyStatus.exaKeyConfigured),
-      tavilyKeyConfigured: asBoolean(keyStatus.tavilyKeyConfigured),
       stitchKeyConfigured: asBoolean(keyStatus.stitchKeyConfigured),
     },
     toolAccess: toolAccessRaw
@@ -140,7 +132,6 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
         toolName: asString(entry.toolName, 'unknown_tool'),
         enabled: asBoolean(entry.enabled),
         reason: asString(entry.reason, 'No reason provided'),
-        policyAction: toPolicyAction(entry.policyAction),
       })),
     integrationAccess: integrationAccessRaw
       .filter((entry): entry is Record<string, unknown> => isRecord(entry))
@@ -149,7 +140,7 @@ export function normalizeCapabilitySnapshot(input: unknown): CapabilitySnapshot 
         enabled: asBoolean(entry.enabled),
         reason: asString(entry.reason, 'No reason provided'),
       })),
-    policyProfile: asString(root.policyProfile, 'coding'),
+    approvalMode: toApprovalMode(root.approvalMode),
     notes: notesRaw.map((note) => asString(note)).filter(Boolean),
   };
 }

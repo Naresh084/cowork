@@ -1081,14 +1081,8 @@ function getArgValue(args: Record<string, unknown> | undefined, keys: string[]):
 }
 
 function isExternalCliToolName(toolName: string): boolean {
-  const lower = toolName.toLowerCase();
-  return (
-    lower === 'start_codex_cli_run'
-    || lower === 'start_claude_cli_run'
-    || lower === 'external_cli_get_progress'
-    || lower === 'external_cli_respond'
-    || lower === 'external_cli_cancel_run'
-  );
+  void toolName;
+  return false;
 }
 
 function extractToolErrorMessage(tool: ToolExecution): string | null {
@@ -1182,7 +1176,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55 flex-shrink-0">{tool.status === 'running' ? 'Running' : 'Ran'}</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70', isActive && 'app-shimmer-text')}>
           {command}
         </span>
       </>
@@ -1195,7 +1189,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Edited</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'app-shimmer-text')}>
           {path}
         </span>
         {counts && (
@@ -1214,7 +1208,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Created</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[320px]', isActive && 'app-shimmer-text')}>
           {path}
         </span>
         {added > 0 && <span className="ml-2 text-[10px] text-white/40">(+{added})</span>}
@@ -1227,7 +1221,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Read</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'app-shimmer-text')}>
           {path}
         </span>
       </>
@@ -1240,7 +1234,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Listed</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'app-shimmer-text')}>
           {path}
         </span>
         {entries.length > 0 && (
@@ -1257,7 +1251,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Searched files</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[260px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[260px]', isActive && 'app-shimmer-text')}>
           {pattern}
         </span>
         {path && <span className="ml-2 text-[10px] text-white/40">in {path}</span>}
@@ -1283,7 +1277,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Searched the web —</span>
-        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] text-white/70 truncate max-w-[340px]', isActive && 'app-shimmer-text')}>
           {query}
         </span>
         {resultCount > 0 && (
@@ -1302,7 +1296,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
         <span
           className={cn(
             'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
-            isActive && 'codex-shimmer-text'
+            isActive && 'app-shimmer-text'
           )}
           title={prompt}
         >
@@ -1320,7 +1314,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
         <span
           className={cn(
             'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
-            isActive && 'codex-shimmer-text'
+            isActive && 'app-shimmer-text'
           )}
           title={query}
         >
@@ -1338,7 +1332,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
         <span
           className={cn(
             'ml-2 text-[11px] text-white/70 truncate inline-block max-w-[280px] align-bottom',
-            isActive && 'codex-shimmer-text'
+            isActive && 'app-shimmer-text'
           )}
           title={prompt}
         >
@@ -1366,7 +1360,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     return (
       <>
         <span className="text-[11px] text-white/55">Fetched</span>
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'app-shimmer-text')}>
           {url}
         </span>
       </>
@@ -1378,7 +1372,7 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     <>
       <span className="text-[11px] text-white/55">{tool.name}</span>
       {primary && (
-        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'codex-shimmer-text')}>
+        <span className={cn('ml-2 text-[11px] font-mono text-white/70 truncate max-w-[340px]', isActive && 'app-shimmer-text')}>
           {primary}
         </span>
       )}
@@ -1782,7 +1776,7 @@ function ToolActivityRow({
         onClick={() => hasDetails && setExpanded((prev) => !prev)}
         className={cn(
           'w-full flex items-center gap-2 text-left',
-          'codex-tool-row border-b border-white/[0.05]',
+          'app-tool-row border-b border-white/[0.05]',
           'transition-colors',
           isActive ? 'text-white/90' : 'text-white/70 hover:text-white/85'
         )}
@@ -2534,7 +2528,7 @@ function ThinkingBlock({ content, isActive }: { content: string; isActive: boole
         )} />
         <span className={cn(
           'text-[12px]',
-          isActive ? 'codex-thinking' : 'text-white/40'
+          isActive ? 'app-thinking' : 'text-white/40'
         )}>
           Thinking...
         </span>

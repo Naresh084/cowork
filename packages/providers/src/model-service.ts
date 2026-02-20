@@ -67,75 +67,6 @@ function requestForProvider(
       const url = `${resolvedBase}/v1beta/models?key=${encodeURIComponent(key)}`;
       return { url, init: { method: 'GET' } };
     }
-    case 'openai': {
-      const url = `${resolvedBase}/v1/models`;
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${key}` },
-        },
-      };
-    }
-    case 'anthropic': {
-      const url = `${resolvedBase}/v1/models`;
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers: {
-            'x-api-key': key,
-            'anthropic-version': '2023-06-01',
-          },
-        },
-      };
-    }
-    case 'openrouter': {
-      const url = `${resolvedBase}/v1/models`;
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${key}` },
-        },
-      };
-    }
-    case 'moonshot': {
-      const url = `${resolvedBase}/v1/models`;
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${key}` },
-        },
-      };
-    }
-    case 'deepseek': {
-      const url = `${resolvedBase}/models`;
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers: { Authorization: `Bearer ${key}` },
-        },
-      };
-    }
-    case 'lmstudio': {
-      const url = `${resolvedBase}/v1/models`;
-      const headers: Record<string, string> = {};
-      if (apiKey?.trim()) {
-        headers.Authorization = `Bearer ${apiKey.trim()}`;
-      }
-      return {
-        url,
-        init: {
-          method: 'GET',
-          headers,
-        },
-      };
-    }
-    case 'glm':
-      return null;
     default:
       return null;
   }
@@ -148,8 +79,7 @@ export async function listModels(
 ): Promise<ModelInfo[]> {
   const provider = getProviderDefinition(providerId);
   const apiKey = credentials.type === 'api_key' ? credentials.apiKey?.trim() : '';
-  const keyRequiredForModelApi = providerId !== 'lmstudio';
-  if ((keyRequiredForModelApi && !apiKey) || !provider.modelApiSupported) {
+  if (!apiKey || !provider.modelApiSupported) {
     return getCuratedCatalog(providerId).models;
   }
 
@@ -175,10 +105,9 @@ export async function validateCredentials(
 ): Promise<boolean> {
   const provider = getProviderDefinition(providerId);
   const apiKey = credentials.type === 'api_key' ? credentials.apiKey?.trim() : '';
-  if (!apiKey && providerId !== 'lmstudio') return false;
+  if (!apiKey) return false;
 
   if (!provider.modelApiSupported) {
-    // For providers without a stable model endpoint, treat non-empty key as syntactically valid.
     return true;
   }
 
@@ -187,16 +116,8 @@ export async function validateCredentials(
 
   try {
     const response = await fetch(request.url, request.init);
-    if ((providerId === 'moonshot' || providerId === 'deepseek') && !response.ok) {
-      // For these providers, model endpoint reliability can vary; only treat
-      // explicit auth failures as invalid credentials.
-      return response.status !== 401 && response.status !== 403;
-    }
     return response.ok;
   } catch {
-    if (providerId === 'moonshot' || providerId === 'deepseek') {
-      return true;
-    }
     return false;
   }
 }

@@ -56,14 +56,8 @@ interface SpecializedMediaModels {
 }
 
 interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai' | 'fal';
-  videoBackend: 'google' | 'openai' | 'fal';
-}
-
-function normalizeOpenAIBaseUrl(baseUrl?: string): string {
-  const trimmed = (baseUrl || 'https://api.openai.com').trim().replace(/\/+$/, '');
-  if (trimmed.endsWith('/v1')) return trimmed;
-  return `${trimmed}/v1`;
+  imageBackend: 'google' | 'fal';
+  videoBackend: 'google' | 'fal';
 }
 
 function normalizeFalModelPath(modelId: string): string {
@@ -331,11 +325,9 @@ async function runFalQueue(
 }
 
 export function createMediaTools(
-  getProviderApiKey: (provider: 'google' | 'openai') => string | null,
+  getProviderApiKey: (provider: 'google') => string | null,
   getGoogleApiKey: () => string | null,
-  getOpenAIApiKey: () => string | null,
   getFalApiKey: () => string | null,
-  getOpenAIBaseUrl: () => string | undefined,
   getMediaRouting: () => MediaRoutingSettings,
   getSpecializedModels: () => SpecializedMediaModels,
   getSessionModel: () => string,
@@ -344,19 +336,18 @@ export function createMediaTools(
   const resolveVideoBackend = () => getMediaRouting().videoBackend;
 
   const resolveGoogleKey = () => getGoogleApiKey() || getProviderApiKey('google');
-  const resolveOpenAIKey = () => getOpenAIApiKey() || getProviderApiKey('openai');
   const resolveFalKey = () => getFalApiKey();
 
   const generateImageTool: ToolHandler = {
     name: 'generate_image',
-    description: 'Generate an image from a prompt. Backend is selected in settings (Google/OpenAI/Fal).',
+    description: 'Generate an image from a prompt. Backend is selected in settings (Google/Fal).',
     parameters: z.object({
       prompt: z.string().describe('Prompt describing the image'),
       model: z.string().optional().describe('Image generation model id'),
       numberOfImages: z.number().optional().describe('Number of images to generate'),
       aspectRatio: z.string().optional().describe('Aspect ratio (for Google backend, e.g. 1:1, 16:9)'),
       imageSize: z.string().optional().describe('Image size (for Google backend, e.g. 1K, 2K)'),
-      size: z.string().optional().describe('Image size (for OpenAI backend, e.g. 1024x1024)'),
+      size: z.string().optional().describe('Optional size alias; mapped to backend-specific size'),
     }),
     execute: async (args: unknown, context: ToolContext): Promise<ToolResult> => {
       const { prompt, model, numberOfImages, aspectRatio, imageSize, size } = args as {
@@ -421,70 +412,6 @@ export function createMediaTools(
           data: {
             prompt,
             backend: 'fal',
-            model: modelId,
-            images: files,
-          },
-        };
-      }
-
-      if (backend === 'openai') {
-        const apiKey = resolveOpenAIKey();
-        if (!apiKey) {
-          return { success: false, error: 'OpenAI API key not set. Configure OpenAI key or OpenAI provider key.' };
-        }
-
-        const response = await fetch(`${normalizeOpenAIBaseUrl(getOpenAIBaseUrl())}/images/generations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: modelId,
-            prompt,
-            n: numberOfImages ?? 1,
-            size: size || '1024x1024',
-            response_format: 'b64_json',
-          }),
-        });
-
-        const bodyText = await response.text();
-        if (!response.ok) {
-          return { success: false, error: `OpenAI image generation failed (${response.status}): ${bodyText}` };
-        }
-
-        const data = JSON.parse(bodyText) as {
-          data?: Array<{ b64_json?: string; url?: string }>;
-        };
-
-        const files = [];
-        for (const item of data.data || []) {
-          if (item.b64_json) {
-            const filePath = await saveGeneratedFile(
-              context.appDataDir,
-              context.sessionId,
-              item.b64_json,
-              'image/png',
-              'image',
-            );
-            files.push({
-              path: filePath,
-              mimeType: 'image/png',
-              data: item.b64_json,
-            });
-          } else if (item.url) {
-            files.push({
-              mimeType: 'image/png',
-              url: item.url,
-            });
-          }
-        }
-
-        return {
-          success: true,
-          data: {
-            prompt,
-            backend: 'openai',
             model: modelId,
             images: files,
           },
@@ -619,73 +546,6 @@ export function createMediaTools(
         };
       }
 
-      if (backend === 'openai') {
-        const apiKey = resolveOpenAIKey();
-        if (!apiKey) {
-          return { success: false, error: 'OpenAI API key not set. Configure OpenAI key or OpenAI provider key.' };
-        }
-
-        const form = new FormData();
-        form.append('model', modelId);
-        form.append('prompt', prompt);
-        form.append('n', String(numberOfImages ?? 1));
-        form.append(
-          'image',
-          new Blob([Buffer.from(image, 'base64')], { type: imageMimeType || 'image/png' }),
-          `edit.${getExtension(imageMimeType, 'png')}`,
-        );
-
-        const response = await fetch(`${normalizeOpenAIBaseUrl(getOpenAIBaseUrl())}/images/edits`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: form,
-        });
-
-        const bodyText = await response.text();
-        if (!response.ok) {
-          return { success: false, error: `OpenAI image edit failed (${response.status}): ${bodyText}` };
-        }
-
-        const data = JSON.parse(bodyText) as {
-          data?: Array<{ b64_json?: string; url?: string }>;
-        };
-
-        const files = [];
-        for (const item of data.data || []) {
-          if (item.b64_json) {
-            const filePath = await saveGeneratedFile(
-              context.appDataDir,
-              context.sessionId,
-              item.b64_json,
-              'image/png',
-              'image-edit',
-            );
-            files.push({
-              path: filePath,
-              mimeType: 'image/png',
-              data: item.b64_json,
-            });
-          } else if (item.url) {
-            files.push({
-              mimeType: 'image/png',
-              url: item.url,
-            });
-          }
-        }
-
-        return {
-          success: true,
-          data: {
-            prompt,
-            backend: 'openai',
-            model: modelId,
-            images: files,
-          },
-        };
-      }
-
       const apiKey = resolveGoogleKey();
       if (!apiKey) {
         return { success: false, error: 'Google API key not set. Configure Google key or Google provider key.' };
@@ -742,7 +602,7 @@ export function createMediaTools(
 
   const generateVideoTool: ToolHandler = {
     name: 'generate_video',
-    description: 'Generate a video from a prompt. Backend is selected in settings (Google/OpenAI/Fal).',
+    description: 'Generate a video from a prompt. Backend is selected in settings (Google/Fal).',
     parameters: z.object({
       prompt: z.string().describe('Prompt describing the video'),
       model: z.string().optional().describe('Video generation model id'),
@@ -815,71 +675,6 @@ export function createMediaTools(
           data: {
             prompt,
             backend: 'fal',
-            model: modelId,
-            videos,
-          },
-        };
-      }
-
-      if (backend === 'openai') {
-        const apiKey = resolveOpenAIKey();
-        if (!apiKey) {
-          return { success: false, error: 'OpenAI API key not set. Configure OpenAI key or OpenAI provider key.' };
-        }
-
-        const response = await fetch(`${normalizeOpenAIBaseUrl(getOpenAIBaseUrl())}/videos/generations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: modelId,
-            prompt,
-            n: numberOfVideos ?? 1,
-            duration: durationSeconds,
-            aspect_ratio: aspectRatio,
-            resolution,
-          }),
-        });
-
-        const bodyText = await response.text();
-        if (!response.ok) {
-          return { success: false, error: `OpenAI video generation failed (${response.status}): ${bodyText}` };
-        }
-
-        const data = JSON.parse(bodyText) as {
-          data?: Array<{ b64_json?: string; url?: string; mime_type?: string }>;
-        };
-
-        const videos = [];
-        for (const item of data.data || []) {
-          if (item.b64_json) {
-            const mimeType = item.mime_type || 'video/mp4';
-            const filePath = await saveGeneratedFile(
-              context.appDataDir,
-              context.sessionId,
-              item.b64_json,
-              mimeType,
-              'video',
-            );
-            videos.push({
-              path: filePath,
-              mimeType,
-            });
-          } else if (item.url) {
-            videos.push({
-              mimeType: item.mime_type || 'video/mp4',
-              url: item.url,
-            });
-          }
-        }
-
-        return {
-          success: true,
-          data: {
-            prompt,
-            backend: 'openai',
             model: modelId,
             videos,
           },
@@ -1011,74 +806,7 @@ export function createMediaTools(
         return { success: false, error: 'Unable to load video data for analysis.' };
       }
 
-      const configuredBackend = resolveVideoBackend();
-      const backend = configuredBackend === 'fal'
-        ? (resolveOpenAIKey() ? 'openai' : 'google')
-        : configuredBackend;
-      const modelId = model || getSessionModel() || (backend === 'openai' ? 'gpt-4.1' : 'gemini-2.5-pro');
-
-      if (backend === 'openai') {
-        const apiKey = resolveOpenAIKey();
-        if (!apiKey) {
-          return { success: false, error: 'OpenAI API key not set. Configure OpenAI key or OpenAI provider key.' };
-        }
-
-        const endpoint = `${normalizeOpenAIBaseUrl(getOpenAIBaseUrl())}/responses`;
-        const primaryRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: modelId,
-            input: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'input_text', text: prompt },
-                  {
-                    type: 'input_video',
-                    video_url: `data:${mimeType};base64,${videoBase64}`,
-                  },
-                ],
-              },
-            ],
-          }),
-        });
-
-        const primaryText = await primaryRes.text();
-        if (!primaryRes.ok) {
-          return {
-            success: false,
-            error:
-              `OpenAI video analysis failed (${primaryRes.status}). ` +
-              `If your model/account does not support video input, switch Video backend to Google. Details: ${primaryText}`,
-          };
-        }
-
-        const parsed = JSON.parse(primaryText) as {
-          output_text?: string;
-          output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
-        };
-        const analysis =
-          parsed.output_text ||
-          (parsed.output || [])
-            .flatMap((item) => item.content || [])
-            .filter((part) => part.type === 'output_text')
-            .map((part) => part.text || '')
-            .join('\n')
-            .trim();
-
-        return {
-          success: true,
-          data: {
-            analysis,
-            backend: 'openai',
-            model: modelId,
-          },
-        };
-      }
+      const modelId = model || getSessionModel() || 'gemini-2.5-pro';
 
       const apiKey = resolveGoogleKey();
       if (!apiKey) {

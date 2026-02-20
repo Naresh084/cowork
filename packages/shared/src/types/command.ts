@@ -63,7 +63,7 @@ export type CommandFrontmatter = z.infer<typeof CommandFrontmatterSchema>;
 export const CommandSourceTypeSchema = z.enum([
   'bundled',   // Shipped with app
   'managed',   // Installed from marketplace / custom
-  'platform',  // Discovered from .agent/ or .claude/ directories
+  'platform',  // Discovered from .agent/ directories
 ]);
 
 export type CommandSourceType = z.infer<typeof CommandSourceTypeSchema>;

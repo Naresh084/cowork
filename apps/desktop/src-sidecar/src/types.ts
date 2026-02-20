@@ -89,8 +89,9 @@ export interface RespondPermissionParams {
   decision: PermissionDecision;
 }
 
-export type ApprovalMode = 'auto' | 'read_only' | 'full';
+export type ApprovalMode = 'ask' | 'full';
 export type ExecutionMode = 'execute' | 'plan';
+export type ThinkingLevel = 'low' | 'medium' | 'high';
 
 export interface SetApprovalModeParams {
   sessionId: string;
@@ -110,6 +111,8 @@ export interface SetModelsParams {
     provider?: ProviderId;
     inputTokenLimit?: number;
     outputTokenLimit?: number;
+    thinking?: boolean;
+    supportedGenerationMethods?: string[];
   }>;
 }
 export interface StopGenerationParams {
@@ -139,106 +142,6 @@ export interface GetSessionChunkParams extends GetSessionParams {
 
 export interface DeleteSessionParams {
   sessionId: string;
-}
-
-export interface LoadMemoryParams {
-  workingDirectory: string;
-}
-
-export interface SaveMemoryParams {
-  workingDirectory: string;
-  entries: MemoryEntry[];
-}
-
-// ============================================================================
-// Deep Memory System Parameters (New)
-// ============================================================================
-
-export interface MemoryCreateParams {
-  workingDirectory: string;
-  title: string;
-  content: string;
-  group: string;
-  tags?: string[];
-  source?: 'manual' | 'auto';
-  confidence?: number;
-}
-
-export interface MemoryReadParams {
-  workingDirectory: string;
-  memoryId: string;
-}
-
-export interface MemoryUpdateParams {
-  workingDirectory: string;
-  memoryId: string;
-  title?: string;
-  content?: string;
-  group?: string;
-  tags?: string[];
-}
-
-export interface MemoryDeleteParams {
-  workingDirectory: string;
-  memoryId: string;
-}
-
-export interface MemoryListParams {
-  workingDirectory: string;
-  group?: string;
-}
-
-export interface MemorySearchParams {
-  workingDirectory: string;
-  query: string;
-  limit?: number;
-}
-
-export interface MemoryGetRelevantParams {
-  workingDirectory: string;
-  context: string;
-  limit?: number;
-}
-
-export interface MemoryGroupCreateParams {
-  workingDirectory: string;
-  groupName: string;
-}
-
-export interface MemoryGroupDeleteParams {
-  workingDirectory: string;
-  groupName: string;
-}
-
-export interface DeepMemoryQueryParams {
-  sessionId: string;
-  query: string;
-  options?: Record<string, unknown>;
-}
-
-export interface DeepMemoryFeedbackParams {
-  sessionId: string;
-  queryId: string;
-  atomId: string;
-  feedback: 'positive' | 'negative' | 'pin' | 'unpin' | 'hide' | 'report_conflict';
-  note?: string;
-}
-
-export interface DeepMemoryExportBundleParams {
-  projectId: string;
-  path: string;
-  encrypted?: boolean;
-}
-
-export interface DeepMemoryImportBundleParams {
-  projectId: string;
-  path: string;
-  mergeMode?: 'replace' | 'merge' | 'append';
-}
-
-export interface DeepMemoryMigrationReportParams {
-  workingDirectory?: string;
-  projectId?: string;
 }
 
 export interface BenchmarkRunSuiteParams {
@@ -410,15 +313,7 @@ export interface SessionListPage {
   nextOffset: number | null;
 }
 
-export type ProviderId =
-  | 'google'
-  | 'openai'
-  | 'anthropic'
-  | 'openrouter'
-  | 'moonshot'
-  | 'glm'
-  | 'deepseek'
-  | 'lmstudio';
+export type ProviderId = 'google';
 
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -434,8 +329,8 @@ export interface CommandSandboxSettings {
 }
 
 export interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai' | 'fal';
-  videoBackend: 'google' | 'openai' | 'fal';
+  imageBackend: 'google' | 'fal';
+  videoBackend: 'google' | 'fal';
 }
 
 export interface SpecializedModelsV2 {
@@ -445,24 +340,10 @@ export interface SpecializedModelsV2 {
     computerUse: string;
     deepResearchAgent: string;
   };
-  openai: {
-    imageGeneration: string;
-    videoGeneration: string;
-  };
   fal: {
     imageGeneration: string;
     videoGeneration: string;
   };
-}
-
-export interface ExternalCliProviderRuntimeSettings {
-  enabled: boolean;
-  allowBypassPermissions: boolean;
-}
-
-export interface ExternalCliRuntimeConfig {
-  codex: ExternalCliProviderRuntimeSettings;
-  claude: ExternalCliProviderRuntimeSettings;
 }
 
 export interface RuntimeSoulProfile {
@@ -475,54 +356,19 @@ export interface RuntimeSoulProfile {
 
 export type UxProfile = 'simple' | 'pro';
 
-export type RuntimeMemoryStyle = 'conservative' | 'balanced' | 'aggressive';
-
-export interface RuntimeMemoryRetrievalSettings {
-  enabled: boolean;
-  lexicalWeight: number;
-  denseWeight: number;
-  graphWeight: number;
-  rerankWeight: number;
-  maxResults: number;
-}
-
-export interface RuntimeMemoryConsolidationSettings {
-  enabled: boolean;
-  intervalMinutes: number;
-  redundancyThreshold: number;
-  decayFactor: number;
-  minConfidence?: number;
-  staleAfterHours?: number;
-  strategy?: 'balanced' | 'aggressive' | 'conservative';
-}
-
-export interface RuntimeMemorySettings {
-  enabled: boolean;
-  autoExtract: boolean;
-  maxInPrompt: number;
-  style: RuntimeMemoryStyle;
-  retrieval?: RuntimeMemoryRetrievalSettings;
-  consolidation?: RuntimeMemoryConsolidationSettings;
-}
-
 export interface RuntimeConfig {
   activeProvider: ProviderId;
   uxProfile?: UxProfile;
   providerApiKeys?: Partial<Record<ProviderId, string>>;
   providerBaseUrls?: Partial<Record<ProviderId, string>>;
   googleApiKey?: string | null;
-  openaiApiKey?: string | null;
   falApiKey?: string | null;
-  exaApiKey?: string | null;
-  tavilyApiKey?: string | null;
-  externalSearchProvider?: 'google' | 'exa' | 'tavily';
   mediaRouting?: MediaRoutingSettings;
   specializedModels?: SpecializedModelsV2;
   sandbox?: CommandSandboxSettings;
-  externalCli?: ExternalCliRuntimeConfig;
   toolOutputTokenLimit?: number;
+  thinkingLevel?: ThinkingLevel;
   activeSoul?: RuntimeSoulProfile | null;
-  memory?: RuntimeMemorySettings;
 }
 
 export interface RuntimeConfigUpdateResult {
@@ -545,15 +391,6 @@ export interface SkillConfig {
   path: string;
   description?: string;
   enabled?: boolean;
-}
-
-export interface MemoryEntry {
-  id: string;
-  category: 'project' | 'preferences' | 'patterns' | 'context' | 'custom';
-  content: string;
-  createdAt: number;
-  updatedAt?: number;
-  source?: 'user' | 'agent';
 }
 
 // ============================================================================

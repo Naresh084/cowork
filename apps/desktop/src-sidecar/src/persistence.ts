@@ -51,7 +51,7 @@ interface SessionMetadataV1 {
   title: string | null;
   workingDirectory: string;
   model: string;
-  approvalMode: 'auto' | 'read_only' | 'full';
+  approvalMode: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,7 +65,7 @@ interface SessionMetadataV2 {
   title: string | null;
   workingDirectory: string;
   model: string;
-  approvalMode: 'auto' | 'read_only' | 'full';
+  approvalMode: 'ask' | 'full';
   createdAt: number;
   updatedAt: number;
   lastAccessedAt: number;
@@ -110,6 +110,13 @@ export interface PersistedSessionDataV2 {
 
 // Union type for loading
 export type PersistedSessionData = PersistedSessionDataV1 | PersistedSessionDataV2;
+
+function normalizeApprovalMode(
+  mode: unknown,
+): 'ask' | 'full' {
+  if (typeof mode !== 'string') return 'ask';
+  return mode.toLowerCase() === 'full' ? 'full' : 'ask';
+}
 
 /**
  * Migrate V1 session data to V2 format.
@@ -231,8 +238,9 @@ function migrateV1toV2(v1Data: PersistedSessionDataV1): PersistedSessionDataV2 {
     metadata: {
       ...v1Data.metadata,
       version: 2,
-      provider: v1Data.metadata.provider || 'google',
+      provider: 'google',
       executionMode: v1Data.metadata.executionMode || 'execute',
+      approvalMode: normalizeApprovalMode(v1Data.metadata.approvalMode),
       // For migrated sessions, set lastAccessedAt to updatedAt
       lastAccessedAt: v1Data.metadata.updatedAt,
     },
@@ -412,8 +420,9 @@ export class SessionPersistence {
         metadata: {
           ...metadata,
           version: 2,
-          provider: metadata.provider || 'google',
+          provider: 'google',
           executionMode: metadata.executionMode || 'execute',
+          approvalMode: normalizeApprovalMode(metadata.approvalMode),
           // Backward compat: if lastAccessedAt is missing, use updatedAt
           lastAccessedAt: metadata.lastAccessedAt || metadata.updatedAt,
         },
@@ -495,12 +504,12 @@ export class SessionPersistence {
           version: SCHEMA_VERSION,
           id: data.metadata.id,
           type: data.metadata.type || 'main',
-          provider: data.metadata.provider || 'google',
+          provider: 'google',
           executionMode: data.metadata.executionMode || 'execute',
           title: data.metadata.title,
           workingDirectory: data.metadata.workingDirectory,
           model: data.metadata.model,
-          approvalMode: data.metadata.approvalMode,
+          approvalMode: normalizeApprovalMode(data.metadata.approvalMode),
           createdAt: data.metadata.createdAt,
           updatedAt: data.metadata.updatedAt,
           lastAccessedAt: data.metadata.lastAccessedAt,
@@ -543,7 +552,7 @@ export class SessionPersistence {
     title: string | null;
     workingDirectory: string;
     model: string;
-    approvalMode: 'auto' | 'read_only' | 'full';
+    approvalMode: 'ask' | 'full';
     messages: PersistedMessage[];
     toolExecutions: PersistedToolExecution[];
     tasks: Task[];

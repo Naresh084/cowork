@@ -29,7 +29,6 @@ export interface PromptCapabilityToolAccessEntry {
   toolName: string;
   enabled: boolean;
   reason: string;
-  policyAction: 'allow' | 'ask' | 'deny';
 }
 
 export interface PromptCapabilityIntegrationAccessEntry {
@@ -41,10 +40,10 @@ export interface PromptCapabilityIntegrationAccessEntry {
 export interface PromptCapabilitySnapshot {
   provider: PromptProviderId;
   executionMode: ExecutionMode;
-  policyProfile: string;
+  approvalMode: 'ask' | 'full';
   mediaRouting: {
-    imageBackend: 'google' | 'openai' | 'fal';
-    videoBackend: 'google' | 'openai' | 'fal';
+    imageBackend: 'google' | 'fal';
+    videoBackend: 'google' | 'fal';
   };
   sandbox: {
     mode: 'read-only' | 'workspace-write' | 'danger-full-access';

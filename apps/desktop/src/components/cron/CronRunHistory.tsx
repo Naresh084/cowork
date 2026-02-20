@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCronStore } from '@/stores/cron-store';
+import { useSessionStore } from '@/stores/session-store';
+import { useAppStore } from '@/stores/app-store';
 import type { CronRun } from '@cowork/shared';
 
 function formatDate(timestamp: number): string {
@@ -40,7 +42,13 @@ function formatDuration(startedAt: number, completedAt?: number): string {
   return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-function RunCard({ run }: { run: CronRun }) {
+function RunCard({
+  run,
+  onOpenSession,
+}: {
+  run: CronRun;
+  onOpenSession: (sessionId: string) => void;
+}) {
   const isSuccess = run.result === 'success';
   const isError = run.result === 'error';
   const isTimeout = run.result === 'timeout';
@@ -88,8 +96,12 @@ function RunCard({ run }: { run: CronRun }) {
         </div>
       )}
 
-      {run.sessionId && run.sessionId !== 'main' && (
-        <button className="flex items-center gap-1 mt-2 text-xs text-[#93C5FD] hover:underline">
+      {run.sessionId && (
+        <button
+          type="button"
+          onClick={() => onOpenSession(run.sessionId)}
+          className="flex items-center gap-1 mt-2 text-xs text-[#93C5FD] hover:underline"
+        >
           <ExternalLink className="w-3 h-3" />
           View Session
         </button>
@@ -101,9 +113,33 @@ function RunCard({ run }: { run: CronRun }) {
 export function CronRunHistory() {
   const { historyJobId, getJob, getJobRuns, loadRunHistory, closeHistory } =
     useCronStore();
+  const closeModal = useCronStore((state) => state.closeModal);
+  const selectSession = useSessionStore((state) => state.selectSession);
+  const setActiveSession = useSessionStore((state) => state.setActiveSession);
+  const loadSessions = useSessionStore((state) => state.loadSessions);
+  const setCurrentView = useAppStore((state) => state.setCurrentView);
 
   const job = historyJobId ? getJob(historyJobId) : null;
   const runs = historyJobId ? getJobRuns(historyJobId) : [];
+
+  const handleOpenSession = async (sessionId: string) => {
+    if (!sessionId) return;
+
+    try {
+      await selectSession(sessionId);
+    } catch {
+      // No-op: explicit fallback below handles stale/paged session lists.
+    }
+
+    if (useSessionStore.getState().activeSessionId !== sessionId) {
+      // Fallback for sessions not currently in paged list.
+      setActiveSession(sessionId);
+    }
+
+    setCurrentView('chat');
+    closeModal();
+    void loadSessions({ reset: true, query: '' });
+  };
 
   // Load run history when component mounts
   useEffect(() => {
@@ -190,7 +226,11 @@ export function CronRunHistory() {
         ) : (
           <div className="space-y-3">
             {runs.map((run) => (
-              <RunCard key={run.id} run={run} />
+              <RunCard
+                key={run.id}
+                run={run}
+                onOpenSession={handleOpenSession}
+              />
             ))}
           </div>
         )}

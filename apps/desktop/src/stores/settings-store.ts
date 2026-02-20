@@ -19,7 +19,11 @@ export interface ModelInfo {
   description: string;
   inputTokenLimit: number;
   outputTokenLimit: number;
+  thinking: boolean;
+  supportedGenerationMethods: string[];
 }
+
+export type ThinkingLevel = 'low' | 'medium' | 'high';
 
 export interface MCPServerConfig {
   id: string;
@@ -92,7 +96,7 @@ export interface PermissionDefaults {
   trustedCommands: string[];
 }
 
-export type ApprovalMode = 'auto' | 'read_only' | 'full';
+export type ApprovalMode = 'ask' | 'full';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type FontSize = 'small' | 'medium' | 'large';
@@ -120,22 +124,19 @@ export interface SpecializedModelsV2 {
     computerUse: string;
     deepResearchAgent: string;
   };
-  openai: {
-    imageGeneration: string;
-    videoGeneration: string;
-  };
   fal: {
     imageGeneration: string;
     videoGeneration: string;
+    enabledModels?: string[];
+    defaultImageModelId?: string;
+    defaultVideoModelId?: string;
   };
 }
 
 export interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai' | 'fal';
-  videoBackend: 'google' | 'openai' | 'fal';
+  imageBackend: 'google' | 'fal';
+  videoBackend: 'google' | 'fal';
 }
-
-export type ExternalSearchProvider = 'google' | 'exa' | 'tavily';
 export type MemoryStyle = 'conservative' | 'balanced' | 'aggressive';
 
 export interface MemorySettings {
@@ -145,22 +146,10 @@ export interface MemorySettings {
   style: MemoryStyle;
 }
 
-export interface ExternalCliProviderSettings {
-  enabled: boolean;
-  allowBypassPermissions: boolean;
-}
-
-export interface ExternalCliSettings {
-  codex: ExternalCliProviderSettings;
-  claude: ExternalCliProviderSettings;
-}
-
 export const DEFAULT_MEDIA_ROUTING: MediaRoutingSettings = {
   imageBackend: 'google',
   videoBackend: 'google',
 };
-
-export const DEFAULT_EXTERNAL_SEARCH_PROVIDER: ExternalSearchProvider = 'google';
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   enabled: true,
   autoExtract: true,
@@ -170,16 +159,6 @@ export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
 export const DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 32000;
 export const MIN_TOOL_OUTPUT_TOKEN_LIMIT = 1024;
 export const MAX_TOOL_OUTPUT_TOKEN_LIMIT = 262144;
-export const DEFAULT_EXTERNAL_CLI_SETTINGS: ExternalCliSettings = {
-  codex: {
-    enabled: false,
-    allowBypassPermissions: false,
-  },
-  claude: {
-    enabled: false,
-    allowBypassPermissions: false,
-  },
-};
 
 export type SoulSource = 'preset' | 'custom';
 
@@ -302,13 +281,12 @@ async function invokeAgentCommand<T>(
 
 export const DEFAULT_SPECIALIZED_MODELS_V2: SpecializedModelsV2 = {
   google: { ...DEFAULT_SPECIALIZED_MODELS },
-  openai: {
-    imageGeneration: 'gpt-image-1',
-    videoGeneration: 'sora',
-  },
   fal: {
     imageGeneration: 'fal-ai/flux/schnell',
     videoGeneration: 'fal-ai/kling-video/v1.6/standard/text-to-video',
+    enabledModels: ['fal-ai/flux/schnell', 'fal-ai/kling-video/v1.6/standard/text-to-video'],
+    defaultImageModelId: 'fal-ai/flux/schnell',
+    defaultVideoModelId: 'fal-ai/kling-video/v1.6/standard/text-to-video',
   },
 };
 
@@ -378,6 +356,40 @@ function normalizeToolOutputTokenLimit(value: unknown): number {
   );
 }
 
+function normalizePersistedApprovalMode(
+  value: unknown,
+  fallback: ApprovalMode,
+): ApprovalMode {
+  if (value === 'full') return 'full';
+  if (value === 'ask' || value === 'auto' || value === 'read_only') return 'ask';
+  return fallback;
+}
+
+const REQUIRED_CHAT_GENERATION_METHODS = [
+  'generateContent',
+  'countTokens',
+  'createCachedContent',
+  'batchGenerateContent',
+] as const;
+
+function isChatContentModel(model: Pick<ModelInfo, 'supportedGenerationMethods'>): boolean {
+  if (!Array.isArray(model.supportedGenerationMethods) || model.supportedGenerationMethods.length === 0) {
+    return false;
+  }
+  const methodSet = new Set(model.supportedGenerationMethods);
+  return REQUIRED_CHAT_GENERATION_METHODS.every((method) => methodSet.has(method));
+}
+
+function normalizeThinkingLevel(
+  value: unknown,
+  fallback: ThinkingLevel = 'medium',
+): ThinkingLevel {
+  if (value === 'low' || value === 'medium' || value === 'high') {
+    return value;
+  }
+  return fallback;
+}
+
 export interface RightPanelSections {
   progress: boolean;
   workingFolder: boolean;
@@ -416,6 +428,7 @@ interface SettingsState {
   // Model
   selectedModel: string;
   selectedModelByProvider: Partial<Record<ProviderId, string>>;
+  thinkingLevel: ThinkingLevel;
   temperature: number;
   maxOutputTokens: number;
   toolOutputTokenLimit: number;
@@ -430,7 +443,6 @@ interface SettingsState {
   specializedModelsV2: SpecializedModelsV2;
   mediaRouting: MediaRoutingSettings;
   mediaRoutingCustomized: boolean;
-  externalSearchProvider: ExternalSearchProvider;
   memory: MemorySettings;
   souls: SoulProfile[];
   activeSoulId: string;
@@ -443,7 +455,6 @@ interface SettingsState {
   permissionDefaults: PermissionDefaults;
   approvalMode: ApprovalMode;
   commandSandbox: CommandSandboxSettings;
-  externalCli: ExternalCliSettings;
 
   // MCP Servers
   mcpServers: MCPServerConfig[];
@@ -493,16 +504,12 @@ interface SettingsActions {
   fetchProviderModels: (provider?: ProviderId) => Promise<void>;
   setActiveProvider: (provider: ProviderId) => Promise<void>;
   setSelectedModelForProvider: (provider: ProviderId, modelId: string) => void;
+  setThinkingLevel: (level: ThinkingLevel) => Promise<void>;
   addCustomModelForProvider: (provider: ProviderId, modelId: string) => void;
   setProviderBaseUrl: (provider: ProviderId, baseUrl: string) => Promise<void>;
   setMediaRouting: (routing: Partial<MediaRoutingSettings>) => Promise<void>;
-  setExternalSearchProvider: (provider: ExternalSearchProvider) => Promise<void>;
   setMemorySettings: (updates: Partial<MemorySettings>) => Promise<void>;
   setCommandSandbox: (updates: Partial<CommandSandboxSettings>) => Promise<void>;
-  updateExternalCliSettings: (
-    provider: keyof ExternalCliSettings,
-    updates: Partial<ExternalCliProviderSettings>,
-  ) => Promise<void>;
   loadSoulProfiles: () => Promise<void>;
   setActiveSoul: (soulId: string) => Promise<void>;
   saveCustomSoul: (title: string, content: string, existingSoulId?: string) => Promise<void>;
@@ -555,7 +562,6 @@ interface SettingsActions {
     provider: keyof SpecializedModelsV2,
     key:
       | keyof SpecializedModelsV2['google']
-      | keyof SpecializedModelsV2['openai']
       | keyof SpecializedModelsV2['fal'],
     value: string
   ) => Promise<void>;
@@ -663,12 +669,11 @@ function buildRuntimeConfigFromSettings(state: SettingsState) {
   return {
     activeProvider: state.activeProvider,
     providerBaseUrls: state.providerBaseUrls,
-    externalSearchProvider: state.externalSearchProvider,
     memory: state.memory,
     mediaRouting: state.mediaRouting,
     sandbox: state.commandSandbox,
-    externalCli: state.externalCli,
     toolOutputTokenLimit: state.toolOutputTokenLimit,
+    thinkingLevel: state.thinkingLevel,
     specializedModels: state.specializedModelsV2,
     activeSoul: toRuntimeSoulProfile(
       resolveActiveSoul(state.souls, state.activeSoulId, state.defaultSoulId),
@@ -693,6 +698,7 @@ const initialState: SettingsState = {
   // Model - populated from Google Models API
   selectedModel: '',
   selectedModelByProvider: {},
+  thinkingLevel: 'medium',
   temperature: 0.7,
   maxOutputTokens: 0,
   toolOutputTokenLimit: DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
@@ -707,7 +713,6 @@ const initialState: SettingsState = {
   specializedModelsV2: { ...DEFAULT_SPECIALIZED_MODELS_V2 },
   mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
   mediaRoutingCustomized: false,
-  externalSearchProvider: DEFAULT_EXTERNAL_SEARCH_PROVIDER,
   memory: { ...DEFAULT_MEMORY_SETTINGS },
   souls: [{ ...FALLBACK_SOUL_PROFILE }],
   activeSoulId: DEFAULT_SOUL_ID,
@@ -718,9 +723,8 @@ const initialState: SettingsState = {
 
   // Permissions
   permissionDefaults: defaultPermissions,
-  approvalMode: 'auto',
+  approvalMode: 'ask',
   commandSandbox: { ...DEFAULT_COMMAND_SANDBOX },
-  externalCli: { ...DEFAULT_EXTERNAL_CLI_SETTINGS },
 
   // MCP Servers
   mcpServers: [],
@@ -795,10 +799,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           await useAuthStore.getState().applyRuntimeConfig(
             buildRuntimeConfigFromSettings(nextState),
           );
-          if (
-            useAuthStore.getState().providerApiKeys[state.activeProvider] ||
-            state.activeProvider === 'lmstudio'
-          ) {
+          if (useAuthStore.getState().providerApiKeys[state.activeProvider]) {
             await state.fetchProviderModels(state.activeProvider);
           }
           await state.syncMCPServers(state.mcpServers);
@@ -880,7 +881,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           const providerKey = authState.providerApiKeys[provider];
           const baseUrl = authState.providerBaseUrls[provider];
 
-          if (!providerKey && provider !== 'lmstudio') {
+          if (!providerKey) {
             set({
               modelsLoading: false,
               availableModels: [],
@@ -898,19 +899,27 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             description: string;
             input_token_limit: number;
             output_token_limit: number;
+            thinking?: boolean;
+            supported_generation_methods?: string[];
           }>>('fetch_provider_models', {
             providerId: provider,
             apiKey: providerKey || '',
             baseUrl: baseUrl || null,
           });
 
-          const mappedModels: ModelInfo[] = models.map((m) => ({
-            id: m.id,
-            name: m.name,
-            description: m.description,
-            inputTokenLimit: m.input_token_limit,
-            outputTokenLimit: m.output_token_limit,
-          }));
+          const mappedModels: ModelInfo[] = models
+            .map((m) => ({
+              id: m.id,
+              name: m.name,
+              description: m.description,
+              inputTokenLimit: m.input_token_limit,
+              outputTokenLimit: m.output_token_limit,
+              thinking: Boolean(m.thinking),
+              supportedGenerationMethods: Array.isArray(m.supported_generation_methods)
+                ? m.supported_generation_methods.filter((method): method is string => typeof method === 'string')
+                : [],
+            }))
+            .filter(isChatContentModel);
 
           const customModels = state.customModelsByProvider[provider] || [];
           const mergedModels = [...mappedModels];
@@ -922,6 +931,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                 description: 'Custom model ID',
                 inputTokenLimit: 0,
                 outputTokenLimit: 0,
+                thinking: false,
+                supportedGenerationMethods: [],
               });
             }
           }
@@ -962,9 +973,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
 
       setActiveProvider: async (provider) => {
         set((state) => {
-          const autoRouting = provider === 'openai'
-            ? { imageBackend: 'openai' as const, videoBackend: 'openai' as const }
-            : { imageBackend: 'google' as const, videoBackend: 'google' as const };
+          const autoRouting = { imageBackend: 'google' as const, videoBackend: 'google' as const };
           const nextMediaRouting = state.mediaRoutingCustomized ? state.mediaRouting : autoRouting;
           return {
             activeProvider: provider,
@@ -1000,6 +1009,15 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         }
       },
 
+      setThinkingLevel: async (level) => {
+        const normalized = normalizeThinkingLevel(level);
+        set({ thinkingLevel: normalized });
+        const state = useSettingsStore.getState();
+        await useAuthStore.getState().applyRuntimeConfig(
+          buildRuntimeConfigFromSettings(state),
+        );
+      },
+
       addCustomModelForProvider: (provider, modelId) => {
         const trimmed = modelId.trim();
         if (!trimmed) return;
@@ -1018,6 +1036,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
                   description: 'Custom model ID',
                   inputTokenLimit: 0,
                   outputTokenLimit: 0,
+                  thinking: false,
+                  supportedGenerationMethods: [],
                 },
               ];
 
@@ -1058,14 +1078,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           },
           mediaRoutingCustomized: true,
         }));
-        const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig(
-          buildRuntimeConfigFromSettings(state),
-        );
-      },
-
-      setExternalSearchProvider: async (provider) => {
-        set({ externalSearchProvider: provider });
         const state = useSettingsStore.getState();
         await useAuthStore.getState().applyRuntimeConfig(
           buildRuntimeConfigFromSettings(state),
@@ -1115,23 +1127,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             },
           };
         });
-
-        const state = useSettingsStore.getState();
-        await useAuthStore.getState().applyRuntimeConfig(
-          buildRuntimeConfigFromSettings(state),
-        );
-      },
-
-      updateExternalCliSettings: async (provider, updates) => {
-        set((state) => ({
-          externalCli: {
-            ...state.externalCli,
-            [provider]: {
-              ...state.externalCli[provider],
-              ...updates,
-            },
-          },
-        }));
 
         const state = useSettingsStore.getState();
         await useAuthStore.getState().applyRuntimeConfig(
@@ -1574,19 +1569,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             };
           }
 
-          if (provider === 'openai') {
-            const safeKey = key as keyof SpecializedModelsV2['openai'];
-            return {
-              specializedModelsV2: {
-                ...state.specializedModelsV2,
-                openai: {
-                  ...state.specializedModelsV2.openai,
-                  [safeKey]: trimmed,
-                },
-              },
-            };
-          }
-
           const safeKey = key as keyof SpecializedModelsV2['fal'];
           return {
             specializedModelsV2: {
@@ -1855,6 +1837,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         autoSave: state.autoSave,
         selectedModel: state.selectedModel,
         selectedModelByProvider: state.selectedModelByProvider,
+        thinkingLevel: state.thinkingLevel,
         temperature: state.temperature,
         maxOutputTokens: state.maxOutputTokens,
         toolOutputTokenLimit: state.toolOutputTokenLimit,
@@ -1864,14 +1847,12 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         specializedModelsV2: state.specializedModelsV2,
         mediaRouting: state.mediaRouting,
         mediaRoutingCustomized: state.mediaRoutingCustomized,
-        externalSearchProvider: state.externalSearchProvider,
         memory: state.memory,
         activeSoulId: state.activeSoulId,
         defaultSoulId: state.defaultSoulId,
         permissionDefaults: state.permissionDefaults,
         approvalMode: state.approvalMode,
         commandSandbox: state.commandSandbox,
-        externalCli: state.externalCli,
         mcpServers: state.mcpServers,
         skillsSettings: state.skillsSettings,
         installedSkillConfigs: state.installedSkillConfigs,
@@ -1907,10 +1888,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           validModel = initialState.selectedModel;
         }
 
-        const persistedMode = persisted?.approvalMode;
-        const validMode = persistedMode === 'auto' || persistedMode === 'read_only' || persistedMode === 'full'
-          ? persistedMode
-          : initialState.approvalMode;
+        const validMode = normalizePersistedApprovalMode(
+          persisted?.approvalMode,
+          initialState.approvalMode,
+        );
+        const validThinkingLevel = normalizeThinkingLevel(
+          persisted?.thinkingLevel,
+          initialState.thinkingLevel,
+        );
         const persistedUxProfile = persisted?.uxProfile;
         const validUxProfile: UxProfile =
           persistedUxProfile === 'pro' || persistedUxProfile === 'simple'
@@ -1924,37 +1909,13 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           persisted?.commandSandbox,
           mergedPermissionDefaults,
         );
-        const persistedExternalCli = persisted?.externalCli;
-        const validExternalCli: ExternalCliSettings = {
-          codex: {
-            enabled: persistedExternalCli?.codex?.enabled ?? DEFAULT_EXTERNAL_CLI_SETTINGS.codex.enabled,
-            allowBypassPermissions:
-              persistedExternalCli?.codex?.allowBypassPermissions ??
-              DEFAULT_EXTERNAL_CLI_SETTINGS.codex.allowBypassPermissions,
-          },
-          claude: {
-            enabled: persistedExternalCli?.claude?.enabled ?? DEFAULT_EXTERNAL_CLI_SETTINGS.claude.enabled,
-            allowBypassPermissions:
-              persistedExternalCli?.claude?.allowBypassPermissions ??
-              DEFAULT_EXTERNAL_CLI_SETTINGS.claude.allowBypassPermissions,
-          },
-        };
-
         const validSpecializedModels = normalizeSpecializedModels(persisted?.specializedModels);
         const persistedActiveProvider = persisted?.activeProvider;
         const validActiveProvider: ProviderId =
           persistedActiveProvider &&
-          ['google', 'openai', 'anthropic', 'openrouter', 'moonshot', 'glm', 'deepseek', 'lmstudio'].includes(
-            persistedActiveProvider,
-          )
+          ['google', 'gemini'].includes(persistedActiveProvider)
             ? (persistedActiveProvider as ProviderId)
             : initialState.activeProvider;
-
-        const persistedExternalSearch = persisted?.externalSearchProvider;
-        const validExternalSearchProvider: ExternalSearchProvider =
-          persistedExternalSearch === 'exa' || persistedExternalSearch === 'tavily'
-            ? persistedExternalSearch
-            : DEFAULT_EXTERNAL_SEARCH_PROVIDER;
         const persistedMemory = persisted?.memory;
         const validMemory: MemorySettings = {
           enabled:
@@ -1987,14 +1948,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
         const persistedSpecializedV2 = persisted?.specializedModelsV2;
         const validSpecializedModelsV2: SpecializedModelsV2 = {
           google: normalizeSpecializedModels(persistedSpecializedV2?.google || validSpecializedModels),
-          openai: {
-            imageGeneration:
-              persistedSpecializedV2?.openai?.imageGeneration?.trim() ||
-              DEFAULT_SPECIALIZED_MODELS_V2.openai.imageGeneration,
-            videoGeneration:
-              persistedSpecializedV2?.openai?.videoGeneration?.trim() ||
-              DEFAULT_SPECIALIZED_MODELS_V2.openai.videoGeneration,
-          },
           fal: {
             imageGeneration:
               persistedSpecializedV2?.fal?.imageGeneration?.trim() ||
@@ -2002,23 +1955,29 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
             videoGeneration:
               persistedSpecializedV2?.fal?.videoGeneration?.trim() ||
               DEFAULT_SPECIALIZED_MODELS_V2.fal.videoGeneration,
+            enabledModels: Array.isArray(persistedSpecializedV2?.fal?.enabledModels)
+              ? persistedSpecializedV2?.fal?.enabledModels.filter((model): model is string => typeof model === 'string' && model.trim().length > 0)
+              : DEFAULT_SPECIALIZED_MODELS_V2.fal.enabledModels,
+            defaultImageModelId:
+              persistedSpecializedV2?.fal?.defaultImageModelId?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.fal.defaultImageModelId,
+            defaultVideoModelId:
+              persistedSpecializedV2?.fal?.defaultVideoModelId?.trim() ||
+              DEFAULT_SPECIALIZED_MODELS_V2.fal.defaultVideoModelId,
           },
         };
 
         const persistedMediaRouting = persisted?.mediaRouting;
         const mediaRoutingCustomized = persisted?.mediaRoutingCustomized ?? false;
         const validMediaRouting: MediaRoutingSettings = {
-          imageBackend: ['google', 'openai', 'fal'].includes(String(persistedMediaRouting?.imageBackend))
+          imageBackend: ['google', 'fal'].includes(String(persistedMediaRouting?.imageBackend))
             ? (persistedMediaRouting?.imageBackend as MediaRoutingSettings['imageBackend'])
             : DEFAULT_MEDIA_ROUTING.imageBackend,
-          videoBackend: ['google', 'openai', 'fal'].includes(String(persistedMediaRouting?.videoBackend))
+          videoBackend: ['google', 'fal'].includes(String(persistedMediaRouting?.videoBackend))
             ? (persistedMediaRouting?.videoBackend as MediaRoutingSettings['videoBackend'])
             : DEFAULT_MEDIA_ROUTING.videoBackend,
         };
-        const autoMediaRouting: MediaRoutingSettings =
-          validActiveProvider === 'openai'
-            ? { imageBackend: 'openai', videoBackend: 'openai' }
-            : { imageBackend: 'google', videoBackend: 'google' };
+        const autoMediaRouting: MediaRoutingSettings = { imageBackend: 'google', videoBackend: 'google' };
         const resolvedMediaRouting = mediaRoutingCustomized ? validMediaRouting : autoMediaRouting;
 
         const persistedSelectedByProvider = persisted?.selectedModelByProvider || {};
@@ -2075,20 +2034,19 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
           activeProvider: validActiveProvider,
           uxProfile: validUxProfile,
           approvalMode: validMode,
+          thinkingLevel: validThinkingLevel,
           selectedModel: activeSelectedModel,
           selectedModelByProvider,
           specializedModels: validSpecializedModels,
           specializedModelsV2: validSpecializedModelsV2,
           mediaRouting: resolvedMediaRouting,
           mediaRoutingCustomized,
-          externalSearchProvider: validExternalSearchProvider,
           memory: validMemory,
           toolOutputTokenLimit: validToolOutputTokenLimit,
           activeSoulId: persistedActiveSoulId || DEFAULT_SOUL_ID,
           defaultSoulId: persistedDefaultSoulId || DEFAULT_SOUL_ID,
           permissionDefaults: mergedPermissionDefaults,
           commandSandbox: validCommandSandbox,
-          externalCli: validExternalCli,
           installedCommandConfigs: migratedCommandConfigs,
           rightPanelSections: validRightPanelSections,
           sessionListFilters: validSessionListFilters,
@@ -2116,6 +2074,8 @@ export const useTheme = () => useSettingsStore((state) => state.theme);
 export const useFontSize = () => useSettingsStore((state) => state.fontSize);
 export const useSelectedModel = () =>
   useSettingsStore((state) => state.selectedModel);
+export const useThinkingLevel = () =>
+  useSettingsStore((state) => state.thinkingLevel);
 export const useAvailableModels = () =>
   useSettingsStore((state) => state.availableModels);
 export const useModelsLoading = () =>
@@ -2158,8 +2118,6 @@ export const useMediaRoutingSettings = () =>
   useSettingsStore((state) => state.mediaRouting);
 export const useSpecializedModelsV2 = () =>
   useSettingsStore((state) => state.specializedModelsV2);
-export const useExternalSearchProvider = () =>
-  useSettingsStore((state) => state.externalSearchProvider);
 export const useMemorySettings = () =>
   useSettingsStore((state) => state.memory);
 export const useSoulProfiles = () =>

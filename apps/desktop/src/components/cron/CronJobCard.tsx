@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Naresh. All rights reserved.
 // Licensed under the MIT License. See LICENSE file for details.
 
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import {
   Play,
@@ -115,6 +115,14 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
     }
   };
 
+  const handleCardClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('button, a, input, textarea, select')) {
+      return;
+    }
+    viewHistory(job.id);
+  };
+
   if (compact) {
     return (
       <div
@@ -165,10 +173,11 @@ export function CronJobCard({ job, compact = false }: CronJobCardProps) {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
+      onClick={handleCardClick}
       className={cn(
         'p-4 rounded-xl',
         'bg-white/[0.02] border border-white/[0.06]',
-        'hover:bg-white/[0.03] transition-colors'
+        'hover:bg-white/[0.03] transition-colors cursor-pointer'
       )}
     >
       {/* Header */}

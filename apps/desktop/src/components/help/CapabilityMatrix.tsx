@@ -76,8 +76,8 @@ export function CapabilityMatrix({ compact = false }: CapabilityMatrixProps) {
           <div>
             <h4 className="text-sm font-medium text-white/90">Tools You Can Use Now</h4>
             <p className="mt-1 text-xs text-white/45">
-              Provider: <span className="font-mono text-white/70">{snapshot.provider}</span> • Policy profile:{' '}
-              <span className="font-mono text-white/70">{snapshot.policyProfile}</span>
+              Provider: <span className="font-mono text-white/70">{snapshot.provider}</span> • Approval mode:{' '}
+              <span className="font-mono text-white/70">{snapshot.approvalMode}</span>
             </p>
           </div>
           <button
@@ -93,10 +93,7 @@ export function CapabilityMatrix({ compact = false }: CapabilityMatrixProps) {
       <div className="flex flex-wrap gap-1.5">
         <KeyStatusPill label="Provider key" configured={snapshot.keyStatus.providerKeyConfigured} />
         <KeyStatusPill label="Google key" configured={snapshot.keyStatus.googleKeyConfigured} />
-        <KeyStatusPill label="OpenAI key" configured={snapshot.keyStatus.openaiKeyConfigured} />
         <KeyStatusPill label="Fal key" configured={snapshot.keyStatus.falKeyConfigured} />
-        <KeyStatusPill label="Exa key" configured={snapshot.keyStatus.exaKeyConfigured} />
-        <KeyStatusPill label="Tavily key" configured={snapshot.keyStatus.tavilyKeyConfigured} />
         <KeyStatusPill label="Stitch key" configured={snapshot.keyStatus.stitchKeyConfigured} />
       </div>
 
@@ -123,18 +120,6 @@ export function CapabilityMatrix({ compact = false }: CapabilityMatrixProps) {
                   {tool.enabled ? 'enabled' : 'disabled'}
                 </span>
               </div>
-              <span
-                className={cn(
-                  'rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
-                  tool.policyAction === 'allow'
-                    ? 'bg-[#1D4ED8]/15 text-[#93C5FD]'
-                    : tool.policyAction === 'deny'
-                      ? 'bg-[#FF5449]/15 text-[#FF9A93]'
-                      : 'bg-[#F59E0B]/15 text-[#FCD34D]',
-                )}
-              >
-                policy: {tool.policyAction}
-              </span>
             </div>
             <p className="mt-1 text-[11px] text-white/55">{tool.reason}</p>
           </div>

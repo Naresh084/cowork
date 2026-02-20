@@ -16,11 +16,11 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
   {
     id: 'provider.activeProvider',
     title: 'Active Provider',
-    description: 'Selects which model provider handles chat and most native capabilities.',
+    description: 'Core assistant provider is fixed to Google.',
     what_it_controls:
-      'Switches runtime provider context, provider-scoped model catalogs, and provider-native capabilities.',
+      'Keeps runtime chat/reasoning aligned to Google model catalogs and Google-native capabilities.',
     when_to_use:
-      'Change this when you want to use different model families, pricing, or provider-native features.',
+      'Reference-only in this build. Legacy sessions/providers are normalized to Google.',
     tool_impact: ['chat', 'web_search', 'google_grounded_search', 'computer_use', 'web_fetch'],
     security_notes: 'Provider-specific credentials are required and stored in system credential storage.',
     requires_new_session: true,
@@ -28,10 +28,10 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
   {
     id: 'provider.apiKey',
     title: 'Provider API Key',
-    description: 'Authenticates requests to the active provider for chat and provider-native tools.',
+    description: 'Authenticates Google provider requests for chat and Google-native tools.',
     what_it_controls:
-      'Enables provider runtime access for chat and related tools. Missing keys disable provider-backed operations.',
-    when_to_use: 'Set when first configuring a provider, rotate keys, or troubleshoot auth failures.',
+      'Enables Google runtime access for chat and related tools. Missing keys disable Google-backed operations.',
+    when_to_use: 'Set during initial setup, key rotation, or Google auth troubleshooting.',
     tool_impact: ['chat', 'web_search', 'google_grounded_search', 'web_fetch', 'computer_use'],
     security_notes: 'Never share keys in chats or screenshots. Keys are masked and stored securely.',
     requires_new_session: false,
@@ -113,9 +113,9 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
   {
     id: 'provider.commandSandbox.trustedCommands',
     title: 'Trusted Command Prefixes',
-    description: 'Commands eligible for automatic approval in auto mode when sandbox-allowed.',
-    what_it_controls: 'Approval-layer auto-allow behavior for shell requests.',
-    when_to_use: 'Add low-risk read commands used frequently; keep list minimal.',
+    description: 'Commands that can be treated as lower-risk inside the permission approval flow.',
+    what_it_controls: 'How shell requests are classified before Ask/Full approval handling.',
+    when_to_use: 'Add low-risk read commands used frequently; keep this list minimal.',
     tool_impact: ['shell_execute permission flow'],
     security_notes: 'Only include commands safe to run without prompting.',
     requires_new_session: false,
@@ -144,7 +144,7 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     id: 'media.imageBackend',
     title: 'Image Backend',
     description: 'Selects the backend used for image generation and image editing.',
-    what_it_controls: 'Routes generate_image and edit_image calls to Google, OpenAI, or Fal backends.',
+    what_it_controls: 'Routes generate_image and edit_image calls to Google or Fal backends.',
     when_to_use: 'Switch for quality preferences, pricing, or key availability.',
     tool_impact: ['generate_image', 'edit_image'],
     security_notes: 'Requires matching backend key to be configured for reliable execution.',
@@ -154,7 +154,7 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     id: 'media.videoBackend',
     title: 'Video Backend',
     description: 'Selects the backend used for video generation.',
-    what_it_controls: 'Routes generate_video calls to Google, OpenAI, or Fal backends.',
+    what_it_controls: 'Routes generate_video calls to Google or Fal backends.',
     when_to_use: 'Switch for output style, cost, or backend availability.',
     tool_impact: ['generate_video'],
     security_notes: 'Ensure the selected backend key is configured before use.',
@@ -168,16 +168,6 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     when_to_use: 'Required when using Google for image or video generation.',
     tool_impact: ['generate_image', 'edit_image', 'generate_video'],
     security_notes: 'Store and rotate like any production credential.',
-    requires_new_session: false,
-  },
-  {
-    id: 'media.openaiApiKey',
-    title: 'OpenAI Media API Key',
-    description: 'Authorizes OpenAI-backed media operations.',
-    what_it_controls: 'Unlocks OpenAI image/video generation paths in media routing.',
-    when_to_use: 'Required for OpenAI media backend unless provider key fallback applies.',
-    tool_impact: ['generate_image', 'edit_image', 'generate_video', 'analyze_video'],
-    security_notes: 'Avoid exposing keys in logs or clipboard history.',
     requires_new_session: false,
   },
   {
@@ -211,26 +201,6 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     requires_new_session: false,
   },
   {
-    id: 'media.openaiImageModel',
-    title: 'OpenAI Image Model',
-    description: 'Override for OpenAI image model ID.',
-    what_it_controls: 'Selects OpenAI model used when OpenAI image backend is active.',
-    when_to_use: 'Use when moving between model generations or testing behavior.',
-    tool_impact: ['generate_image', 'edit_image'],
-    security_notes: 'Unsupported IDs can disable image generation.',
-    requires_new_session: false,
-  },
-  {
-    id: 'media.openaiVideoModel',
-    title: 'OpenAI Video Model',
-    description: 'Override for OpenAI video model ID.',
-    what_it_controls: 'Selects OpenAI model used for video generation with OpenAI backend.',
-    when_to_use: 'Use when evaluating speed/quality tradeoffs.',
-    tool_impact: ['generate_video'],
-    security_notes: 'Model availability may vary by account/region.',
-    requires_new_session: false,
-  },
-  {
     id: 'media.falImageModel',
     title: 'Fal Image Model',
     description: 'Override for Fal image model ID.',
@@ -251,30 +221,6 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     requires_new_session: false,
   },
   {
-    id: 'capability.policyControl',
-    title: 'Capability Policy Control',
-    description:
-      'Unified capability table for availability status and per-tool Allow/Ask/Deny policy.',
-    what_it_controls:
-      'Shows whether each capability is currently available and lets you set policy action inline for each tool.',
-    when_to_use:
-      'Use when you want one place to audit capability readiness and tighten/relax permissions.',
-    tool_impact: ['all capability tools', 'policy_evaluate'],
-    security_notes:
-      'Changing policy from Ask to Allow reduces review prompts; use Allow only for tools you trust.',
-    requires_new_session: false,
-  },
-  {
-    id: 'integration.externalSearchProvider',
-    title: 'External Search Fallback Provider',
-    description: 'Chooses runtime search fallback when provider-native search is unavailable.',
-    what_it_controls: 'Routes web_search fallback to Google, Exa, or Tavily.',
-    when_to_use: 'Use from the Runtime tab when your active provider has limited native web search support.',
-    tool_impact: ['web_search', 'google_grounded_search'],
-    security_notes: 'Fallback providers may have separate data handling policies.',
-    requires_new_session: false,
-  },
-  {
     id: 'runtime.toolOutputTokenLimit',
     title: 'Tool Output Token Limit',
     description: 'Caps each tool result size before it is returned to the model.',
@@ -288,26 +234,6 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     requires_new_session: false,
   },
   {
-    id: 'integration.exaApiKey',
-    title: 'Exa API Key',
-    description: 'Credential for Exa-powered web search fallback.',
-    what_it_controls: 'Enables Exa backend for search fallback when selected.',
-    when_to_use: 'Set from Runtime tab when external search provider is Exa.',
-    tool_impact: ['web_search'],
-    security_notes: 'Treat as sensitive credential and rotate periodically.',
-    requires_new_session: false,
-  },
-  {
-    id: 'integration.tavilyApiKey',
-    title: 'Tavily API Key',
-    description: 'Credential for Tavily-powered web search fallback.',
-    what_it_controls: 'Enables Tavily backend for search fallback when selected.',
-    when_to_use: 'Set from Runtime tab when external search provider is Tavily.',
-    tool_impact: ['web_search'],
-    security_notes: 'Key leakage can consume quota; keep private.',
-    requires_new_session: false,
-  },
-  {
     id: 'integration.stitchApiKey',
     title: 'Stitch MCP API Key',
     description: 'Controls availability of Stitch MCP and Stitch-labeled design tools.',
@@ -315,36 +241,6 @@ export const SETTINGS_HELP_CONTENT: SettingHelpEntry[] = [
     when_to_use: 'Set from Runtime tab when using Stitch-driven design or MCP functionality.',
     tool_impact: ['mcp_*', 'stitch*'],
     security_notes: 'Stored securely; missing key is safer than stale leaked key.',
-    requires_new_session: false,
-  },
-  {
-    id: 'integration.externalCli.enableTools',
-    title: 'External CLI Tool Enablement',
-    description: 'Enables external Codex/Claude orchestration tools when binaries are installed.',
-    what_it_controls:
-      'Registers or hides start/progress/respond/cancel external CLI tools for each installed provider.',
-    when_to_use:
-      'Enable from Runtime tab for users who want Cowork to orchestrate local codex/claude workflows with conversational pre-launch confirmations.',
-    tool_impact: [
-      'start_codex_cli_run',
-      'start_claude_cli_run',
-      'external_cli_get_progress',
-      'external_cli_respond',
-      'external_cli_cancel_run',
-    ],
-    security_notes: 'Disable when you do not want agents invoking external local CLIs.',
-    requires_new_session: false,
-  },
-  {
-    id: 'integration.externalCli.allowBypassPermissions',
-    title: 'External CLI Bypass Permissions',
-    description: 'Allows bypass mode to be selected for external CLI runs.',
-    what_it_controls:
-      'Permits `bypassPermission=true` for provider start tools. The agent should still ask for conversational confirmation each launch.',
-    when_to_use:
-      'Enable only in trusted environments where bypass may be needed after user confirmation.',
-    tool_impact: ['start_codex_cli_run', 'start_claude_cli_run'],
-    security_notes: 'Bypass mode can execute high-risk actions without HITL checks. Keep disabled by default.',
     requires_new_session: false,
   },
   {

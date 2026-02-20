@@ -17,13 +17,6 @@ import { useCapabilityStore } from '@/stores/capability-store';
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-  moonshot: 'Moonshot (Kimi)',
-  glm: 'GLM',
-  deepseek: 'DeepSeek',
-  lmstudio: 'LM Studio',
 };
 
 function maskKey(value: string | null): string {
@@ -266,7 +259,6 @@ export function ApiKeysSettings() {
     await applyRuntimeConfig({
       activeProvider,
       providerBaseUrls: settingsState.providerBaseUrls,
-      externalSearchProvider: settingsState.externalSearchProvider,
       mediaRouting: settingsState.mediaRouting,
       specializedModels: settingsState.specializedModelsV2,
       sandbox: settingsState.commandSandbox,
@@ -357,7 +349,6 @@ export function ApiKeysSettings() {
             await applyRuntimeConfig({
               activeProvider,
               providerBaseUrls: settingsState.providerBaseUrls,
-              externalSearchProvider: settingsState.externalSearchProvider,
               mediaRouting: settingsState.mediaRouting,
               specializedModels: settingsState.specializedModelsV2,
               sandbox: settingsState.commandSandbox,

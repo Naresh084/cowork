@@ -82,7 +82,7 @@ async function installDesktopMock(page: Page, seed: ReliabilitySeed): Promise<vo
     const summary = {
       id: payload.sessionId,
       type: 'main',
-      provider: 'lmstudio',
+      provider: 'google',
       executionMode: 'execute',
       title: 'Reliability Session',
       firstMessage: 'Run reliability flow',
@@ -134,17 +134,10 @@ async function installDesktopMock(page: Page, seed: ReliabilitySeed): Promise<vo
     const persistedSettings = {
       state: {
         userName: payload.userName,
-        activeProvider: 'lmstudio',
+        activeProvider: 'google',
         selectedModel: 'gemini-2.5-pro',
         selectedModelByProvider: {
           google: 'gemini-2.5-pro',
-          openai: '',
-          anthropic: '',
-          openrouter: '',
-          moonshot: '',
-          glm: '',
-          deepseek: '',
-          lmstudio: 'gemini-2.5-pro',
         },
       },
       version: 0,
@@ -284,10 +277,7 @@ async function installDesktopMock(page: Page, seed: ReliabilitySeed): Promise<vo
         if (
           cmd === 'get_provider_api_key' ||
           cmd === 'get_google_api_key' ||
-          cmd === 'get_openai_api_key' ||
           cmd === 'get_fal_api_key' ||
-          cmd === 'get_exa_api_key' ||
-          cmd === 'get_tavily_api_key' ||
           cmd === 'get_stitch_api_key'
         ) {
           return null;

@@ -49,7 +49,7 @@ describe('cron-tool schedule_task temporal grounding', () => {
     }), () => ({
       version: 1,
       sourceSessionId: 'session_test',
-      approvalMode: 'auto',
+      approvalMode: 'ask',
       permissionScopes: {
         shell_execute: ['/usr/local/bin'],
       },

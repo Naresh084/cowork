@@ -872,9 +872,6 @@ export class MessageRouter extends EventEmitter {
     if (!requestAny?.id || !requestAny.question) return;
 
     const metadata = requestAny.metadata || {};
-    const externalCliInteraction = metadata.externalCliInteraction === true;
-    if (!externalCliInteraction) return;
-
     const origin = (metadata.origin as { source?: string; platform?: PlatformType; chatId?: string } | undefined) || {};
     if (origin.source !== 'integration' || !origin.platform || !origin.chatId) return;
 
@@ -960,28 +957,6 @@ export class MessageRouter extends EventEmitter {
 
     if (await this.tryHandlePendingQuestionResponse(sessionId, msg)) {
       return;
-    }
-
-    if (
-      this.agentRunner &&
-      typeof this.agentRunner.tryHandleIntegrationExternalCliResponse === 'function'
-    ) {
-      const handled = await Promise.resolve(
-        this.agentRunner.tryHandleIntegrationExternalCliResponse(
-          sessionId,
-          msg.platform,
-          msg.chatId,
-          this.normalizeIncomingContent(msg.content),
-        ),
-      );
-      if (handled) {
-        const adapter = this.adapters.get(msg.platform);
-        if (adapter) {
-          await adapter.sendMessage(msg.chatId, 'Acknowledged. Continuing the pending run.');
-          eventEmitter.integrationMessageOut(msg.platform, msg.chatId);
-        }
-        return;
-      }
     }
 
     if (state.isProcessing) {

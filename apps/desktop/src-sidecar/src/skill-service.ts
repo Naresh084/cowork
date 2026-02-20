@@ -205,18 +205,12 @@ export class SkillService {
       }
     }
 
-    // Priority 1.5: Platform directories (.agent/ and .claude/)
+    // Priority 1.5: Platform directories (.agent/)
     const platformSkillDirs: string[] = [];
     if (workingDirectory) {
-      platformSkillDirs.push(
-        join(workingDirectory, '.agent', 'skills'),
-        join(workingDirectory, '.claude', 'skills'),
-      );
+      platformSkillDirs.push(join(workingDirectory, '.agent', 'skills'));
     }
-    platformSkillDirs.push(
-      join(homedir(), '.agent', 'skills'),
-      join(homedir(), '.claude', 'skills'),
-    );
+    platformSkillDirs.push(join(homedir(), '.agent', 'skills'));
 
     for (const dir of platformSkillDirs) {
       const skills = await this.discoverDirectorySafe(dir, 'platform', 1);

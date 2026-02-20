@@ -76,7 +76,6 @@ export function App() {
       await applyRuntimeConfig({
         activeProvider: refreshedSettings.activeProvider,
         providerBaseUrls: refreshedSettings.providerBaseUrls,
-        externalSearchProvider: refreshedSettings.externalSearchProvider,
         mediaRouting: refreshedSettings.mediaRouting,
         toolOutputTokenLimit: refreshedSettings.toolOutputTokenLimit,
         specializedModels: refreshedSettings.specializedModelsV2,
@@ -150,7 +149,7 @@ export function App() {
   }, [isAuthenticated, hasLoaded, waitForBackend, loadSessions, discoverSkills, discoverCommands, loadSubagents, loadCronJobs, setStartupIssue]);
 
   useEffect(() => {
-    if ((!apiKey && activeProvider !== 'lmstudio') || modelsLoading || availableModels.length > 0) return;
+    if (!apiKey || modelsLoading || availableModels.length > 0) return;
     fetchProviderModels(activeProvider).catch((error) => {
       console.warn('[App] Failed to fetch models:', error);
       void reportTerminalDiagnostic(

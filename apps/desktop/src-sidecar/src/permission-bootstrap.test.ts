@@ -12,7 +12,7 @@ describe('permission-bootstrap encoding', () => {
     const encoded = encodeSessionPermissionBootstrap({
       version: 1,
       sourceSessionId: 'sess_123',
-      approvalMode: 'auto',
+      approvalMode: 'ask',
       permissionScopes: {
         shell_execute: ['/usr/local/bin', '/opt/homebrew/bin'],
         file_read: ['/Users/test/project'],
@@ -27,7 +27,7 @@ describe('permission-bootstrap encoding', () => {
     expect(decoded).not.toBeNull();
     expect(decoded?.version).toBe(1);
     expect(decoded?.sourceSessionId).toBe('sess_123');
-    expect(decoded?.approvalMode).toBe('auto');
+    expect(decoded?.approvalMode).toBe('ask');
     expect(decoded?.permissionScopes.shell_execute).toContain('/usr/local/bin');
     expect(decoded?.permissionCache['shell_execute:ls /usr/local/bin']).toBe('allow_session');
   });

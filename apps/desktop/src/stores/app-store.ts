@@ -8,7 +8,6 @@ export type AppView = 'chat' | 'settings' | 'workflows';
 export type SettingsTab =
   | 'provider'
   | 'media'
-  | 'capabilities'
   | 'runtime'
   | 'benchmarks'
   | 'integrations'

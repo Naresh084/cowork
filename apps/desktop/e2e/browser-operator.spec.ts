@@ -47,13 +47,6 @@ async function installBrowserMock(page: Page, seed: BrowserSeed): Promise<void> 
           activeProvider: 'google',
           selectedModelByProvider: {
             google: 'gemini-2.5-pro',
-            openai: '',
-            anthropic: '',
-            openrouter: '',
-            moonshot: '',
-            glm: '',
-            deepseek: '',
-            lmstudio: '',
           },
         },
         version: 0,
@@ -316,10 +309,7 @@ async function installBrowserMock(page: Page, seed: BrowserSeed): Promise<void> 
         }
         if (
           cmd === 'get_google_api_key' ||
-          cmd === 'get_openai_api_key' ||
           cmd === 'get_fal_api_key' ||
-          cmd === 'get_exa_api_key' ||
-          cmd === 'get_tavily_api_key' ||
           cmd === 'get_stitch_api_key'
         ) {
           return null;

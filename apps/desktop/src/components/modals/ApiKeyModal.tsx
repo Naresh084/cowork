@@ -9,13 +9,6 @@ import { cn } from '../../lib/utils';
 
 const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-  moonshot: 'Moonshot (Kimi)',
-  glm: 'GLM',
-  deepseek: 'DeepSeek',
-  lmstudio: 'LM Studio',
 };
 
 interface ApiKeyModalProps {
@@ -68,7 +61,6 @@ export function ApiKeyModal({ isOpen, onClose, errorMessage }: ApiKeyModalProps)
       await applyRuntimeConfig({
         activeProvider: settingsState.activeProvider,
         providerBaseUrls: settingsState.providerBaseUrls,
-        externalSearchProvider: settingsState.externalSearchProvider,
         mediaRouting: settingsState.mediaRouting,
         specializedModels: settingsState.specializedModelsV2,
         sandbox: settingsState.commandSandbox,

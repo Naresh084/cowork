@@ -70,10 +70,12 @@ describe('agent-runner integration capability refresh', () => {
       sessions: Map<string, any>;
       buildToolHandlers: (session: any) => unknown[];
       createDeepAgent: (session: any, tools: unknown[]) => Promise<unknown>;
+      isReady: () => boolean;
       refreshIntegrationCapabilities: (reason?: string) => Promise<void>;
     };
 
-    runner.runtimeConfig.activeProvider = 'lmstudio';
+    runner.runtimeConfig.activeProvider = 'google';
+    vi.spyOn(runner, 'isReady').mockReturnValue(true);
 
     const rebuildableSession: Record<string, unknown> = {
       id: 'sess-rebuild',

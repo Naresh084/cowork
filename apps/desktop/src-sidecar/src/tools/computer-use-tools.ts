@@ -379,258 +379,24 @@ export class PlaywrightDriver implements BrowserDriver {
 // ChromeExtensionDriver removed - now using session-based CDP instances
 // Each session gets its own Chrome instance via ChromeCDPDriver.forSession()
 
-const COMPUTER_USE_VIEWPORT = {
-  width: 1440,
-  height: 900,
-};
-
-function ensureOpenAIBaseUrl(baseUrl?: string): string {
-  const trimmed = (baseUrl || 'https://api.openai.com').trim().replace(/\/+$/, '');
-  if (trimmed.endsWith('/v1')) return trimmed;
-  return `${trimmed}/v1`;
-}
-
-function normalizeCoordinateForDriver(raw: unknown, axis: 'x' | 'y'): number {
-  const numeric = Number(raw);
-  if (!Number.isFinite(numeric)) return 0;
-  const max = axis === 'x' ? COMPUTER_USE_VIEWPORT.width : COMPUTER_USE_VIEWPORT.height;
-  if (numeric <= 1 && numeric >= 0) {
-    return Math.round(numeric * 1000);
-  }
-  const normalized = Math.round((numeric / max) * 1000);
-  return Math.max(0, Math.min(1000, normalized));
-}
-
-function parseActionType(actionInput: Record<string, unknown>): string {
-  const action = actionInput.action || actionInput.type || actionInput.name || '';
-  return String(action).toLowerCase().trim();
-}
-
-async function performProviderAction(
-  driver: BrowserDriver,
-  actionInput: Record<string, unknown>,
-): Promise<{ log: string; args: Record<string, unknown> }> {
-  const actionType = parseActionType(actionInput);
-  const x = normalizeCoordinateForDriver(actionInput.x, 'x');
-  const y = normalizeCoordinateForDriver(actionInput.y, 'y');
-
-  switch (actionType) {
-    case 'navigate':
-    case 'open_url':
-    case 'open_web_browser': {
-      const url = String(actionInput.url || actionInput.target_url || '');
-      if (!url) throw new Error('Computer use navigate action missing URL.');
-      const args = { url };
-      await performActionWithRetry(driver, { name: 'navigate', args });
-      return { log: `navigate(${JSON.stringify(args)})`, args };
-    }
-    case 'click':
-    case 'left_click':
-    case 'single_click': {
-      const args = { x, y };
-      await performActionWithRetry(driver, { name: 'click_at', args });
-      return { log: `click_at(${JSON.stringify(args)})`, args };
-    }
-    case 'double_click': {
-      const args = { x, y };
-      await performActionWithRetry(driver, { name: 'click_at', args });
-      await performActionWithRetry(driver, { name: 'click_at', args });
-      return { log: `double_click(${JSON.stringify(args)})`, args };
-    }
-    case 'right_click': {
-      const args = { x, y };
-      await performActionWithRetry(driver, { name: 'click_at', args });
-      return { log: `right_click_as_click(${JSON.stringify(args)})`, args };
-    }
-    case 'mouse_move':
-    case 'hover': {
-      const args = { x, y };
-      await performActionWithRetry(driver, { name: 'hover_at', args });
-      return { log: `hover_at(${JSON.stringify(args)})`, args };
-    }
-    case 'drag':
-    case 'left_click_drag':
-    case 'drag_and_drop': {
-      const destinationX = normalizeCoordinateForDriver(
-        actionInput.destination_x ?? actionInput.to_x ?? actionInput.end_x,
-        'x',
-      );
-      const destinationY = normalizeCoordinateForDriver(
-        actionInput.destination_y ?? actionInput.to_y ?? actionInput.end_y,
-        'y',
-      );
-      const args = { x, y, destination_x: destinationX, destination_y: destinationY };
-      await performActionWithRetry(driver, { name: 'drag_and_drop', args });
-      return { log: `drag_and_drop(${JSON.stringify(args)})`, args };
-    }
-    case 'type':
-    case 'type_text':
-    case 'input_text': {
-      const text = String(actionInput.text || actionInput.value || '');
-      const pressEnter = Boolean(actionInput.press_enter || actionInput.submit);
-      const args = {
-        x,
-        y,
-        text,
-        press_enter: pressEnter,
-        clear_before_typing: Boolean(actionInput.clear_before_typing || actionInput.clear_text),
-      };
-      await performActionWithRetry(driver, { name: 'type_text_at', args });
-      return { log: `type_text_at(${JSON.stringify(args)})`, args };
-    }
-    case 'keypress':
-    case 'key':
-    case 'key_combination': {
-      const keysRaw = actionInput.keys ?? actionInput.key ?? actionInput.key_code;
-      const keys = Array.isArray(keysRaw) ? keysRaw.map(String) : [String(keysRaw || '')].filter(Boolean);
-      const args = { keys };
-      await performActionWithRetry(driver, { name: 'key_combination', args });
-      return { log: `key_combination(${JSON.stringify(args)})`, args };
-    }
-    case 'scroll':
-    case 'scroll_at':
-    case 'scroll_document': {
-      const deltaY = Number(actionInput.scroll_y ?? actionInput.delta_y ?? actionInput.dy ?? actionInput.amount ?? 0);
-      if (Number.isFinite(deltaY) && deltaY !== 0) {
-        const args = {
-          x,
-          y,
-          direction: deltaY > 0 ? 'down' : 'up',
-          magnitude: Math.max(50, Math.min(2000, Math.abs(Math.round(deltaY)))),
-        };
-        await performActionWithRetry(driver, { name: 'scroll_at', args });
-        return { log: `scroll_at(${JSON.stringify(args)})`, args };
-      }
-      const direction = String(actionInput.direction || 'down').toLowerCase().includes('up') ? 'up' : 'down';
-      const args = { direction };
-      await performActionWithRetry(driver, { name: 'scroll_document', args });
-      return { log: `scroll_document(${JSON.stringify(args)})`, args };
-    }
-    case 'go_back': {
-      const args = {};
-      await performActionWithRetry(driver, { name: 'go_back', args });
-      return { log: 'go_back()', args };
-    }
-    case 'go_forward': {
-      const args = {};
-      await performActionWithRetry(driver, { name: 'go_forward', args });
-      return { log: 'go_forward()', args };
-    }
-    case 'wait':
-    case 'wait_5_seconds': {
-      const args = {};
-      await performActionWithRetry(driver, { name: 'wait_5_seconds', args });
-      return { log: 'wait_5_seconds()', args };
-    }
-    default:
-      throw new Error(`Unsupported computer-use action: ${actionType || 'unknown'}`);
-  }
-}
-
-function extractOpenAIOutputText(payload: Record<string, unknown>): string {
-  const outputText = payload.output_text;
-  if (typeof outputText === 'string' && outputText.trim()) {
-    return outputText.trim();
-  }
-
-  const output = Array.isArray(payload.output) ? payload.output : [];
-  const chunks: string[] = [];
-  for (const item of output) {
-    if (!item || typeof item !== 'object') continue;
-    const content = (item as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (!part || typeof part !== 'object') continue;
-      const text =
-        (part as { text?: unknown }).text ||
-        (part as { output_text?: unknown }).output_text;
-      if (typeof text === 'string' && text.trim()) {
-        chunks.push(text.trim());
-      }
-    }
-  }
-
-  return chunks.join('\n').trim();
-}
-
-function extractAnthropicOutputText(content: unknown): string {
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter((part) => part && typeof part === 'object' && (part as { type?: unknown }).type === 'text')
-    .map((part) => String((part as { text?: unknown }).text || '').trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
-function findAnthropicToolUse(content: unknown): { id: string; input: Record<string, unknown> } | null {
-  if (!Array.isArray(content)) return null;
-  for (const part of content) {
-    if (!part || typeof part !== 'object') continue;
-    const type = String((part as { type?: unknown }).type || '');
-    if (type !== 'tool_use') continue;
-    const id = String((part as { id?: unknown }).id || '');
-    const input = (part as { input?: unknown }).input;
-    if (!id || !input || typeof input !== 'object') continue;
-    return { id, input: input as Record<string, unknown> };
-  }
-  return null;
-}
-
 function createComputerUseProviderContext(
-  provider: ProviderId,
+  _provider: ProviderId,
   modelOverride: string | undefined,
   getProviderApiKey: (providerId: ProviderId) => string | null,
   getProviderBaseUrl: (providerId: ProviderId) => string | undefined,
   getGoogleApiKey: () => string | null,
   getComputerUseModel: () => string,
-  getSessionModel: () => string,
 ): {
   provider: ProviderId;
   apiKey: string;
   model: string;
   baseUrl?: string;
 } | null {
-  if (provider === 'google') {
-    const apiKey = getGoogleApiKey() || getProviderApiKey('google');
-    if (!apiKey) return null;
-    return {
-      provider,
-      apiKey,
-      model: modelOverride || getComputerUseModel(),
-      baseUrl: getProviderBaseUrl('google'),
-    };
-  }
-
-  if (provider === 'openai') {
-    const apiKey = getProviderApiKey('openai');
-    if (!apiKey) return null;
-    return {
-      provider,
-      apiKey,
-      model: modelOverride || getSessionModel() || 'computer-use-preview',
-      baseUrl: getProviderBaseUrl('openai'),
-    };
-  }
-
-  if (provider === 'anthropic') {
-    const apiKey = getProviderApiKey('anthropic');
-    if (!apiKey) return null;
-    return {
-      provider,
-      apiKey,
-      model: modelOverride || getSessionModel() || 'claude-sonnet-4-5',
-      baseUrl: getProviderBaseUrl('anthropic'),
-    };
-  }
-
-  // Fallback: for providers without native computer-use integration,
-  // allow Google-backed computer-use if a Google key is configured.
-  const googleFallbackKey = getGoogleApiKey() || getProviderApiKey('google');
-  if (!googleFallbackKey) return null;
+  const googleKey = getGoogleApiKey() || getProviderApiKey('google');
+  if (!googleKey) return null;
   return {
     provider: 'google',
-    apiKey: googleFallbackKey,
+    apiKey: googleKey,
     model: modelOverride || getComputerUseModel(),
     baseUrl: getProviderBaseUrl('google'),
   };
@@ -642,7 +408,7 @@ export function createComputerUseTool(
   getProviderBaseUrl: (provider: ProviderId) => string | undefined,
   getGoogleApiKey: () => string | null,
   getComputerUseModel: () => string,
-  getSessionModel: () => string,
+  _getSessionModel: () => string,
 ): ToolHandler {
   return {
     name: 'computer_use',
@@ -695,7 +461,6 @@ export function createComputerUseTool(
         getProviderBaseUrl,
         getGoogleApiKey,
         getComputerUseModel,
-        getSessionModel,
       );
       if (!providerContext) {
         return {
@@ -903,321 +668,107 @@ export function createComputerUseTool(
             }
           }
 
-          if (providerContext.provider === 'google') {
-            const ai = new GoogleGenAI({ apiKey: providerContext.apiKey });
-            const response = await ai.models.generateContent({
-              model: providerContext.model,
-              contents: [
-                {
-                  role: 'user',
-                  parts: [
-                    { text: prompt },
-                    {
-                      inlineData: {
-                        mimeType: screenshot.mimeType,
-                        data: screenshot.data,
-                      },
+          const ai = new GoogleGenAI({ apiKey: providerContext.apiKey });
+          const response = await ai.models.generateContent({
+            model: providerContext.model,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: screenshot.mimeType,
+                      data: screenshot.data,
                     },
-                  ],
+                  },
+                ],
+              },
+            ],
+            config: {
+              tools: [
+                {
+                  computerUse: { environment: Environment.ENVIRONMENT_BROWSER },
                 },
               ],
-              config: {
-                tools: [
-                  {
-                    computerUse: { environment: Environment.ENVIRONMENT_BROWSER },
-                  },
-                ],
-              },
-            });
+            },
+          });
 
-            const finishReason = response.candidates?.[0]?.finishReason;
-            if (finishReason && String(finishReason).toLowerCase().includes('safety')) {
-              blocked = true;
-              blockedReason = String(finishReason);
-              completed = true;
-              eventEmitter.browserBlocked(_context.sessionId, {
-                reason: blockedReason,
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                checkpointPath,
-              });
-              await persistCheckpoint('blocked', currentUrl);
-              break;
-            }
-
-            let textResponse = '';
-            const candidate = response.candidates?.[0];
-            if (candidate?.content?.parts) {
-              for (const part of candidate.content.parts) {
-                if ('text' in part && part.text) {
-                  textResponse = part.text;
-                }
-              }
-            }
-
-            const functionCalls = response.functionCalls;
-            if (!functionCalls?.length) {
-              completed = true;
-              if (textResponse && textResponse.length > 20) {
-                finalAnalysis = textResponse;
-                actions.push(`[Analysis]: ${textResponse}`);
-              }
-              eventEmitter.browserProgress(_context.sessionId, {
-                status: 'completed',
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                detail: 'Model returned final browser analysis.',
-              });
-              await persistCheckpoint('completed', currentUrl);
-              break;
-            }
-
-            for (const call of functionCalls) {
-              const name = call.name || 'unknown';
-              const actionArgs = call.args || {};
-              const safety = classifyActionSafety(name, actionArgs);
-              if (!safety.allowed) {
-                blocked = true;
-                blockedReason = safety.reason || `Blocked unsafe action: ${name}`;
-                completed = true;
-                eventEmitter.browserBlocked(_context.sessionId, {
-                  reason: blockedReason,
-                  step: steps,
-                  maxSteps: effectiveMaxSteps,
-                  url: currentUrl,
-                  checkpointPath,
-                });
-                await persistCheckpoint('blocked', currentUrl);
-                break;
-              }
-              const action = { name, args: actionArgs };
-
-              await performActionWithRetry(driver, action);
-              actions.push(`${name}(${JSON.stringify(actionArgs)})`);
-              actionHistory.push({
-                action: name,
-                args: actionArgs,
-                url: currentUrl,
-                ts: Date.now(),
-                signature: actionSignature(name, actionArgs),
-              });
-            }
-            if (completed) break;
-          } else if (providerContext.provider === 'openai') {
-            const endpoint = `${ensureOpenAIBaseUrl(providerContext.baseUrl)}/responses`;
-            const openaiPrompt =
-              `${COMPUTER_USE_SYSTEM_PROMPT.replace('{goal}', goal)}\n\nCurrent URL: ${currentUrl}`;
-
-            const openaiResponse = await fetch(endpoint, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${providerContext.apiKey}`,
-              },
-              body: JSON.stringify({
-                model: providerContext.model,
-                input: [
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'input_text', text: openaiPrompt },
-                      { type: 'input_image', image_url: `data:${screenshot.mimeType};base64,${screenshot.data}` },
-                    ],
-                  },
-                ],
-                tools: [
-                  {
-                    type: 'computer_use_preview',
-                    environment: 'browser',
-                    display_width: COMPUTER_USE_VIEWPORT.width,
-                    display_height: COMPUTER_USE_VIEWPORT.height,
-                  },
-                ],
-              }),
-            });
-
-            const openaiText = await openaiResponse.text();
-            if (!openaiResponse.ok) {
-              return {
-                success: false,
-                error: `OpenAI computer_use failed (${openaiResponse.status}): ${openaiText}`,
-              };
-            }
-
-            const payload = JSON.parse(openaiText) as Record<string, unknown>;
-            const output = Array.isArray(payload.output) ? payload.output : [];
-            const computerCall = output.find(
-              (item) => item && typeof item === 'object' && (item as { type?: unknown }).type === 'computer_call',
-            ) as Record<string, unknown> | undefined;
-
-            if (!computerCall) {
-              completed = true;
-              const textResponse = extractOpenAIOutputText(payload);
-              if (textResponse) {
-                finalAnalysis = textResponse;
-                actions.push(`[Analysis]: ${textResponse}`);
-              }
-              eventEmitter.browserProgress(_context.sessionId, {
-                status: 'completed',
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                detail: 'Provider returned final browser analysis.',
-              });
-              await persistCheckpoint('completed', currentUrl);
-              break;
-            }
-
-            const actionInput = (computerCall.action || {}) as Record<string, unknown>;
-            const actionType = parseActionType(actionInput);
-            const safety = classifyActionSafety(actionType, actionInput);
-            if (!safety.allowed) {
-              blocked = true;
-              blockedReason = safety.reason || `Blocked unsafe action: ${actionType}`;
-              completed = true;
-              eventEmitter.browserBlocked(_context.sessionId, {
-                reason: blockedReason,
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                checkpointPath,
-              });
-              await persistCheckpoint('blocked', currentUrl);
-              break;
-            }
-            const executed = await performProviderAction(driver, actionInput);
-            actions.push(executed.log);
-            actionHistory.push({
-              action: actionType,
-              args: executed.args,
+          const finishReason = response.candidates?.[0]?.finishReason;
+          if (finishReason && String(finishReason).toLowerCase().includes('safety')) {
+            blocked = true;
+            blockedReason = String(finishReason);
+            completed = true;
+            eventEmitter.browserBlocked(_context.sessionId, {
+              reason: blockedReason,
+              step: steps,
+              maxSteps: effectiveMaxSteps,
               url: currentUrl,
-              ts: Date.now(),
-              signature: actionSignature(actionType, executed.args),
+              checkpointPath,
             });
-            if (completed) break;
-          } else if (providerContext.provider === 'anthropic') {
-            const anthropicPrompt =
-              `${COMPUTER_USE_SYSTEM_PROMPT.replace('{goal}', goal)}\n\nCurrent URL: ${currentUrl}`;
-
-            const response = await fetch('https://api.anthropic.com/v1/messages', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': providerContext.apiKey,
-                'anthropic-version': '2023-06-01',
-                'anthropic-beta': 'computer-use-2025-01-24',
-              },
-              body: JSON.stringify({
-                model: providerContext.model,
-                max_tokens: 1400,
-                messages: [
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'text', text: anthropicPrompt },
-                      {
-                        type: 'image',
-                        source: {
-                          type: 'base64',
-                          media_type: screenshot.mimeType,
-                          data: screenshot.data,
-                        },
-                      },
-                    ],
-                  },
-                ],
-                tools: [
-                  {
-                    type: 'computer_20250124',
-                    name: 'computer',
-                    display_width_px: COMPUTER_USE_VIEWPORT.width,
-                    display_height_px: COMPUTER_USE_VIEWPORT.height,
-                    display_number: 1,
-                  },
-                ],
-              }),
-            });
-
-            const bodyText = await response.text();
-            if (!response.ok) {
-              return {
-                success: false,
-                error: `Anthropic computer_use failed (${response.status}): ${bodyText}`,
-              };
-            }
-
-            const payload = JSON.parse(bodyText) as {
-              stop_reason?: string;
-              content?: unknown;
-            };
-            if (String(payload.stop_reason || '').toLowerCase().includes('safety')) {
-              blocked = true;
-              blockedReason = String(payload.stop_reason);
-              completed = true;
-              eventEmitter.browserBlocked(_context.sessionId, {
-                reason: blockedReason,
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                checkpointPath,
-              });
-              await persistCheckpoint('blocked', currentUrl);
-              break;
-            }
-
-            const toolUse = findAnthropicToolUse(payload.content);
-            if (!toolUse) {
-              completed = true;
-              const textResponse = extractAnthropicOutputText(payload.content);
-              if (textResponse) {
-                finalAnalysis = textResponse;
-                actions.push(`[Analysis]: ${textResponse}`);
-              }
-              eventEmitter.browserProgress(_context.sessionId, {
-                status: 'completed',
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                detail: 'Provider returned final browser analysis.',
-              });
-              await persistCheckpoint('completed', currentUrl);
-              break;
-            }
-
-            const actionType = parseActionType(toolUse.input);
-            const safety = classifyActionSafety(actionType, toolUse.input);
-            if (!safety.allowed) {
-              blocked = true;
-              blockedReason = safety.reason || `Blocked unsafe action: ${actionType}`;
-              completed = true;
-              eventEmitter.browserBlocked(_context.sessionId, {
-                reason: blockedReason,
-                step: steps,
-                maxSteps: effectiveMaxSteps,
-                url: currentUrl,
-                checkpointPath,
-              });
-              await persistCheckpoint('blocked', currentUrl);
-              break;
-            }
-            const executed = await performProviderAction(driver, toolUse.input);
-            actions.push(executed.log);
-            actionHistory.push({
-              action: actionType,
-              args: executed.args,
-              url: currentUrl,
-              ts: Date.now(),
-              signature: actionSignature(actionType, executed.args),
-            });
-            if (completed) break;
-          } else {
-            return {
-              success: false,
-              error: `Computer use is not supported for provider "${providerContext.provider}".`,
-            };
+            await persistCheckpoint('blocked', currentUrl);
+            break;
           }
+
+          let textResponse = '';
+          const candidate = response.candidates?.[0];
+          if (candidate?.content?.parts) {
+            for (const part of candidate.content.parts) {
+              if ('text' in part && part.text) {
+                textResponse = part.text;
+              }
+            }
+          }
+
+          const functionCalls = response.functionCalls;
+          if (!functionCalls?.length) {
+            completed = true;
+            if (textResponse && textResponse.length > 20) {
+              finalAnalysis = textResponse;
+              actions.push(`[Analysis]: ${textResponse}`);
+            }
+            eventEmitter.browserProgress(_context.sessionId, {
+              status: 'completed',
+              step: steps,
+              maxSteps: effectiveMaxSteps,
+              url: currentUrl,
+              detail: 'Model returned final browser analysis.',
+            });
+            await persistCheckpoint('completed', currentUrl);
+            break;
+          }
+
+          for (const call of functionCalls) {
+            const name = call.name || 'unknown';
+            const actionArgs = call.args || {};
+            const safety = classifyActionSafety(name, actionArgs);
+            if (!safety.allowed) {
+              blocked = true;
+              blockedReason = safety.reason || `Blocked unsafe action: ${name}`;
+              completed = true;
+              eventEmitter.browserBlocked(_context.sessionId, {
+                reason: blockedReason,
+                step: steps,
+                maxSteps: effectiveMaxSteps,
+                url: currentUrl,
+                checkpointPath,
+              });
+              await persistCheckpoint('blocked', currentUrl);
+              break;
+            }
+            const action = { name, args: actionArgs };
+
+            await performActionWithRetry(driver, action);
+            actions.push(`${name}(${JSON.stringify(actionArgs)})`);
+            actionHistory.push({
+              action: name,
+              args: actionArgs,
+              url: currentUrl,
+              ts: Date.now(),
+              signature: actionSignature(name, actionArgs),
+            });
+          }
+          if (completed) break;
 
           steps += 1;
           await persistCheckpoint('running', lastObservedUrl || undefined);

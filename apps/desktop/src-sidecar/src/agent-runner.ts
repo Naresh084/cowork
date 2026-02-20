@@ -14,7 +14,6 @@ import type {
   MessageContentPart,
   SessionType,
   PlatformType,
-  ToolEvaluationResult,
   SkillGenerationDraft,
   SkillGenerationRequest,
   SkillGenerationResult,
@@ -42,8 +41,11 @@ import type {
   DesignItem,
   ErrorItem,
 } from '@cowork/shared';
-import { createDeepAgent, FilesystemBackend, CompositeBackend } from 'deepagents';
+import { createDeepAgent, FilesystemBackend, CompositeBackend, type BackendProtocol } from 'deepagents';
+import { SqliteBaseStore } from './sqlite-store.js';
 import { createMiddleware } from 'langchain';
+import type { InterruptOnConfig, HITLResponse } from 'langchain';
+import { Command } from '@langchain/langgraph';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { ToolMessage } from '@langchain/core/messages';
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
@@ -65,7 +67,6 @@ import {
   createMediaTools,
   createGroundingTools,
   createCronTools,
-  createExternalCliTools,
   createWorkflowTools,
   createConversationSkillTools,
 } from './tools/index.js';
@@ -73,20 +74,13 @@ import { createNotificationTools } from './tools/notification-tools.js';
 import { connectorBridge } from './connector-bridge.js';
 import { CoworkBackend } from './deepagents-backend.js';
 import { skillService } from './skill-service.js';
-import { toolPolicyService } from './tool-policy.js';
 import { cronService } from './cron/index.js';
 import { workflowService } from './workflow/index.js';
-// Deep Agents middleware integration
-import { createMiddlewareStack, buildFullSystemPrompt } from './middleware/middleware-stack.js';
-import { createMemoryService, type MemoryService } from './memory/memory-service.js';
-import { createMemoryExtractor, type MemoryExtractor } from './memory/memory-extractor.js';
 import { createAgentsMdService, type AgentsMdService } from './agents-md/agents-md-service.js';
 import { MCPClientManager, type MCPServerConfig as RuntimeMCPServerConfig } from '@cowork/mcp';
 import type { AgentsMdConfig } from './agents-md/types.js';
-import { MEMORY_SYSTEM_PROMPT } from './memory/memory-middleware.js';
 import { createSubagentService } from './subagents/index.js';
 import { SystemPromptBuilder } from './prompts/system-prompt-builder.js';
-import type { ToolCallContext } from '@cowork/shared';
 import type {
   PromptBuildContext,
   PromptBuildDiagnostics,
@@ -109,22 +103,14 @@ import type {
   SkillConfig,
   ProviderId,
   ExecutionMode,
+  ThinkingLevel,
   RuntimeConfig,
   RuntimeSoulProfile,
   RuntimeConfigUpdateResult,
-  ExternalCliRuntimeConfig,
 } from './types.js';
 import { SessionPersistence, type PersistedSessionDataV2 } from './persistence.js';
 import { getCheckpointer, setCheckpointerDataDir } from './checkpointer.js';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
-import { ChatOpenAI } from '@langchain/openai';
-import { ExternalCliDiscoveryService } from './external-cli/discovery-service.js';
-import { ExternalCliRunManager } from './external-cli/run-manager.js';
-import {
-  DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG,
-  type ExternalCliPendingInteraction,
-  type ExternalCliRunOrigin,
-} from './external-cli/types.js';
 import { WORKFLOWS_ENABLED } from './config/feature-flags.js';
 import { integrationBridge } from './integrations/index.js';
 import { BenchmarkRunner } from './benchmark/runner.js';
@@ -149,12 +135,16 @@ const RECURSION_LIMIT = Number.MAX_SAFE_INTEGER;
 type DeepAgentInstance = {
   invoke: (input: unknown, options?: unknown) => Promise<unknown>;
   streamEvents?: (input: unknown, options?: unknown) => AsyncIterable<unknown>;
+  stream?: (input: unknown, options?: unknown) => AsyncIterable<unknown>;
+  getState?: (config: unknown) => Promise<unknown>;
+  getStateHistory?: (config: unknown, options?: unknown) => AsyncIterable<unknown>;
+  updateState?: (config: unknown, values: unknown, asNode?: string) => Promise<unknown>;
   stop?: () => void;
   abort?: () => void;
   cancel?: () => void;
 };
 
-type ApprovalMode = 'auto' | 'read_only' | 'full';
+type ApprovalMode = 'ask' | 'full';
 
 interface QueuedMessage {
   id: string;
@@ -207,6 +197,8 @@ interface ActiveSession {
   pendingPermissions: Map<string, {
     request: ExtendedPermissionRequest;
     resolve: (decision: PermissionDecision) => void;
+    /** True when this permission is from a native HITL interrupt (requires Command resume) */
+    interruptResumeRequired?: boolean;
   }>;
   pendingQuestions: Map<string, {
     request: QuestionRequest;
@@ -310,10 +302,6 @@ interface SpecializedModelsV2Local {
     computerUse: string;
     deepResearchAgent: string;
   };
-  openai: {
-    imageGeneration: string;
-    videoGeneration: string;
-  };
   fal: {
     imageGeneration: string;
     videoGeneration: string;
@@ -321,8 +309,8 @@ interface SpecializedModelsV2Local {
 }
 
 interface MediaRoutingSettingsLocal {
-  imageBackend: 'google' | 'openai' | 'fal';
-  videoBackend: 'google' | 'openai' | 'fal';
+  imageBackend: 'google' | 'fal';
+  videoBackend: 'google' | 'fal';
 }
 
 interface RuntimeConfigState {
@@ -330,32 +318,13 @@ interface RuntimeConfigState {
   providerApiKeys: Partial<Record<ProviderId, string>>;
   providerBaseUrls: Partial<Record<ProviderId, string>>;
   googleApiKey: string | null;
-  openaiApiKey: string | null;
   falApiKey: string | null;
-  exaApiKey: string | null;
-  tavilyApiKey: string | null;
-  externalSearchProvider: 'google' | 'exa' | 'tavily';
   mediaRouting: MediaRoutingSettingsLocal;
   specializedModels: SpecializedModelsV2Local;
   sandbox: CommandSandboxSettings;
-  externalCli: ExternalCliRuntimeConfig;
   toolOutputTokenLimit: number;
+  thinkingLevel: ThinkingLevel;
   activeSoul: RuntimeSoulProfile | null;
-  memory: {
-    enabled: boolean;
-    autoExtract: boolean;
-    maxInPrompt: number;
-    style: 'conservative' | 'balanced' | 'aggressive';
-    consolidation: {
-      enabled: boolean;
-      intervalMinutes: number;
-      redundancyThreshold: number;
-      decayFactor: number;
-      minConfidence: number;
-      staleAfterHours: number;
-      strategy: 'balanced' | 'aggressive' | 'conservative';
-    };
-  };
 }
 
 interface SoulCatalogResult {
@@ -392,10 +361,6 @@ const DEFAULT_SPECIALIZED_MODELS: SpecializedModelsV2Local = {
     computerUse: 'gemini-3-flash-preview',
     deepResearchAgent: 'deep-research-pro-preview-12-2025',
   },
-  openai: {
-    imageGeneration: 'gpt-image-1',
-    videoGeneration: 'sora',
-  },
   fal: {
     imageGeneration: 'fal-ai/flux/schnell',
     videoGeneration: 'fal-ai/kling-video/v1.6/standard/text-to-video',
@@ -421,39 +386,6 @@ const DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT = 32000;
 const MIN_TOOL_OUTPUT_TOKEN_LIMIT = 1024;
 const MAX_TOOL_OUTPUT_TOKEN_LIMIT = 262144;
 const TOOL_OUTPUT_APPROX_CHARS_PER_TOKEN = 4;
-type ExternalCliStartToolName = 'start_codex_cli_run' | 'start_claude_cli_run';
-const EXTERNAL_CLI_START_TOOLS = new Set<ExternalCliStartToolName>([
-  'start_codex_cli_run',
-  'start_claude_cli_run',
-]);
-const EXTERNAL_CLI_INTENT_PATTERNS: Record<ExternalCliStartToolName, RegExp[]> = {
-  start_codex_cli_run: [
-    /\bstart_codex_cli_run\b/i,
-    /\b(use|run|start|launch|open|execute)\b.{0,30}\bcodex(?:\s+cli)?\b/i,
-    /\bcodex(?:\s+cli)?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
-  ],
-  start_claude_cli_run: [
-    /\bstart_claude_cli_run\b/i,
-    /\b(use|run|start|launch|open|execute)\b.{0,30}\bclaude(?:\s+(?:cli|code))?\b/i,
-    /\bclaude(?:\s+(?:cli|code))?\b.{0,30}\b(use|run|start|launch|open|execute)\b/i,
-  ],
-};
-
-const DEFAULT_RUNTIME_MEMORY_SETTINGS: RuntimeConfigState['memory'] = {
-  enabled: true,
-  autoExtract: true,
-  maxInPrompt: 5,
-  style: 'balanced',
-  consolidation: {
-    enabled: true,
-    intervalMinutes: 60,
-    redundancyThreshold: 0.9,
-    decayFactor: 0.92,
-    minConfidence: 0.15,
-    staleAfterHours: 24 * 14,
-    strategy: 'balanced',
-  },
-};
 
 function normalizeToolOutputTokenLimit(value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -502,92 +434,59 @@ function normalizeCommandSandboxSettings(
   };
 }
 
-function normalizeRuntimeMemorySettings(
-  value?:
-    | (Partial<RuntimeConfigState['memory']> & {
-        consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
-      })
-    | null,
-): RuntimeConfigState['memory'] {
-  const style = value?.style;
-  const consolidation = value?.consolidation;
-  const consolidationStrategy = consolidation?.strategy;
-  return {
-    enabled:
-      typeof value?.enabled === 'boolean' ? value.enabled : DEFAULT_RUNTIME_MEMORY_SETTINGS.enabled,
-    autoExtract:
-      typeof value?.autoExtract === 'boolean'
-        ? value.autoExtract
-        : DEFAULT_RUNTIME_MEMORY_SETTINGS.autoExtract,
-    maxInPrompt:
-      typeof value?.maxInPrompt === 'number' && Number.isFinite(value.maxInPrompt)
-        ? Math.max(1, Math.min(20, Math.floor(value.maxInPrompt)))
-        : DEFAULT_RUNTIME_MEMORY_SETTINGS.maxInPrompt,
-    style:
-      style === 'conservative' || style === 'balanced' || style === 'aggressive'
-        ? style
-        : DEFAULT_RUNTIME_MEMORY_SETTINGS.style,
-    consolidation: {
-      enabled:
-        typeof consolidation?.enabled === 'boolean'
-          ? consolidation.enabled
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.enabled,
-      intervalMinutes:
-        typeof consolidation?.intervalMinutes === 'number' && consolidation.intervalMinutes > 0
-          ? Math.min(24 * 60, Math.max(1, Math.floor(consolidation.intervalMinutes)))
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.intervalMinutes,
-      redundancyThreshold:
-        typeof consolidation?.redundancyThreshold === 'number'
-          ? Math.max(0.6, Math.min(0.99, consolidation.redundancyThreshold))
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.redundancyThreshold,
-      decayFactor:
-        typeof consolidation?.decayFactor === 'number'
-          ? Math.max(0.5, Math.min(0.999, consolidation.decayFactor))
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.decayFactor,
-      minConfidence:
-        typeof consolidation?.minConfidence === 'number'
-          ? Math.max(0.05, Math.min(0.95, consolidation.minConfidence))
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.minConfidence,
-      staleAfterHours:
-        typeof consolidation?.staleAfterHours === 'number' && consolidation.staleAfterHours > 0
-          ? Math.min(24 * 365, Math.max(1, Math.floor(consolidation.staleAfterHours)))
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.staleAfterHours,
-      strategy:
-        consolidationStrategy === 'balanced' ||
-        consolidationStrategy === 'aggressive' ||
-        consolidationStrategy === 'conservative'
-          ? consolidationStrategy
-          : DEFAULT_RUNTIME_MEMORY_SETTINGS.consolidation.strategy,
-    },
-  };
-}
-
 const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<ProviderId, string>> = {
   google: 'https://generativelanguage.googleapis.com',
-  openai: 'https://api.openai.com',
-  anthropic: 'https://api.anthropic.com',
-  openrouter: 'https://openrouter.ai/api',
-  moonshot: 'https://api.moonshot.ai',
-  glm: 'https://open.bigmodel.cn/api/paas',
-  deepseek: 'https://api.deepseek.com',
-  lmstudio: 'http://127.0.0.1:1234',
 };
 
 function normalizeProvider(provider: ProviderId | string): ProviderId {
   if (provider === 'gemini') return 'google';
-  switch (provider) {
-    case 'google':
-    case 'openai':
-    case 'anthropic':
-    case 'openrouter':
-    case 'moonshot':
-    case 'glm':
-    case 'deepseek':
-    case 'lmstudio':
-      return provider;
-    default:
-      return 'google';
+  return 'google';
+}
+
+function normalizeApprovalMode(mode: ApprovalMode | string | undefined): ApprovalMode {
+  return mode === 'full' ? 'full' : 'ask';
+}
+
+const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
+const GOOGLE_THINKING_LEVEL_MAP: Record<ThinkingLevel, 'LOW' | 'MEDIUM' | 'HIGH'> = {
+  low: 'LOW',
+  medium: 'MEDIUM',
+  high: 'HIGH',
+};
+const LEGACY_THINKING_BUDGET_MAP: Record<ThinkingLevel, number> = {
+  low: 1024,
+  medium: 8192,
+  high: 24576,
+};
+
+function normalizeThinkingLevel(
+  value: unknown,
+  fallback: ThinkingLevel = DEFAULT_THINKING_LEVEL,
+): ThinkingLevel {
+  if (value === 'low' || value === 'medium' || value === 'high') {
+    return value;
   }
+  return fallback;
+}
+
+function isGoogleModelId(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+  return (
+    normalized.startsWith('gemini') ||
+    normalized.startsWith('imagen') ||
+    normalized.startsWith('veo') ||
+    normalized.startsWith('deep-research')
+  );
+}
+
+function getGeminiMajorVersion(modelId: string): number | null {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized.startsWith('gemini-')) return null;
+  const match = normalized.match(/^gemini-(\d+)(?:\.\d+)?-/);
+  if (!match) return null;
+  const major = Number.parseInt(match[1], 10);
+  return Number.isFinite(major) ? major : null;
 }
 
 function normalizeRuntimeSoulProfile(
@@ -662,13 +561,8 @@ interface ManagedMCPToolMeta {
 
 interface ToolCapabilityContext {
   googleCapabilityKey: string | null;
-  openAICapabilityKey: string | null;
   falCapabilityKey: string | null;
   mediaRouting: MediaRoutingSettingsLocal;
-  externalSearchProvider: 'google' | 'exa' | 'tavily';
-  hasConfiguredExternalSearch: boolean;
-  providerSupportsNativeSearch: boolean;
-  hasNativeSearchKey: boolean;
   hasResearchKey: boolean;
   hasImageMediaKey: boolean;
   hasVideoMediaKey: boolean;
@@ -682,7 +576,6 @@ interface CapabilityToolAccessEntry {
   toolName: string;
   enabled: boolean;
   reason: string;
-  policyAction: 'allow' | 'ask' | 'deny';
 }
 
 interface CapabilityIntegrationAccessEntry {
@@ -704,15 +597,12 @@ interface CapabilitySnapshot {
   keyStatus: {
     providerKeyConfigured: boolean;
     googleKeyConfigured: boolean;
-    openaiKeyConfigured: boolean;
     falKeyConfigured: boolean;
-    exaKeyConfigured: boolean;
-    tavilyKeyConfigured: boolean;
     stitchKeyConfigured: boolean;
   };
   toolAccess: CapabilityToolAccessEntry[];
   integrationAccess: CapabilityIntegrationAccessEntry[];
-  policyProfile: string;
+  approvalMode: ApprovalMode;
   notes: string[];
 }
 
@@ -723,27 +613,24 @@ export class AgentRunner {
     providerApiKeys: {},
     providerBaseUrls: {},
     googleApiKey: null,
-    openaiApiKey: null,
     falApiKey: null,
-    exaApiKey: null,
-    tavilyApiKey: null,
-    externalSearchProvider: 'google',
     mediaRouting: { ...DEFAULT_MEDIA_ROUTING },
     sandbox: { ...DEFAULT_COMMAND_SANDBOX },
-    externalCli: {
-      codex: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.codex },
-      claude: { ...DEFAULT_EXTERNAL_CLI_RUNTIME_CONFIG.claude },
-    },
     toolOutputTokenLimit: DEFAULT_TOOL_OUTPUT_TOKEN_LIMIT,
+    thinkingLevel: DEFAULT_THINKING_LEVEL,
     activeSoul: { ...FALLBACK_SOUL_PROFILE },
-    memory: { ...DEFAULT_RUNTIME_MEMORY_SETTINGS },
     specializedModels: {
       google: { ...DEFAULT_SPECIALIZED_MODELS.google },
-      openai: { ...DEFAULT_SPECIALIZED_MODELS.openai },
       fal: { ...DEFAULT_SPECIALIZED_MODELS.fal },
     },
   };
-  private modelCatalog: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }> = [];
+  private modelCatalog: Array<{
+    id: string;
+    inputTokenLimit?: number;
+    outputTokenLimit?: number;
+    thinking?: boolean;
+    supportedGenerationMethods?: string[];
+  }> = [];
   private skills: SkillConfig[] = [];
   private enabledSkillIds: Set<string> = new Set();
   private persistence: SessionPersistence | null = null;
@@ -754,16 +641,12 @@ export class AgentRunner {
   private mcpServerConfigs: MCPServerConfigInput[] = [];
   private mcpServerStates: Map<string, ManagedMCPServerState> = new Map();
   private mcpToolRegistry: Map<string, ManagedMCPToolMeta> = new Map();
-  private externalCliDiscoveryService: ExternalCliDiscoveryService = new ExternalCliDiscoveryService();
-  private externalCliRunManager: ExternalCliRunManager | null = null;
-  private externalCliQuestionMap: Map<string, { sessionId: string; questionId: string }> = new Map();
   private appDataDir: string | null = null;
+  private baseStore: SqliteBaseStore | null = null;
   private systemPromptBuilder: SystemPromptBuilder = new SystemPromptBuilder();
   private lastPromptDiagnostics: Map<string, PromptBuildDiagnostics> = new Map();
   private initializePromise: Promise<{ sessionsRestored: number }> | null = null;
   // Deep Agents services (per-session instances stored in map)
-  private memoryServices: Map<string, MemoryService> = new Map();
-  private memoryExtractors: Map<string, MemoryExtractor> = new Map();
   private agentsMdServices: Map<string, AgentsMdService> = new Map();
   private agentsMdConfigs: Map<string, AgentsMdConfig | null> = new Map();
   private storageDb: DatabaseConnection | null = null;
@@ -844,26 +727,6 @@ export class AgentRunner {
         const reason = error instanceof Error ? error.message : String(error);
         console.warn(`[skills] Failed to ensure default skill-creator install: ${reason}`);
       }
-      this.externalCliRunManager = new ExternalCliRunManager({
-        appDataDir,
-        discoveryService: this.externalCliDiscoveryService,
-        getRuntimeConfig: () => this.runtimeConfig.externalCli,
-      });
-      this.externalCliRunManager.on('interaction', (interaction: ExternalCliPendingInteraction) => {
-        void this.handleExternalCliInteraction(interaction);
-      });
-      this.externalCliRunManager.on(
-        'interaction_resolved',
-        (payload: { interactionId: string; sessionId: string }) => {
-          this.handleExternalCliInteractionResolved(payload.interactionId, payload.sessionId);
-        },
-      );
-      await this.externalCliRunManager.initialize();
-      void this.externalCliDiscoveryService.getAvailability(true).catch(() => undefined);
-
-      // Initialize tool policy service
-      await toolPolicyService.initialize();
-
       // Initialize and start cron service
       cronService.initialize(this);
       await cronService.start();
@@ -894,53 +757,17 @@ export class AgentRunner {
   // ============================================================================
 
   /**
-   * Get or create MemoryService for a session's working directory.
+   * Get or create the singleton BaseStore for persistent cross-session memory.
    */
-  private async getMemoryService(workingDirectory: string): Promise<MemoryService> {
-    const dir = workingDirectory || homedir();
-    let service = this.memoryServices.get(dir);
-    if (!service) {
-      service = createMemoryService(dir, { appDataDir: this.appDataDir || undefined });
-      await service.initialize();
-      this.memoryServices.set(dir, service);
+  private getBaseStore(): SqliteBaseStore {
+    if (!this.baseStore) {
+      const dbPath = this.appDataDir ? join(this.appDataDir, 'store.db') : undefined;
+      this.baseStore = new SqliteBaseStore(dbPath);
     }
-    return service;
+    return this.baseStore;
   }
 
-  /**
-   * Get or create MemoryExtractor for a session.
-   */
-  private getMemoryExtractor(sessionId: string): MemoryExtractor {
-    let extractor = this.memoryExtractors.get(sessionId);
-    if (!extractor) {
-      const memorySettings = this.runtimeConfig.memory || DEFAULT_RUNTIME_MEMORY_SETTINGS;
-      extractor = createMemoryExtractor({
-        enabled: memorySettings.autoExtract && memorySettings.enabled,
-        confidenceThreshold: memorySettings.style === 'conservative'
-          ? 0.78
-          : memorySettings.style === 'aggressive'
-            ? 0.58
-            : 0.68,
-        maxPerConversation: 5,
-        style: memorySettings.style,
-        maxAcceptedPerTurn:
-          memorySettings.style === 'conservative'
-            ? 1
-            : memorySettings.style === 'aggressive'
-              ? 4
-              : 2,
-      });
-      this.memoryExtractors.set(sessionId, extractor);
-    }
-    return extractor;
-  }
 
-  private shouldUseLongTermMemory(session: ActiveSession): boolean {
-    if (!this.runtimeConfig.memory.enabled) {
-      return false;
-    }
-    return session.type === 'main' || session.type === 'integration';
-  }
 
   /**
    * Get or create AgentsMdService for a session's working directory.
@@ -971,13 +798,11 @@ export class AgentRunner {
    * Clear Deep Agents services for a session (on session delete).
    */
   private clearSessionServices(sessionId: string, workingDirectory: string): void {
-    this.memoryExtractors.delete(sessionId);
-    // Note: memory service and agents.md service are shared per working directory
-    // Only clean them up if no other session uses this working directory
+    // agents.md service is shared per working directory
+    // Only clean up if no other session uses this working directory
     const otherSessionsWithSameDir = Array.from(this.sessions.values())
       .filter(s => s.id !== sessionId && s.workingDirectory === workingDirectory);
     if (otherSessionsWithSameDir.length === 0) {
-      this.memoryServices.delete(workingDirectory);
       this.agentsMdServices.delete(workingDirectory);
       this.agentsMdConfigs.delete(workingDirectory);
     }
@@ -1066,19 +891,22 @@ export class AgentRunner {
       const seq = typeof item.sequence === 'number' ? item.sequence : -1;
       return seq > max ? seq : max;
     }, -1);
+    const metadataProvider = (data.metadata as { provider?: string }).provider || 'google';
+    const provider = normalizeProvider(metadataProvider);
+    const fallbackModel = this.modelCatalog[0]?.id || 'gemini-3-flash-preview';
+    const persistedModel = typeof data.metadata.model === 'string' ? data.metadata.model.trim() : '';
+    const model = isGoogleModelId(persistedModel) ? persistedModel : fallbackModel;
 
     const session: ActiveSession = {
       id: data.metadata.id,
       type: (data.metadata as { type?: SessionType }).type || 'main',
-      provider: (data.metadata as { provider?: ProviderId }).provider || 'google',
+      provider,
       executionMode: (data.metadata as { executionMode?: ExecutionMode }).executionMode || 'execute',
       workingDirectory: data.metadata.workingDirectory,
-      baseUrlSnapshot: this.getProviderBaseUrl(
-        ((data.metadata as { provider?: ProviderId }).provider || 'google') as ProviderId,
-      ),
-      model: data.metadata.model,
+      baseUrlSnapshot: this.getProviderBaseUrl(provider),
+      model,
       title: data.metadata.title,
-      approvalMode: data.metadata.approvalMode,
+      approvalMode: normalizeApprovalMode(data.metadata.approvalMode),
       baseSystemPrompt: undefined,
       agent: {} as DeepAgentInstance, // Will be recreated on first message
       chatItems: data.chatItems,
@@ -1867,19 +1695,22 @@ export class AgentRunner {
       ...(config.providerBaseUrls || {}),
     };
 
+    const configuredMediaRouting = (config.mediaRouting || {}) as Partial<MediaRoutingSettingsLocal>;
     const nextMediaRouting: MediaRoutingSettingsLocal = {
-      ...this.runtimeConfig.mediaRouting,
-      ...(config.mediaRouting || {}),
+      imageBackend:
+        configuredMediaRouting.imageBackend === 'fal'
+          ? 'fal'
+          : 'google',
+      videoBackend:
+        configuredMediaRouting.videoBackend === 'fal'
+          ? 'fal'
+          : 'google',
     };
 
     const nextSpecializedModels: SpecializedModelsV2Local = {
       google: {
         ...this.runtimeConfig.specializedModels.google,
         ...(config.specializedModels?.google || {}),
-      },
-      openai: {
-        ...this.runtimeConfig.specializedModels.openai,
-        ...(config.specializedModels?.openai || {}),
       },
       fal: {
         ...this.runtimeConfig.specializedModels.fal,
@@ -1890,30 +1721,13 @@ export class AgentRunner {
       ...this.runtimeConfig.sandbox,
       ...(config.sandbox || {}),
     });
-    const nextExternalCli: ExternalCliRuntimeConfig = {
-      codex: {
-        ...this.runtimeConfig.externalCli.codex,
-        ...(config.externalCli?.codex || {}),
-      },
-      claude: {
-        ...this.runtimeConfig.externalCli.claude,
-        ...(config.externalCli?.claude || {}),
-      },
-    };
     const nextToolOutputTokenLimit = normalizeToolOutputTokenLimit(
       config.toolOutputTokenLimit ?? this.runtimeConfig.toolOutputTokenLimit,
     );
-    const mergedMemory: Partial<RuntimeConfigState['memory']> & {
-      consolidation?: Partial<RuntimeConfigState['memory']['consolidation']>;
-    } = {
-      ...this.runtimeConfig.memory,
-      ...(config.memory || {}),
-      consolidation: {
-        ...this.runtimeConfig.memory.consolidation,
-        ...(config.memory?.consolidation || {}),
-      },
-    };
-    const nextMemory = normalizeRuntimeMemorySettings(mergedMemory);
+    const nextThinkingLevel = normalizeThinkingLevel(
+      config.thinkingLevel,
+      this.runtimeConfig.thinkingLevel,
+    );
     const nextActiveSoul = normalizeRuntimeSoulProfile(
       config.activeSoul === undefined ? this.runtimeConfig.activeSoul : config.activeSoul,
     );
@@ -1937,18 +1751,12 @@ export class AgentRunner {
       providerApiKeys: nextProviderApiKeys,
       providerBaseUrls: nextProviderBaseUrls,
       googleApiKey: config.googleApiKey ?? this.runtimeConfig.googleApiKey,
-      openaiApiKey: config.openaiApiKey ?? this.runtimeConfig.openaiApiKey,
       falApiKey: config.falApiKey ?? this.runtimeConfig.falApiKey,
-      exaApiKey: config.exaApiKey ?? this.runtimeConfig.exaApiKey,
-      tavilyApiKey: config.tavilyApiKey ?? this.runtimeConfig.tavilyApiKey,
-      externalSearchProvider:
-        config.externalSearchProvider ?? this.runtimeConfig.externalSearchProvider,
       mediaRouting: nextMediaRouting,
       sandbox: nextSandbox,
-      externalCli: nextExternalCli,
       toolOutputTokenLimit: nextToolOutputTokenLimit,
+      thinkingLevel: nextThinkingLevel,
       activeSoul: nextActiveSoul || { ...FALLBACK_SOUL_PROFILE },
-      memory: nextMemory,
       specializedModels: nextSpecializedModels,
     };
 
@@ -1980,122 +1788,6 @@ export class AgentRunner {
       reasons,
       affectedSessionIds,
     };
-  }
-
-  async getExternalCliAvailability(forceRefresh = false): Promise<unknown> {
-    return this.externalCliDiscoveryService.getAvailability(forceRefresh);
-  }
-
-  async tryHandleIntegrationExternalCliResponse(
-    sessionId: string,
-    platform: PlatformType,
-    chatId: string,
-    text: string,
-  ): Promise<boolean> {
-    if (!this.externalCliRunManager) {
-      return false;
-    }
-
-    return this.externalCliRunManager.tryRespondFromIntegration(sessionId, platform, chatId, text);
-  }
-
-  private getExternalCliOrigin(sessionId: string): ExternalCliRunOrigin {
-    const session = this.sessions.get(sessionId);
-    if (!session) {
-      return { source: 'desktop' };
-    }
-
-    const currentOrigin = this.getCurrentIntegrationOrigin(session);
-    if (!currentOrigin) {
-      return { source: 'desktop' };
-    }
-
-    return {
-      source: 'integration',
-      platform: currentOrigin.platform,
-      chatId: currentOrigin.chatId,
-      senderName: currentOrigin.senderName,
-    };
-  }
-
-  private async handleExternalCliInteraction(interaction: ExternalCliPendingInteraction): Promise<void> {
-    if (!this.externalCliRunManager) {
-      return;
-    }
-
-    const session = this.sessions.get(interaction.sessionId);
-    if (!session) {
-      return;
-    }
-
-    const questionId = generateId('q');
-    this.externalCliQuestionMap.set(interaction.interactionId, {
-      sessionId: interaction.sessionId,
-      questionId,
-    });
-
-    try {
-      const options =
-        interaction.options?.map((option) => ({
-          label: option,
-          description: '',
-        })) || [];
-
-      const answer = await this.askQuestion(
-        interaction.sessionId,
-        interaction.prompt,
-        options.length > 0 ? options : undefined,
-        false,
-        `${interaction.provider.toUpperCase()} CLI`,
-        true,
-        {
-          externalCliInteraction: true,
-          runId: interaction.runId,
-          interactionId: interaction.interactionId,
-          provider: interaction.provider,
-          origin: interaction.origin,
-        },
-        questionId,
-      );
-
-      const answerText = Array.isArray(answer) ? answer.join(', ') : answer;
-      if (answerText === '__external_cli_resolved__') {
-        return;
-      }
-      if (!answerText || answerText === '__cancelled__') {
-        await this.externalCliRunManager.respond(interaction.runId, 'cancel');
-        return;
-      }
-
-      await this.externalCliRunManager.respond(interaction.runId, answerText);
-    } catch (error) {
-      eventEmitter.error(
-        session.id,
-        `Failed to resolve external CLI interaction: ${error instanceof Error ? error.message : String(error)}`,
-        'CLI_PROTOCOL_ERROR',
-      );
-    } finally {
-      this.externalCliQuestionMap.delete(interaction.interactionId);
-    }
-  }
-
-  private handleExternalCliInteractionResolved(interactionId: string, sessionId: string): void {
-    const mapped = this.externalCliQuestionMap.get(interactionId);
-    if (!mapped) {
-      return;
-    }
-
-    if (mapped.sessionId !== sessionId) {
-      return;
-    }
-
-    try {
-      this.respondToQuestion(sessionId, mapped.questionId, '__external_cli_resolved__');
-    } catch {
-      // Question may already be answered by user.
-    } finally {
-      this.externalCliQuestionMap.delete(interactionId);
-    }
   }
 
   async setStitchApiKey(apiKey: string | null): Promise<void> {
@@ -2438,7 +2130,6 @@ export class AgentRunner {
       }
     }
 
-    toolPolicyService.registerMcpTools(Array.from(this.mcpToolRegistry.keys()));
     await this.rebuildAllSessionAgents();
   }
 
@@ -2496,7 +2187,15 @@ export class AgentRunner {
     return handlers;
   }
 
-  setModelCatalog(models: Array<{ id: string; inputTokenLimit?: number; outputTokenLimit?: number }>): void {
+  setModelCatalog(
+    models: Array<{
+      id: string;
+      inputTokenLimit?: number;
+      outputTokenLimit?: number;
+      thinking?: boolean;
+      supportedGenerationMethods?: string[];
+    }>,
+  ): void {
     setModelContextWindows(models);
     this.modelCatalog = models;
 
@@ -2526,9 +2225,6 @@ export class AgentRunner {
    */
   getImageGenerationModel(): string {
     const backend = this.runtimeConfig.mediaRouting.imageBackend;
-    if (backend === 'openai') {
-      return this.runtimeConfig.specializedModels.openai.imageGeneration;
-    }
     if (backend === 'fal') {
       return this.runtimeConfig.specializedModels.fal.imageGeneration;
     }
@@ -2540,9 +2236,6 @@ export class AgentRunner {
    */
   getVideoGenerationModel(): string {
     const backend = this.runtimeConfig.mediaRouting.videoBackend;
-    if (backend === 'openai') {
-      return this.runtimeConfig.specializedModels.openai.videoGeneration;
-    }
     if (backend === 'fal') {
       return this.runtimeConfig.specializedModels.fal.videoGeneration;
     }
@@ -2575,40 +2268,8 @@ export class AgentRunner {
     return PROVIDER_DEFAULT_BASE_URLS[provider];
   }
 
-  private toOpenAICompatibleBaseUrl(
-    provider: ProviderId,
-    baseUrl?: string,
-  ): string | undefined {
-    if (!baseUrl) return undefined;
-    const trimmed = baseUrl.trim().replace(/\/+$/, '');
-    if (!trimmed) return undefined;
-
-    if (provider === 'openrouter') {
-      if (trimmed.endsWith('/v1') || trimmed.endsWith('/api/v1')) return trimmed;
-      return `${trimmed}/v1`;
-    }
-
-    if (
-      provider === 'openai' ||
-      provider === 'moonshot' ||
-      provider === 'glm' ||
-      provider === 'deepseek' ||
-      provider === 'lmstudio'
-    ) {
-      return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
-    }
-
-    // Anthropic does not have OpenAI-compatible chat endpoints by default.
-    // Keep user-configured URL untouched for custom compatibility proxies.
-    return trimmed;
-  }
-
   getGoogleApiKey(): string | null {
     return this.runtimeConfig.googleApiKey?.trim() || this.getProviderApiKey('google');
-  }
-
-  getOpenAIApiKey(): string | null {
-    return this.runtimeConfig.openaiApiKey?.trim() || this.getProviderApiKey('openai');
   }
 
   getFalApiKey(): string | null {
@@ -2616,85 +2277,29 @@ export class AgentRunner {
     return key || null;
   }
 
-  getExaApiKey(): string | null {
-    const key = this.runtimeConfig.exaApiKey?.trim();
-    return key || null;
-  }
-
-  getTavilyApiKey(): string | null {
-    const key = this.runtimeConfig.tavilyApiKey?.trim();
-    return key || null;
-  }
-
-  getExternalSearchProvider(): 'google' | 'exa' | 'tavily' {
-    return this.runtimeConfig.externalSearchProvider || 'google';
-  }
-
-  private getToolCapabilityContext(provider: ProviderId): ToolCapabilityContext {
+  private getToolCapabilityContext(_provider: ProviderId): ToolCapabilityContext {
     const googleCapabilityKey = this.getGoogleApiKey() || this.getProviderApiKey('google');
-    const openAICapabilityKey = this.getOpenAIApiKey() || this.getProviderApiKey('openai');
     const falCapabilityKey = this.getFalApiKey();
     const mediaRouting = this.getMediaRoutingSettings();
-    const externalSearchProvider = this.getExternalSearchProvider();
-    const hasConfiguredExternalSearch =
-      (externalSearchProvider === 'exa' && Boolean(this.getExaApiKey())) ||
-      (externalSearchProvider === 'tavily' && Boolean(this.getTavilyApiKey()));
-
-    const providersWithNativeWebSearch = new Set<ProviderId>([
-      'google',
-      'openai',
-      'anthropic',
-      'moonshot',
-      'glm',
-    ]);
-    const providerSupportsNativeSearch = providersWithNativeWebSearch.has(provider);
-    const hasNativeSearchKey =
-      providerSupportsNativeSearch &&
-      (provider === 'google'
-        ? Boolean(googleCapabilityKey)
-        : Boolean(this.getProviderApiKey(provider)));
 
     const hasResearchKey = Boolean(googleCapabilityKey);
     const hasImageMediaKey =
       mediaRouting.imageBackend === 'google'
         ? Boolean(googleCapabilityKey)
-        : mediaRouting.imageBackend === 'openai'
-          ? Boolean(openAICapabilityKey)
-          : Boolean(falCapabilityKey);
+        : Boolean(falCapabilityKey);
     const hasVideoMediaKey =
       mediaRouting.videoBackend === 'google'
         ? Boolean(googleCapabilityKey)
-        : mediaRouting.videoBackend === 'openai'
-          ? Boolean(openAICapabilityKey)
-          : Boolean(falCapabilityKey);
-    const hasAnalyzeVideoKey = Boolean(openAICapabilityKey) || Boolean(googleCapabilityKey);
-
-    const hasComputerUseKey =
-      provider === 'google'
-        ? Boolean(googleCapabilityKey)
-        : provider === 'openai'
-          ? Boolean(this.getProviderApiKey('openai'))
-          : provider === 'anthropic'
-            ? Boolean(this.getProviderApiKey('anthropic'))
-            : Boolean(googleCapabilityKey);
-
-    const hasWebSearch = hasNativeSearchKey || hasConfiguredExternalSearch || Boolean(googleCapabilityKey);
-    const hasWebFetch =
-      provider === 'anthropic'
-        ? Boolean(this.getProviderApiKey('anthropic'))
-        : provider === 'glm'
-          ? Boolean(this.getProviderApiKey('glm')) || Boolean(googleCapabilityKey)
-          : Boolean(googleCapabilityKey);
+        : Boolean(falCapabilityKey);
+    const hasAnalyzeVideoKey = Boolean(googleCapabilityKey);
+    const hasComputerUseKey = Boolean(googleCapabilityKey);
+    const hasWebSearch = Boolean(googleCapabilityKey);
+    const hasWebFetch = Boolean(googleCapabilityKey);
 
     return {
       googleCapabilityKey,
-      openAICapabilityKey,
       falCapabilityKey,
       mediaRouting,
-      externalSearchProvider,
-      hasConfiguredExternalSearch,
-      providerSupportsNativeSearch,
-      hasNativeSearchKey,
       hasResearchKey,
       hasImageMediaKey,
       hasVideoMediaKey,
@@ -2719,38 +2324,17 @@ export class AgentRunner {
     }));
   }
 
-  private evaluatePolicyForSnapshot(
-    toolName: string,
-    provider: ProviderId,
-  ): { action: 'allow' | 'ask' | 'deny'; reason: string } {
-    const policyResult = toolPolicyService.evaluate({
-      toolName,
-      arguments: {},
-      sessionId: 'capability-snapshot',
-      sessionType: 'main',
-      provider,
-    });
-    return {
-      action: policyResult.action,
-      reason: policyResult.reason || 'No policy rule matched',
-    };
-  }
-
   private pushSnapshotToolAccess(
     output: CapabilityToolAccessEntry[],
-    provider: ProviderId,
+    _provider: ProviderId,
     toolName: string,
     enabled: boolean,
     reason: string,
   ): void {
-    const policy = this.evaluatePolicyForSnapshot(toolName, provider);
-    const policyDenies = policy.action === 'deny';
-
     output.push({
       toolName,
-      enabled: enabled && !policyDenies,
-      reason: policyDenies ? `Disabled by policy: ${policy.reason}` : reason,
-      policyAction: policy.action,
+      enabled,
+      reason,
     });
   }
 
@@ -2758,6 +2342,7 @@ export class AgentRunner {
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
     const provider = session?.provider || this.runtimeConfig.activeProvider;
     const executionMode = session?.executionMode || 'execute';
+    const approvalMode = session?.approvalMode || 'ask';
     const activeSandbox = session
       ? this.getSessionSandboxSettings(session)
       : {
@@ -2772,15 +2357,10 @@ export class AgentRunner {
     const context = this.getToolCapabilityContext(provider);
     const toolAccess: CapabilityToolAccessEntry[] = [];
     const integrationAccess: CapabilityIntegrationAccessEntry[] = [];
-    const policy = toolPolicyService.getPolicy();
 
-    const providerKeyConfigured =
-      provider === 'lmstudio' ? true : Boolean(this.getProviderApiKey(provider));
+    const providerKeyConfigured = Boolean(this.getProviderApiKey(provider));
     const googleKeyConfigured = Boolean(this.getGoogleApiKey());
-    const openaiKeyConfigured = Boolean(this.getOpenAIApiKey());
     const falKeyConfigured = Boolean(this.getFalApiKey());
-    const exaKeyConfigured = Boolean(this.getExaApiKey());
-    const tavilyKeyConfigured = Boolean(this.getTavilyApiKey());
     const stitchKeyConfigured = Boolean(this.stitchApiKey);
 
     this.pushSnapshotToolAccess(toolAccess, provider, 'read_any_file', true, 'Available for local file inspection.');
@@ -2832,25 +2412,21 @@ export class AgentRunner {
       provider,
       'analyze_video',
       context.hasAnalyzeVideoKey,
-      context.hasAnalyzeVideoKey ? 'Google or OpenAI capability key is configured.' : 'Google/OpenAI key is missing.',
+      context.hasAnalyzeVideoKey ? 'Google capability key is configured.' : 'Google key is missing.',
     );
     this.pushSnapshotToolAccess(
       toolAccess,
       provider,
       'web_search',
       context.hasWebSearch,
-      context.hasWebSearch
-        ? 'Native or fallback web search path is available.'
-        : 'No native search key and no configured external fallback.',
+      context.hasWebSearch ? 'Google web search path is available.' : 'Google key is missing for web search.',
     );
     this.pushSnapshotToolAccess(
       toolAccess,
       provider,
       'google_grounded_search',
       context.hasWebSearch,
-      context.hasWebSearch
-        ? 'Native or fallback web search path is available.'
-        : 'No native search key and no configured external fallback.',
+      context.hasWebSearch ? 'Google grounded search path is available.' : 'Google key is missing for grounded search.',
     );
     this.pushSnapshotToolAccess(
       toolAccess,
@@ -2937,84 +2513,15 @@ export class AgentRunner {
       scheduleReason,
     );
 
-    const externalAvailability = this.externalCliDiscoveryService.getCachedAvailability();
-    const codexInstalled = Boolean(externalAvailability?.codex.installed);
-    const claudeInstalled = Boolean(externalAvailability?.claude.installed);
-    const codexEnabled = codexInstalled && this.runtimeConfig.externalCli.codex.enabled;
-    const claudeEnabled = claudeInstalled && this.runtimeConfig.externalCli.claude.enabled;
-    const sharedExternalToolsEnabled = codexEnabled || claudeEnabled;
-
-    this.pushSnapshotToolAccess(
-      toolAccess,
-      provider,
-      'start_codex_cli_run',
-      codexEnabled,
-      codexInstalled
-        ? this.runtimeConfig.externalCli.codex.enabled
-          ? 'Codex CLI is installed and enabled in settings.'
-          : 'Codex CLI is installed but disabled in settings.'
-        : 'Codex CLI is not installed.',
-    );
-    this.pushSnapshotToolAccess(
-      toolAccess,
-      provider,
-      'start_claude_cli_run',
-      claudeEnabled,
-      claudeInstalled
-        ? this.runtimeConfig.externalCli.claude.enabled
-          ? 'Claude CLI is installed and enabled in settings.'
-          : 'Claude CLI is installed but disabled in settings.'
-        : 'Claude CLI is not installed.',
-    );
-    this.pushSnapshotToolAccess(
-      toolAccess,
-      provider,
-      'external_cli_get_progress',
-      sharedExternalToolsEnabled,
-      sharedExternalToolsEnabled
-        ? 'At least one external CLI provider is active.'
-        : 'No external CLI provider is currently active.',
-    );
-    this.pushSnapshotToolAccess(
-      toolAccess,
-      provider,
-      'external_cli_respond',
-      sharedExternalToolsEnabled,
-      sharedExternalToolsEnabled
-        ? 'At least one external CLI provider is active.'
-        : 'No external CLI provider is currently active.',
-    );
-    this.pushSnapshotToolAccess(
-      toolAccess,
-      provider,
-      'external_cli_cancel_run',
-      sharedExternalToolsEnabled,
-      sharedExternalToolsEnabled
-        ? 'At least one external CLI provider is active.'
-        : 'No external CLI provider is currently active.',
-    );
-
     const notes: string[] = [];
-    if (!providerKeyConfigured && provider !== 'lmstudio') {
+    if (!providerKeyConfigured) {
       notes.push(`Active provider "${provider}" is missing its API key.`);
-    }
-    if (context.externalSearchProvider === 'exa' && !exaKeyConfigured) {
-      notes.push('External search provider is Exa but Exa API key is missing.');
-    }
-    if (context.externalSearchProvider === 'tavily' && !tavilyKeyConfigured) {
-      notes.push('External search provider is Tavily but Tavily API key is missing.');
     }
     if (!stitchKeyConfigured) {
       notes.push('Stitch key is not configured, so Stitch-gated tools stay disabled.');
     }
-    if (externalAvailability?.codex.installed && externalAvailability.codex.authStatus === 'unauthenticated') {
-      notes.push('Codex CLI is installed but not authenticated. Run `codex login`.');
-    }
-    if (externalAvailability?.claude.installed && externalAvailability.claude.authStatus === 'unauthenticated') {
-      notes.push('Claude CLI is installed but not authenticated. Run `claude /login`.');
-    }
     if (!isOsSandboxAvailable() && activeSandbox.mode !== 'danger-full-access') {
-      notes.push('OS-level sandbox is unavailable. Validator policy enforcement is active.');
+      notes.push('OS-level sandbox is unavailable. Validator safeguards are active.');
     }
     if (session && (session.type === 'isolated' || session.type === 'cron')) {
       notes.push('Scheduling tools are disabled in isolated/cron sessions.');
@@ -3054,15 +2561,12 @@ export class AgentRunner {
       keyStatus: {
         providerKeyConfigured,
         googleKeyConfigured,
-        openaiKeyConfigured,
         falKeyConfigured,
-        exaKeyConfigured,
-        tavilyKeyConfigured,
         stitchKeyConfigured,
       },
       toolAccess,
       integrationAccess,
-      policyProfile: policy.profile,
+      approvalMode,
       notes,
     };
   }
@@ -3100,9 +2604,6 @@ export class AgentRunner {
   }
 
   private getSessionProviderKey(session: ActiveSession): string | null {
-    if (session.provider === 'lmstudio') {
-      return this.getProviderApiKey('lmstudio') || 'lm-studio';
-    }
     return this.getProviderApiKey(session.provider);
   }
 
@@ -3110,9 +2611,6 @@ export class AgentRunner {
    * Check if provider is ready.
    */
   isReady(): boolean {
-    if (this.runtimeConfig.activeProvider === 'lmstudio') {
-      return true;
-    }
     return Boolean(this.getProviderApiKey(this.runtimeConfig.activeProvider));
   }
 
@@ -3358,22 +2856,15 @@ export class AgentRunner {
         : process.cwd(),
     );
 
-    const selectedProvider = (provider || this.runtimeConfig.activeProvider || 'google') as ProviderId;
+    const selectedProvider = normalizeProvider(provider || this.runtimeConfig.activeProvider || 'google');
     const providerKey = this.getProviderApiKey(selectedProvider);
     const requiresProviderKey = type !== 'integration';
-    if (requiresProviderKey && !providerKey && selectedProvider !== 'lmstudio') {
+    if (requiresProviderKey && !providerKey) {
       throw new Error(`Provider "${selectedProvider}" not initialized. Set API key first.`);
     }
 
     const providerFallbackModel: Partial<Record<ProviderId, string>> = {
       google: 'gemini-3-flash-preview',
-      openai: 'gpt-5.2',
-      anthropic: 'claude-opus-4-6',
-      openrouter: 'openai/gpt-5.2',
-      moonshot: 'kimi-k2-thinking',
-      glm: 'glm-4.7',
-      deepseek: 'deepseek-chat',
-      lmstudio: 'local-model',
     };
 
     // Use provided model or fall back to default
@@ -3400,7 +2891,7 @@ export class AgentRunner {
       baseUrlSnapshot: this.getProviderBaseUrl(selectedProvider),
       model: actualModel,
       title: title || null,
-      approvalMode: 'auto',
+      approvalMode: 'ask',
       baseSystemPrompt: undefined,
       agent: {} as DeepAgentInstance,
       chatItems: [],
@@ -3667,6 +3158,40 @@ export class AgentRunner {
       });
       this.runs.set(runId, run);
       return { runId: run.id, sessionId: run.sessionId, status: run.status };
+    }
+
+    // Check for pending HITL interrupts in the graph state first.
+    // If the graph was paused for human approval, we re-emit the interrupt
+    // rather than re-executing the message from scratch.
+    const agent = session.agent as DeepAgentInstance | undefined;
+    if (agent?.getState) {
+      try {
+        const state = (await agent.getState({
+          configurable: { thread_id: session.threadId },
+        })) as Record<string, unknown> | null;
+        const tasks = (state?.tasks ?? []) as Array<{
+          interrupts?: Array<{ value: unknown; id?: string }>;
+        }>;
+        const hasInterrupts = tasks.some((t) => t.interrupts && t.interrupts.length > 0);
+        if (hasInterrupts) {
+          // Graph is paused at an HITL interrupt — emit permission requests
+          // and let respondToPermission handle the Command resume.
+          this.runs.set(runId, run);
+          run.status = 'recovered';
+          run.updatedAt = Date.now();
+          this.appendRunTimelineEvent(run, 'run:recovered', {
+            checkpointCount: run.checkpointCount,
+            resumeSource: 'hitl_interrupt',
+            resumeFromStage: latestCheckpoint?.stage,
+          });
+          this.activeRunBySession.set(sessionId, runId);
+          await this.detectAndEmitHitlInterrupts(session, agent);
+          return { runId: run.id, sessionId: run.sessionId, status: run.status };
+        }
+      } catch (err) {
+        console.warn(`[AgentRunner] Failed to check graph state for HITL interrupts during resume:`, err);
+        // Fall through to standard resume
+      }
     }
 
     const resumePayload = this.resolveRunResumePayload(session, latestCheckpoint);
@@ -4651,35 +4176,10 @@ export class AgentRunner {
     const agentAny = session.agent as DeepAgentInstance;
     let assistantMessage: Message | null = null;
     let streamedText = '';
-    const systemPromptAdditions: string[] = [];
-
     // Emit stream start — MUST be inside try so streamDone is guaranteed in finally/catch
     eventEmitter.streamStart(sessionId);
 
     try {
-      if (this.shouldUseLongTermMemory(session)) {
-        const middleware = this.middlewareHooks.get(sessionId);
-        if (middleware) {
-          try {
-            const beforeInvoke = await middleware.beforeInvoke({
-              sessionId,
-              input: content,
-              messages: this.deriveMessagesFromChatItems(session.chatItems),
-              systemPrompt: session.baseSystemPrompt || '',
-              systemPromptAdditions: [],
-            });
-            if (beforeInvoke.systemPromptAddition?.trim()) {
-              systemPromptAdditions.push(beforeInvoke.systemPromptAddition.trim());
-            }
-          } catch (error) {
-            console.warn(
-              '[memory] beforeInvoke failed:',
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        }
-      }
-
       // Convert multimodal parts to provider-compatible LangChain content.
       const lcContent = typeof messageContent === 'string'
         ? messageContent
@@ -4688,11 +4188,7 @@ export class AgentRunner {
         ? lcContent.map((p: any) => p.type)
         : typeof lcContent);
       const newUserMessage = new HumanMessage(lcContent);
-      const lcMessages = [];
-      if (systemPromptAdditions.length > 0) {
-        lcMessages.push(new SystemMessage(systemPromptAdditions.join('\n\n')));
-      }
-      lcMessages.push(newUserMessage);
+      const lcMessages = [newUserMessage];
 
       if (agentAny.streamEvents) {
         try {
@@ -4796,6 +4292,29 @@ export class AgentRunner {
             }
           }
 
+          // Check for HITL interrupts (graph paused for human approval)
+          if (!session.stopRequested) {
+            const interrupted = await this.detectAndEmitHitlInterrupts(session, agentAny);
+            if (interrupted) {
+              // Finalize any accumulated text before pausing
+              this.finalizeAssistantSegment(session);
+              if (streamedText) {
+                this.emitFinalAssistantSegment(session, {
+                  id: generateMessageId(),
+                  role: 'assistant',
+                  content: streamedText,
+                  createdAt: now(),
+                });
+              }
+              // Signal stream completion — turn is paused, not completed
+              session.isStreaming = false;
+              session.isThinking = false;
+              this.persistRuntimeSnapshot(session);
+              eventEmitter.streamDone(sessionId, null);
+              return; // Exit executeMessage — finally block handles cleanup
+            }
+          }
+
           if (session.stopRequested) {
             if (streamedText) {
               assistantMessage = {
@@ -4895,30 +4414,6 @@ export class AgentRunner {
       );
       if (assistantMessage || session.hasAssistantTextThisTurn) {
         session.updatedAt = Date.now();
-      }
-
-      if (
-        this.shouldUseLongTermMemory(session) &&
-        session.executionMode !== 'plan' &&
-        !session.stopRequested
-      ) {
-        const middleware = this.middlewareHooks.get(sessionId);
-        if (middleware) {
-          try {
-            await middleware.afterInvoke({
-              sessionId,
-              input: content,
-              messages: this.deriveMessagesFromChatItems(session.chatItems),
-              systemPrompt: session.baseSystemPrompt || '',
-              systemPromptAdditions,
-            });
-          } catch (error) {
-            console.warn(
-              '[memory] afterInvoke failed:',
-              error instanceof Error ? error.message : String(error),
-            );
-          }
-        }
       }
 
       // Signal stream completion (frontend uses this for streaming state)
@@ -5032,12 +4527,14 @@ export class AgentRunner {
 
   /**
    * Respond to a permission request.
+   * Handles both Promise-based permissions (custom tools) and
+   * HITL interrupt-based permissions (DeepAgents native tools via interruptOn).
    */
-  respondToPermission(
+  async respondToPermission(
     sessionId: string,
     permissionId: string,
     decision: PermissionDecision
-  ): void {
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -5048,10 +4545,9 @@ export class AgentRunner {
       throw new Error(`Permission request not found: ${permissionId}`);
     }
 
-    // Resolve the promise
-    pending.resolve(decision);
     session.pendingPermissions.delete(permissionId);
 
+    // Update scope/cache for 'allow_session' decisions
     if (decision === 'allow_session') {
       const paths = this.resolveRequestPaths(session, pending.request);
       if (paths.length > 0) {
@@ -5066,6 +4562,9 @@ export class AgentRunner {
       }
     }
 
+    // Update PermissionItem status
+    this.updatePermissionStatus(session, permissionId, decision);
+
     // Emit resolved event
     eventEmitter.permissionResolved(sessionId, permissionId, decision);
     this.checkpointActiveRun(sessionId, 'permission_resolved', {
@@ -5074,7 +4573,64 @@ export class AgentRunner {
       permissionType: pending.request.type,
       resource: pending.request.resource,
     });
-    this.persistRuntimeSnapshot(session);
+
+    if (pending.interruptResumeRequired) {
+      // HITL interrupt — resume graph with Command
+      const hitlResponse = this.convertDecisionToHitlResponse(decision, pending.request);
+      const agentAny = session.agent as DeepAgentInstance;
+
+      if (!agentAny.streamEvents) {
+        console.error('[HITL] Agent does not support streamEvents, cannot resume');
+        this.persistRuntimeSnapshot(session);
+        return;
+      }
+
+      try {
+        // Resume the graph
+        const resumeCommand = new Command({ resume: hitlResponse });
+        session.isStreaming = true;
+        this.persistRuntimeSnapshot(session);
+        eventEmitter.streamStart(sessionId);
+
+        const stream = agentAny.streamEvents(
+          resumeCommand,
+          {
+            version: 'v2',
+            configurable: { thread_id: session.threadId },
+          },
+        );
+
+        await this.processResumeStream(session, stream);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('[HITL] Resume stream error:', errorMessage);
+        session.isStreaming = false;
+        session.isThinking = false;
+        this.persistRuntimeSnapshot(session);
+        eventEmitter.error(sessionId, `Resume failed: ${errorMessage}`, 'AGENT_ERROR');
+        eventEmitter.streamDone(sessionId, null);
+      }
+    } else {
+      // Promise-based — resolve the pending promise (custom tool path)
+      pending.resolve(decision);
+      this.persistRuntimeSnapshot(session);
+    }
+  }
+
+  /**
+   * Update a PermissionItem's status in the chat items.
+   */
+  private updatePermissionStatus(
+    session: ActiveSession,
+    permissionId: string,
+    decision: PermissionDecision,
+  ): void {
+    const item = session.chatItems.find(
+      (ci) => ci.kind === 'permission' && (ci as PermissionItem).permissionId === permissionId,
+    ) as PermissionItem | undefined;
+    if (item) {
+      this.updateChatItem(session, item.id, { status: 'resolved' as const, decision });
+    }
   }
 
   /**
@@ -5092,8 +4648,12 @@ export class AgentRunner {
       session.abortController.abort();
     }
     // Resolve any pending permission requests to unblock the agent.
+    // For HITL interrupt-based permissions, we just clear them (no Promise to resolve).
+    // For Promise-based permissions (custom tools), resolve with 'deny'.
     for (const [permissionId, pending] of session.pendingPermissions.entries()) {
-      pending.resolve('deny');
+      if (!pending.interruptResumeRequired) {
+        pending.resolve('deny');
+      }
       session.pendingPermissions.delete(permissionId);
       eventEmitter.permissionResolved(sessionId, permissionId, 'deny');
     }
@@ -5472,6 +5032,50 @@ export class AgentRunner {
     return this.buildRuntimeState(session);
   }
 
+  /**
+   * Get the current LangGraph state snapshot for a session's agent.
+   * Returns null if session not found or agent doesn't support getState.
+   */
+  async getSessionState(sessionId: string): Promise<Record<string, unknown> | null> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    const agent = session.agent as DeepAgentInstance;
+    if (!agent.getState) return null;
+    try {
+      const state = await agent.getState({ configurable: { thread_id: session.threadId } });
+      return state as Record<string, unknown>;
+    } catch (err) {
+      console.warn(`[AgentRunner] Failed to get state for session ${sessionId}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Get state history for a session's agent (most recent first).
+   * Returns empty array if session not found or agent doesn't support getStateHistory.
+   */
+  async getSessionStateHistory(sessionId: string, limit = 10): Promise<Record<string, unknown>[]> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    const agent = session.agent as DeepAgentInstance;
+    if (!agent.getStateHistory) return [];
+    try {
+      const history: Record<string, unknown>[] = [];
+      const iter = agent.getStateHistory(
+        { configurable: { thread_id: session.threadId } },
+        { limit },
+      );
+      for await (const snapshot of iter) {
+        history.push(snapshot as Record<string, unknown>);
+        if (history.length >= limit) break;
+      }
+      return history;
+    } catch (err) {
+      console.warn(`[AgentRunner] Failed to get state history for session ${sessionId}:`, err);
+      return [];
+    }
+  }
+
   getBootstrapState(eventCursor: number): RuntimeBootstrapState {
     const sessions = this.listSessions();
     const runtime: Record<string, SessionRuntimeState> = {};
@@ -5677,7 +5281,6 @@ export class AgentRunner {
 
     // Clean up Deep Agents services for this session
     this.clearSessionServices(sessionId, session.workingDirectory);
-    this.middlewareHooks.delete(sessionId);
     this.lastPromptDiagnostics.delete(sessionId);
 
     // Only delete from memory after successful disk deletion
@@ -6023,7 +5626,6 @@ export class AgentRunner {
       ? this.buildAgentsMdPrompt(agentsMdConfig)
       : '';
 
-    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
     const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
     const skillBlock = await this.buildSkillsPrompt(session);
     const mcpPrompt = this.buildMcpPrompt();
@@ -6032,7 +5634,6 @@ export class AgentRunner {
     const additionalSections: PromptTemplateSection[] = [
       { key: 'soul', content: soulPrompt },
       { key: 'agents_md', content: agentsMdPrompt },
-      { key: 'memory', content: memoryPrompt },
       { key: 'subagents', content: subagentPrompt },
       { key: 'skills', content: skillBlock },
       { key: 'mcp_summary', content: mcpPrompt },
@@ -6625,9 +6226,6 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
       ? this.buildAgentsMdPrompt(agentsMdConfig)
       : '';
 
-    // Memory system prompt
-    const memoryPrompt = this.shouldUseLongTermMemory(session) ? MEMORY_SYSTEM_PROMPT : '';
-
     // Subagent prompts
     const subagentPrompt = await this.buildInstalledSubagentPrompt(session);
 
@@ -6638,15 +6236,9 @@ Execution is enabled. Use write_todos before non-trivial implementation work and
     const integrationPrompt = this.buildIntegrationPrompt();
     const mcpPrompt = this.buildMcpPrompt();
 
-    return buildFullSystemPrompt(basePrompt, [
-      modePrompt,
-      agentsMdPrompt,
-      memoryPrompt,
-      subagentPrompt,
-      skillBlock,
-      integrationPrompt,
-      mcpPrompt,
-    ].filter(Boolean));
+    return [basePrompt, modePrompt, agentsMdPrompt, subagentPrompt, skillBlock, integrationPrompt, mcpPrompt]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   /**
@@ -6913,137 +6505,79 @@ ${stitchGuidance}
     this.emitContextUsage(session);
   }
 
+  private findModelCatalogEntry(modelId: string): {
+    id: string;
+    inputTokenLimit?: number;
+    outputTokenLimit?: number;
+    thinking?: boolean;
+    supportedGenerationMethods?: string[];
+  } | undefined {
+    const normalized = modelId.trim().toLowerCase();
+    if (!normalized) return undefined;
+
+    const normalizedWithoutPrefix = normalized.replace(/^models\//, '');
+    return this.modelCatalog.find((entry) => {
+      const entryId = entry.id.trim().toLowerCase().replace(/^models\//, '');
+      return entryId === normalizedWithoutPrefix;
+    });
+  }
+
+  private resolveGeminiThreeThinkingLevel(
+    modelId: string,
+    configuredLevel: ThinkingLevel,
+  ): 'LOW' | 'MEDIUM' | 'HIGH' {
+    const normalized = modelId.trim().toLowerCase();
+
+    // Gemini 3 Pro (non-3.1) does not support "medium". Fall back to "high".
+    if (
+      configuredLevel === 'medium' &&
+      normalized.includes('gemini-3-pro') &&
+      !normalized.includes('gemini-3.1-pro')
+    ) {
+      return 'HIGH';
+    }
+
+    return GOOGLE_THINKING_LEVEL_MAP[configuredLevel];
+  }
+
+  private resolveThinkingConfigForModel(
+    modelId: string,
+  ): { thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'; thinkingBudget?: number } | undefined {
+    const configuredLevel = this.runtimeConfig.thinkingLevel;
+
+    const modelEntry = this.findModelCatalogEntry(modelId);
+    if (modelEntry?.thinking !== true) {
+      return undefined;
+    }
+
+    // Gemini 3+ supports explicit thinkingLevel. Older thinking-capable models
+    // are configured via thinkingBudget for compatibility.
+    const majorVersion = getGeminiMajorVersion(modelId);
+    if (majorVersion !== null && majorVersion >= 3) {
+      return {
+        thinkingLevel: this.resolveGeminiThreeThinkingLevel(modelId, configuredLevel),
+      };
+    }
+
+    return { thinkingBudget: LEGACY_THINKING_BUDGET_MAP[configuredLevel] };
+  }
+
   private async createDeepAgent(session: ActiveSession, tools: ToolHandler[]): Promise<DeepAgentInstance> {
     const providerKey = this.getSessionProviderKey(session);
     if (!providerKey) {
       throw new Error(`API key not set for provider ${session.provider}`);
     }
-    const ctxWindow = this.getContextWindow(session.provider, session.model);
-    const glmMaxTokens =
-      session.provider === 'glm' && ctxWindow.output > 0
-        ? Math.min(ctxWindow.output, 131072)
-        : undefined;
 
-    // Initialize Deep Agents services for this session
-    const agentsMdConfig = await this.loadAgentsMdConfig(session.workingDirectory);
-    if (this.shouldUseLongTermMemory(session)) {
-      const memoryService = await this.getMemoryService(session.workingDirectory);
-      const memoryExtractor = this.getMemoryExtractor(session.id);
-      const memorySettings = this.runtimeConfig.memory;
-      const autoExtractEnabled = memorySettings.enabled && memorySettings.autoExtract && session.executionMode !== 'plan';
-      memoryExtractor.updateConfig({
-        enabled: autoExtractEnabled,
-        confidenceThreshold:
-          memorySettings.style === 'conservative'
-            ? 0.78
-            : memorySettings.style === 'aggressive'
-              ? 0.58
-              : 0.68,
-        maxPerConversation: 5,
-        style: memorySettings.style,
-        maxAcceptedPerTurn:
-          memorySettings.style === 'conservative'
-            ? 1
-            : memorySettings.style === 'aggressive'
-              ? 4
-              : 2,
-      });
-      memoryExtractor.setInvoker(async ({ system, user }) => {
-        const providerFactory = createProvider as unknown as (
-          id: ProviderId,
-          config: {
-            providerId?: ProviderId;
-            baseUrl?: string;
-            credentials: { type: 'api_key'; apiKey: string };
-          },
-        ) => {
-          generate: (request: {
-            model: string;
-            messages: Message[];
-          }) => Promise<{ message: Message }>;
-        };
-        try {
-          const provider = providerFactory(session.provider, {
-            providerId: session.provider,
-            baseUrl: session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
-            credentials: {
-              type: 'api_key',
-              apiKey: providerKey,
-            },
-          });
-          const response = await provider.generate({
-            model: session.model,
-            messages: [
-              {
-                id: generateMessageId(),
-                role: 'system',
-                content: system,
-                createdAt: now(),
-              },
-              {
-                id: generateMessageId(),
-                role: 'user',
-                content: user,
-                createdAt: now(),
-              },
-            ],
-          });
-          return typeof response.message.content === 'string'
-            ? response.message.content
-            : this.extractTextContent(response.message) || '{"candidates":[]}';
-        } catch {
-          return '{"candidates":[]}';
-        }
-      });
+    const thinkingConfig = this.resolveThinkingConfigForModel(session.model);
+    const geminiMajor = getGeminiMajorVersion(session.model);
+    const enforceTemperature = geminiMajor !== null && geminiMajor >= 3 ? 1 : undefined;
 
-      const middlewareStack = await createMiddlewareStack(
-        {
-          id: session.id,
-          messages: this.deriveMessagesFromChatItems(session.chatItems),
-          model: session.model,
-        },
-        memoryService,
-        memoryExtractor,
-        agentsMdConfig,
-        {
-          maxMemoriesInPrompt: memorySettings.maxInPrompt,
-          autoExtract: autoExtractEnabled,
-          consolidation: {
-            enabled: memorySettings.consolidation.enabled,
-            intervalMinutes: memorySettings.consolidation.intervalMinutes,
-            redundancyThreshold: memorySettings.consolidation.redundancyThreshold,
-            decayFactor: memorySettings.consolidation.decayFactor,
-            minConfidence: memorySettings.consolidation.minConfidence,
-            staleAfterHours: memorySettings.consolidation.staleAfterHours,
-            strategy: memorySettings.consolidation.strategy,
-          },
-        },
-      );
-      this.storeMiddlewareHooks(session.id, middlewareStack);
-    } else {
-      this.middlewareHooks.delete(session.id);
-    }
-
-    // Note: thinkingConfig with includeThoughts is not yet supported by @langchain/google-genai
-    // See: https://github.com/langchain-ai/langchainjs/issues/7434
-    // The package throws "Unknown content type thinking" error when enabled
-    // Thinking UI remains in place for when support is added
-    const model = session.provider === 'google'
-      ? new ChatGoogleGenerativeAI({
-          model: session.model,
-          apiKey: providerKey,
-        })
-      : new ChatOpenAI({
-          model: session.model,
-          apiKey: providerKey,
-          ...(glmMaxTokens ? { maxTokens: glmMaxTokens } : {}),
-          configuration: {
-            baseURL: this.toOpenAICompatibleBaseUrl(
-              session.provider,
-              session.baseUrlSnapshot || this.getProviderBaseUrl(session.provider),
-            ),
-          },
-        });
+    const model = new ChatGoogleGenerativeAI({
+      model: session.model,
+      apiKey: providerKey,
+      ...(typeof enforceTemperature === 'number' ? { temperature: enforceTemperature } : {}),
+      ...(thinkingConfig ? { thinkingConfig } : {}),
+    });
 
     const wrappedTools = tools.map((tool) => this.wrapTool(tool, session));
 
@@ -7063,25 +6597,41 @@ ${stitchGuidance}
     const agentsMdPath = join(session.workingDirectory, '.deepagents', 'AGENTS.md');
     const memoryPaths = existsSync(agentsMdPath) ? [agentsMdPath] : undefined;
     const largeToolResultsRoot = this.getLargeToolResultsDir(session.id);
+
+    // Per-project data directory: ~/.cowork/projects/<slug>/
+    // Memories, logs, and project-specific data live here.
+    const projectDir = this.getProjectDir(session.workingDirectory);
+    const memoriesRoot = join(projectDir, 'memories');
+    const logsRoot = join(projectDir, 'logs');
+
+    // Ensure directories exist
     try {
-      await mkdir(largeToolResultsRoot, { recursive: true });
+      await Promise.all([
+        mkdir(largeToolResultsRoot, { recursive: true }),
+        mkdir(memoriesRoot, { recursive: true }),
+        mkdir(logsRoot, { recursive: true }),
+      ]);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      console.warn(`[tool-output] Failed to prepare large tool results directory: ${reason}`);
+      console.warn(`[backend] Failed to prepare runtime directories: ${reason}`);
     }
 
     const createDeepAgentAny = createDeepAgent as unknown as (params: unknown) => DeepAgentInstance;
     const promptBuild = await this.buildSystemPromptForSession(session, tools);
     session.baseSystemPrompt = promptBuild.prompt;
+    const store = this.getBaseStore();
     const agent = createDeepAgentAny({
       model,
       tools: wrappedTools,
       systemPrompt: promptBuild.prompt,
       middleware: [this.createToolMiddleware(session)],
+      interruptOn: this.buildInterruptOnConfig(session),
       recursionLimit: RECURSION_LIMIT,
+      name: `cowork-${session.id}`,
       skills: skillsParam,
       subagents: deepAgentSubagents.length > 0 ? deepAgentSubagents : undefined,
       checkpointer: getCheckpointer(),
+      store,
       memory: memoryPaths,
       backend: () => {
         const sandboxBackend = new CoworkBackend(
@@ -7094,7 +6644,7 @@ ${stitchGuidance}
 
         // Route all filesystem operations through DeepAgents FilesystemBackend rooted
         // to the session working directory, while keeping command execution on sandboxBackend.
-        const routeBackends: Record<string, FilesystemBackend> = {
+        const routeBackends: Record<string, BackendProtocol> = {
           '/': new FilesystemBackend({
             rootDir: resolve(session.workingDirectory),
             virtualMode: true,
@@ -7108,6 +6658,18 @@ ${stitchGuidance}
           // Defensive alias in case any middleware uses hyphenated path form.
           '/large-tool-results/': new FilesystemBackend({
             rootDir: largeToolResultsRoot,
+            virtualMode: true,
+          }),
+          // Persistent cross-session memories stored as files under
+          // ~/.cowork/projects/<project-slug>/memories/
+          // Agent reads/writes /memories/* with standard file tools.
+          '/memories/': new FilesystemBackend({
+            rootDir: memoriesRoot,
+            virtualMode: true,
+          }),
+          // Per-project logs directory
+          '/logs/': new FilesystemBackend({
+            rootDir: logsRoot,
             virtualMode: true,
           }),
         };
@@ -7128,28 +6690,28 @@ ${stitchGuidance}
   }
 
   /**
-   * Middleware hooks storage for memory injection and extraction.
-   */
-  private middlewareHooks: Map<string, {
-    beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
-    afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
-  }> = new Map();
-
-  private storeMiddlewareHooks(
-    sessionId: string,
-    stack: {
-      beforeInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<{ systemPromptAddition: string; memoriesUsed: string[]; agentsMdLoaded: boolean }>;
-      afterInvoke: (context: { sessionId: string; input: string; messages: Message[]; systemPrompt: string; systemPromptAdditions: string[] }) => Promise<void>;
-    }
-  ): void {
-    this.middlewareHooks.set(sessionId, stack);
-  }
-
-  /**
    * Get the managed skills directory for DeepAgents backend
    */
   private getSkillsDirectory(): string {
     return skillService.getManagedSkillsDir();
+  }
+
+  /**
+   * Get the per-project directory under ~/.cowork/projects/<slug>/.
+   * The slug is a readable, filesystem-safe representation of the working directory.
+   * Example: /Users/naresh/Work/project → ~/.cowork/projects/Users-naresh-Work-project/
+   */
+  private getProjectDir(workingDirectory: string): string {
+    const coworkRoot = join(homedir(), '.cowork');
+    // Create a readable slug: strip leading slash/drive, replace separators with dashes
+    const slug = workingDirectory
+      .replace(/^\/|^[A-Za-z]:[/\\]/g, '')
+      .replace(/[/\\]+/g, '-')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 200); // Prevent overly long paths
+    return join(coworkRoot, 'projects', slug || 'default');
   }
 
   private getLargeToolResultsDir(sessionId: string): string {
@@ -7392,9 +6954,7 @@ ${stitchGuidance}
     const mediaTools = createMediaTools(
       (provider) => this.getProviderApiKey(provider),
       () => this.getGoogleApiKey(),
-      () => this.getOpenAIApiKey(),
       () => this.getFalApiKey(),
-      () => this.getProviderBaseUrl('openai'),
       () => this.getMediaRoutingSettings(),
       () => ({
         imageGeneration: this.getImageGenerationModel(),
@@ -7414,13 +6974,8 @@ ${stitchGuidance}
       return true;
     });
     const groundingTools = createGroundingTools(
-      () => session.provider,
-      (provider) => this.getProviderApiKey(provider),
-      (provider) => this.getProviderBaseUrl(provider),
       () => this.getGoogleApiKey(),
-      () => this.getExternalSearchProvider(),
-      () => this.getExaApiKey(),
-      () => this.getTavilyApiKey(),
+      () => this.getProviderApiKey('google'),
       () => session.model,
     ).filter((tool) => {
       if (tool.name === 'web_search' || tool.name === 'google_grounded_search') {
@@ -7598,28 +7153,6 @@ ${stitchGuidance}
         ? []
         : createWorkflowTools();
 
-    const availability = this.externalCliDiscoveryService.getCachedAvailability();
-    const codexToolEnabled =
-      Boolean(this.externalCliRunManager) &&
-      Boolean(availability?.codex.installed) &&
-      this.runtimeConfig.externalCli.codex.enabled;
-    const claudeToolEnabled =
-      Boolean(this.externalCliRunManager) &&
-      Boolean(availability?.claude.installed) &&
-      this.runtimeConfig.externalCli.claude.enabled;
-
-    let externalCliTools: ToolHandler[] = [];
-    if (this.externalCliRunManager && (codexToolEnabled || claudeToolEnabled)) {
-      externalCliTools = createExternalCliTools({
-        runManager: this.externalCliRunManager,
-        getSessionOrigin: (sessionId) => this.getExternalCliOrigin(sessionId),
-      }).filter((tool) => {
-        if (tool.name === 'start_codex_cli_run') return codexToolEnabled;
-        if (tool.name === 'start_claude_cli_run') return claudeToolEnabled;
-        return true;
-      });
-    }
-
     const handlers = [
       readAnyFileTool,
       ...researchTools,
@@ -7632,7 +7165,6 @@ ${stitchGuidance}
       ...conversationSkillTools,
       ...cronTools,
       ...workflowTools,
-      ...externalCliTools,
     ];
 
     if (session.executionMode !== 'plan') {
@@ -8083,129 +7615,15 @@ ${stitchGuidance}
           });
         }
 
-        if (this.isExternalCliStartTool(toolName) && !this.shouldAllowExternalCliLaunch(session, toolName)) {
-          const duration = this.consumeToolDuration(session, toolCallId);
-          const errorMsg = this.buildExternalCliLaunchBlockedMessage(toolName);
-          eventEmitter.toolResult(session.id, toolCallPayload, {
-            toolCallId,
-            success: false,
-            result: null,
-            error: errorMsg,
-            duration,
-            parentToolId,
-          });
-          this.checkpointActiveRun(session.id, 'tool_result', {
-            toolCallId,
-            toolName,
-            success: false,
-            error: errorMsg,
-            duration,
-          });
-          emitToolResult('error', null, errorMsg, duration);
-          finishRuntimeTool();
-          return new ToolMessage({
-            content: errorMsg,
-            tool_call_id: toolCallId,
-            name: toolName,
-          });
-        }
-
         if (this.shouldEnforceTodoGuard(session, toolName)) {
           // Advisory-only: keep light telemetry, never block execution on todo state.
           session.nonTodoToolCallsSinceTodoUpdate += 1;
         }
 
-        // Step 1: Evaluate tool call against policy
-        const policyContext: ToolCallContext = {
-          toolName,
-          arguments: args as Record<string, unknown>,
-          sessionType: session.type,
-          sessionId: session.id,
-        };
-        const policyResult = toolPolicyService.evaluate(policyContext);
-        const permissionRequest = this.getPermissionForDeepagentsTool(
-          toolName,
-          args,
-          toolCallId,
-          policyResult,
-        );
-        const shouldPromptForPolicyDeny =
-          policyResult.action === 'deny'
-            && this.shouldPromptForPolicyDeny(policyResult, permissionRequest);
-
-        // If policy explicitly denies, block immediately
-        if (policyResult.action === 'deny' && !shouldPromptForPolicyDeny) {
-          const duration = this.consumeToolDuration(session, toolCallId);
-          const policyCode = policyResult.reasonCode ? ` (${policyResult.reasonCode})` : '';
-          const errorMsg = `Tool blocked by policy${policyCode}: ${policyResult.reason}`;
-          const payload = {
-            toolCallId,
-            success: false,
-            result: null,
-            error: errorMsg,
-            duration,
-            parentToolId,
-          };
-          eventEmitter.toolResult(session.id, toolCallPayload, payload);
-          this.checkpointActiveRun(session.id, 'tool_result', {
-            toolCallId,
-            toolName,
-            success: false,
-            error: errorMsg,
-            duration,
-          });
-          // Emit tool result
-          emitToolResult('error', null, errorMsg, duration);
-          finishRuntimeTool();
-
-          return new ToolMessage({
-            content: errorMsg,
-            tool_call_id: toolCallId,
-            name: toolName,
-          });
-        }
-
-        // Step 2: Check existing permission system (for 'ask' or when policy allows but still needs user approval)
-        if (permissionRequest) {
-          // If policy says 'allow', we can skip the permission prompt for non-dangerous ops
-          // But we still respect the existing permission system for dangerous operations
-          const skipPermission =
-            !shouldPromptForPolicyDeny
-            && policyResult.action === 'allow'
-            && !this.isDangerousOperation(toolName, args);
-
-          if (!skipPermission) {
-            const decision = await this.requestPermission(session, permissionRequest);
-            if (decision === 'deny') {
-              const duration = this.consumeToolDuration(session, toolCallId);
-              const payload = {
-                toolCallId,
-                success: false,
-                result: null,
-                error: 'Permission denied',
-                duration,
-                parentToolId,
-              };
-              eventEmitter.toolResult(session.id, toolCallPayload, payload);
-              this.checkpointActiveRun(session.id, 'tool_result', {
-                toolCallId,
-                toolName,
-                success: false,
-                error: 'Permission denied',
-                duration,
-              });
-              // Emit tool result
-              emitToolResult('error', null, 'Permission denied', duration);
-              finishRuntimeTool();
-
-              return new ToolMessage({
-                content: 'Permission denied',
-                tool_call_id: toolCallId,
-                name: toolName,
-              });
-            }
-          }
-        }
+        // Permission checks for DeepAgents native tools (read_file, write_file,
+        // edit_file, delete_file, execute) are handled by the native HITL middleware
+        // via interruptOn config. The graph interrupts before tool execution,
+        // and respondToPermission resumes with Command.
 
         // If this is a task tool, set it as the active parent so sub-tools inherit it
         if (isTask) {
@@ -8306,130 +7724,6 @@ ${stitchGuidance}
   private isTaskTool(toolName: string): boolean {
     const lower = toolName.toLowerCase();
     return lower === 'task' || lower.includes('spawn_task') || lower.includes('subagent');
-  }
-
-  private isExternalCliStartTool(toolName: string): toolName is ExternalCliStartToolName {
-    return EXTERNAL_CLI_START_TOOLS.has(toolName as ExternalCliStartToolName);
-  }
-
-  private hasExplicitExternalCliLaunchIntent(
-    userText: string | null,
-    toolName: ExternalCliStartToolName,
-  ): boolean {
-    if (!userText) return false;
-    const normalized = userText.trim();
-    if (!normalized) return false;
-    return EXTERNAL_CLI_INTENT_PATTERNS[toolName].some((pattern) => pattern.test(normalized));
-  }
-
-  private shouldAllowExternalCliLaunch(
-    session: ActiveSession,
-    toolName: ExternalCliStartToolName,
-  ): boolean {
-    // Allow recent follow-up answers after an explicit launch request.
-    const recentUserMessages = [...session.chatItems]
-      .reverse()
-      .filter((item): item is UserMessageItem => item.kind === 'user_message')
-      .slice(0, 3);
-
-    for (const item of recentUserMessages) {
-      const text = this.getTextFromMessageContent(item.content as Message['content']);
-      if (this.hasExplicitExternalCliLaunchIntent(text, toolName)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private buildExternalCliLaunchBlockedMessage(toolName: ExternalCliStartToolName): string {
-    const providerLabel = toolName === 'start_codex_cli_run' ? 'Codex CLI' : 'Claude CLI';
-    return [
-      `${providerLabel} launch blocked: \`${toolName}\` is allowed only when the user explicitly asks to launch ${providerLabel}.`,
-      'For discovery/lookups (for example Twitter profiles/posts), use `web_search` and `web_fetch` instead of external CLI launch tools.',
-    ].join(' ');
-  }
-
-  private getPermissionForDeepagentsTool(
-    toolName: string,
-    args: Record<string, unknown>,
-    toolCallId: string,
-    policyResult?: Pick<ToolEvaluationResult, 'action' | 'reason' | 'reasonCode'>,
-  ): PermissionRequest | null {
-    const policyExplainability = {
-      policyAction: policyResult?.action,
-      policyReason: policyResult?.reason,
-      policyReasonCode: policyResult?.reasonCode,
-    };
-
-    switch (toolName) {
-      case 'read_file':
-      case 'ls':
-      case 'glob':
-      case 'grep': {
-        const resource = String(args.file_path ?? args.path ?? args.pattern ?? '');
-        return {
-          type: 'file_read',
-          resource,
-          reason: `Read file data: ${resource || toolName}`,
-          toolName,
-          toolCallId,
-          ...policyExplainability,
-        };
-      }
-      case 'write_file':
-      case 'edit_file': {
-        const resource = String(args.file_path ?? args.path ?? '');
-        return {
-          type: 'file_write',
-          resource,
-          reason: `Write file data: ${resource || toolName}`,
-          toolName,
-          toolCallId,
-          ...policyExplainability,
-        };
-      }
-      case 'delete_file': {
-        const resource = String(args.file_path ?? args.path ?? '');
-        return {
-          type: 'file_delete',
-          resource,
-          reason: `Delete file: ${resource || toolName}`,
-          toolName,
-          toolCallId,
-          ...policyExplainability,
-        };
-      }
-      case 'execute': {
-        const resource = String(args.command ?? '');
-        return {
-          type: 'shell_execute',
-          resource,
-          reason: `Execute command: ${resource || toolName}`,
-          toolName,
-          toolCallId,
-          ...policyExplainability,
-        };
-      }
-      default:
-        return null;
-    }
-  }
-
-  private shouldPromptForPolicyDeny(
-    policyResult: Pick<ToolEvaluationResult, 'action' | 'reasonCode'>,
-    permissionRequest: PermissionRequest | null,
-  ): boolean {
-    if (!permissionRequest) return false;
-    if (policyResult.action !== 'deny') return false;
-
-    // Profile defaults are guardrails; allow a runtime permission override so users
-    // can approve case-by-case without permanently relaxing policy.
-    if (policyResult.reasonCode === 'profile_deny') {
-      return true;
-    }
-
-    return false;
   }
 
   private stringifyToolOutputValue(value: unknown): string {
@@ -8660,7 +7954,7 @@ ${stitchGuidance}
     if (!bootstrap) return;
 
     if (bootstrap.approvalMode) {
-      session.approvalMode = bootstrap.approvalMode;
+      session.approvalMode = normalizeApprovalMode(bootstrap.approvalMode);
     }
 
     for (const [permissionType, rawPaths] of Object.entries(bootstrap.permissionScopes || {})) {
@@ -8721,6 +8015,245 @@ ${stitchGuidance}
     return startTime ? Date.now() - startTime : undefined;
   }
 
+  // ---------------------------------------------------------------------------
+  // Native HITL interrupt detection and resume
+  // ---------------------------------------------------------------------------
+
+  /**
+   * After a stream ends, check if the graph was interrupted by the HITL middleware.
+   * If so, emit permission events to the frontend and track them in pendingPermissions.
+   * Returns true if an interrupt was detected.
+   */
+  private async detectAndEmitHitlInterrupts(
+    session: ActiveSession,
+    agent: DeepAgentInstance,
+  ): Promise<boolean> {
+    if (!agent.getState) return false;
+
+    try {
+      const state = await agent.getState({
+        configurable: { thread_id: session.threadId },
+      });
+      const stateAny = state as {
+        tasks?: Array<{
+          interrupts?: Array<{
+            value?: {
+              actionRequests?: Array<{ name: string; args: Record<string, unknown>; description?: string }>;
+              reviewConfigs?: Array<{ actionName: string; allowedDecisions: string[] }>;
+            };
+          }>;
+        }>;
+      };
+
+      const interruptedTasks = stateAny?.tasks?.filter(
+        (t) => t.interrupts && t.interrupts.length > 0,
+      ) || [];
+
+      if (interruptedTasks.length === 0) return false;
+
+      for (const task of interruptedTasks) {
+        for (const interruptInfo of task.interrupts || []) {
+          const hitlRequest = interruptInfo.value;
+          if (!hitlRequest?.actionRequests) continue;
+
+          for (const action of hitlRequest.actionRequests) {
+            const permissionId = generateId('perm');
+            const permissionType = this.mapToolNameToPermissionType(action.name);
+            const resource = this.extractResourceFromToolArgs(action.name, action.args);
+
+            const extendedRequest: ExtendedPermissionRequest = {
+              type: permissionType,
+              resource,
+              reason: action.description || `Tool "${action.name}" requires approval`,
+              toolName: action.name,
+              toolCallId: permissionId,
+              id: permissionId,
+              riskLevel: this.assessRiskLevel({
+                type: permissionType,
+                resource,
+                reason: '',
+              }),
+              command: action.name === 'execute' ? String(action.args.command || '') : undefined,
+              timestamp: Date.now(),
+            };
+
+            // Create PermissionItem for UI
+            const permissionItem: PermissionItem = {
+              id: generateChatItemId(),
+              kind: 'permission',
+              timestamp: Date.now(),
+              turnId: session.currentTurnId,
+              permissionId,
+              request: {
+                type: extendedRequest.type,
+                resource: extendedRequest.resource,
+                reason: extendedRequest.reason,
+                toolCallId: extendedRequest.toolCallId,
+                toolName: extendedRequest.toolName,
+                riskLevel: extendedRequest.riskLevel,
+                command: extendedRequest.command,
+              },
+              status: 'pending',
+            };
+            this.appendChatItem(session, permissionItem);
+
+            // Track as pending permission with interrupt flag
+            session.pendingPermissions.set(permissionId, {
+              request: extendedRequest,
+              resolve: () => {}, // No-op for HITL interrupts
+              interruptResumeRequired: true,
+            });
+
+            eventEmitter.permissionRequest(session.id, extendedRequest);
+            this.checkpointActiveRun(session.id, 'permission_request', {
+              permissionId,
+              permissionType: extendedRequest.type,
+              resource: extendedRequest.resource,
+              riskLevel: extendedRequest.riskLevel,
+              source: 'hitl_interrupt',
+            });
+          }
+        }
+      }
+
+      this.persistRuntimeSnapshot(session);
+      return true;
+    } catch (error) {
+      console.error('[HITL] Error detecting interrupts:', error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
+
+  /**
+   * Map a DeepAgents tool name to our PermissionRequest type.
+   */
+  private mapToolNameToPermissionType(toolName: string): PermissionRequest['type'] {
+    switch (toolName) {
+      case 'read_file':
+      case 'ls':
+      case 'glob':
+      case 'grep':
+        return 'file_read';
+      case 'write_file':
+      case 'edit_file':
+        return 'file_write';
+      case 'delete_file':
+        return 'file_delete';
+      case 'execute':
+        return 'shell_execute';
+      default:
+        return 'shell_execute';
+    }
+  }
+
+  /**
+   * Extract a resource string from tool arguments for permission display.
+   */
+  private extractResourceFromToolArgs(toolName: string, args: Record<string, unknown>): string {
+    switch (toolName) {
+      case 'read_file':
+      case 'write_file':
+      case 'edit_file':
+      case 'delete_file':
+        return String(args.file_path ?? args.path ?? '');
+      case 'ls':
+      case 'glob':
+      case 'grep':
+        return String(args.path ?? args.pattern ?? args.file_path ?? '');
+      case 'execute':
+        return String(args.command ?? '');
+      default:
+        return JSON.stringify(args).slice(0, 200);
+    }
+  }
+
+  /**
+   * Convert a PermissionDecision to an HITLResponse for Command resume.
+   */
+  private convertDecisionToHitlResponse(
+    decision: PermissionDecision,
+    request: ExtendedPermissionRequest,
+  ): HITLResponse {
+    if (decision === 'allow' || decision === 'allow_session') {
+      return { decisions: [{ type: 'approve' }] };
+    }
+    return {
+      decisions: [{
+        type: 'reject',
+        message: `Permission denied for ${request.toolName}: ${request.resource}`,
+      }],
+    };
+  }
+
+  /**
+   * Process a resumed stream after HITL interrupt response.
+   * Handles stream events and checks for additional interrupts recursively.
+   */
+  private async processResumeStream(
+    session: ActiveSession,
+    stream: AsyncIterable<unknown>,
+  ): Promise<void> {
+    let streamedText = '';
+
+    for await (const event of stream) {
+      if (session.stopRequested) break;
+
+      const thinkingText = this.extractThinkingContent(event);
+      if (thinkingText) {
+        // Emit thinking events for resumed stream
+        eventEmitter.thinkingChunk(session.id, thinkingText);
+      }
+
+      const chunkText = this.extractStreamChunkText(event);
+      if (chunkText) {
+        const normalizedChunkText = this.normalizeAssistantStreamChunk(session, chunkText);
+        if (normalizedChunkText) {
+          streamedText += normalizedChunkText;
+          this.appendAssistantSegmentChunk(session, normalizedChunkText);
+          eventEmitter.streamChunk(session.id, normalizedChunkText);
+        }
+      }
+
+      const output = this.extractStateFromStreamEvent(event);
+      if (output) {
+        this.syncTasksFromState(session, output);
+        this.updateUsageFromState(session, output);
+      }
+
+      this.extractUsageFromStreamEvent(session, event);
+      this.syncTasksFromStreamEvent(session, event);
+    }
+
+    // Check for additional HITL interrupts (recursive)
+    const agentAny = session.agent as DeepAgentInstance;
+    const moreInterrupts = await this.detectAndEmitHitlInterrupts(session, agentAny);
+    if (moreInterrupts) {
+      // Additional interrupt detected — leave stream paused for next respondToPermission
+      session.isStreaming = false;
+      session.isThinking = false;
+      this.persistRuntimeSnapshot(session);
+      eventEmitter.streamDone(session.id, null);
+      return;
+    }
+
+    // No more interrupts — finalize the turn
+    this.finalizeAssistantSegment(session);
+    if (streamedText) {
+      this.emitFinalAssistantSegment(session, {
+        id: generateMessageId(),
+        role: 'assistant',
+        content: streamedText,
+        createdAt: now(),
+      });
+      session.updatedAt = Date.now();
+    }
+    session.isStreaming = false;
+    session.isThinking = false;
+    this.persistRuntimeSnapshot(session);
+    eventEmitter.streamDone(session.id, null);
+    this.emitContextUsage(session);
+    await this.finalizeAndPersistTurn(session);
+  }
 
   private async requestPermission(
     session: ActiveSession,
@@ -8802,9 +8335,6 @@ ${stitchGuidance}
           toolName: extendedRequest.toolName,
           riskLevel: extendedRequest.riskLevel,
           command: extendedRequest.command,
-          policyAction: extendedRequest.policyAction,
-          policyReason: extendedRequest.policyReason,
-          policyReasonCode: extendedRequest.policyReasonCode,
         },
         status: 'pending',
       };
@@ -8862,6 +8392,29 @@ ${stitchGuidance}
     };
   }
 
+  /**
+   * Build the interruptOn config for the native HITL middleware.
+   * Maps tool names to interrupt configs based on the session's approval mode.
+   */
+  private buildInterruptOnConfig(
+    session: ActiveSession,
+  ): Record<string, boolean | InterruptOnConfig> | undefined {
+    if (session.approvalMode === 'full') {
+      // 'full' mode: more permissive, only interrupt on high-risk operations
+      return {
+        delete_file: { allowedDecisions: ['approve', 'reject'] as const },
+      };
+    }
+
+    // 'ask' mode (default): interrupt on all mutating operations
+    return {
+      execute: { allowedDecisions: ['approve', 'reject'] as const },
+      write_file: { allowedDecisions: ['approve', 'edit', 'reject'] as const },
+      edit_file: { allowedDecisions: ['approve', 'edit', 'reject'] as const },
+      delete_file: { allowedDecisions: ['approve', 'reject'] as const },
+    };
+  }
+
   private applyApprovalMode(
     session: ActiveSession,
     request: PermissionRequest
@@ -8890,9 +8443,6 @@ ${stitchGuidance}
     if (isShell && !shellAllowed) {
       // Keep hard-deny for explicitly blocked/dangerous shell commands, but ask user
       // for runtime approval when the denial is caused by default sandbox scope.
-      if (mode === 'read_only') {
-        return 'deny';
-      }
       const hasHardSecurityViolation = shellViolations.some(
         (violation) =>
           violation.startsWith('Command is explicitly blocked.')
@@ -8915,11 +8465,17 @@ ${stitchGuidance}
       return null;
     }
 
-    if (mode === 'read_only') {
+    if (mode === 'ask') {
       if (isRead && !touchesOutside) {
         return 'allow';
       }
-      return 'deny';
+      if (isShell && !touchesOutside && shellAllowed && isTrustedShell) {
+        return 'allow';
+      }
+      if (isNetwork || isWrite || isDelete || isShell) {
+        return null;
+      }
+      return null;
     }
 
     if (mode === 'full') {
@@ -8941,16 +8497,6 @@ ${stitchGuidance}
       return 'allow';
     }
 
-    // Auto mode
-    if (isRead && !touchesOutside) {
-      return 'allow';
-    }
-    if (isShell && !touchesOutside && shellAllowed && isTrustedShell) {
-      return 'allow';
-    }
-    if (isNetwork || isWrite || isDelete || isShell) {
-      return null;
-    }
     return null;
   }
 
@@ -10296,9 +9842,7 @@ ${stitchGuidance}
       return turnId ? keepMessageIds.has(turnId) : false;
     });
     session.chatItems = [summaryItem, ...recentChatItems];
-    if (!this.shouldUseLongTermMemory(session)) {
-      await this.persistSummary(session.workingDirectory, summary);
-    }
+    await this.persistSummary(session.workingDirectory, summary);
     this.emitContextUsage(session);
   }
 

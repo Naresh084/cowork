@@ -1785,16 +1785,7 @@ export class RemoteAccessService {
       model,
       title,
       'main',
-      provider as
-        | 'google'
-        | 'openai'
-        | 'anthropic'
-        | 'openrouter'
-        | 'moonshot'
-        | 'glm'
-        | 'deepseek'
-        | 'lmstudio'
-        | undefined,
+      provider as 'google' | undefined,
       executionMode,
     );
     this.sendJson(response, 200, { session });

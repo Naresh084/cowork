@@ -14,7 +14,6 @@ import {
   Sparkles,
   Bot,
   Smartphone,
-  Wrench,
   LogOut,
   Loader2,
   Cpu,
@@ -33,7 +32,6 @@ import { useAuthStore } from '@/stores/auth-store';
 import { GeneralSettings } from './GeneralSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { IntegrationSettings } from './IntegrationSettings';
-import { CapabilitySettings } from './CapabilitySettings';
 import { RuntimeSettings } from './RuntimeSettings';
 import { SoulSettings } from './SoulSettings';
 import { RemoteAccessSettings } from './RemoteAccessSettings';
@@ -49,7 +47,6 @@ interface TabConfig {
 const tabConfig: TabConfig[] = [
   { id: 'provider', label: 'Provider', icon: KeyRound },
   { id: 'media', label: 'Media', icon: Image },
-  { id: 'capabilities', label: 'Capabilities', icon: Wrench },
   { id: 'runtime', label: 'Runtime', icon: Cpu },
   { id: 'benchmarks', label: 'Benchmarks', icon: BarChart3 },
   { id: 'integrations', label: 'Integrations', icon: SlidersHorizontal },
@@ -57,10 +54,9 @@ const tabConfig: TabConfig[] = [
   { id: 'souls', label: 'Souls', icon: Bot },
 ];
 
-const tabContent: Record<SettingsTab, React.ComponentType> = {
+const tabContent: Partial<Record<SettingsTab, React.ComponentType>> = {
   provider: ApiKeysSettings,
   media: GeneralSettings,
-  capabilities: CapabilitySettings,
   runtime: RuntimeSettings,
   benchmarks: BenchmarkDashboard,
   integrations: IntegrationSettings,
@@ -115,7 +111,7 @@ export function SettingsView() {
   const resolvedTab = visibleTabs.some((tab) => tab.id === activeTab)
     ? activeTab
     : (visibleTabs[0]?.id || 'provider');
-  const ActiveContent = tabContent[resolvedTab];
+  const ActiveContent = tabContent[resolvedTab] || ApiKeysSettings;
   const handleLogout = async () => {
     if (isLoggingOut) return;
 
@@ -126,7 +122,7 @@ export function SettingsView() {
         'This will:',
         '- Delete all saved API keys and provider credentials.',
         '- Reset provider/model/settings stored in this desktop app.',
-        '- Remove local Cowork data at ~/.cowork (sessions, policies, schedules, pairings).',
+        '- Remove local Cowork data at ~/.cowork (sessions, schedules, memory, pairings).',
         '',
         'This cannot be undone. Continue?',
       ].join('\n'),
@@ -159,10 +155,7 @@ export function SettingsView() {
         providerApiKeys: {},
         providerBaseUrls: {},
         googleApiKey: null,
-        openaiApiKey: null,
         falApiKey: null,
-        exaApiKey: null,
-        tavilyApiKey: null,
         stitchApiKey: null,
         activeSoul: null,
         error: null,

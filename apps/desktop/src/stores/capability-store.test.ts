@@ -19,16 +19,16 @@ describe('capability-store', () => {
 
   it('normalizes partial payloads safely', () => {
     const snapshot = normalizeCapabilitySnapshot({
-      provider: 'openai',
-      mediaRouting: { imageBackend: 'openai' },
+      provider: 'legacy_provider',
+      mediaRouting: { imageBackend: 'legacy_backend' },
       toolAccess: [{ toolName: 'web_search', enabled: true }],
     });
 
-    expect(snapshot.provider).toBe('openai');
-    expect(snapshot.mediaRouting.imageBackend).toBe('openai');
+    expect(snapshot.provider).toBe('google');
+    expect(snapshot.mediaRouting.imageBackend).toBe('google');
     expect(snapshot.mediaRouting.videoBackend).toBe('google');
     expect(snapshot.toolAccess[0].toolName).toBe('web_search');
-    expect(snapshot.toolAccess[0].policyAction).toBe('ask');
+    expect(snapshot.approvalMode).toBe('ask');
   });
 
   it('loads capability snapshot via tauri command', async () => {
@@ -38,10 +38,7 @@ describe('capability-store', () => {
       keyStatus: {
         providerKeyConfigured: true,
         googleKeyConfigured: true,
-        openaiKeyConfigured: false,
         falKeyConfigured: false,
-        exaKeyConfigured: false,
-        tavilyKeyConfigured: false,
         stitchKeyConfigured: false,
       },
       toolAccess: [
@@ -49,11 +46,10 @@ describe('capability-store', () => {
           toolName: 'web_search',
           enabled: true,
           reason: 'Ready',
-          policyAction: 'allow',
         },
       ],
       integrationAccess: [],
-      policyProfile: 'coding',
+      approvalMode: 'full',
       notes: [],
     });
 
@@ -61,7 +57,7 @@ describe('capability-store', () => {
 
     const state = useCapabilityStore.getState();
     expect(state.snapshot).not.toBeNull();
-    expect(state.snapshot?.toolAccess[0]?.policyAction).toBe('allow');
+    expect(state.snapshot?.approvalMode).toBe('full');
     expect(state.error).toBeNull();
     expect(state.isLoading).toBe(false);
   });

@@ -8,20 +8,8 @@ const API_KEY_SERVICE: &str = "cowork";
 const LEGACY_API_KEY_ACCOUNT: &str = "api_key";
 const STITCH_API_KEY_ACCOUNT: &str = "stitch_api_key";
 const GOOGLE_API_KEY_ACCOUNT: &str = "google_api_key";
-const OPENAI_API_KEY_ACCOUNT: &str = "openai_api_key";
 const FAL_API_KEY_ACCOUNT: &str = "fal_api_key";
-const EXA_API_KEY_ACCOUNT: &str = "exa_api_key";
-const TAVILY_API_KEY_ACCOUNT: &str = "tavily_api_key";
-const PROVIDER_IDS: [&str; 8] = [
-    "google",
-    "openai",
-    "anthropic",
-    "openrouter",
-    "moonshot",
-    "glm",
-    "deepseek",
-    "lmstudio",
-];
+const PROVIDER_IDS: [&str; 1] = ["google"];
 
 #[derive(serde::Serialize)]
 pub struct ModelInfo {
@@ -30,6 +18,8 @@ pub struct ModelInfo {
     pub description: String,
     pub input_token_limit: u32,
     pub output_token_limit: u32,
+    pub thinking: bool,
+    pub supported_generation_methods: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -64,9 +54,7 @@ fn normalize_provider_id(provider_id: &str) -> Result<String, String> {
     };
 
     match mapped.as_str() {
-        "google" | "openai" | "anthropic" | "openrouter" | "moonshot" | "glm" | "deepseek" | "lmstudio" => {
-            Ok(mapped)
-        }
+        "google" => Ok(mapped),
         _ => Err(format!("Unsupported provider: {}", provider_id)),
     }
 }
@@ -81,261 +69,55 @@ fn provider_api_key_account(provider_id: &str) -> Result<String, String> {
 fn default_base_url(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "google" => Some("https://generativelanguage.googleapis.com"),
-        "openai" => Some("https://api.openai.com"),
-        "anthropic" => Some("https://api.anthropic.com"),
-        "openrouter" => Some("https://openrouter.ai/api"),
-        "moonshot" => Some("https://api.moonshot.ai"),
-        "glm" => Some("https://open.bigmodel.cn/api/paas"),
-        "deepseek" => Some("https://api.deepseek.com"),
-        "lmstudio" => Some("http://127.0.0.1:1234"),
         _ => None,
     }
 }
 
-fn curated_models(provider_id: &str) -> Vec<ModelInfo> {
-    match provider_id {
-        "google" => vec![
-            ModelInfo {
-                id: "gemini-3-flash-preview".to_string(),
-                name: "Gemini 3 Flash Preview".to_string(),
-                description: "Latest fast preview model".to_string(),
-                input_token_limit: 1_048_576,
-                output_token_limit: 65_536,
-            },
-            ModelInfo {
-                id: "gemini-3-pro-preview".to_string(),
-                name: "Gemini 3 Pro Preview".to_string(),
-                description: "Latest reasoning-focused preview model".to_string(),
-                input_token_limit: 1_048_576,
-                output_token_limit: 65_536,
-            },
-        ],
-        "openai" => vec![
-            ModelInfo {
-                id: "gpt-5.2".to_string(),
-                name: "GPT-5.2".to_string(),
-                description: "Latest GPT model".to_string(),
-                input_token_limit: 400_000,
-                output_token_limit: 128_000,
-            },
-            ModelInfo {
-                id: "gpt-4.1".to_string(),
-                name: "GPT-4.1".to_string(),
-                description: "Broad compatibility fallback model".to_string(),
-                input_token_limit: 1_000_000,
-                output_token_limit: 32_768,
-            },
-        ],
-        "anthropic" => vec![
-            ModelInfo {
-                id: "claude-opus-4-6".to_string(),
-                name: "Claude Opus 4.6".to_string(),
-                description: "Latest Claude flagship model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 8_192,
-            },
-            ModelInfo {
-                id: "claude-sonnet-4-5".to_string(),
-                name: "Claude Sonnet 4.5".to_string(),
-                description: "Balanced reasoning and speed".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 8_192,
-            },
-        ],
-        "openrouter" => vec![
-            ModelInfo {
-                id: "openai/gpt-5.2".to_string(),
-                name: "OpenAI GPT-5.2".to_string(),
-                description: "Via OpenRouter".to_string(),
-                input_token_limit: 0,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "anthropic/claude-opus-4.6".to_string(),
-                name: "Claude Opus 4.6".to_string(),
-                description: "Via OpenRouter".to_string(),
-                input_token_limit: 0,
-                output_token_limit: 0,
-            },
-        ],
-        "moonshot" => vec![
-            ModelInfo {
-                id: "kimi-k2-thinking".to_string(),
-                name: "Kimi K2 Thinking".to_string(),
-                description: "Moonshot latest reasoning-focused K2 model".to_string(),
-                input_token_limit: 262_144,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "kimi-k2.5".to_string(),
-                name: "Kimi K2.5".to_string(),
-                description: "Moonshot multimodal flagship model".to_string(),
-                input_token_limit: 262_144,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "kimi-k2-0711-preview".to_string(),
-                name: "Kimi K2 0711 Preview".to_string(),
-                description: "Moonshot K2 preview model".to_string(),
-                input_token_limit: 131_072,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "kimi-k2-turbo-preview".to_string(),
-                name: "Kimi K2 Turbo Preview".to_string(),
-                description: "Moonshot high-speed K2 model".to_string(),
-                input_token_limit: 262_144,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "kimi-k2-0905-preview".to_string(),
-                name: "Kimi K2 0905 Preview".to_string(),
-                description: "Moonshot K2 preview model".to_string(),
-                input_token_limit: 262_144,
-                output_token_limit: 0,
-            },
-            ModelInfo {
-                id: "kimi-k2-thinking-turbo".to_string(),
-                name: "Kimi K2 Thinking Turbo".to_string(),
-                description: "Moonshot high-speed reasoning K2 model".to_string(),
-                input_token_limit: 262_144,
-                output_token_limit: 0,
-            },
-        ],
-        "glm" => vec![
-            ModelInfo {
-                id: "glm-4.7".to_string(),
-                name: "GLM-4.7".to_string(),
-                description: "GLM flagship model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.7-flashx".to_string(),
-                name: "GLM-4.7-FlashX".to_string(),
-                description: "GLM fast flagship variant".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.6".to_string(),
-                name: "GLM-4.6".to_string(),
-                description: "GLM high-capability model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5".to_string(),
-                name: "GLM-4.5".to_string(),
-                description: "GLM balanced model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5-x".to_string(),
-                name: "GLM-4.5-X".to_string(),
-                description: "GLM premium high-reasoning model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5-air".to_string(),
-                name: "GLM-4.5-Air".to_string(),
-                description: "GLM lightweight model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5-airx".to_string(),
-                name: "GLM-4.5-AirX".to_string(),
-                description: "GLM high-speed lightweight variant".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4-32b-0414-128k".to_string(),
-                name: "GLM-4-32B-0414-128K".to_string(),
-                description: "GLM 32B 128K context model".to_string(),
-                input_token_limit: 131_072,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.7-flash".to_string(),
-                name: "GLM-4.7-Flash".to_string(),
-                description: "GLM free fast model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5-flash".to_string(),
-                name: "GLM-4.5-Flash".to_string(),
-                description: "GLM free balanced model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.6v".to_string(),
-                name: "GLM-4.6V".to_string(),
-                description: "GLM vision model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-ocr".to_string(),
-                name: "GLM-OCR".to_string(),
-                description: "GLM OCR model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.6v-flashx".to_string(),
-                name: "GLM-4.6V-FlashX".to_string(),
-                description: "GLM fast vision model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.5v".to_string(),
-                name: "GLM-4.5V".to_string(),
-                description: "GLM vision-balanced model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-            ModelInfo {
-                id: "glm-4.6v-flash".to_string(),
-                name: "GLM-4.6V-Flash".to_string(),
-                description: "GLM free fast vision model".to_string(),
-                input_token_limit: 200_000,
-                output_token_limit: 131_072,
-            },
-        ],
-        "deepseek" => vec![
-            ModelInfo {
-                id: "deepseek-chat".to_string(),
-                name: "DeepSeek Chat".to_string(),
-                description: "DeepSeek V3.2 non-thinking mode (max output 8K)".to_string(),
-                input_token_limit: 131_072,
-                output_token_limit: 8_192,
-            },
-            ModelInfo {
-                id: "deepseek-reasoner".to_string(),
-                name: "DeepSeek Reasoner".to_string(),
-                description: "DeepSeek V3.2 thinking mode (max output 64K)".to_string(),
-                input_token_limit: 131_072,
-                output_token_limit: 65_536,
-            },
-        ],
-        "lmstudio" => vec![
-            ModelInfo {
-                id: "local-model".to_string(),
-                name: "Local Model (LM Studio)".to_string(),
-                description: "Fallback local model entry when LM Studio /v1/models is unavailable.".to_string(),
-                input_token_limit: 0,
-                output_token_limit: 0,
-            },
-        ],
-        _ => vec![],
-    }
+fn curated_models(_provider_id: &str) -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "gemini-3-flash-preview".to_string(),
+            name: "Gemini 3 Flash Preview".to_string(),
+            description: "Latest fast preview model".to_string(),
+            input_token_limit: 1_048_576,
+            output_token_limit: 65_536,
+            thinking: true,
+            supported_generation_methods: vec![
+                "generateContent".to_string(),
+                "countTokens".to_string(),
+                "createCachedContent".to_string(),
+                "batchGenerateContent".to_string(),
+            ],
+        },
+        ModelInfo {
+            id: "gemini-3-pro-preview".to_string(),
+            name: "Gemini 3 Pro Preview".to_string(),
+            description: "Latest reasoning-focused preview model".to_string(),
+            input_token_limit: 1_048_576,
+            output_token_limit: 65_536,
+            thinking: true,
+            supported_generation_methods: vec![
+                "generateContent".to_string(),
+                "countTokens".to_string(),
+                "createCachedContent".to_string(),
+                "batchGenerateContent".to_string(),
+            ],
+        },
+        ModelInfo {
+            id: "gemini-3.1-pro-preview".to_string(),
+            name: "Gemini 3.1 Pro Preview".to_string(),
+            description: "Latest Gemini 3.1 reasoning preview model".to_string(),
+            input_token_limit: 1_048_576,
+            output_token_limit: 65_536,
+            thinking: true,
+            supported_generation_methods: vec![
+                "generateContent".to_string(),
+                "countTokens".to_string(),
+                "createCachedContent".to_string(),
+                "batchGenerateContent".to_string(),
+            ],
+        },
+    ]
 }
 
 async fn migrate_legacy_google_api_key_if_needed() -> Result<(), String> {
@@ -369,18 +151,37 @@ async fn migrate_legacy_google_api_key_if_needed() -> Result<(), String> {
 }
 
 fn parse_google_models(body: &serde_json::Value) -> Result<Vec<ModelInfo>, String> {
+    const REQUIRED_METHODS: [&str; 4] = [
+        "generateContent",
+        "countTokens",
+        "createCachedContent",
+        "batchGenerateContent",
+    ];
+
     let models = body["models"]
         .as_array()
         .ok_or("Invalid Google models response format")?
         .iter()
         .filter_map(|model| {
             let name = model["name"].as_str()?;
-            let methods = model["supportedGenerationMethods"].as_array()?;
-            let supports_generate = methods
-                .iter()
-                .any(|m| m.as_str() == Some("generateContent"));
+            let methods = model["supportedGenerationMethods"]
+                .as_array()
+                .map(|rows| {
+                    rows.iter()
+                        .filter_map(|m| m.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default();
 
-            if !supports_generate {
+            if methods.is_empty() {
+                return None;
+            }
+
+            let supports_required_methods = REQUIRED_METHODS
+                .iter()
+                .all(|required| methods.iter().any(|method| method == required));
+
+            if !supports_required_methods {
                 return None;
             }
 
@@ -392,6 +193,8 @@ fn parse_google_models(body: &serde_json::Value) -> Result<Vec<ModelInfo>, Strin
                 description: model["description"].as_str().unwrap_or("").to_string(),
                 input_token_limit: model["inputTokenLimit"].as_u64().unwrap_or(0) as u32,
                 output_token_limit: model["outputTokenLimit"].as_u64().unwrap_or(0) as u32,
+                thinking: model["thinking"].as_bool().unwrap_or(false),
+                supported_generation_methods: methods,
             })
         })
         .collect();
@@ -435,6 +238,8 @@ fn parse_generic_models(body: &serde_json::Value) -> Result<Vec<ModelInfo>, Stri
                 description,
                 input_token_limit: input_limit,
                 output_token_limit: output_limit,
+                thinking: false,
+                supported_generation_methods: vec![],
             })
         })
         .collect();
@@ -448,10 +253,6 @@ async fn provider_models_http(
     base_url: Option<&str>,
 ) -> Result<Vec<ModelInfo>, String> {
     let provider = normalize_provider_id(provider_id)?;
-    if provider == "glm" {
-        return Ok(curated_models(&provider));
-    }
-
     let resolved_base = base_url
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.trim().trim_end_matches('/').to_string())
@@ -460,43 +261,8 @@ async fn provider_models_http(
 
     let client = reqwest::Client::new();
 
-    let mut request = match provider.as_str() {
-        "google" => {
-            let url = format!(
-                "{}/v1beta/models?key={}",
-                resolved_base,
-                api_key
-            );
-            client.get(url)
-        }
-        "openai" | "openrouter" | "moonshot" => {
-            let url = format!("{}/v1/models", resolved_base);
-            client.get(url).bearer_auth(api_key)
-        }
-        "deepseek" => {
-            let url = format!("{}/models", resolved_base);
-            client.get(url).bearer_auth(api_key)
-        }
-        "lmstudio" => {
-            let url = format!("{}/v1/models", resolved_base);
-            let req = client.get(url);
-            if api_key.trim().is_empty() {
-                req
-            } else {
-                req.bearer_auth(api_key)
-            }
-        }
-        "anthropic" => {
-            let url = format!("{}/v1/models", resolved_base);
-            client
-                .get(url)
-                .header("x-api-key", api_key)
-                .header("anthropic-version", "2023-06-01")
-        }
-        _ => {
-            return Ok(curated_models(&provider));
-        }
-    };
+    let url = format!("{}/v1beta/models?key={}", resolved_base, api_key);
+    let mut request = client.get(url);
 
     request = request.header("content-type", "application/json");
     let response = request.send().await.map_err(|e| e.to_string())?;
@@ -506,11 +272,7 @@ async fn provider_models_http(
     }
 
     let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    let parsed = if provider == "google" {
-        parse_google_models(&body)?
-    } else {
-        parse_generic_models(&body)?
-    };
+    let parsed = parse_google_models(&body)?;
 
     if parsed.is_empty() {
         Ok(curated_models(&provider))
@@ -586,38 +348,6 @@ pub async fn delete_google_api_key() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn get_openai_api_key() -> Result<Option<String>, String> {
-    credentials::credentials_get(
-        API_KEY_SERVICE.to_string(),
-        OPENAI_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn set_openai_api_key(api_key: String) -> Result<(), String> {
-    if api_key.trim().is_empty() {
-        return Err("OpenAI API key cannot be empty".to_string());
-    }
-
-    credentials::credentials_set(
-        API_KEY_SERVICE.to_string(),
-        OPENAI_API_KEY_ACCOUNT.to_string(),
-        api_key.trim().to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_openai_api_key() -> Result<(), String> {
-    credentials::credentials_delete(
-        API_KEY_SERVICE.to_string(),
-        OPENAI_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
 pub async fn get_fal_api_key() -> Result<Option<String>, String> {
     credentials::credentials_get(
         API_KEY_SERVICE.to_string(),
@@ -645,70 +375,6 @@ pub async fn delete_fal_api_key() -> Result<(), String> {
     credentials::credentials_delete(
         API_KEY_SERVICE.to_string(),
         FAL_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn get_exa_api_key() -> Result<Option<String>, String> {
-    credentials::credentials_get(
-        API_KEY_SERVICE.to_string(),
-        EXA_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn set_exa_api_key(api_key: String) -> Result<(), String> {
-    if api_key.trim().is_empty() {
-        return Err("Exa API key cannot be empty".to_string());
-    }
-
-    credentials::credentials_set(
-        API_KEY_SERVICE.to_string(),
-        EXA_API_KEY_ACCOUNT.to_string(),
-        api_key.trim().to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_exa_api_key() -> Result<(), String> {
-    credentials::credentials_delete(
-        API_KEY_SERVICE.to_string(),
-        EXA_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn get_tavily_api_key() -> Result<Option<String>, String> {
-    credentials::credentials_get(
-        API_KEY_SERVICE.to_string(),
-        TAVILY_API_KEY_ACCOUNT.to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn set_tavily_api_key(api_key: String) -> Result<(), String> {
-    if api_key.trim().is_empty() {
-        return Err("Tavily API key cannot be empty".to_string());
-    }
-
-    credentials::credentials_set(
-        API_KEY_SERVICE.to_string(),
-        TAVILY_API_KEY_ACCOUNT.to_string(),
-        api_key.trim().to_string(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn delete_tavily_api_key() -> Result<(), String> {
-    credentials::credentials_delete(
-        API_KEY_SERVICE.to_string(),
-        TAVILY_API_KEY_ACCOUNT.to_string(),
     )
     .await
 }
@@ -750,10 +416,7 @@ pub async fn auth_logout_and_cleanup() -> Result<LogoutCleanupResult, String> {
     let mut accounts_to_clear = vec![
         LEGACY_API_KEY_ACCOUNT.to_string(),
         GOOGLE_API_KEY_ACCOUNT.to_string(),
-        OPENAI_API_KEY_ACCOUNT.to_string(),
         FAL_API_KEY_ACCOUNT.to_string(),
-        EXA_API_KEY_ACCOUNT.to_string(),
-        TAVILY_API_KEY_ACCOUNT.to_string(),
         STITCH_API_KEY_ACCOUNT.to_string(),
     ];
 
@@ -814,10 +477,7 @@ pub async fn auth_get_security_posture() -> Result<SecurityPostureStatus, String
 
     let auxiliary_accounts = [
         GOOGLE_API_KEY_ACCOUNT,
-        OPENAI_API_KEY_ACCOUNT,
         FAL_API_KEY_ACCOUNT,
-        EXA_API_KEY_ACCOUNT,
-        TAVILY_API_KEY_ACCOUNT,
         STITCH_API_KEY_ACCOUNT,
     ];
     let mut auxiliary_keys_configured = 0usize;
@@ -860,37 +520,11 @@ pub async fn validate_provider_connection(
     api_key: String,
     base_url: Option<String>,
 ) -> Result<bool, String> {
-    let provider = normalize_provider_id(&provider_id)?;
-    if api_key.trim().is_empty() && provider != "lmstudio" {
+    normalize_provider_id(&provider_id)?;
+    if api_key.trim().is_empty() {
         return Ok(false);
     }
-
-    if provider == "glm" {
-        // GLM may not expose a stable model listing endpoint across all base URLs.
-        return Ok(true);
-    }
-
-    if provider == "lmstudio" {
-        let result = provider_models_http(&provider, api_key.trim(), base_url.as_deref()).await;
-        return Ok(result.is_ok());
-    }
-
-    if provider == "moonshot" || provider == "deepseek" {
-        let result = provider_models_http(&provider, api_key.trim(), base_url.as_deref()).await;
-        return match result {
-            Ok(_) => Ok(true),
-            Err(error) => {
-                let lower = error.to_lowercase();
-                let auth_failed = lower.contains("401")
-                    || lower.contains("403")
-                    || lower.contains("unauthorized")
-                    || lower.contains("forbidden");
-                Ok(!auth_failed)
-            }
-        };
-    }
-
-    let result = provider_models_http(&provider, api_key.trim(), base_url.as_deref()).await;
+    let result = provider_models_http("google", api_key.trim(), base_url.as_deref()).await;
     Ok(result.is_ok())
 }
 
@@ -901,23 +535,12 @@ pub async fn fetch_provider_models(
     base_url: Option<String>,
 ) -> Result<Vec<ModelInfo>, String> {
     let provider = normalize_provider_id(&provider_id)?;
-    if api_key.trim().is_empty() && provider != "lmstudio" {
+    if api_key.trim().is_empty() {
         return Ok(curated_models(&provider));
     }
-
-    match provider_models_http(&provider, api_key.trim(), base_url.as_deref()).await {
-        Ok(models) => Ok(models),
-        Err(error) => {
-            if provider == "moonshot" || provider == "deepseek" || provider == "lmstudio" {
-                eprintln!(
-                    "[auth::fetch_provider_models] Falling back to curated models for {}: {}",
-                    provider, error
-                );
-                return Ok(curated_models(&provider));
-            }
-            Err(error)
-        }
-    }
+    provider_models_http(&provider, api_key.trim(), base_url.as_deref())
+        .await
+        .or_else(|_| Ok(curated_models(&provider)))
 }
 
 // ---------------------------------------------------------------------------

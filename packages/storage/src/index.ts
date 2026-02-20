@@ -18,8 +18,6 @@ export { SettingsRepository, type Setting } from './repositories/settings.js';
 export { WorkflowRepository } from './repositories/workflow.js';
 export { WorkflowRunRepository, type WorkflowRunWithDetails } from './repositories/workflow-run.js';
 export { WorkflowEventRepository } from './repositories/workflow-event.js';
-export { MemoryAtomRepository } from './repositories/memory-atom.js';
-export { MemoryQueryRepository, type MemoryQueryLog } from './repositories/memory-query.js';
 export { SessionBranchRepository } from './repositories/session-branch.js';
 export { RunCheckpointRepository } from './repositories/run-checkpoint.js';
 export {
@@ -48,8 +46,6 @@ import { SettingsRepository } from './repositories/settings.js';
 import { WorkflowRepository } from './repositories/workflow.js';
 import { WorkflowRunRepository } from './repositories/workflow-run.js';
 import { WorkflowEventRepository } from './repositories/workflow-event.js';
-import { MemoryAtomRepository } from './repositories/memory-atom.js';
-import { MemoryQueryRepository } from './repositories/memory-query.js';
 import { SessionBranchRepository } from './repositories/session-branch.js';
 import { RunCheckpointRepository } from './repositories/run-checkpoint.js';
 import { BenchmarkRepository } from './repositories/benchmark.js';
@@ -62,8 +58,6 @@ export interface Repositories {
   workflows: WorkflowRepository;
   workflowRuns: WorkflowRunRepository;
   workflowEvents: WorkflowEventRepository;
-  memoryAtoms: MemoryAtomRepository;
-  memoryQueries: MemoryQueryRepository;
   sessionBranches: SessionBranchRepository;
   runCheckpoints: RunCheckpointRepository;
   benchmarks: BenchmarkRepository;
@@ -84,8 +78,6 @@ export function createRepositories(options?: DatabaseOptions): Repositories {
     workflows: new WorkflowRepository(db),
     workflowRuns: new WorkflowRunRepository(db),
     workflowEvents: new WorkflowEventRepository(db),
-    memoryAtoms: new MemoryAtomRepository(db),
-    memoryQueries: new MemoryQueryRepository(db),
     sessionBranches: new SessionBranchRepository(db),
     runCheckpoints: new RunCheckpointRepository(db),
     benchmarks: new BenchmarkRepository(db),

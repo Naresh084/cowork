@@ -35,7 +35,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Runtime Model',
         body:
-          'Cowork runs locally through a desktop shell and a sidecar agent runtime. Your active provider, keys, model, and routing settings determine which capabilities are enabled for new tool calls.',
+          'Cowork runs locally through a desktop shell and a sidecar agent runtime. Google powers core assistant reasoning, while media routing settings choose Google or Fal for image/video tools.',
       },
       {
         heading: 'Automation Runtime',
@@ -45,12 +45,12 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Sessions and Scope',
         body:
-          'Each chat session captures provider/model context and workspace directory. Some runtime changes apply immediately, while provider/base URL/model changes usually require a new session for consistency.',
+          'Each chat session captures model context and workspace directory. Some runtime changes apply immediately, while model/base URL changes usually require a new session for consistency.',
       },
       {
-        heading: 'Permissions and Policies',
+        heading: 'Permissions and Access Modes',
         body:
-          'Tool policy profiles and per-action approval checks work together. Even allowed tools can still prompt for risky actions, depending on policy and operation type.',
+          'Runtime permissions use two modes: Ask (prompt on sensitive actions) and Full (allow direct execution). Tool-level permission checks still apply to risky operations.',
       },
       {
         heading: 'Plan Mode Workflow',
@@ -60,7 +60,7 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Tool Availability',
         body:
-          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. Session type and policy controls determine which automation and integration tools are exposed.',
+          'Tool access is dynamic. Missing keys or disabled integrations remove tools at runtime. Session type and permission state determine which automation and integration tools are exposed.',
       },
       {
         heading: 'Where to Build',
@@ -144,12 +144,12 @@ export const HELP_ARTICLES: HelpArticle[] = [
       {
         heading: 'Provider Keys',
         body:
-          'Provider keys authorize chat and provider-native capability calls. Without a valid key (except LM Studio), runtime capabilities are reduced or unavailable.',
+          'Google provider keys authorize chat and Google-native capability calls. Without a valid key, runtime capabilities are reduced or unavailable.',
       },
       {
         heading: 'Media and Runtime Extension Keys',
         body:
-          'Google/OpenAI/Fal media keys govern media tools. Exa/Tavily/Stitch keys and external CLI controls are managed under Runtime settings.',
+          'Google and Fal keys govern media tools. Stitch runtime controls are managed under Runtime settings.',
       },
       {
         heading: 'Storage and Rotation',
@@ -172,12 +172,12 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
   {
     id: 'settings',
     title: 'Settings Tour',
-    description: 'Learn provider, media, capabilities, runtime, integrations, and remote access with impact-aware guidance.',
+    description: 'Learn provider, media, runtime, integrations, and remote access with impact-aware guidance.',
     steps: [
       {
         id: 'settings-step-tabs',
         title: 'Settings Tabs',
-        description: 'Use tabs to switch between Provider, Media, Capabilities, Runtime, Integrations, Remote, and Souls.',
+        description: 'Use tabs to switch between Provider, Media, Runtime, Integrations, Remote, and Souls.',
         targetId: 'settings-tab-nav',
       },
       {
@@ -187,15 +187,9 @@ export const GUIDED_TOURS: GuidedTourDefinition[] = [
         targetId: 'settings-tab-provider',
       },
       {
-        id: 'settings-step-capabilities-tab',
-        title: 'Capabilities Tab',
-        description: 'Review capability availability and set Allow/Ask/Deny policy in one unified table.',
-        targetId: 'settings-tab-capabilities',
-      },
-      {
         id: 'settings-step-runtime-tab',
         title: 'Runtime Tab',
-        description: 'Manage search fallback, Stitch key, external CLI orchestration, and specialized runtime models.',
+        description: 'Manage runtime keys, memory behavior, and specialized model settings.',
         targetId: 'settings-tab-runtime',
       },
       {

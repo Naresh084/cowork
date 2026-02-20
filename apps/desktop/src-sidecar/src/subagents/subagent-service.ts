@@ -143,27 +143,16 @@ export class SubagentService {
       }
     }
 
-    // Step 5: Platform directories (.agent/ and .claude/)
-    const platformAgentDirs: Array<{ dir: string; type: 'agent' | 'claude' }> = [];
+    // Step 5: Platform directories (.agent/)
+    const platformAgentDirs: string[] = [];
     if (workingDirectory) {
-      platformAgentDirs.push(
-        { dir: join(workingDirectory, '.agent', 'agents'), type: 'agent' },
-        { dir: join(workingDirectory, '.claude', 'agents'), type: 'claude' },
-      );
+      platformAgentDirs.push(join(workingDirectory, '.agent', 'agents'));
     }
-    platformAgentDirs.push(
-      { dir: join(homedir(), '.agent', 'agents'), type: 'agent' },
-      { dir: join(homedir(), '.claude', 'agents'), type: 'claude' },
-    );
+    platformAgentDirs.push(join(homedir(), '.agent', 'agents'));
 
-    for (const { dir, type } of platformAgentDirs) {
+    for (const dir of platformAgentDirs) {
       if (existsSync(dir)) {
-        let discovered: LoadedSubagent[];
-        if (type === 'claude') {
-          discovered = await this.discoverClaudeAgents(dir, 1);
-        } else {
-          discovered = await this.discoverFromDirectory(dir, 'platform', 1);
-        }
+        const discovered = await this.discoverFromDirectory(dir, 'platform', 1);
         for (const sub of discovered) {
           if (!seenNames.has(sub.manifest.name)) {
             seenNames.add(sub.manifest.name);
@@ -175,120 +164,6 @@ export class SubagentService {
     }
 
     return allSubagents;
-  }
-
-  /**
-   * Discover agents from .claude/ format directories.
-   * Supports standard subagent.json+prompt.md format AND simple .md files.
-   */
-  private async discoverClaudeAgents(
-    dir: string,
-    priority: number
-  ): Promise<LoadedSubagent[]> {
-    const subagents: LoadedSubagent[] = [];
-
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue;
-
-        if (entry.isDirectory()) {
-          // Standard format: dir/agent-name/subagent.json + prompt.md
-          const manifestPath = join(dir, entry.name, 'subagent.json');
-          if (existsSync(manifestPath)) {
-            try {
-              const manifestContent = readFileSync(manifestPath, 'utf-8');
-              const manifest: SubagentManifest = JSON.parse(manifestContent);
-              manifest.source = 'platform';
-
-              const promptPath = join(dir, entry.name, 'prompt.md');
-              if (existsSync(promptPath) && !manifest.systemPrompt) {
-                manifest.systemPrompt = readFileSync(promptPath, 'utf-8');
-              }
-
-              const source: SubagentSourceInfo = {
-                type: 'platform',
-                path: dir,
-                priority,
-              };
-              subagents.push({
-                manifest,
-                source,
-                subagentPath: join(dir, entry.name),
-              });
-            } catch {
-              // Skip subagents that fail to parse
-            }
-          }
-        } else if (entry.name.endsWith('.md')) {
-          // Claude simple format: dir/my-agent.md
-          // Optional YAML frontmatter with name, description, model, tools
-          // Body = system prompt
-          try {
-            const content = readFileSync(join(dir, entry.name), 'utf-8');
-            const name = entry.name.replace(/\.md$/, '');
-            const displayName = name
-              .split('-')
-              .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
-              .join(' ');
-
-            let description = `Platform agent: ${displayName}`;
-            let systemPrompt = content;
-            let model: string | undefined;
-            let tools: string[] | undefined;
-
-            // Try to extract YAML frontmatter
-            const fmMatch = content.match(
-              /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
-            );
-            if (fmMatch) {
-              const yamlStr = fmMatch[1];
-              systemPrompt = fmMatch[2].trim();
-
-              // Simple YAML parsing for key: value pairs
-              for (const line of yamlStr.split('\n')) {
-                const match = line.match(/^(\w+):\s*(.+)$/);
-                if (match) {
-                  const [, key, value] = match;
-                  const cleanVal = value
-                    .replace(/^["']|["']$/g, '')
-                    .trim();
-                  if (key === 'description') description = cleanVal;
-                  if (key === 'model') model = cleanVal;
-                }
-              }
-            }
-
-            const manifest: SubagentManifest = {
-              name,
-              displayName,
-              description,
-              version: '1.0.0',
-              category: 'custom',
-              systemPrompt,
-              tools,
-              model,
-              priority: 0,
-              source: 'platform',
-            };
-
-            const source: SubagentSourceInfo = {
-              type: 'platform',
-              path: dir,
-              priority,
-            };
-            subagents.push({ manifest, source, subagentPath: dir });
-          } catch {
-            // Skip agents that fail to parse
-          }
-        }
-      }
-    } catch {
-      // Directory scanning error - return empty array
-    }
-
-    return subagents;
   }
 
   /**

@@ -28,13 +28,6 @@ describe('tool-autonomy', () => {
     expect(getToolAutonomyLevel('send_notification_slack')).toBe('confirm');
     expect(getToolAutonomyLevel('connector_salesforce_update')).toBe('confirm');
     expect(getToolAutonomyLevel('mcp_design_generate')).toBe('confirm');
-    expect(getToolAutonomyLevel('start_codex_cli_run')).toBe('confirm');
-    expect(getToolAutonomyLevel('start_claude_cli_run')).toBe('confirm');
-  });
-
-  it('keeps external-cli progress/respond tools as auto-use', () => {
-    expect(getToolAutonomyLevel('external_cli_get_progress')).toBe('auto');
-    expect(getToolAutonomyLevel('external_cli_respond')).toBe('auto');
   });
 
   it('renders autonomy section using runtime tool availability', () => {
@@ -62,8 +55,6 @@ describe('tool-autonomy', () => {
         'web_search',
         'google_grounded_search',
         'web_fetch',
-        'external_cli_get_progress',
-        'external_cli_respond',
       ]),
     );
   });

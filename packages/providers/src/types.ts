@@ -10,28 +10,12 @@ import type { Message, ToolDefinition, GenerationConfig, StreamChunk } from '@co
 
 export const ProviderIdSchema = z.enum([
   'google',
-  'openai',
-  'anthropic',
-  'openrouter',
-  'moonshot',
-  'glm',
-  'deepseek',
-  'lmstudio',
   // Backward-compat alias; normalized to `google`.
   'gemini',
 ]);
 export type ProviderId = z.infer<typeof ProviderIdSchema>;
 
-export const CanonicalProviderIdSchema = z.enum([
-  'google',
-  'openai',
-  'anthropic',
-  'openrouter',
-  'moonshot',
-  'glm',
-  'deepseek',
-  'lmstudio',
-]);
+export const CanonicalProviderIdSchema = z.enum(['google']);
 export type CanonicalProviderId = z.infer<typeof CanonicalProviderIdSchema>;
 
 export const PROVIDER_ALIAS_MAP: Record<string, CanonicalProviderId> = {
@@ -43,8 +27,8 @@ export function normalizeProviderId(providerId: ProviderId | string): CanonicalP
   if (normalized in PROVIDER_ALIAS_MAP) {
     return PROVIDER_ALIAS_MAP[normalized]!;
   }
-  if (CanonicalProviderIdSchema.safeParse(normalized).success) {
-    return normalized as CanonicalProviderId;
+  if (normalized === 'google') {
+    return 'google';
   }
   throw new Error(`Unknown provider: ${providerId}`);
 }
@@ -82,8 +66,8 @@ export interface ProviderConnectionSettings {
 }
 
 export interface MediaRoutingSettings {
-  imageBackend: 'google' | 'openai';
-  videoBackend: 'google' | 'openai';
+  imageBackend: 'google' | 'fal';
+  videoBackend: 'google' | 'fal';
 }
 
 // ============================================================================

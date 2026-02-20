@@ -20,7 +20,6 @@ export const DATA_DIR = path.join(homedir(), '.cowork');
  */
 export const CRON_DIR = path.join(DATA_DIR, 'cron');
 export const CRON_RUNS_DIR = path.join(CRON_DIR, 'runs');
-export const POLICIES_DIR = path.join(DATA_DIR, 'policies');
 export const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 export const MEMORY_DIR = path.join(DATA_DIR, 'memory');
 
@@ -37,13 +36,6 @@ export async function ensureDataDir(): Promise<void> {
 export async function ensureCronDir(): Promise<void> {
   await fs.mkdir(CRON_DIR, { recursive: true });
   await fs.mkdir(CRON_RUNS_DIR, { recursive: true });
-}
-
-/**
- * Ensure the policies directory exists
- */
-export async function ensurePoliciesDir(): Promise<void> {
-  await fs.mkdir(POLICIES_DIR, { recursive: true });
 }
 
 /**
@@ -72,13 +64,6 @@ export function getCronJobsPath(): string {
  */
 export function getCronRunsPath(jobId: string): string {
   return path.join(CRON_RUNS_DIR, `${jobId}.jsonl`);
-}
-
-/**
- * Get path to tool policy file
- */
-export function getPolicyPath(): string {
-  return path.join(POLICIES_DIR, 'policy.json');
 }
 
 /**

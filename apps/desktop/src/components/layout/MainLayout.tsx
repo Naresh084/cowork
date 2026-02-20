@@ -111,7 +111,7 @@ export function MainLayout() {
             <Sidebar isCollapsed={sidebarCollapsed} />
 
             {/* Main View */}
-            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative codex-grid codex-vignette overflow-x-hidden">
+            <main className="flex-1 flex flex-col min-w-0 min-h-0 relative app-grid app-vignette overflow-x-hidden">
               {startupIssue ? (
                 <div className="mx-4 mt-3 rounded-xl border border-[#F5C400]/30 bg-[#F5C400]/10 px-4 py-3">
                   <div className="flex items-start gap-3">

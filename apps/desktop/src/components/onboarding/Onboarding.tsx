@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { PROVIDERS, useAuthStore, type ProviderId } from '@/stores/auth-store';
+import { useAuthStore, type ProviderId } from '@/stores/auth-store';
 import { resolveActiveSoul, useSettingsStore } from '@/stores/settings-store';
 import { BrandMark } from '../icons/BrandMark';
 
@@ -13,13 +13,6 @@ const onboardingHero = new URL('../../assets/onboarding/image_2.png', import.met
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
   google: 'Google',
-  openai: 'OpenAI',
-  anthropic: 'Anthropic',
-  openrouter: 'OpenRouter',
-  moonshot: 'Moonshot (Kimi)',
-  glm: 'GLM',
-  deepseek: 'DeepSeek',
-  lmstudio: 'LM Studio',
 };
 
 export function Onboarding() {
@@ -28,15 +21,10 @@ export function Onboarding() {
     useSettingsStore();
 
   const [userName, setUserName] = useState(existingUserName || '');
-  const [provider, setProvider] = useState<ProviderId>(activeProvider || 'google');
+  const [provider] = useState<ProviderId>(activeProvider || 'google');
   const [providerKey, setProviderKey] = useState(providerApiKeys[activeProvider] || '');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-
-  const handleProviderChange = (nextProvider: ProviderId) => {
-    setProvider(nextProvider);
-    setProviderKey(providerApiKeys[nextProvider] || '');
-  };
 
   const handleComplete = async () => {
     if (isSaving) return;
@@ -49,7 +37,7 @@ export function Onboarding() {
       return;
     }
 
-    if (provider !== 'lmstudio' && !trimmedProviderKey) {
+    if (!trimmedProviderKey) {
       setError('Please enter your provider API key.');
       return;
     }
@@ -71,7 +59,6 @@ export function Onboarding() {
       await applyRuntimeConfig({
         activeProvider: settingsState.activeProvider,
         providerBaseUrls: settingsState.providerBaseUrls,
-        externalSearchProvider: settingsState.externalSearchProvider,
         mediaRouting: settingsState.mediaRouting,
         sandbox: settingsState.commandSandbox,
         specializedModels: settingsState.specializedModelsV2,
@@ -155,32 +142,20 @@ export function Onboarding() {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-white/75">Provider</label>
-                  <select
-                    value={provider}
-                    onChange={(e) => handleProviderChange(e.target.value as ProviderId)}
-                    className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10 focus:border-[#3B82F6] focus:ring-2 focus:ring-[#1D4ED8]/35"
-                  >
-                    {PROVIDERS.map((id) => (
-                      <option key={id} value={id}>
-                        {PROVIDER_LABELS[id]}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="app-select w-full rounded-xl border bg-[#0A1021]/80 py-3.5 text-sm text-white border-white/10">
+                    {PROVIDER_LABELS.google}
+                  </div>
                 </div>
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-white/75">
-                    API Key{provider === 'lmstudio' ? ' (optional)' : ''}
+                    API Key
                   </label>
                   <input
                     type="password"
                     value={providerKey}
                     onChange={(e) => setProviderKey(e.target.value)}
-                    placeholder={
-                      provider === 'lmstudio'
-                        ? 'Optional for local LM Studio servers'
-                        : `Enter ${PROVIDER_LABELS[provider]} API key`
-                    }
+                    placeholder={`Enter ${PROVIDER_LABELS[provider]} API key`}
                     className="w-full rounded-xl border bg-[#0A1021]/80 py-3.5 px-4 text-sm text-white placeholder:text-white/35 border-white/10 focus:border-[#3B82F6] focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]/35"
                   />
                 </div>

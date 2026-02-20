@@ -73,28 +73,17 @@ export class CommandService {
   async discoverAll(workingDirectory?: string): Promise<CommandManifest[]> {
     const allCommands: CommandManifest[] = [];
 
-    // Platform directories (.agent/ and .claude/)
-    const platformCmdDirs: Array<{ dir: string; type: 'agent' | 'claude' }> = [];
+    // Platform directories (.agent/)
+    const platformCmdDirs: string[] = [];
     if (workingDirectory) {
-      platformCmdDirs.push(
-        { dir: join(workingDirectory, '.agent', 'commands'), type: 'agent' },
-        { dir: join(workingDirectory, '.claude', 'commands'), type: 'claude' },
-      );
+      platformCmdDirs.push(join(workingDirectory, '.agent', 'commands'));
     }
-    platformCmdDirs.push(
-      { dir: join(homedir(), '.agent', 'commands'), type: 'agent' },
-      { dir: join(homedir(), '.claude', 'commands'), type: 'claude' },
-    );
+    platformCmdDirs.push(join(homedir(), '.agent', 'commands'));
 
-    for (const { dir, type } of platformCmdDirs) {
+    for (const dir of platformCmdDirs) {
       if (existsSync(dir)) {
-        if (type === 'claude') {
-          const commands = await this.discoverClaudeCommands(dir, 0);
-          allCommands.push(...commands);
-        } else {
-          const commands = await this.discoverFromDirectory(dir, 'platform', 0);
-          allCommands.push(...commands);
-        }
+        const commands = await this.discoverFromDirectory(dir, 'platform', 0);
+        allCommands.push(...commands);
       }
     }
 
@@ -171,92 +160,6 @@ export class CommandService {
           commands.push(manifest);
         } catch {
           // Skip commands that fail to parse
-        }
-      }
-    } catch {
-      // Directory scanning error - return empty array
-    }
-
-    return commands;
-  }
-
-  /**
-   * Discover commands from .claude/ format directories.
-   * Supports both standard COMMAND.md format (in subdirs) and simple .md files.
-   */
-  async discoverClaudeCommands(
-    dir: string,
-    priority: number
-  ): Promise<CommandManifest[]> {
-    const commands: CommandManifest[] = [];
-
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue;
-
-        if (entry.isDirectory()) {
-          // Standard format: dir/command-name/COMMAND.md
-          const commandMdPath = join(dir, entry.name, 'COMMAND.md');
-          if (existsSync(commandMdPath)) {
-            try {
-              const content = await readFile(commandMdPath, 'utf-8');
-              const parsed = parseCommandMarkdown(content);
-              if (parsed) {
-                const source: CommandSource = { type: 'platform', path: dir, priority };
-                commands.push({
-                  id: `platform:${parsed.frontmatter.name}`,
-                  source,
-                  frontmatter: parsed.frontmatter,
-                  commandPath: join(dir, entry.name),
-                  prompt: parsed.frontmatter.action ? null : parsed.body,
-                });
-              }
-            } catch {
-              // Skip commands that fail to parse
-            }
-          }
-        } else if (entry.name.endsWith('.md')) {
-          // Claude simple format: dir/my-command.md (bare markdown, optional frontmatter)
-          try {
-            const content = await readFile(join(dir, entry.name), 'utf-8');
-            const name = entry.name.replace(/\.md$/, '');
-
-            // Try to parse frontmatter if present
-            const parsed = parseCommandMarkdown(content);
-            if (parsed) {
-              const source: CommandSource = { type: 'platform', path: dir, priority };
-              commands.push({
-                id: `platform:${parsed.frontmatter.name}`,
-                source,
-                frontmatter: parsed.frontmatter,
-                commandPath: dir,
-                prompt: parsed.frontmatter.action ? null : parsed.body,
-              });
-            } else {
-              // No valid frontmatter - synthesize from filename + full body as prompt
-              const source: CommandSource = { type: 'platform', path: dir, priority };
-              const displayName = name
-                .split('-')
-                .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                .join(' ');
-              commands.push({
-                id: `platform:${name}`,
-                source,
-                frontmatter: {
-                  name,
-                  displayName,
-                  description: `Platform command: ${displayName}`,
-                  category: 'custom',
-                },
-                commandPath: dir,
-                prompt: content.trim(),
-              });
-            }
-          } catch {
-            // Skip commands that fail to parse
-          }
         }
       }
     } catch {

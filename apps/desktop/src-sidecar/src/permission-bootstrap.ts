@@ -24,6 +24,16 @@ function isPermissionDecision(value: unknown): value is PermissionDecision {
   );
 }
 
+function normalizeApprovalMode(
+  value: unknown,
+): ApprovalMode | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.toLowerCase();
+  if (normalized === 'full') return 'full';
+  if (normalized === 'ask' || normalized === 'auto' || normalized === 'read_only') return 'ask';
+  return undefined;
+}
+
 function normalizeBootstrap(
   input: Partial<SessionPermissionBootstrap> | null | undefined,
 ): SessionPermissionBootstrap | null {
@@ -52,19 +62,13 @@ function normalizeBootstrap(
     }
   }
 
-  const approvalMode = input.approvalMode;
-  const safeApprovalMode =
-    approvalMode === 'auto' || approvalMode === 'read_only' || approvalMode === 'full'
-      ? approvalMode
-      : undefined;
-
   return {
     version: 1,
     sourceSessionId:
       typeof input.sourceSessionId === 'string' && input.sourceSessionId.trim()
         ? input.sourceSessionId.trim()
         : undefined,
-    approvalMode: safeApprovalMode,
+    approvalMode: normalizeApprovalMode(input.approvalMode),
     permissionScopes,
     permissionCache,
     createdAt:

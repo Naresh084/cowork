@@ -46,7 +46,7 @@ function createContext(provider: PromptProviderId, mode: 'execute' | 'plan' = 'e
     capabilitySnapshot: {
       provider,
       executionMode: mode,
-      policyProfile: 'coding',
+      approvalMode: 'ask',
       mediaRouting: {
         imageBackend: 'google',
         videoBackend: 'google',
@@ -62,13 +62,11 @@ function createContext(provider: PromptProviderId, mode: 'execute' | 'plan' = 'e
           toolName: 'read_any_file',
           enabled: true,
           reason: 'Available',
-          policyAction: 'allow',
         },
         {
           toolName: 'write_file',
           enabled: true,
           reason: 'Available',
-          policyAction: 'ask',
         },
       ],
       integrationAccess: [],
@@ -81,16 +79,7 @@ function createContext(provider: PromptProviderId, mode: 'execute' | 'plan' = 'e
 
 describe('system-prompt-builder', () => {
   const builder = new SystemPromptBuilder();
-  const providers: PromptProviderId[] = [
-    'google',
-    'openai',
-    'anthropic',
-    'openrouter',
-    'moonshot',
-    'glm',
-    'deepseek',
-    'lmstudio',
-  ];
+  const providers: PromptProviderId[] = ['google'];
 
   it.each(providers)('selects provider template for %s', (provider) => {
     const result = builder.build(createContext(provider));
@@ -103,7 +92,7 @@ describe('system-prompt-builder', () => {
   });
 
   it('uses plan-mode template and keeps deterministic output for fixed input', () => {
-    const context = createContext('anthropic', 'plan');
+    const context = createContext('google', 'plan');
     const first = builder.build(context);
     const second = builder.build(context);
 
@@ -117,23 +106,4 @@ describe('system-prompt-builder', () => {
     expect(result.prompt.length).toBeLessThan(40000);
   });
 
-  it('includes external-cli conversational operating practice when launch tools are available', () => {
-    const context = createContext('google');
-    context.toolHandlers = [
-      ...context.toolHandlers,
-      createTool('start_codex_cli_run', 'Launch Codex CLI run'),
-      createTool('start_claude_cli_run', 'Launch Claude CLI run'),
-      createTool('external_cli_get_progress', 'Get external CLI progress'),
-    ];
-
-    const result = builder.build(context);
-    expect(result.prompt).toContain('## External CLI Operating Practice');
-    expect(result.prompt).toContain('`working_directory`');
-    expect(result.prompt).toContain('`create_if_missing`');
-    expect(result.prompt).toContain('`bypassPermission`');
-    expect(result.prompt).toContain('external_cli_get_progress');
-    expect(result.prompt).toContain('low=5s');
-    expect(result.prompt).toContain('explicitly asks to use Codex/Claude CLI');
-    expect(result.prompt).toContain('`web_search`');
-  });
 });

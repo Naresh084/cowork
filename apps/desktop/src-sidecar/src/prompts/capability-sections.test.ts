@@ -46,7 +46,7 @@ function createContext(partial?: Partial<PromptBuildContext>): PromptBuildContex
     capabilitySnapshot: {
       provider: 'google',
       executionMode: 'execute',
-      policyProfile: 'coding',
+      approvalMode: 'ask',
       mediaRouting: {
         imageBackend: 'google',
         videoBackend: 'google',
@@ -62,13 +62,11 @@ function createContext(partial?: Partial<PromptBuildContext>): PromptBuildContex
           toolName: 'read_any_file',
           enabled: true,
           reason: 'Available',
-          policyAction: 'allow',
         },
         {
           toolName: 'schedule_task',
           enabled: false,
           reason: 'Unavailable in isolated/cron sessions.',
-          policyAction: 'ask',
         },
       ],
       integrationAccess: [
@@ -144,27 +142,6 @@ describe('capability-sections', () => {
     expect(integration?.content).toContain('Notification Tools: none');
   });
 
-  it('adds external-cli operating practice section when launch tools are available', () => {
-    const sections = buildCapabilitySections(
-      createContext({
-        toolHandlers: [
-          createTool('start_codex_cli_run', 'Launch Codex CLI run'),
-          createTool('external_cli_get_progress', 'Get run progress'),
-        ],
-      }),
-    );
-
-    const externalCli = sections.find((section) => section.key === 'external_cli_operating_practice');
-    expect(externalCli).toBeDefined();
-    expect(externalCli?.content).toContain('`working_directory`');
-    expect(externalCli?.content).toContain('`create_if_missing`');
-    expect(externalCli?.content).toContain('`bypassPermission`');
-    expect(externalCli?.content).toContain('external_cli_get_progress');
-    expect(externalCli?.content).toContain('low=5s');
-    expect(externalCli?.content).toContain('explicitly asks to use Codex/Claude CLI');
-    expect(externalCli?.content).toContain('`web_search`');
-  });
-
   it('adds draft-first skill flow guidance when skill generation and scheduling tools are available', () => {
     const sections = buildCapabilitySections(
       createContext({
@@ -180,19 +157,16 @@ describe('capability-sections', () => {
               toolName: 'draft_skill_from_conversation',
               enabled: true,
               reason: 'Available',
-              policyAction: 'ask',
             },
             {
               toolName: 'create_skill_from_conversation',
               enabled: true,
               reason: 'Available',
-              policyAction: 'ask',
             },
             {
               toolName: 'schedule_task',
               enabled: true,
               reason: 'Available',
-              policyAction: 'ask',
             },
           ],
         },

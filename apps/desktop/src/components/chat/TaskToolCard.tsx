@@ -61,7 +61,7 @@ export function TaskToolCard({ execution, isActive }: TaskToolCardProps) {
         onClick={() => setIsExpanded(!isExpanded)}
         className={cn(
           'w-full flex items-center gap-3 px-4 py-3 text-left',
-          isActive && 'codex-shimmer-row'
+          isActive && 'app-shimmer-row'
         )}
       >
         {/* Icon */}
@@ -94,7 +94,7 @@ export function TaskToolCard({ execution, isActive }: TaskToolCardProps) {
           <p
             className={cn(
               'text-sm text-white/80 truncate mt-0.5',
-              execution.status === 'running' && 'codex-shimmer-text'
+              execution.status === 'running' && 'app-shimmer-text'
             )}
           >
             {taskDescription || 'Running task...'}
@@ -228,7 +228,7 @@ function SubToolTimelineItem({ tool }: { tool: SubToolExecution; isLast: boolean
           onClick={() => setShowDetails(!showDetails)}
           className={cn(
             'w-full flex items-center gap-2 px-3 py-2 text-left',
-            tool.status === 'running' && 'codex-shimmer-row'
+            tool.status === 'running' && 'app-shimmer-row'
           )}
         >
           {/* Icon */}
@@ -262,7 +262,7 @@ function SubToolTimelineItem({ tool }: { tool: SubToolExecution; isLast: boolean
               <p
                 className={cn(
                   'text-xs text-white/70 font-mono truncate mt-0.5',
-                  tool.status === 'running' && 'codex-shimmer-text'
+                  tool.status === 'running' && 'app-shimmer-text'
                 )}
               >
                 {primaryArg}
