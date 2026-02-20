@@ -57,6 +57,7 @@ import type {
   RespondPermissionParams,
   SetApprovalModeParams,
   SetExecutionModeParams,
+  SetSessionModeParams,
   RespondQuestionParams,
   StopGenerationParams,
   GetSessionParams,
@@ -388,6 +389,8 @@ registerHandler('create_session', async (params) => {
     p.type,
     p.provider,
     p.executionMode,
+    undefined,
+    p.sessionMode,
   );
   return session;
 });
@@ -516,6 +519,15 @@ registerHandler('set_execution_mode', async (params) => {
     throw new Error('sessionId and mode are required');
   }
   await agentRunner.setExecutionMode(p.sessionId, p.mode);
+  return { success: true };
+});
+
+registerHandler('set_session_mode', async (params) => {
+  const p = params as unknown as SetSessionModeParams;
+  if (!p.sessionId || !p.mode) {
+    throw new Error('sessionId and mode are required');
+  }
+  await agentRunner.setSessionMode(p.sessionId, p.mode);
   return { success: true };
 });
 

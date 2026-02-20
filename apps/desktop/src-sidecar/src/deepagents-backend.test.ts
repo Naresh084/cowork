@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Naresh. All rights reserved.
 // Licensed under the MIT License. See LICENSE file for details.
 
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
-import { tmpdir } from 'os';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
+import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CoworkBackend } from './deepagents-backend.js';
@@ -11,6 +11,14 @@ const tempDirs: string[] = [];
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+async function createHomeTempDir(prefix: string): Promise<string> {
+  const base = join(homedir(), '.cowork-test-tmp');
+  await mkdir(base, { recursive: true });
+  const dir = await mkdtemp(join(base, prefix));
   tempDirs.push(dir);
   return dir;
 }
@@ -127,5 +135,38 @@ describe('CoworkBackend skill virtual file support', () => {
         path: '/skills/planner/SKILL.md',
       }),
     ]);
+  });
+});
+
+describe('CoworkBackend path normalization', () => {
+  it('treats working-directory absolute paths without leading slash as absolute paths', async () => {
+    const workingDirectory = await createHomeTempDir('cowork-backend-path-drop-slash-');
+    const backend = new CoworkBackend(workingDirectory, 'session-test');
+    const droppedLeadingSlashPath = `${workingDirectory.replace(/^\/+/, '')}/nested/created.txt`;
+
+    const result = await backend.write(droppedLeadingSlashPath, 'hello');
+    expect(result.error).toBeUndefined();
+
+    const expectedPath = join(workingDirectory, 'nested', 'created.txt');
+    await expect(readFile(expectedPath, 'utf-8')).resolves.toBe('hello');
+
+    const incorrectlyNestedPath = join(
+      workingDirectory,
+      workingDirectory.replace(/^\/+/, ''),
+      'nested',
+      'created.txt',
+    );
+    await expect(readFile(incorrectlyNestedPath, 'utf-8')).rejects.toThrow();
+  });
+
+  it('does not remap absolute paths with case-variant root prefixes into the workspace', async () => {
+    const workingDirectory = await createTempDir('cowork-backend-path-case-prefix-');
+    const backend = new CoworkBackend(workingDirectory, 'session-test');
+
+    const result = await backend.write('/TMP/cowork-should-not-nest.txt', 'hello');
+    expect(result.error).toContain('Access denied');
+
+    const incorrectlyNestedPath = join(workingDirectory, 'TMP', 'cowork-should-not-nest.txt');
+    await expect(readFile(incorrectlyNestedPath, 'utf-8')).rejects.toThrow();
   });
 });

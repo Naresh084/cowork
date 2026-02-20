@@ -19,6 +19,7 @@ function createContext(partial?: Partial<PromptBuildContext>): PromptBuildContex
   return {
     provider: 'google',
     executionMode: 'execute',
+    sessionMode: 'cowork',
     sessionType: 'main',
     workingDirectory: '/workspace/project',
     model: 'gemini-2.5-pro',

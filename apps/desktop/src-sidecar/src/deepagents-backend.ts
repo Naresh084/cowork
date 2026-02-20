@@ -31,6 +31,9 @@ const ABSOLUTE_PREFIXES = [
   '/opt',
   '/tmp',
 ];
+const ABSOLUTE_PREFIX_SEGMENTS = ABSOLUTE_PREFIXES.map((prefix) =>
+  prefix.replace(/^\/+/, '').toLowerCase(),
+);
 
 const DEFAULT_COMMAND_SANDBOX: CommandSandboxSettings = {
   mode: 'workspace-write',
@@ -748,22 +751,47 @@ export class CoworkBackend implements SandboxBackendProtocol {
     const isMemoryVirtualPath =
       normalizedPosix === '/memories' || normalizedPosix.startsWith('/memories/');
     const isAbs = isAbsolute(normalized);
+    const normalizedWithoutLeadingSlash = normalizedPosix.replace(/^\/+/, '');
+    const workingDirectoryWithoutLeadingSlash = toPosixPath(this.workingDirectory)
+      .replace(/^\/+/, '')
+      .toLowerCase();
+    const firstSegment = normalizedWithoutLeadingSlash.split('/')[0]?.toLowerCase() || '';
+    const looksLikeAbsoluteWithoutLeadingSlash =
+      !isAbs &&
+      normalizedWithoutLeadingSlash.length > 0 &&
+      (
+        normalizedWithoutLeadingSlash.toLowerCase() === workingDirectoryWithoutLeadingSlash ||
+        normalizedWithoutLeadingSlash.toLowerCase().startsWith(`${workingDirectoryWithoutLeadingSlash}/`) ||
+        ABSOLUTE_PREFIX_SEGMENTS.includes(firstSegment)
+      );
 
     let virtualPath = ensureLeadingSlash(isAbs ? normalized : `/${normalized}`);
     let absolutePath: string;
     const allowedRoots = [this.workingDirectory, ...this.allowedPathProvider().map((p) => resolve(p))];
     const isKnownAbsolute = (path: string) => {
-      if (path.startsWith(this.workingDirectory)) return true;
-      if (allowedRoots.some((root) => path === root || path.startsWith(`${root}${sep}`))) return true;
-      return ABSOLUTE_PREFIXES.some((prefix) => path.startsWith(prefix));
+      const posixPath = toPosixPath(path);
+      const lowerPath = posixPath.toLowerCase();
+      if (lowerPath.startsWith(toPosixPath(this.workingDirectory).toLowerCase())) return true;
+      if (allowedRoots.some((root) => {
+        const posixRoot = toPosixPath(root);
+        const lowerRoot = posixRoot.toLowerCase();
+        return lowerPath === lowerRoot || lowerPath.startsWith(`${lowerRoot}/`);
+      })) {
+        return true;
+      }
+      return ABSOLUTE_PREFIXES.some((prefix) => {
+        const lowerPrefix = prefix.toLowerCase();
+        return lowerPath === lowerPrefix || lowerPath.startsWith(`${lowerPrefix}/`);
+      });
     };
 
     if (isMemoryVirtualPath) {
       const relative = normalizedPosix.replace(/^\/memories\/?/, '');
       absolutePath = join(this.workingDirectory, '.cowork', 'memories', relative);
       virtualPath = ensureLeadingSlash(normalizedPosix);
-    } else if (isAbs) {
-      const resolvedAbs = resolve(normalized);
+    } else if (isAbs || looksLikeAbsoluteWithoutLeadingSlash) {
+      const absoluteCandidate = isAbs ? normalized : `/${normalizedWithoutLeadingSlash}`;
+      const resolvedAbs = resolve(absoluteCandidate);
       if (isKnownAbsolute(resolvedAbs)) {
         absolutePath = resolvedAbs;
         if (absolutePath.startsWith(this.workingDirectory)) {
@@ -772,10 +800,13 @@ export class CoworkBackend implements SandboxBackendProtocol {
         } else {
           virtualPath = ensureLeadingSlash(toPosixPath(absolutePath));
         }
-      } else {
+      } else if (isAbs) {
         const relative = normalized.replace(/^[/\\]+/, '');
         absolutePath = join(this.workingDirectory, relative);
         virtualPath = ensureLeadingSlash(toPosixPath(relative));
+      } else {
+        absolutePath = resolvedAbs;
+        virtualPath = ensureLeadingSlash(toPosixPath(absolutePath));
       }
     } else {
       const relative = normalized.replace(/^[/\\]+/, '');

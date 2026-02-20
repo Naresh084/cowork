@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { join } from 'path';
 import { homedir } from 'os';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { GoogleGenAI, RawReferenceImage } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import type { ToolHandler, ToolContext, ToolResult } from '@cowork/core';
 
 function getExtension(mimeType?: string, fallback = 'bin'): string {
@@ -58,6 +58,124 @@ interface SpecializedMediaModels {
 interface MediaRoutingSettings {
   imageBackend: 'google' | 'fal';
   videoBackend: 'google' | 'fal';
+}
+
+const GOOGLE_IMAGE_MODELS = new Set([
+  'gemini-2.5-flash-image',
+  'gemini-3-pro-image-preview',
+]);
+
+const MAX_GOOGLE_IMAGE_RESULTS = 4;
+
+function normalizeGoogleModelId(modelId: string): string {
+  return modelId.replace(/^models\//i, '').trim();
+}
+
+function buildGoogleImagePrompt(
+  prompt: string,
+  options?: {
+    aspectRatio?: string;
+    imageSize?: string;
+    size?: string;
+  },
+): string {
+  const extras: string[] = [];
+  if (options?.aspectRatio) extras.push(`Aspect ratio: ${options.aspectRatio}`);
+  if (options?.imageSize) extras.push(`Image size: ${options.imageSize}`);
+  if (options?.size) extras.push(`Requested size: ${options.size}`);
+  if (extras.length === 0) return prompt;
+  return `${prompt}\n\n${extras.join('\n')}`;
+}
+
+function extractGoogleGeneratedImages(response: unknown): Array<{ imageBytes: string; mimeType: string }> {
+  const out: Array<{ imageBytes: string; mimeType: string }> = [];
+  if (!response || typeof response !== 'object') {
+    return out;
+  }
+
+  const responseAny = response as {
+    candidates?: Array<{ content?: { parts?: unknown[] } }>;
+    generatedImages?: Array<{ image?: { imageBytes?: string; mimeType?: string } }>;
+  };
+
+  const candidates = Array.isArray(responseAny.candidates) ? responseAny.candidates : [];
+  for (const candidate of candidates) {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    for (const part of parts) {
+      if (!part || typeof part !== 'object') continue;
+      const partAny = part as {
+        inlineData?: { data?: string; mimeType?: string };
+        inline_data?: { data?: string; mimeType?: string };
+      };
+      const inlineData = partAny.inlineData || partAny.inline_data;
+      if (!inlineData?.data) continue;
+      out.push({
+        imageBytes: inlineData.data,
+        mimeType: inlineData.mimeType || 'image/png',
+      });
+    }
+  }
+
+  const generatedImages = Array.isArray(responseAny.generatedImages) ? responseAny.generatedImages : [];
+  for (const row of generatedImages) {
+    const imageBytes = row?.image?.imageBytes;
+    if (!imageBytes) continue;
+    out.push({
+      imageBytes,
+      mimeType: row?.image?.mimeType || 'image/png',
+    });
+  }
+
+  return out;
+}
+
+async function generateGoogleImagesWithGemini(
+  ai: GoogleGenAI,
+  modelId: string,
+  prompt: string,
+  numberOfImages: number,
+  sourceImage?: { data: string; mimeType: string },
+): Promise<Array<{ imageBytes: string; mimeType: string }>> {
+  const targetCount = Math.max(1, Math.min(numberOfImages || 1, MAX_GOOGLE_IMAGE_RESULTS));
+  const images: Array<{ imageBytes: string; mimeType: string }> = [];
+
+  for (let i = 0; i < targetCount; i += 1) {
+    const parts: Array<{ text?: string; inlineData?: { data: string; mimeType: string } }> = [
+      { text: prompt },
+    ];
+    if (sourceImage) {
+      parts.push({
+        inlineData: {
+          data: sourceImage.data,
+          mimeType: sourceImage.mimeType,
+        },
+      });
+    }
+
+    const response = await ai.models.generateContent({
+      model: modelId,
+      contents: [
+        {
+          role: 'user',
+          parts,
+        },
+      ],
+      config: {
+        responseModalities: ['IMAGE'],
+      },
+    });
+
+    const extracted = extractGoogleGeneratedImages(response);
+    if (extracted.length === 0) {
+      break;
+    }
+    images.push(...extracted);
+    if (images.length >= targetCount) {
+      break;
+    }
+  }
+
+  return images.slice(0, targetCount);
 }
 
 function normalizeFalModelPath(modelId: string): string {
@@ -360,7 +478,8 @@ export function createMediaTools(
       };
 
       const backend = resolveImageBackend();
-      const modelId = model || getSpecializedModels().imageGeneration;
+      const configuredModelId = model || getSpecializedModels().imageGeneration;
+      const modelId = normalizeGoogleModelId(configuredModelId);
 
       if (backend === 'fal') {
         const apiKey = resolveFalKey();
@@ -422,36 +541,40 @@ export function createMediaTools(
       if (!apiKey) {
         return { success: false, error: 'Google API key not set. Configure Google key or Google provider key.' };
       }
+      if (!GOOGLE_IMAGE_MODELS.has(modelId)) {
+        return {
+          success: false,
+          error: `Unsupported Google image model "${configuredModelId}". Use one of: gemini-3-pro-image-preview, gemini-2.5-flash-image.`,
+        };
+      }
 
       const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateImages({
-        model: modelId,
-        prompt,
-        config: {
-          numberOfImages: numberOfImages ?? 1,
-          aspectRatio,
-          imageSize,
-        },
-      });
-
-      const images = (response.generatedImages || [])
-        .map((img) => img.image)
-        .filter((img): img is { imageBytes?: string; mimeType?: string } => !!img?.imageBytes)
-        .slice(0, numberOfImages ?? 1);
+      const images = await generateGoogleImagesWithGemini(
+        ai,
+        modelId,
+        buildGoogleImagePrompt(prompt, { aspectRatio, imageSize, size }),
+        numberOfImages ?? 1,
+      );
+      if (images.length === 0) {
+        return {
+          success: false,
+          error: `Google model "${modelId}" returned no image output. Ensure this model supports image generation via generateContent.`,
+        };
+      }
 
       const files = [];
-      for (const img of images) {
+      for (const imageResult of images) {
         const filePath = await saveGeneratedFile(
           context.appDataDir,
           context.sessionId,
-          img.imageBytes || '',
-          img.mimeType,
+          imageResult.imageBytes,
+          imageResult.mimeType,
           'image',
         );
         files.push({
           path: filePath,
-          mimeType: img.mimeType || 'image/png',
-          data: img.imageBytes,
+          mimeType: imageResult.mimeType || 'image/png',
+          data: imageResult.imageBytes,
         });
       }
 
@@ -486,7 +609,8 @@ export function createMediaTools(
         numberOfImages?: number;
       };
       const backend = resolveImageBackend();
-      const modelId = model || getSpecializedModels().imageGeneration;
+      const configuredModelId = model || getSpecializedModels().imageGeneration;
+      const modelId = normalizeGoogleModelId(configuredModelId);
 
       if (backend === 'fal') {
         const apiKey = resolveFalKey();
@@ -550,41 +674,44 @@ export function createMediaTools(
       if (!apiKey) {
         return { success: false, error: 'Google API key not set. Configure Google key or Google provider key.' };
       }
+      if (!GOOGLE_IMAGE_MODELS.has(modelId)) {
+        return {
+          success: false,
+          error: `Unsupported Google image model "${configuredModelId}". Use one of: gemini-3-pro-image-preview, gemini-2.5-flash-image.`,
+        };
+      }
 
       const ai = new GoogleGenAI({ apiKey });
-      const reference = new RawReferenceImage();
-      reference.referenceImage = {
-        imageBytes: image,
-        mimeType: imageMimeType || 'image/png',
-      };
-
-      const response = await ai.models.editImage({
-        model: modelId,
+      const images = await generateGoogleImagesWithGemini(
+        ai,
+        modelId,
         prompt,
-        referenceImages: [reference],
-        config: {
-          numberOfImages: numberOfImages ?? 1,
+        numberOfImages ?? 1,
+        {
+          data: image,
+          mimeType: imageMimeType || 'image/png',
         },
-      });
-
-      const images = (response.generatedImages || [])
-        .map((img) => img.image)
-        .filter((img): img is { imageBytes?: string; mimeType?: string } => !!img?.imageBytes)
-        .slice(0, numberOfImages ?? 1);
+      );
+      if (images.length === 0) {
+        return {
+          success: false,
+          error: `Google model "${modelId}" returned no edited image output. Ensure this model supports image editing via generateContent.`,
+        };
+      }
 
       const files = [];
-      for (const img of images) {
+      for (const imageResult of images) {
         const filePath = await saveGeneratedFile(
           context.appDataDir,
           context.sessionId,
-          img.imageBytes || '',
-          img.mimeType,
+          imageResult.imageBytes,
+          imageResult.mimeType,
           'image-edit',
         );
         files.push({
           path: filePath,
-          mimeType: img.mimeType || 'image/png',
-          data: img.imageBytes,
+          mimeType: imageResult.mimeType || 'image/png',
+          data: imageResult.imageBytes,
         });
       }
 

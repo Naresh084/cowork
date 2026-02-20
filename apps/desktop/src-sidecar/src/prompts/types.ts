@@ -3,7 +3,7 @@
 
 import type { ToolHandler } from '@cowork/core';
 import type { PlatformType, SessionType } from '@cowork/shared';
-import type { ExecutionMode, ProviderId } from '../types.js';
+import type { ExecutionMode, ProviderId, SessionMode } from '../types.js';
 
 export type PromptProviderId = ProviderId;
 export type ToolAutonomyLevel = 'auto' | 'confirm';
@@ -70,6 +70,7 @@ export interface PromptTemplateSection {
 export interface PromptBuildContext {
   provider: PromptProviderId;
   executionMode: ExecutionMode;
+  sessionMode: SessionMode;
   sessionType: SessionType;
   workingDirectory: string;
   model: string;
@@ -78,6 +79,7 @@ export interface PromptBuildContext {
   capabilitySnapshot: PromptCapabilitySnapshot;
   additionalSections: PromptTemplateSection[];
   defaultNotificationTarget?: PromptDefaultNotificationTarget | null;
+  stitchApiKeyConfigured?: boolean;
 }
 
 export interface PromptBuildDiagnostics {

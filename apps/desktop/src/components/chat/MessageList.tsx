@@ -10,6 +10,7 @@ import {
   Sparkles,
   Code,
   CheckCircle2,
+  XCircle,
   Circle,
   Loader2,
   Mic,
@@ -465,7 +466,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
             }
 
             if (activity.type === 'permission') {
-              return null;
+              return (
+                <PermissionActivityRow
+                  key={activity.id}
+                  toolName={activity.permissionToolName}
+                  resource={activity.permissionResource}
+                  status={activity.status}
+                  decision={activity.permissionDecision}
+                />
+              );
             }
 
             if (activity.type === 'question') {
@@ -2033,6 +2042,80 @@ function DesignActivityRow({
         >
           Open
         </button>
+    </div>
+  );
+}
+
+function PermissionActivityRow({
+  toolName,
+  resource,
+  status,
+  decision,
+}: {
+  toolName?: string;
+  resource?: string;
+  status?: 'active' | 'done';
+  decision?: 'allow' | 'deny' | 'allow_once' | 'allow_session';
+}) {
+  const resolvedResource = (() => {
+    const trimmed = String(resource || '').trim();
+    if (!trimmed) return null;
+    const compact = trimmed.replace(/\s+/g, ' ');
+    return compact.length > 180 ? `${compact.slice(0, 177)}...` : compact;
+  })();
+
+  const decisionLabel =
+    status === 'active'
+      ? 'Pending'
+      : decision === 'allow_session'
+        ? 'Allowed for session'
+        : decision === 'allow_once' || decision === 'allow'
+          ? 'Allowed'
+          : decision === 'deny'
+            ? 'Denied'
+            : 'Resolved';
+
+  const DecisionIcon =
+    status === 'active'
+      ? Loader2
+      : decision === 'deny'
+        ? XCircle
+        : CheckCircle2;
+
+  const decisionTone =
+    status === 'active'
+      ? 'text-[#93C5FD]'
+      : decision === 'deny'
+        ? 'text-[#FCA5A5]'
+        : 'text-[#86EFAC]';
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+      <div className="min-w-0 flex items-start gap-2">
+        <span className="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md border border-white/[0.12] bg-white/[0.04]">
+          <DecisionIcon className={cn('h-3 w-3', status === 'active' && 'animate-spin', decisionTone)} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[12px] text-white/80">
+            {toolName?.trim() || 'Permission request'}
+          </p>
+          {resolvedResource ? (
+            <p className="mt-0.5 truncate text-[11px] font-mono text-white/45">{resolvedResource}</p>
+          ) : null}
+        </div>
+      </div>
+      <span
+        className={cn(
+          'inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px]',
+          status === 'active'
+            ? 'border-[#1D4ED8]/40 bg-[#1D4ED8]/10 text-[#BFDBFE]'
+            : decision === 'deny'
+              ? 'border-[#FF5449]/35 bg-[#FF5449]/10 text-[#FCA5A5]'
+              : 'border-[#16A34A]/35 bg-[#16A34A]/10 text-[#BBF7D0]'
+        )}
+      >
+        {decisionLabel}
+      </span>
     </div>
   );
 }

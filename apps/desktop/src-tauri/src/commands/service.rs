@@ -331,6 +331,49 @@ fn resolve_mode(mode: Option<String>) -> Result<ServiceMode, String> {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn is_effective_root() -> bool {
+    let output = match run_command("id", &["-u".to_string()]) {
+        Ok(output) => output,
+        Err(_) => return false,
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout).trim() == "0"
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn is_effective_root() -> bool {
+    true
+}
+
+fn normalize_mode_for_privileges(
+    mode: ServiceMode,
+    explicit_mode: bool,
+    action: &str,
+) -> Result<ServiceMode, String> {
+    if mode != ServiceMode::System {
+        return Ok(mode);
+    }
+
+    if is_effective_root() {
+        return Ok(mode);
+    }
+
+    if explicit_mode {
+        return Err(format!(
+            "System service mode requires elevated privileges for {}. \
+Switch to user mode in Settings > Runtime > Background Service, or run the app with administrator/root privileges.",
+            action
+        ));
+    }
+
+    let fallback = ServiceMode::User;
+    let _ = save_mode(fallback);
+    Ok(fallback)
+}
+
 fn output_text(output: &Output) -> String {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1233,7 +1276,15 @@ fn service_status_impl(_mode: ServiceMode, spec: &DaemonExecSpec) -> Result<Serv
 
 #[tauri::command]
 pub async fn service_get_mode() -> Result<ServiceModeState, String> {
-    let mode = load_saved_mode();
+    let saved_mode = load_saved_mode();
+    let mode = normalize_mode_for_privileges(
+        saved_mode,
+        false,
+        "background service management",
+    )?;
+    if mode != saved_mode {
+        let _ = save_mode(mode);
+    }
     Ok(ServiceModeState {
         mode: mode.as_str().to_string(),
         updated_at: now_ms(),
@@ -1255,7 +1306,10 @@ pub async fn service_status(mode: Option<String>) -> Result<ServiceStatus, Strin
 
 #[tauri::command]
 pub async fn service_install(mode: Option<String>) -> Result<ServiceStatus, String> {
+    let explicit_mode = mode.is_some();
     let parsed_mode = resolve_mode(mode)?;
+    let parsed_mode =
+        normalize_mode_for_privileges(parsed_mode, explicit_mode, "installing the service")?;
     let spec = resolve_daemon_exec_spec()?;
     install_service_impl(parsed_mode, &spec)?;
     let _ = save_mode(parsed_mode);
@@ -1264,7 +1318,10 @@ pub async fn service_install(mode: Option<String>) -> Result<ServiceStatus, Stri
 
 #[tauri::command]
 pub async fn service_uninstall(mode: Option<String>) -> Result<ServiceStatus, String> {
+    let explicit_mode = mode.is_some();
     let parsed_mode = resolve_mode(mode)?;
+    let parsed_mode =
+        normalize_mode_for_privileges(parsed_mode, explicit_mode, "uninstalling the service")?;
     let spec = resolve_daemon_exec_spec()?;
     uninstall_service_impl(parsed_mode, &spec)?;
     service_status_impl(parsed_mode, &spec)
@@ -1272,7 +1329,10 @@ pub async fn service_uninstall(mode: Option<String>) -> Result<ServiceStatus, St
 
 #[tauri::command]
 pub async fn service_start(mode: Option<String>) -> Result<ServiceStatus, String> {
+    let explicit_mode = mode.is_some();
     let parsed_mode = resolve_mode(mode)?;
+    let parsed_mode =
+        normalize_mode_for_privileges(parsed_mode, explicit_mode, "starting the service")?;
     let spec = resolve_daemon_exec_spec()?;
     start_service_impl(parsed_mode, &spec)?;
     service_status_impl(parsed_mode, &spec)
@@ -1280,7 +1340,10 @@ pub async fn service_start(mode: Option<String>) -> Result<ServiceStatus, String
 
 #[tauri::command]
 pub async fn service_stop(mode: Option<String>) -> Result<ServiceStatus, String> {
+    let explicit_mode = mode.is_some();
     let parsed_mode = resolve_mode(mode)?;
+    let parsed_mode =
+        normalize_mode_for_privileges(parsed_mode, explicit_mode, "stopping the service")?;
     let spec = resolve_daemon_exec_spec()?;
     stop_service_impl(parsed_mode, &spec)?;
     service_status_impl(parsed_mode, &spec)
@@ -1288,7 +1351,10 @@ pub async fn service_stop(mode: Option<String>) -> Result<ServiceStatus, String>
 
 #[tauri::command]
 pub async fn service_restart(mode: Option<String>) -> Result<ServiceStatus, String> {
+    let explicit_mode = mode.is_some();
     let parsed_mode = resolve_mode(mode)?;
+    let parsed_mode =
+        normalize_mode_for_privileges(parsed_mode, explicit_mode, "restarting the service")?;
     let spec = resolve_daemon_exec_spec()?;
     restart_service_impl(parsed_mode, &spec)?;
     service_status_impl(parsed_mode, &spec)

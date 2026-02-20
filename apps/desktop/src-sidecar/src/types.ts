@@ -39,6 +39,7 @@ export interface CreateSessionParams {
   model?: string;
   provider?: ProviderId;
   executionMode?: ExecutionMode;
+  sessionMode?: SessionMode;
   title?: string;
   type?: SessionType;
 }
@@ -91,6 +92,7 @@ export interface RespondPermissionParams {
 
 export type ApprovalMode = 'ask' | 'full';
 export type ExecutionMode = 'execute' | 'plan';
+export type SessionMode = 'coding' | 'cowork';
 export type ThinkingLevel = 'low' | 'medium' | 'high';
 
 export interface SetApprovalModeParams {
@@ -101,6 +103,11 @@ export interface SetApprovalModeParams {
 export interface SetExecutionModeParams {
   sessionId: string;
   mode: ExecutionMode;
+}
+
+export interface SetSessionModeParams {
+  sessionId: string;
+  mode: SessionMode;
 }
 
 export interface SetModelsParams {
@@ -224,6 +231,7 @@ export interface SessionInfo {
   type: SessionType;
   provider: ProviderId;
   executionMode: ExecutionMode;
+  sessionMode?: SessionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;

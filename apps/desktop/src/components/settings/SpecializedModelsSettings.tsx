@@ -2,12 +2,18 @@
 // Licensed under the MIT License. See LICENSE file for details.
 
 import { useEffect, useMemo, useState } from 'react';
-import { Undo2 } from 'lucide-react';
+import { Check, Copy, Eye, EyeOff, Key, Trash2, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '../../stores/auth-store';
 import { resolveActiveSoul, useSettingsStore } from '../../stores/settings-store';
 import { useCapabilityStore } from '@/stores/capability-store';
 import { SettingHelpPopover } from '@/components/help/SettingHelpPopover';
+
+function maskKey(value: string | null): string {
+  if (!value) return 'Not configured';
+  if (value.length <= 10) return '•'.repeat(value.length);
+  return `${value.slice(0, 6)}${'•'.repeat(Math.max(6, value.length - 10))}${value.slice(-4)}`;
+}
 
 export function SpecializedModelsSettings() {
   const specializedModelsV2 = useSettingsStore((state) => state.specializedModelsV2);
@@ -24,6 +30,8 @@ export function SpecializedModelsSettings() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [stitchKeyDraft, setStitchKeyDraft] = useState(stitchApiKey || '');
+  const [isEditingStitchKey, setIsEditingStitchKey] = useState(false);
+  const [showStitchKey, setShowStitchKey] = useState(false);
   const [computerUseModelDraft, setComputerUseModelDraft] = useState(
     specializedModelsV2.google.computerUse,
   );
@@ -56,6 +64,11 @@ export function SpecializedModelsSettings() {
       specializedModelsV2.google.computerUse,
       specializedModelsV2.google.deepResearchAgent,
     ],
+  );
+
+  const stitchDisplayValue = useMemo(
+    () => (showStitchKey ? stitchApiKey || 'Not configured' : maskKey(stitchApiKey || null)),
+    [showStitchKey, stitchApiKey],
   );
 
   const applyRuntime = async () => {
@@ -116,63 +129,146 @@ export function SpecializedModelsSettings() {
           </div>
           <SettingHelpPopover settingId="integration.stitchApiKey" />
         </div>
-        <input
-          type="password"
-          value={stitchKeyDraft}
-          onChange={(event) => setStitchKeyDraft(event.target.value)}
-          placeholder="Enter Stitch MCP API key"
-          className={cn(
-            'w-full px-3 py-2 rounded-lg text-sm',
-            'bg-[#0B0C10] border border-white/[0.08]',
-            'text-white/90 placeholder:text-white/30',
-            'focus:outline-none focus:border-[#1D4ED8]/50',
-            'font-mono',
-          )}
-        />
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled={isLoading || !stitchKeyDraft.trim()}
-            onClick={async () => {
-              try {
-                await setStitchApiKey(stitchKeyDraft.trim());
-                setNotice('Stitch key saved.');
-                await refreshCapabilitySnapshot();
-              } catch (saveError) {
-                setError(saveError instanceof Error ? saveError.message : String(saveError));
-              }
-            }}
-            className={cn(
-              'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
-              isLoading || !stitchKeyDraft.trim()
-                ? 'bg-white/[0.04] text-white/30 cursor-not-allowed'
-                : 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]',
-            )}
-          >
-            Save Stitch Key
-          </button>
-          <button
-            type="button"
-            disabled={isLoading || !stitchApiKey}
-            onClick={async () => {
-              try {
-                await clearStitchApiKey();
-                setNotice('Stitch key removed.');
-                await refreshCapabilitySnapshot();
-              } catch (clearError) {
-                setError(clearError instanceof Error ? clearError.message : String(clearError));
-              }
-            }}
-            className={cn(
-              'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
-              isLoading || !stitchApiKey
-                ? 'bg-white/[0.04] text-white/30 cursor-not-allowed'
-                : 'bg-[#FF5449]/10 text-[#FF8A80] hover:bg-[#FF5449]/18',
-            )}
-          >
-            Clear
-          </button>
-        </div>
+        {isEditingStitchKey ? (
+          <div className="space-y-2">
+            <input
+              type={showStitchKey ? 'text' : 'password'}
+              value={stitchKeyDraft}
+              onChange={(event) => setStitchKeyDraft(event.target.value)}
+              placeholder="Enter Stitch MCP API key"
+              className={cn(
+                'w-full px-3 py-2 rounded-lg text-sm',
+                'bg-[#0B0C10] border border-white/[0.08]',
+                'text-white/90 placeholder:text-white/30',
+                'focus:outline-none focus:border-[#1D4ED8]/50',
+                'font-mono',
+              )}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowStitchKey((current) => !current)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1]"
+              >
+                {showStitchKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showStitchKey ? 'Hide' : 'Show'}
+              </button>
+              <button
+                type="button"
+                disabled={isLoading || !stitchKeyDraft.trim()}
+                onClick={async () => {
+                  setError(null);
+                  setNotice(null);
+                  try {
+                    await setStitchApiKey(stitchKeyDraft.trim());
+                    setIsEditingStitchKey(false);
+                    setShowStitchKey(false);
+                    setStitchKeyDraft('');
+                    setNotice('Stitch key saved.');
+                    await refreshCapabilitySnapshot();
+                  } catch (saveError) {
+                    setError(saveError instanceof Error ? saveError.message : String(saveError));
+                  }
+                }}
+                className={cn(
+                  'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                  isLoading || !stitchKeyDraft.trim()
+                    ? 'bg-white/[0.04] text-white/30 cursor-not-allowed'
+                    : 'bg-[#1D4ED8] text-white hover:bg-[#3B82F6]',
+                )}
+              >
+                <Check className="h-4 w-4" />
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingStitchKey(false);
+                  setShowStitchKey(false);
+                  setStitchKeyDraft('');
+                }}
+                className="rounded-lg px-3 py-2 text-sm text-white/60 transition-colors hover:bg-white/[0.06] hover:text-white/80"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="break-all rounded-lg border border-white/[0.08] bg-[#0B0C10] px-3 py-2 font-mono text-xs text-white/65">
+              {stitchDisplayValue}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setShowStitchKey((current) => !current)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1]"
+              >
+                {showStitchKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showStitchKey ? 'Hide' : 'Show'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingStitchKey(true);
+                  setShowStitchKey(false);
+                  setStitchKeyDraft('');
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1]"
+              >
+                <Key className="h-4 w-4" />
+                {stitchApiKey ? 'Update' : 'Set key'}
+              </button>
+              {stitchApiKey ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setError(null);
+                    setNotice(null);
+                    try {
+                      await navigator.clipboard.writeText(stitchApiKey);
+                      setNotice('Stitch key copied.');
+                    } catch (copyError) {
+                      setError(copyError instanceof Error ? copyError.message : String(copyError));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3 py-2 text-sm text-white/70 transition-colors hover:bg-white/[0.1]"
+                >
+                  <Copy className="h-4 w-4" />
+                  Copy
+                </button>
+              ) : null}
+              {stitchApiKey ? (
+                <button
+                  type="button"
+                  disabled={isLoading}
+                  onClick={async () => {
+                    setError(null);
+                    setNotice(null);
+                    try {
+                      await clearStitchApiKey();
+                      setShowStitchKey(false);
+                      setStitchKeyDraft('');
+                      setNotice('Stitch key removed.');
+                      await refreshCapabilitySnapshot();
+                    } catch (clearError) {
+                      setError(clearError instanceof Error ? clearError.message : String(clearError));
+                    }
+                  }}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                    isLoading
+                      ? 'bg-[#FF5449]/10 text-[#FF5449]/40 cursor-not-allowed'
+                      : 'bg-[#FF5449]/10 text-[#FF5449] hover:bg-[#FF5449]/20',
+                  )}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove
+                </button>
+              ) : null}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-white/[0.08] bg-white/[0.02] p-4 md:p-5 space-y-4">

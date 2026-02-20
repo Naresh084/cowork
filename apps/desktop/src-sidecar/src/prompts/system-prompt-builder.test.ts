@@ -15,10 +15,15 @@ function createTool(name: string, description = 'Tool description'): ToolHandler
   };
 }
 
-function createContext(provider: PromptProviderId, mode: 'execute' | 'plan' = 'execute'): PromptBuildContext {
+function createContext(
+  provider: PromptProviderId,
+  mode: 'execute' | 'plan' = 'execute',
+  sessionMode: 'coding' | 'cowork' = 'cowork',
+): PromptBuildContext {
   return {
     provider,
     executionMode: mode,
+    sessionMode,
     sessionType: 'main',
     workingDirectory: '/workspace/project',
     model: 'model-x',
@@ -97,8 +102,28 @@ describe('system-prompt-builder', () => {
     const second = builder.build(context);
 
     expect(first.prompt).toBe(second.prompt);
-    expect(first.prompt).toContain('Mode Instructions: Plan');
+    expect(first.prompt).toContain('Plan mode');
     expect(first.prompt).toContain('<proposed_plan>');
+  });
+
+  it('selects coding-execute template when sessionMode is coding', () => {
+    const result = builder.build(createContext('google', 'execute', 'coding'));
+
+    expect(result.diagnostics.modeTemplateKey).toBe('modes/coding-execute.md');
+    expect(result.prompt).toContain('precision software engineering agent');
+  });
+
+  it('selects coding-plan template when sessionMode is coding and mode is plan', () => {
+    const result = builder.build(createContext('google', 'plan', 'coding'));
+
+    expect(result.diagnostics.modeTemplateKey).toBe('modes/coding-plan.md');
+    expect(result.prompt).toContain('codebase analyst and architecture advisor');
+  });
+
+  it('selects cowork-execute template when sessionMode is cowork', () => {
+    const result = builder.build(createContext('google', 'execute', 'cowork'));
+
+    expect(result.diagnostics.modeTemplateKey).toBe('modes/cowork-execute.md');
   });
 
   it('keeps prompt size under regression guard threshold', () => {

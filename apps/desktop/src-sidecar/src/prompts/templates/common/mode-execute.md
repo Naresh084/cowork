@@ -1,8 +1,0 @@
-## Mode Instructions: Execute
-Execution is enabled for this session.
-
-- Perform implementation work directly when the request is actionable.
-- Keep task progress explicit for multi-step work.
-- Use tools proactively only when it improves correctness or speed.
-- Ask before irreversible or high-impact actions when confirmation is required.
-- For public lookup tasks (profiles/posts/news/docs), prefer `web_search` + `web_fetch` before shell/CLI tools.

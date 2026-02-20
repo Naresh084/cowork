@@ -9,12 +9,11 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useAuthStore } from '../../stores/auth-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useAppStore } from '../../stores/app-store';
-import { useCapabilityStore } from '../../stores/capability-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '../ui/Toast';
 import { invoke } from '@tauri-apps/api/core';
 import type { ApprovalMode } from '../../stores/settings-store';
-import type { ExecutionMode } from '../../stores/session-store';
+import type { SessionMode } from '../../stores/session-store';
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/Dialog';
 
 const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: string }> = [
@@ -22,17 +21,16 @@ const APPROVAL_MODES: Array<{ id: ApprovalMode; label: string; description: stri
   { id: 'full', label: 'Full', description: 'Allow local actions' },
 ];
 
-const EXECUTION_MODES: Array<{ id: ExecutionMode; label: string; description: string }> = [
-  { id: 'execute', label: 'Execute', description: 'Implement changes directly' },
-  { id: 'plan', label: 'Plan', description: 'Analyze only and propose plan' },
+const SESSION_MODES: Array<{ id: SessionMode; label: string; description: string }> = [
+  { id: 'coding', label: 'Coding', description: 'Focused coding assistant' },
+  { id: 'cowork', label: 'Cowork', description: 'Full collaborative coworker' },
 ];
 
 export function SessionHeader() {
-  const { activeSessionId, sessions, updateSessionTitle, deleteSession, setSessionExecutionMode } = useSessionStore();
+  const { activeSessionId, sessions, updateSessionTitle, deleteSession, setSessionMode, pendingSessionMode, setPendingSessionMode } = useSessionStore();
   const { approvalMode, updateSetting, liveViewOpen, setLiveViewOpen } = useSettingsStore();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
   const runtimeConfigNotice = useAppStore((state) => state.runtimeConfigNotice);
-  const sandboxSnapshot = useCapabilityStore((state) => state.snapshot?.sandbox);
 
   // Check if computer_use tool is running (V2: derive from chatItems)
   const isComputerUseRunning = useChatStore((state) => {
@@ -92,6 +90,7 @@ export function SessionHeader() {
   const sessionTitle = activeSession?.title ||
     (activeSession?.firstMessage ? truncate(activeSession.firstMessage, 40) : 'New conversation');
   const executionMode = activeSession?.executionMode || 'execute';
+  const sessionMode = activeSession?.sessionMode || 'cowork';
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -208,14 +207,14 @@ export function SessionHeader() {
     setModeDialogOpen(true);
   };
 
-  const handleExecutionModeChange = async (mode: ExecutionMode) => {
+  const handleSessionModeChange = async (mode: SessionMode) => {
     if (!activeSessionId) return;
-    if (mode === executionMode) return;
+    if (mode === sessionMode) return;
     try {
-      await setSessionExecutionMode(activeSessionId, mode);
+      await setSessionMode(activeSessionId, mode);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      toast.error('Failed to change execution mode', errorMessage);
+      toast.error('Failed to change session mode', errorMessage);
     }
   };
 
@@ -238,8 +237,25 @@ export function SessionHeader() {
 
   if (!activeSession) {
     return (
-      <div className="flex items-center px-4 py-3 border-b border-white/[0.06]">
-        <span className="text-white/50 text-sm">No active session</span>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06]">
+        <span className="text-white/50 text-sm">New conversation</span>
+        <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.08] bg-[#111218] p-0.5 shrink-0 window-no-drag">
+          {SESSION_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => setPendingSessionMode(mode.id)}
+              className={cn(
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer select-none min-w-[72px] text-center',
+                pendingSessionMode === mode.id
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'
+              )}
+              title={mode.description}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -346,20 +362,19 @@ export function SessionHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 max-w-[62%] overflow-x-auto min-w-0 pr-1">
-        <div className="flex items-center gap-1 rounded-lg border border-white/[0.08] bg-[#111218] p-1 shrink-0">
-          {EXECUTION_MODES.map((mode) => (
+      <div className="flex items-center gap-2 min-w-0 shrink-0 pr-1 overflow-visible">
+        <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.08] bg-[#111218] p-0.5 shrink-0 window-no-drag">
+          {SESSION_MODES.map((mode) => (
             <button
               key={mode.id}
-              onClick={() => void handleExecutionModeChange(mode.id)}
+              onClick={() => void handleSessionModeChange(mode.id)}
               className={cn(
-                'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
-                executionMode === mode.id
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer select-none min-w-[72px] text-center',
+                sessionMode === mode.id
                   ? 'bg-[#1D4ED8] text-white'
                   : 'text-white/60 hover:text-white/90 hover:bg-white/[0.06]'
               )}
               title={mode.description}
-              data-tour-id={mode.id === 'plan' ? 'session-execution-mode-plan' : undefined}
             >
               {mode.label}
             </button>
@@ -409,30 +424,11 @@ export function SessionHeader() {
           </div>
         ) : null}
 
-        {sandboxSnapshot ? (
-          <div
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs shrink-0',
-              sandboxSnapshot.mode === 'danger-full-access'
-                ? 'bg-[#FF5449]/15 text-[#FF8A80]'
-                : 'bg-[#1D4ED8]/10 text-[#93C5FD]',
-            )}
-            title={
-              sandboxSnapshot.osEnforced
-                ? 'Command sandbox is OS-enforced'
-                : 'Command sandbox is validator-enforced'
-            }
-          >
-            <Shield className="w-3.5 h-3.5" />
-            Sandbox: {sandboxSnapshot.mode}
-            <span className="text-[10px] opacity-70">
-              {sandboxSnapshot.osEnforced ? 'OS' : 'validator'}
-            </span>
-          </div>
-        ) : null}
-
         {executionMode === 'plan' ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD] shrink-0">
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD] shrink-0"
+            title="Press Shift+Tab to switch back to Execute mode"
+          >
             Plan mode active
           </div>
         ) : null}

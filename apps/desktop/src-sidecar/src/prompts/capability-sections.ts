@@ -31,6 +31,7 @@ function buildEffectiveEnvironmentSection(context: PromptBuildContext): PromptTe
       `- Provider: ${context.provider}`,
       `- Model: ${context.model}`,
       `- Session Type: ${context.sessionType}`,
+      `- Session Mode: ${context.sessionMode}`,
       `- Execution Mode: ${context.executionMode}`,
       `- Working Directory: ${context.workingDirectory}`,
       `- User: ${systemInfo.username}`,
@@ -215,6 +216,22 @@ function buildSchedulingDefaultsSection(context: PromptBuildContext): PromptTemp
   };
 }
 
+function buildStitchSection(context: PromptBuildContext): PromptTemplateSection | null {
+  if (!context.stitchApiKeyConfigured) return null;
+  const stitchTools = context.toolHandlers.filter((t) => t.name.toLowerCase().includes('stitch'));
+  if (stitchTools.length === 0) return null;
+
+  return {
+    key: 'stitch_design',
+    content: [
+      '## Stitch Design Tools',
+      `- Available Stitch tools: ${stitchTools.map((t) => `\`${t.name}\``).join(', ')}`,
+      '- Use Stitch tools for design/UI workflows: generating designs, creating mockups, converting designs to code.',
+      '- Stitch tools require an API key which is already configured for this session.',
+    ].join('\n'),
+  };
+}
+
 function buildNotesSection(context: PromptBuildContext): PromptTemplateSection | null {
   const notes = context.capabilitySnapshot.notes || [];
   if (notes.length === 0) return null;
@@ -270,6 +287,8 @@ export function buildCapabilitySections(context: PromptBuildContext): PromptTemp
 
   const scheduling = buildSchedulingInstructionsSection(context);
   if (scheduling) sections.push(scheduling);
+  const stitch = buildStitchSection(context);
+  if (stitch) sections.push(stitch);
   const notes = buildNotesSection(context);
   if (notes) sections.push(notes);
   return sections;

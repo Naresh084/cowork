@@ -18,6 +18,8 @@ pub struct SessionInfo {
     pub provider: String,
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+    #[serde(default)]
+    pub session_mode: Option<String>,
     pub title: Option<String>,
     #[serde(default)]
     pub first_message: Option<String>,
@@ -41,6 +43,8 @@ pub struct SessionSummary {
     pub provider: String,
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+    #[serde(default)]
+    pub session_mode: Option<String>,
     pub title: Option<String>,
     #[serde(default)]
     pub first_message: Option<String>,
@@ -62,6 +66,8 @@ pub struct SessionDetails {
     pub provider: String,
     #[serde(default = "default_execution_mode")]
     pub execution_mode: String,
+    #[serde(default)]
+    pub session_mode: Option<String>,
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -476,6 +482,7 @@ pub async fn agent_create_session(
     model: Option<String>,
     provider: Option<String>,
     execution_mode: Option<String>,
+    session_mode: Option<String>,
 ) -> Result<SessionInfo, String> {
     ensure_sidecar_started(&app, &state).await?;
 
@@ -485,6 +492,7 @@ pub async fn agent_create_session(
         "model": model,
         "provider": provider,
         "executionMode": execution_mode,
+        "sessionMode": session_mode,
     });
 
     let result = manager.send_command("create_session", params).await?;
@@ -749,6 +757,26 @@ pub async fn agent_set_execution_mode(
     });
 
     manager.send_command("set_execution_mode", params).await?;
+    Ok(())
+}
+
+/// Set session mode (coding vs cowork)
+#[tauri::command]
+pub async fn agent_set_session_mode(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    ensure_sidecar_started(&app, &state).await?;
+
+    let manager = &state.manager;
+    let params = serde_json::json!({
+        "sessionId": session_id,
+        "mode": mode,
+    });
+
+    manager.send_command("set_session_mode", params).await?;
     Ok(())
 }
 

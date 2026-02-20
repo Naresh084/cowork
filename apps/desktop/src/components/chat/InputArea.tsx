@@ -84,12 +84,45 @@ function getPermissionPromptTitle(request: ExtendedPermissionRequest): string {
   return 'Permission Request';
 }
 
+function isVerbosePermissionReason(reason: string): boolean {
+  const normalized = reason.toLowerCase();
+  return (
+    reason.length > 220 ||
+    normalized.includes('tool execution requires approval') ||
+    normalized.includes('args:') ||
+    normalized.includes('"content"') ||
+    normalized.includes('<!doctype') ||
+    normalized.includes('<html')
+  );
+}
+
 function getPermissionPromptQuestion(request: ExtendedPermissionRequest): string {
+  const toolLabel = request.toolName?.trim() || getPermissionPromptTitle(request);
+  if (request.type === 'file_read') return `Allow ${toolLabel} for this path?`;
+  if (request.type === 'file_write') return `Allow ${toolLabel} for this path?`;
+  if (request.type === 'file_delete') return `Allow ${toolLabel} for this path?`;
+  if (request.type === 'shell_execute') return `Allow ${toolLabel} for this command?`;
+
   const reason = request.reason?.trim();
-  if (reason) return reason;
+  if (reason && !isVerbosePermissionReason(reason)) return reason;
   const resource = request.resource?.trim();
   if (resource) return `Allow this action on ${resource}?`;
   return 'Allow this action to continue?';
+}
+
+function getPermissionTargetLabel(request: ExtendedPermissionRequest): string | null {
+  let resource = request.resource?.trim() || '';
+  if (!resource) {
+    const reason = request.reason || '';
+    const pathMatch = reason.match(/"(?:file_path|path)"\s*:\s*"([^"]+)"/i);
+    if (pathMatch?.[1]) {
+      resource = pathMatch[1].trim();
+    }
+  }
+  if (!resource) return null;
+  if (request.type === 'shell_execute') return `Command: ${resource}`;
+  if (request.type.startsWith('file_')) return `Path: ${resource}`;
+  return resource;
 }
 
 interface InputAreaProps {
@@ -162,7 +195,7 @@ export function InputArea({
     defaultWorkingDirectory,
     updateSetting: updateSettings,
   } = useSettingsStore();
-  const { activeSessionId, sessions, updateSessionWorkingDirectory } = useSessionStore();
+  const { activeSessionId, sessions, updateSessionWorkingDirectory, setSessionExecutionMode } = useSessionStore();
   const pendingPermissions = useChatStore((state) => {
     if (!activeSessionId) return EMPTY_PENDING_PERMISSIONS;
     return state.sessions[activeSessionId]?.pendingPermissions ?? EMPTY_PENDING_PERMISSIONS;
@@ -197,6 +230,7 @@ export function InputArea({
   const hasPendingPermissionPrompt = Boolean(activeSessionId && activePermission);
   const activePermissionTitle = activePermission ? getPermissionPromptTitle(activePermission) : '';
   const activePermissionQuestion = activePermission ? getPermissionPromptQuestion(activePermission) : '';
+  const activePermissionTarget = activePermission ? getPermissionTargetLabel(activePermission) : null;
 
   useEffect(() => {
     if (sortedPendingPermissions.length === 0) {
@@ -567,6 +601,20 @@ export function InputArea({
   ]);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault();
+      if (activeSessionId) {
+        const currentSession = sessions.find(s => s.id === activeSessionId);
+        const newMode = currentSession?.executionMode === 'plan' ? 'execute' : 'plan';
+        void setSessionExecutionMode(activeSessionId, newMode);
+        toast.info(
+          newMode === 'plan' ? 'Plan mode' : 'Execute mode',
+          newMode === 'plan' ? 'Agent will analyze and propose plans' : 'Agent will implement changes directly',
+          2000
+        );
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -846,9 +894,9 @@ export function InputArea({
               <p className="mt-1.5 text-[12px] text-white/82 break-words">
                 {activePermissionQuestion}
               </p>
-              {activePermission.resource ? (
+              {activePermissionTarget ? (
                 <p className="mt-1 text-[10px] text-white/48 font-mono truncate">
-                  {activePermission.resource}
+                  {activePermissionTarget}
                 </p>
               ) : null}
 

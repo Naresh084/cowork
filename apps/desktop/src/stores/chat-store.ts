@@ -112,6 +112,9 @@ export interface TurnActivityItem {
   status?: 'active' | 'done';
   toolId?: string;
   permissionId?: string;
+  permissionDecision?: 'allow' | 'deny' | 'allow_once' | 'allow_session';
+  permissionToolName?: string;
+  permissionResource?: string;
   questionId?: string;
   messageId?: string;
   mediaItems?: MediaActivityItem[];
@@ -825,16 +828,26 @@ export function deriveTurnActivitiesFromItems(
         break;
       }
       case 'permission': {
-        // Only show if still pending
-        if (item.status === 'pending' || pendingPermissionIds.has(item.permissionId)) {
-          activities.push({
-            id: `act-perm-${item.id}`,
-            type: 'permission',
-            status: item.status === 'pending' ? 'active' : 'done',
-            permissionId: item.permissionId,
-            createdAt: item.timestamp,
-          });
-        }
+        const permissionItem = item as ChatItem & {
+          permissionId: string;
+          status: 'pending' | 'resolved';
+          decision?: 'allow' | 'deny' | 'allow_once' | 'allow_session';
+          request?: {
+            toolName?: string;
+            resource?: string;
+          };
+        };
+        const isPending = permissionItem.status === 'pending' || pendingPermissionIds.has(permissionItem.permissionId);
+        activities.push({
+          id: `act-perm-${item.id}`,
+          type: 'permission',
+          status: isPending ? 'active' : 'done',
+          permissionId: permissionItem.permissionId,
+          permissionDecision: permissionItem.status === 'resolved' ? permissionItem.decision : undefined,
+          permissionToolName: permissionItem.request?.toolName,
+          permissionResource: permissionItem.request?.resource,
+          createdAt: item.timestamp,
+        });
         break;
       }
       case 'question': {

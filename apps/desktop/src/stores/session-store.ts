@@ -14,12 +14,14 @@ import { reportTerminalDiagnostic } from '../lib/terminal-diagnostics';
 
 export type SessionKind = 'main' | 'isolated' | 'cron' | 'ephemeral' | 'integration';
 export type ExecutionMode = 'execute' | 'plan';
+export type SessionMode = 'coding' | 'cowork';
 
 export interface SessionSummary {
   id: string;
   type?: SessionKind;
   provider?: ProviderId;
   executionMode?: ExecutionMode;
+  sessionMode?: SessionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string | null;
@@ -35,6 +37,7 @@ export interface SessionInfo {
   type?: SessionKind;
   provider?: ProviderId;
   executionMode?: ExecutionMode;
+  sessionMode?: SessionMode;
   title: string | null;
   firstMessage: string | null;
   workingDirectory: string;
@@ -86,6 +89,7 @@ interface BootstrapStateResult {
 interface SessionState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
+  pendingSessionMode: SessionMode;
   isLoading: boolean;
   hasLoaded: boolean;
   error: string | null;
@@ -103,6 +107,7 @@ interface SessionActions {
   loadSessions: (options?: { reset?: boolean; query?: string }) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   setSessionSearchQuery: (query: string) => Promise<void>;
+  setPendingSessionMode: (mode: SessionMode) => void;
   createSession: (
     workingDirectory: string,
     model?: string,
@@ -114,6 +119,7 @@ interface SessionActions {
   updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
   updateSessionWorkingDirectory: (sessionId: string, workingDirectory: string) => Promise<void>;
   setSessionExecutionMode: (sessionId: string, mode: ExecutionMode) => Promise<void>;
+  setSessionMode: (sessionId: string, mode: SessionMode) => Promise<void>;
   createBranch: (sessionId: string, branchName: string, fromTurnId?: string) => Promise<SessionBranch>;
   mergeBranch: (
     sessionId: string,
@@ -156,6 +162,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
       branchesBySession: {},
       activeBranchBySession: {},
       activeSessionId: null,
+      pendingSessionMode: 'cowork' as SessionMode,
       isLoading: false,
       hasLoaded: false,
       error: null,
@@ -401,6 +408,10 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         await get().loadSessions({ reset: true, query: normalized });
       },
 
+      setPendingSessionMode: (mode: SessionMode) => {
+        set({ pendingSessionMode: mode });
+      },
+
       createSession: async (
         workingDirectory: string,
         model?: string,
@@ -413,11 +424,13 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           const activeProvider = provider || settingsState.activeProvider;
           const providerModel = model || settingsState.selectedModelByProvider[activeProvider] || settingsState.selectedModel;
 
+          const sessionMode = get().pendingSessionMode;
           const session = await invoke<SessionInfo>('agent_create_session', {
             workingDirectory,
             model: providerModel,
             provider: activeProvider,
             executionMode,
+            sessionMode,
           });
 
           // Add to sessions list (new sessions are most recently accessed)
@@ -426,6 +439,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
             type: session.type,
             provider: session.provider || activeProvider,
             executionMode: session.executionMode || executionMode,
+            sessionMode: session.sessionMode || 'cowork',
             title: session.title,
             firstMessage: null,
             workingDirectory: session.workingDirectory,
@@ -644,6 +658,28 @@ export const useSessionStore = create<SessionState & SessionActions>()(
         }
       },
 
+      setSessionMode: async (sessionId: string, mode: SessionMode) => {
+        const previousSessions = get().sessions;
+
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId ? { ...s, sessionMode: mode } : s
+          ),
+        }));
+
+        try {
+          await invoke('agent_set_session_mode', { sessionId, mode });
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          toast.error('Failed to update session mode', errorMessage);
+          set({
+            sessions: previousSessions,
+            error: errorMessage,
+          });
+          throw error;
+        }
+      },
+
       createBranch: async (sessionId: string, branchName: string, fromTurnId?: string) => {
         try {
           const branch = await invoke<SessionBranch>('agent_branch_session', {
@@ -808,6 +844,7 @@ export const useSessionStore = create<SessionState & SessionActions>()(
           id: s.id,
           provider: s.provider,
           executionMode: s.executionMode || 'execute',
+          sessionMode: s.sessionMode || 'cowork',
           title: s.title,
           firstMessage: s.firstMessage,
           workingDirectory: s.workingDirectory,
