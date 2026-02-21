@@ -38,6 +38,48 @@ import { fixNestedCodeFences } from '../../lib/fix-markdown';
 // Lazy load react-markdown for better bundle splitting
 const ReactMarkdown = React.lazy(() => import('react-markdown'));
 
+const TOOL_STATUS_VERBS: Record<string, string> = {
+  // File operations
+  read_any_file: 'Reading file',
+  read_file: 'Reading file',
+  write_file: 'Writing file',
+  edit_file: 'Editing code',
+  list_directory: 'Browsing files',
+  create_directory: 'Creating folder',
+  move_file: 'Moving file',
+  delete_file: 'Removing file',
+  // Search
+  glob: 'Searching files',
+  grep: 'Searching code',
+  web_search: 'Searching the web',
+  web_scrape: 'Reading webpage',
+  // Execution
+  bash: 'Running command',
+  execute_command: 'Running command',
+  // Tasks
+  task_create: 'Planning tasks',
+  task_update: 'Updating progress',
+  task_list: 'Reviewing tasks',
+  task_get: 'Checking task',
+  task_remove: 'Removing task',
+  // Other
+  notification: 'Sending notification',
+  cron_schedule: 'Setting up schedule',
+};
+
+function getStatusVerb(isThinking: boolean, runningTools: ToolExecution[], currentTool?: ToolExecution | null): string {
+  if (isThinking) return 'Thinking';
+  // Prefer currentTool (set instantly by tool:start) over toolMap (derived from chat:item, may lag)
+  if (currentTool && currentTool.status === 'running') {
+    return TOOL_STATUS_VERBS[currentTool.name] || `Running ${currentTool.name}`;
+  }
+  if (runningTools.length > 0) {
+    const tool = runningTools[0];
+    return TOOL_STATUS_VERBS[tool.name] || `Running ${tool.name}`;
+  }
+  return 'Generating';
+}
+
 type ErrorMessageMetadata = {
   kind: 'error';
   code?: string;
@@ -61,6 +103,7 @@ const EMPTY_SESSION_STATE = {
   pendingQuestions: [] as UserQuestion[],
   pendingPermissions: [] as ExtendedPermissionRequest[],
   activeTurnId: undefined as string | undefined,
+  currentTool: null as ToolExecution | null,
   hasLoaded: false,
   hasMoreHistory: false,
   oldestLoadedSequence: null,
@@ -140,6 +183,7 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
     hasLoaded,
     hasMoreHistory,
     error: sessionError,
+    currentTool,
   } = sessionState;
 
   // V2: Derive rendering data from chatItems (single source of truth)
@@ -394,11 +438,15 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
 
   const renderTurnActivities = (turnId: string) => {
     const activities = turnActivities?.[turnId] ?? [];
-    const hasRunningTool = [...toolMap.values()].some((t) => t.status === 'running');
+    const runningTools = [...toolMap.values()].filter((t) => t.status === 'running');
+    const hasRunningTool = runningTools.length > 0 || (currentTool?.status === 'running');
     const hasAssistantInTurn = activities.some((activity) => activity.type === 'assistant');
-    const showThinking =
-      isStreaming && activeTurnId === turnId && (thinkingContent || (!hasAssistantInTurn && !hasRunningTool));
-    if (activities.length === 0 && !showThinking) {
+    const showStatusLine =
+      isStreaming && activeTurnId === turnId && (thinkingContent || !hasAssistantInTurn);
+    const statusVerb = showStatusLine
+      ? getStatusVerb(isThinking || (!hasAssistantInTurn && !hasRunningTool && !thinkingContent), runningTools, currentTool)
+      : '';
+    if (activities.length === 0 && !showStatusLine) {
       return null;
     }
 
@@ -517,9 +565,13 @@ export function MessageList({ optimisticFirstMessage = null }: MessageListProps)
             return null;
           })}
 
-          {/* Show thinking block when there's thinking content or when waiting for the first assistant item */}
-          {showThinking && (
-            <ThinkingBlock content={thinkingContent} isActive={isThinking || (!hasAssistantInTurn && !hasRunningTool)} />
+          {/* Show status line when thinking, executing tools, or waiting for assistant content */}
+          {showStatusLine && (
+            <ThinkingBlock
+              content={thinkingContent}
+              isActive={isStreaming && !hasAssistantInTurn}
+              statusVerb={statusVerb}
+            />
           )}
         </div>
 
@@ -2581,23 +2633,19 @@ function ContentPartRenderer({ part, isUser }: ContentPartRendererProps) {
  * Thinking block component - displays agent's internal reasoning
  * Shows "Thinking..." with sliding glow effect and optional dropdown for details
  */
-function ThinkingBlock({ content, isActive }: { content: string; isActive: boolean }) {
+function ThinkingBlock({ content, isActive, statusVerb }: { content: string; isActive: boolean; statusVerb: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasContent = content && content.trim().length > 0;
 
   return (
     <div className="space-y-2">
-      {/* Main thinking indicator with glow effect */}
+      {/* Main status line */}
       <div className="flex items-center gap-2 py-1">
-        <Sparkles className={cn(
-          'w-3 h-3 flex-shrink-0',
-          isActive ? 'text-[#93C5FD] animate-pulse' : 'text-white/30'
-        )} />
         <span className={cn(
-          'text-[12px]',
+          'text-[13px]',
           isActive ? 'app-thinking' : 'text-white/40'
         )}>
-          Thinking...
+          {statusVerb || 'Thinking'}...
         </span>
 
         {/* Expand button - only show when there's thinking content */}

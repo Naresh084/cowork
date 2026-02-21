@@ -41,7 +41,14 @@ import type {
   DesignItem,
   ErrorItem,
 } from '@cowork/shared';
-import { createDeepAgent, FilesystemBackend, CompositeBackend, type BackendProtocol } from 'deepagents';
+import {
+  createDeepAgent,
+  FilesystemBackend,
+  CompositeBackend,
+  DEFAULT_GENERAL_PURPOSE_DESCRIPTION,
+  DEFAULT_SUBAGENT_PROMPT,
+  type BackendProtocol,
+} from 'deepagents';
 import { SqliteBaseStore } from './sqlite-store.js';
 import { createMiddleware } from 'langchain';
 import type { InterruptOnConfig, HITLResponse } from 'langchain';
@@ -146,6 +153,15 @@ type DeepAgentInstance = {
   cancel?: () => void;
 };
 
+type DeepAgentSubagentConfig = {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  model?: string;
+  skills?: string[];
+  middleware?: unknown[];
+};
+
 type ApprovalMode = 'ask' | 'full';
 
 interface QueuedMessage {
@@ -171,6 +187,17 @@ interface IntegrationMessageOrigin {
   timestamp: number;
 }
 
+type PendingPermissionEntry = {
+  request: ExtendedPermissionRequest;
+  resolve: (decision: PermissionDecision) => void;
+  /** True when this permission is from a native HITL interrupt (requires Command resume) */
+  interruptResumeRequired?: boolean;
+  /** Group id for a single HITL interrupt carrying multiple action requests. */
+  hitlBatchId?: string;
+  /** Number of tool calls in the same HITL interrupt batch. */
+  hitlBatchSize?: number;
+};
+
 interface ActiveSession {
   id: string;
   type: SessionType;
@@ -195,14 +222,11 @@ interface ActiveSession {
   artifacts: Artifact[];
   permissionCache: Map<string, PermissionDecision>;
   permissionScopes: Map<string, Set<string>>;
+  /** One-shot file path grants keyed by toolCallId for native HITL resumes. */
+  transientPermissionGrants: Map<string, string[]>;
   toolStartTimes: Map<string, number>;
   activeTools: Map<string, RuntimeToolSnapshot>;
-  pendingPermissions: Map<string, {
-    request: ExtendedPermissionRequest;
-    resolve: (decision: PermissionDecision) => void;
-    /** True when this permission is from a native HITL interrupt (requires Command resume) */
-    interruptResumeRequired?: boolean;
-  }>;
+  pendingPermissions: Map<string, PendingPermissionEntry>;
   pendingQuestions: Map<string, {
     request: QuestionRequest;
     resolve: (answer: string | string[]) => void;
@@ -918,6 +942,7 @@ export class AgentRunner {
       artifacts: data.artifacts,
       permissionCache: new Map(),
       permissionScopes: new Map(),
+      transientPermissionGrants: new Map(),
       toolStartTimes: new Map(),
       activeTools: new Map(),
       pendingPermissions: new Map(),
@@ -962,9 +987,14 @@ export class AgentRunner {
         }
       }
       for (const pending of data.runtime.pendingPermissions || []) {
+        const interruptResumeRequired =
+          pending.interruptResumeRequired === true || this.isNativeHitlToolName(pending.toolName);
         session.pendingPermissions.set(pending.id, {
           request: pending,
           resolve: () => {},
+          interruptResumeRequired,
+          hitlBatchId: pending.hitlBatchId,
+          hitlBatchSize: pending.hitlBatchSize,
         });
       }
       for (const question of data.runtime.pendingQuestions || []) {
@@ -1187,50 +1217,34 @@ export class AgentRunner {
 
   private appendAssistantSegmentChunk(session: ActiveSession, chunkText: string): void {
     if (!chunkText) return;
-
-    const nextContent = `${session.activeAssistantSegmentText}${chunkText}`;
-    session.activeAssistantSegmentText = nextContent;
+    session.activeAssistantSegmentText += chunkText;
     session.hasAssistantTextThisTurn = true;
-
-    if (!session.activeAssistantSegmentItemId) {
-      const assistantItem: AssistantMessageItem = {
-        id: generateChatItemId(),
-        kind: 'assistant_message',
-        timestamp: Date.now(),
-        turnId: session.currentTurnId,
-        content: nextContent,
-        stream: {
-          phase: 'intermediate',
-          status: 'streaming',
-          segmentIndex: session.assistantSegmentIndex,
-        },
-      };
-      const appended = this.appendChatItem(session, assistantItem) as AssistantMessageItem;
-      session.activeAssistantSegmentItemId = appended.id;
-      return;
-    }
-
-    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
-      content: nextContent,
-      stream: {
-        phase: 'intermediate',
-        status: 'streaming',
-        segmentIndex: session.assistantSegmentIndex,
-      },
-    });
   }
 
   private finalizeAssistantSegment(session: ActiveSession): void {
-    if (!session.activeAssistantSegmentItemId) return;
-
     const finalText = session.activeAssistantSegmentText.trim();
-    this.updateChatItem(session, session.activeAssistantSegmentItemId, {
+    if (!finalText) {
+      // Nothing buffered — reset state and return
+      session.activeAssistantSegmentItemId = undefined;
+      session.activeAssistantSegmentText = '';
+      session.assistantSegmentIndex += 1;
+      return;
+    }
+
+    // Emit the COMPLETE message as a single atomic chat:item
+    const assistantItem: AssistantMessageItem = {
+      id: generateChatItemId(),
+      kind: 'assistant_message',
+      timestamp: Date.now(),
+      turnId: session.currentTurnId,
+      content: finalText,
       stream: {
         phase: 'intermediate',
         status: 'done',
         segmentIndex: session.assistantSegmentIndex,
       },
-    });
+    };
+    this.appendChatItem(session, assistantItem);
 
     session.lastCompletedAssistantSegmentText = finalText;
     session.activeAssistantSegmentItemId = undefined;
@@ -2947,6 +2961,7 @@ export class AgentRunner {
       artifacts: [],
       permissionCache: new Map(),
       permissionScopes: new Map(),
+      transientPermissionGrants: new Map(),
       toolStartTimes: new Map(),
       activeTools: new Map(),
       pendingPermissions: new Map(),
@@ -4584,38 +4599,41 @@ export class AgentRunner {
       throw new Error(`Permission request not found: ${permissionId}`);
     }
 
-    session.pendingPermissions.delete(permissionId);
-
-    // Update scope/cache for 'allow_session' decisions
-    if (decision === 'allow_session') {
-      const paths = this.resolveRequestPaths(session, pending.request);
-      if (paths.length > 0) {
-        const scopeSet = session.permissionScopes.get(pending.request.type) ?? new Set<string>();
-        for (const path of paths) {
-          scopeSet.add(path);
+    const isInterruptPermission = this.isInterruptPermissionEntry(pending);
+    const entriesToResolve: Array<{ id: string; entry: PendingPermissionEntry }> = [];
+    if (isInterruptPermission) {
+      for (const [id, entry] of session.pendingPermissions.entries()) {
+        if (!this.isInterruptPermissionEntry(entry)) continue;
+        if (pending.hitlBatchId && entry.hitlBatchId && pending.hitlBatchId !== entry.hitlBatchId) {
+          continue;
         }
-        session.permissionScopes.set(pending.request.type, scopeSet);
-      } else {
-        const cacheKey = `${pending.request.type}:${pending.request.resource}`;
-        session.permissionCache.set(cacheKey, decision);
+        entriesToResolve.push({ id, entry });
       }
     }
+    if (entriesToResolve.length === 0) {
+      entriesToResolve.push({ id: permissionId, entry: pending });
+    }
 
-    // Update PermissionItem status
-    this.updatePermissionStatus(session, permissionId, decision);
+    for (const { id, entry } of entriesToResolve) {
+      session.pendingPermissions.delete(id);
+      this.applyPermissionDecision(session, id, entry, decision);
+    }
 
-    // Emit resolved event
-    eventEmitter.permissionResolved(sessionId, permissionId, decision);
-    this.checkpointActiveRun(sessionId, 'permission_resolved', {
-      permissionId,
-      decision,
-      permissionType: pending.request.type,
-      resource: pending.request.resource,
-    });
-
-    if (pending.interruptResumeRequired) {
+    if (isInterruptPermission) {
       // HITL interrupt — resume graph with Command
-      const hitlResponse = this.convertDecisionToHitlResponse(decision, pending.request);
+      const decisionCountFromEntries = entriesToResolve.reduce((max, entry) => {
+        const candidate = entry.entry.hitlBatchSize;
+        if (typeof candidate === 'number' && candidate > max) {
+          return candidate;
+        }
+        return max;
+      }, 0);
+      const liveDecisionCount = await this.getHitlHangingToolCallCount(session);
+      const decisionCount = Math.max(
+        decisionCountFromEntries > 0 ? decisionCountFromEntries : entriesToResolve.length,
+        liveDecisionCount ?? 0,
+      );
+      const hitlResponse = this.convertDecisionToHitlResponse(decision, pending.request, decisionCount);
       const agentAny = session.agent as DeepAgentInstance;
 
       if (!agentAny.streamEvents) {
@@ -4654,6 +4672,53 @@ export class AgentRunner {
       pending.resolve(decision);
       this.persistRuntimeSnapshot(session);
     }
+  }
+
+  private applyPermissionDecision(
+    session: ActiveSession,
+    permissionId: string,
+    pending: PendingPermissionEntry,
+    decision: PermissionDecision,
+  ): void {
+    // Update scope/cache and one-shot grants for allow decisions.
+    const paths = this.resolveRequestPaths(session, pending.request);
+    if (decision === 'allow_session') {
+      if (paths.length > 0) {
+        const scopeSet = session.permissionScopes.get(pending.request.type) ?? new Set<string>();
+        for (const path of paths) {
+          scopeSet.add(path);
+        }
+        session.permissionScopes.set(pending.request.type, scopeSet);
+      } else {
+        const cacheKey = `${pending.request.type}:${pending.request.resource}`;
+        session.permissionCache.set(cacheKey, decision);
+      }
+    } else if (pending.interruptResumeRequired && (decision === 'allow' || decision === 'allow_once') && paths.length > 0) {
+      const toolCallId = pending.request.toolCallId;
+      if (toolCallId && toolCallId.trim().length > 0) {
+        session.transientPermissionGrants.set(toolCallId, paths);
+      } else {
+        // Fallback: if no toolCallId is available, persist a scope so the resumed
+        // native tool call is not blocked after explicit approval.
+        const scopeSet = session.permissionScopes.get(pending.request.type) ?? new Set<string>();
+        for (const path of paths) {
+          scopeSet.add(path);
+        }
+        session.permissionScopes.set(pending.request.type, scopeSet);
+      }
+    }
+
+    // Update PermissionItem status
+    this.updatePermissionStatus(session, permissionId, decision);
+
+    // Emit resolved event
+    eventEmitter.permissionResolved(session.id, permissionId, decision);
+    this.checkpointActiveRun(session.id, 'permission_resolved', {
+      permissionId,
+      decision,
+      permissionType: pending.request.type,
+      resource: pending.request.resource,
+    });
   }
 
   /**
@@ -5950,7 +6015,7 @@ ${stitchGuidance}
 
   private resolveThinkingConfigForModel(
     modelId: string,
-  ): { thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'; thinkingBudget?: number } | undefined {
+  ): { includeThoughts?: boolean; thinkingLevel?: 'LOW' | 'MEDIUM' | 'HIGH'; thinkingBudget?: number } | undefined {
     const configuredLevel = this.runtimeConfig.thinkingLevel;
 
     const modelEntry = this.findModelCatalogEntry(modelId);
@@ -5963,11 +6028,15 @@ ${stitchGuidance}
     const majorVersion = getGeminiMajorVersion(modelId);
     if (majorVersion !== null && majorVersion >= 3) {
       return {
+        includeThoughts: true,
         thinkingLevel: this.resolveGeminiThreeThinkingLevel(modelId, configuredLevel),
       };
     }
 
-    return { thinkingBudget: LEGACY_THINKING_BUDGET_MAP[configuredLevel] };
+    return {
+      includeThoughts: true,
+      thinkingBudget: LEGACY_THINKING_BUDGET_MAP[configuredLevel],
+    };
   }
 
   private async createDeepAgent(session: ActiveSession, tools: ToolHandler[]): Promise<DeepAgentInstance> {
@@ -5999,6 +6068,12 @@ ${stitchGuidance}
       session.model,
       session.workingDirectory,
       skillsParam,
+    );
+    const todoGuardMiddleware = this.createTodoToolGuardMiddleware();
+    const toolMiddleware = this.createToolMiddleware(session);
+    const guardedSubagents = this.buildTodoGuardedSubagents(
+      deepAgentSubagents,
+      todoGuardMiddleware,
     );
 
     // Determine AGENTS.md paths for DeepAgents built-in memory loading
@@ -6032,12 +6107,12 @@ ${stitchGuidance}
       model,
       tools: wrappedTools,
       systemPrompt: promptBuild.prompt,
-      middleware: [this.createToolMiddleware(session)],
+      middleware: [todoGuardMiddleware, toolMiddleware],
       interruptOn: this.buildInterruptOnConfig(session),
       recursionLimit: RECURSION_LIMIT,
       name: `cowork-${session.id}`,
       skills: skillsParam,
-      subagents: deepAgentSubagents.length > 0 ? deepAgentSubagents : undefined,
+      subagents: guardedSubagents.length > 0 ? guardedSubagents : undefined,
       checkpointer: getCheckpointer(),
       store,
       memory: memoryPaths,
@@ -6050,13 +6125,10 @@ ${stitchGuidance}
           () => this.getSessionSandboxSettings(session),
         );
 
-        // Route all filesystem operations through DeepAgents FilesystemBackend rooted
-        // to the session working directory, while keeping command execution on sandboxBackend.
+        // Keep CoworkBackend as the default backend so path resolution and permission
+        // scopes apply consistently across relative and approved absolute paths.
+        // Route only special virtual prefixes to dedicated filesystem roots.
         const routeBackends: Record<string, BackendProtocol> = {
-          '/': new FilesystemBackend({
-            rootDir: resolve(session.workingDirectory),
-            virtualMode: true,
-          }),
           // DeepAgents writes oversized tool outputs to /large_tool_results/* by default.
           // Route that path to app data so chat working directories remain clean.
           '/large_tool_results/': new FilesystemBackend({
@@ -6186,13 +6258,7 @@ ${stitchGuidance}
     sessionModel: string,
     workingDirectory: string,
     skillSourcePaths?: string[],
-  ): Promise<Array<{
-    name: string;
-    description: string;
-    systemPrompt: string;
-    model?: string;
-    skills?: string[];
-  }>> {
+  ): Promise<DeepAgentSubagentConfig[]> {
     try {
       const service = createSubagentService(this.appDataDir || undefined);
       await service.initialize();
@@ -6816,6 +6882,101 @@ ${stitchGuidance}
     });
   }
 
+  private normalizeToolIdentifier(value: string): string {
+    return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  }
+
+  private isNativeHitlToolName(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const normalized = this.normalizeToolIdentifier(value);
+    return normalized === 'read_file'
+      || normalized === 'write_file'
+      || normalized === 'edit_file'
+      || normalized === 'delete_file'
+      || normalized === 'ls'
+      || normalized === 'glob'
+      || normalized === 'grep'
+      || normalized === 'execute';
+  }
+
+  private isInterruptPermissionEntry(entry: PendingPermissionEntry): boolean {
+    return entry.interruptResumeRequired === true
+      || entry.request.interruptResumeRequired === true
+      || this.isNativeHitlToolName(entry.request.toolName);
+  }
+
+  private isDisabledTodoToolName(value: unknown): boolean {
+    if (typeof value !== 'string') return false;
+    const normalized = this.normalizeToolIdentifier(value);
+    return normalized === 'write_todos' || normalized === 'write_todo';
+  }
+
+  private getTodoToolDisabledMessage(): string {
+    return 'The `write_todos` tool is disabled in this runtime. Use `task_create`, `task_update`, `task_list`, `task_get`, and `task_remove` for plan/progress tracking.';
+  }
+
+  private createTodoToolGuardMiddleware() {
+    return createMiddleware({
+      name: 'CoworkTodoToolGuardMiddleware',
+      wrapModelCall: async (request, handler) => {
+        if (!request.tools || request.tools.length === 0) {
+          return handler(request);
+        }
+
+        const filteredTools = request.tools.filter((tool) => {
+          const name = (tool as { name?: unknown })?.name;
+          return !this.isDisabledTodoToolName(name);
+        });
+
+        if (filteredTools.length === request.tools.length) {
+          return handler(request);
+        }
+
+        return handler({
+          ...request,
+          tools: filteredTools,
+        });
+      },
+      wrapToolCall: async (request, handler) => {
+        const toolName = request.toolCall?.name || '';
+        if (!this.isDisabledTodoToolName(toolName)) {
+          return handler(request);
+        }
+
+        const toolCallId = request.toolCall?.id ?? generateId('tool');
+        return new ToolMessage({
+          content: this.getTodoToolDisabledMessage(),
+          tool_call_id: toolCallId,
+          name: toolName || 'write_todos',
+        });
+      },
+    });
+  }
+
+  private buildTodoGuardedSubagents(
+    subagents: DeepAgentSubagentConfig[],
+    todoGuardMiddleware: ReturnType<typeof createMiddleware>,
+  ): DeepAgentSubagentConfig[] {
+    const guardedSubagents = subagents.map((subagent) => ({
+      ...subagent,
+      middleware: [...(Array.isArray(subagent.middleware) ? subagent.middleware : []), todoGuardMiddleware],
+    }));
+
+    const hasGeneralPurposeOverride = guardedSubagents.some(
+      (subagent) => subagent.name.trim().toLowerCase() === 'general-purpose',
+    );
+    if (!hasGeneralPurposeOverride) {
+      guardedSubagents.push({
+        name: 'general-purpose',
+        description: DEFAULT_GENERAL_PURPOSE_DESCRIPTION,
+        systemPrompt: DEFAULT_SUBAGENT_PROMPT,
+        middleware: [todoGuardMiddleware],
+      });
+    }
+
+    return guardedSubagents;
+  }
+
   private createToolMiddleware(session: ActiveSession) {
     return createMiddleware({
       name: 'CoworkToolMiddleware',
@@ -6883,8 +7044,8 @@ ${stitchGuidance}
 
         // Filter out DeepAgents built-in write_todos — replaced by custom task_* tools
         const filtered = request.tools.filter((tool) => {
-          const name = (tool as { name?: string })?.name;
-          return name !== 'write_todos';
+          const name = (tool as { name?: unknown })?.name;
+          return !this.isDisabledTodoToolName(name);
         });
         if (filtered.length !== request.tools.length) {
           request = { ...request, tools: filtered };
@@ -6921,6 +7082,15 @@ ${stitchGuidance}
           toolCall && typeof toolCall.args === 'object' && toolCall.args !== null
             ? (toolCall.args as Record<string, unknown>)
             : {};
+
+        if (this.isDisabledTodoToolName(toolName)) {
+          const toolCallId = toolCall?.id ?? generateId('tool');
+          return new ToolMessage({
+            content: this.getTodoToolDisabledMessage(),
+            tool_call_id: toolCallId,
+            name: toolName || 'write_todos',
+          });
+        }
 
         if (request.tool && this.isCoworkTool(request.tool)) {
           return handler(request);
@@ -7084,11 +7254,14 @@ ${stitchGuidance}
           return limitedResult;
         } catch (error) {
           const duration = this.consumeToolDuration(session, toolCallId);
+          const rawError = error instanceof Error ? error.message : String(error);
+          const validationError = this.buildToolArgumentValidationError(toolName, rawError);
+          const finalError = validationError || rawError;
           const payload = {
             toolCallId,
             success: false,
             result: null,
-            error: error instanceof Error ? error.message : String(error),
+            error: finalError,
             duration,
             parentToolId,
           };
@@ -7104,8 +7277,17 @@ ${stitchGuidance}
           // Emit tool result
           emitToolResult('error', null, payload.error, duration);
 
+          if (validationError) {
+            return new ToolMessage({
+              content: validationError,
+              tool_call_id: toolCallId,
+              name: toolName,
+            });
+          }
+
           throw error;
         } finally {
+          session.transientPermissionGrants.delete(toolCallId);
           finishRuntimeTool();
           // Clear activeParentToolId when task tool completes
           if (isTask && session.activeParentToolId === toolCallId) {
@@ -7462,6 +7644,8 @@ ${stitchGuidance}
         for (const interruptInfo of task.interrupts || []) {
           const hitlRequest = interruptInfo.value;
           if (!hitlRequest?.actionRequests) continue;
+          const hitlBatchId = generateId('hitl');
+          const hitlBatchSize = hitlRequest.actionRequests.length;
 
           for (const action of hitlRequest.actionRequests) {
             const permissionId = generateId('perm');
@@ -7481,6 +7665,9 @@ ${stitchGuidance}
                 reason: '',
               }),
               command: action.name === 'execute' ? String(action.args.command || '') : undefined,
+              interruptResumeRequired: true,
+              hitlBatchId,
+              hitlBatchSize,
               timestamp: Date.now(),
             };
 
@@ -7509,6 +7696,8 @@ ${stitchGuidance}
               request: extendedRequest,
               resolve: () => {}, // No-op for HITL interrupts
               interruptResumeRequired: true,
+              hitlBatchId,
+              hitlBatchSize,
             });
 
             eventEmitter.permissionRequest(session.id, extendedRequest);
@@ -7553,6 +7742,42 @@ ${stitchGuidance}
     }
   }
 
+  private async getHitlHangingToolCallCount(session: ActiveSession): Promise<number | null> {
+    const agent = session.agent as DeepAgentInstance;
+    if (!agent?.getState) return null;
+
+    try {
+      const state = await agent.getState({
+        configurable: { thread_id: session.threadId },
+      });
+      const stateAny = state as {
+        tasks?: Array<{
+          interrupts?: Array<{
+            value?: {
+              actionRequests?: Array<unknown>;
+            };
+          }>;
+        }>;
+      };
+
+      let total = 0;
+      for (const task of stateAny.tasks || []) {
+        for (const interruptInfo of task.interrupts || []) {
+          const requests = interruptInfo.value?.actionRequests;
+          if (Array.isArray(requests)) {
+            total += requests.length;
+          }
+        }
+      }
+
+      return total > 0 ? total : null;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[HITL] Failed to read hanging tool call count from graph state: ${reason}`);
+      return null;
+    }
+  }
+
   /**
    * Extract a resource string from tool arguments for permission display.
    */
@@ -7580,15 +7805,21 @@ ${stitchGuidance}
   private convertDecisionToHitlResponse(
     decision: PermissionDecision,
     request: ExtendedPermissionRequest,
+    decisionCount = 1,
   ): HITLResponse {
-    if (decision === 'allow' || decision === 'allow_session') {
-      return { decisions: [{ type: 'approve' }] };
+    const normalizedCount = Number.isFinite(decisionCount)
+      ? Math.max(1, Math.floor(decisionCount))
+      : 1;
+    if (decision === 'allow' || decision === 'allow_once' || decision === 'allow_session') {
+      return {
+        decisions: Array.from({ length: normalizedCount }, () => ({ type: 'approve' as const })),
+      };
     }
     return {
-      decisions: [{
-        type: 'reject',
+      decisions: Array.from({ length: normalizedCount }, () => ({
+        type: 'reject' as const,
         message: `Permission denied for ${request.toolName}: ${request.resource}`,
-      }],
+      })),
     };
   }
 
@@ -8113,6 +8344,31 @@ ${stitchGuidance}
     return name.includes('abort') || message.includes('abort') || message.includes('cancel');
   }
 
+  private buildToolArgumentValidationError(toolName: string, errorMessage: string): string | null {
+    const normalized = String(errorMessage || '');
+    if (
+      !normalized.includes('Received tool input did not match expected schema') &&
+      !normalized.includes('Invalid input:')
+    ) {
+      return null;
+    }
+
+    const fieldMatch =
+      normalized.match(/→\s*at\s+([a-zA-Z0-9_]+)/) ||
+      normalized.match(/at\s+([a-zA-Z0-9_]+)\s*$/m);
+    const field = fieldMatch?.[1] || 'required parameters';
+
+    const guidanceByTool: Partial<Record<string, string>> = {
+      write_file: 'Include both `file_path` and `content`.',
+      edit_file: 'Include `file_path`, `old_string`, and `new_string`.',
+      read_file: 'Include `file_path`.',
+      read_any_file: 'Include `file_path`.',
+    };
+    const guidance = guidanceByTool[toolName] || 'Provide all required parameters defined by the tool schema.';
+
+    return `Tool "${toolName}" argument validation failed at \`${field}\`. ${guidance}`;
+  }
+
   private getBackendAllowedScopes(session: ActiveSession): string[] {
     const roots = new Set<string>([resolve(session.workingDirectory)]);
     for (const path of this.runtimeConfig.sandbox.allowedPaths) {
@@ -8125,6 +8381,14 @@ ${stitchGuidance}
       if (!type.startsWith('file_')) continue;
       for (const scope of scopes) {
         const normalized = this.normalizePermissionPath(session, scope);
+        if (normalized) {
+          roots.add(resolve(normalized));
+        }
+      }
+    }
+    for (const paths of session.transientPermissionGrants.values()) {
+      for (const path of paths) {
+        const normalized = this.normalizePermissionPath(session, path);
         if (normalized) {
           roots.add(resolve(normalized));
         }
@@ -8411,8 +8675,13 @@ ${stitchGuidance}
         return content
           .map((part) => {
             if (typeof part === 'string') return part;
-            if (part && typeof part === 'object' && 'text' in part) {
-              return String((part as { text?: string }).text || '');
+            if (part && typeof part === 'object') {
+              const partAny = part as { type?: string; text?: string };
+              // Keep internal reasoning out of assistant content stream.
+              if (partAny.type === 'thinking') return '';
+              if ('text' in partAny) {
+                return String(partAny.text || '');
+              }
             }
             return '';
           })
@@ -8427,8 +8696,12 @@ ${stitchGuidance}
         return messageContent
           .map((part) => {
             if (typeof part === 'string') return part;
-            if (part && typeof part === 'object' && 'text' in part) {
-              return String((part as { text?: string }).text || '');
+            if (part && typeof part === 'object') {
+              const partAny = part as { type?: string; text?: string };
+              if (partAny.type === 'thinking') return '';
+              if ('text' in partAny) {
+                return String(partAny.text || '');
+              }
             }
             return '';
           })
@@ -8441,7 +8714,9 @@ ${stitchGuidance}
 
   /**
    * Extract thinking/reasoning content from a stream event.
-   * Gemini API returns thinking content in parts with `thought: true`.
+   * Modern LangChain Google chunks expose reasoning as content parts with
+   * `type: "thinking"` and `thinking: "<text>"`. Keep backwards-compat for
+   * older `thought: true` shapes.
    */
   private extractThinkingContent(event: unknown): string | null {
     const eventAny = event as { event?: string; name?: string; data?: Record<string, unknown> };
@@ -8465,15 +8740,32 @@ ${stitchGuidance}
       return chunkAny.additional_kwargs.thought_text;
     }
 
-    // Check content array for parts with thought: true (Gemini pattern)
+    // Check content array for reasoning parts.
     const content = chunkAny.content;
     if (Array.isArray(content)) {
       const thoughtParts = content
-        .filter((part) => part && typeof part === 'object' && (part as { thought?: boolean }).thought === true)
         .map((part) => {
-          if (typeof part === 'string') return part;
-          const partAny = part as { text?: string };
-          return partAny.text || '';
+          if (!part || typeof part !== 'object') return '';
+          const partAny = part as {
+            type?: string;
+            thinking?: string;
+            text?: string;
+            thought?: boolean;
+          };
+
+          // Current @langchain/google-genai chunk format.
+          if (partAny.type === 'thinking') {
+            if (typeof partAny.thinking === 'string') return partAny.thinking;
+            if (typeof partAny.text === 'string') return partAny.text;
+          }
+
+          // Backwards-compatible fallback.
+          if (partAny.thought === true) {
+            if (typeof partAny.text === 'string') return partAny.text;
+            if (typeof partAny.thinking === 'string') return partAny.thinking;
+          }
+
+          return '';
         })
         .filter(Boolean);
 

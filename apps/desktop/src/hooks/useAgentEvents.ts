@@ -487,11 +487,18 @@ export function useAgentEvents(sessionId: string | null): void {
           scheduleStreamStallCheck(eventSessionId);
           break;
 
-        case 'stream:chunk':
+        case 'stream:chunk': {
           // Assistant text now comes from persisted chat:item/chat:update events.
           chat.markStreamActivity(eventSessionId);
           scheduleStreamStallCheck(eventSessionId);
+          // Regular text chunk means thinking phase is over (covers no-thinking mode
+          // where thinking:done never fires but stream:start set isThinking=true)
+          const chunkSession = useChatStore.getState().sessions[eventSessionId];
+          if (chunkSession?.isThinking) {
+            chat.setThinking(eventSessionId, false);
+          }
           break;
+        }
 
         case 'stream:done':
           chat.setStreaming(eventSessionId, false);
@@ -601,8 +608,9 @@ export function useAgentEvents(sessionId: string | null): void {
           break;
 
         case 'thinking:done':
-          // Keep thinking content visible but mark thinking as done
-          // Content will be cleared when stream:done is received
+          // Mark thinking phase as done so status line transitions from "Thinking..." to "Generating..."
+          // thinkingContent is preserved (cleared at stream:done) so the expand/collapse UI still works
+          chat.setThinking(eventSessionId, false);
           break;
 
         // Tool execution events

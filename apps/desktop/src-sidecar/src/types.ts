@@ -532,6 +532,12 @@ export interface ExtendedPermissionRequest extends PermissionRequest {
   };
   command?: string;
   toolName?: string;
+  /** True when this permission came from native HITL interrupt handling. */
+  interruptResumeRequired?: boolean;
+  /** Group id for a single HITL interrupt batch. */
+  hitlBatchId?: string;
+  /** Number of tool calls in the same HITL interrupt batch. */
+  hitlBatchSize?: number;
   timestamp: number;
 }
 
