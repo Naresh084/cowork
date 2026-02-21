@@ -11,3 +11,4 @@ export { createCronTools, createScheduleTaskTool, createManageScheduledTaskTool 
 export { createNotificationTools } from './notification-tools.js';
 export { createWorkflowTools } from './workflow-tool.js';
 export { createConversationSkillTools } from './skill-conversation-tools.js';
+export { createTaskTools } from './task-tools.js';

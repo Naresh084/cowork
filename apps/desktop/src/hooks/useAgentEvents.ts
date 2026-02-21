@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { parseSidecarEventEnvelope, subscribeToAgentEvents } from '../lib/agent-events';
 import type { AgentEvent } from '../lib/event-types';
 import { useChatStore } from '../stores/chat-store';
-import { useAgentStore, type Task } from '../stores/agent-store';
+import { useAgentStore } from '../stores/agent-store';
 import { useSessionStore } from '../stores/session-store';
 import { useAppStore } from '../stores/app-store';
 import { useIntegrationStore } from '../stores/integration-store';
@@ -50,64 +50,6 @@ function toBenchmarkScorecard(value: unknown): BenchmarkScorecard | null {
     dimensions,
     passed: typeof value.passed === 'boolean' ? value.passed : undefined,
   };
-}
-
-function normalizeTodoStatus(value: unknown): 'pending' | 'in_progress' | 'completed' {
-  const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
-  if (normalized === 'done' || normalized === 'complete' || normalized === 'completed') return 'completed';
-  if (normalized === 'in_progress') return 'in_progress';
-  return 'pending';
-}
-
-function extractTodosFromToolResult(result: unknown): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> | null {
-  if (!result) return null;
-  if (Array.isArray(result)) {
-    return result
-      .filter((todo): todo is { content: string; status: 'pending' | 'in_progress' | 'completed' } =>
-        !!todo && typeof (todo as { content?: unknown }).content === 'string'
-      )
-      .map((todo) => ({
-        content: String((todo as { content: string }).content),
-        status: normalizeTodoStatus((todo as { status?: string }).status),
-      }));
-  }
-
-  if (typeof result === 'string') {
-    const trimmed = result.trim();
-    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        return extractTodosFromToolResult(parsed);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }
-
-  if (typeof result === 'object') {
-    const resultAny = result as { todos?: unknown; output?: unknown };
-    if (Array.isArray(resultAny.todos)) {
-      return extractTodosFromToolResult(resultAny.todos);
-    }
-    if (resultAny.output) {
-      return extractTodosFromToolResult(resultAny.output);
-    }
-  }
-
-  return null;
-}
-
-function mapTodosToTasks(sessionId: string, todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>): Task[] {
-  const now = Date.now();
-  return todos.map((todo, index) => ({
-    id: `task-${sessionId}-${index}-${Math.abs(todo.content.length + index)}`,
-    subject: todo.content,
-    description: '',
-    status: todo.status,
-    createdAt: now,
-    updatedAt: now,
-  }));
 }
 
 function isInfrastructureError(code: string | undefined, message: string): boolean {
@@ -718,15 +660,6 @@ export function useAgentEvents(sessionId: string | null): void {
 
           if (result.success && toolName) {
             const lower = toolName.toLowerCase();
-
-            // Resolve tool args for write_todos from chatItems
-            if (lower === 'write_todos') {
-              const toolArgs = toolStartItem && toolStartItem.kind === 'tool_start' ? toolStartItem.args : undefined;
-              const todos = extractTodosFromToolResult(result.result) ?? (toolArgs ? extractTodosFromToolResult(toolArgs) : null);
-              if (todos && todos.length > 0) {
-                agent.setTasks(eventSessionId, mapTodosToTasks(eventSessionId, todos));
-              }
-            }
 
             if (lower === 'computer_use') {
               const data = result.result as {

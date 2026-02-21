@@ -492,6 +492,10 @@ export class EventEmitter {
     this.emit('task:update', sessionId, { task });
   }
 
+  taskDelete(sessionId: string, taskId: string): void {
+    this.emit('task:delete', sessionId, { taskId });
+  }
+
   taskSet(sessionId: string, tasks: unknown[]): void {
     this.emit('task:set', sessionId, { tasks });
   }

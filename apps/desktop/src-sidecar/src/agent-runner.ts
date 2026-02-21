@@ -69,6 +69,7 @@ import {
   createCronTools,
   createWorkflowTools,
   createConversationSkillTools,
+  createTaskTools,
 } from './tools/index.js';
 import { createNotificationTools } from './tools/notification-tools.js';
 import { connectorBridge } from './connector-bridge.js';
@@ -190,7 +191,7 @@ interface ActiveSession {
   /** Current turn ID for associating items with user message */
   currentTurnId?: string;
   tasks: Task[];
-  lastTodosSignature?: string;
+  nextTaskId: number;
   artifacts: Artifact[];
   permissionCache: Map<string, PermissionDecision>;
   permissionScopes: Map<string, Set<string>>;
@@ -257,10 +258,6 @@ interface ActiveSession {
   pendingIntegrationOrigin?: IntegrationMessageOrigin;
   /** Active origin context for currently executing turn */
   activeTurnIntegrationOrigin?: IntegrationMessageOrigin;
-  /** Per-turn guardrail state for todo enforcement in execute mode */
-  hasTodoStateThisTurn: boolean;
-  /** Non-todo tool call count since last todo update */
-  nonTodoToolCallsSinceTodoUpdate: number;
   createdAt: number;
   updatedAt: number;
   /** Last time the session was accessed/selected by the user */
@@ -915,7 +912,9 @@ export class AgentRunner {
       chatItems: data.chatItems,
       currentTurnId: undefined,
       tasks: data.tasks,
-      lastTodosSignature: undefined,
+      nextTaskId: data.tasks?.length > 0
+        ? Math.max(...data.tasks.map((t: { id: string }) => { const n = parseInt(t.id, 10); return Number.isFinite(n) ? n : 0; })) + 1
+        : 1,
       artifacts: data.artifacts,
       permissionCache: new Map(),
       permissionScopes: new Map(),
@@ -942,8 +941,6 @@ export class AgentRunner {
       pendingPlanProposal: undefined,
       pendingIntegrationOrigin: undefined,
       activeTurnIntegrationOrigin: undefined,
-      hasTodoStateThisTurn: false,
-      nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: data.metadata.createdAt,
       updatedAt: data.metadata.updatedAt,
       lastAccessedAt: data.metadata.lastAccessedAt,
@@ -1425,7 +1422,7 @@ export class AgentRunner {
       await this.setExecutionMode(session.id, 'execute');
       this.enqueueSessionMessage(
         session,
-        `Approved plan:\n\n${planMarkdown}\n\nImplement this plan now. Start by calling write_todos with a detailed step list, then execute and keep todo statuses continuously updated as each step completes.`,
+        `Approved plan:\n\n${planMarkdown}\n\nImplement this plan now. Start by calling task_create with a detailed step list, then execute and keep task statuses continuously updated as each step completes.`,
         true,
       );
     } else {
@@ -2752,6 +2749,9 @@ export class AgentRunner {
    * Update execution mode for a session.
    */
   async setExecutionMode(sessionId: string, mode: ExecutionMode): Promise<void> {
+    // Plan mode is disabled — always force execute
+    if (mode === 'plan') return;
+
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -2774,8 +2774,6 @@ export class AgentRunner {
     session.executionMode = mode;
     session.updatedAt = Date.now();
     session.pendingPlanProposal = undefined;
-    session.hasTodoStateThisTurn = false;
-    session.nonTodoToolCallsSinceTodoUpdate = 0;
 
     const toolHandlers = this.buildToolHandlers(session);
     session.agent = await this.createDeepAgent(session, toolHandlers);
@@ -2945,7 +2943,7 @@ export class AgentRunner {
       chatItems: [],
       currentTurnId: undefined,
       tasks: [],
-      lastTodosSignature: undefined,
+      nextTaskId: 1,
       artifacts: [],
       permissionCache: new Map(),
       permissionScopes: new Map(),
@@ -2972,8 +2970,6 @@ export class AgentRunner {
       pendingPlanProposal: undefined,
       pendingIntegrationOrigin: undefined,
       activeTurnIntegrationOrigin: undefined,
-      hasTodoStateThisTurn: false,
-      nonTodoToolCallsSinceTodoUpdate: 0,
       createdAt: now,
       updatedAt: now,
       lastAccessedAt: now,
@@ -4183,8 +4179,6 @@ export class AgentRunner {
       turnMessageId: turnId,
       toolIds: [],
     });
-    session.hasTodoStateThisTurn = false;
-    session.nonTodoToolCallsSinceTodoUpdate = 0;
     session.activeTurnIntegrationOrigin = this.getCurrentIntegrationOrigin(session) || undefined;
     session.pendingIntegrationOrigin = undefined;
 
@@ -4323,7 +4317,6 @@ export class AgentRunner {
             // Try to extract usage metadata from stream events
             this.extractUsageFromStreamEvent(session, event);
 
-            this.syncTasksFromStreamEvent(session, event);
           }
 
           // Ensure thinking is marked done if it was started
@@ -4376,7 +4369,6 @@ export class AgentRunner {
           } else {
             assistantMessage = this.extractAssistantMessage(finalState);
             if (finalState) {
-              this.syncTasksFromState(session, finalState);
               this.updateUsageFromState(session, finalState);
             }
             if (!assistantMessage && streamedText) {
@@ -4415,7 +4407,6 @@ export class AgentRunner {
               invokeOptions,
             );
             assistantMessage = this.extractAssistantMessage(result);
-            this.syncTasksFromState(session, result);
             this.updateUsageFromState(session, result);
             if (assistantMessage) {
               const textContent = this.extractTextContent(assistantMessage);
@@ -4441,7 +4432,6 @@ export class AgentRunner {
           invokeOptions,
         );
         assistantMessage = this.extractAssistantMessage(result);
-        this.syncTasksFromState(session, result);
         this.updateUsageFromState(session, result);
         if (assistantMessage) {
           const textContent = this.extractTextContent(assistantMessage);
@@ -6571,6 +6561,13 @@ ${stitchGuidance}
         ? []
         : createWorkflowTools();
 
+    const taskTools = createTaskTools({
+      getTasks: () => session.tasks,
+      setTasks: (tasks) => { session.tasks = tasks; },
+      incrementTaskId: () => { const id = session.nextTaskId; session.nextTaskId = id + 1; return id; },
+      getSessionId: () => session.id,
+    });
+
     const handlers = [
       readAnyFileTool,
       ...researchTools,
@@ -6583,6 +6580,7 @@ ${stitchGuidance}
       ...conversationSkillTools,
       ...cronTools,
       ...workflowTools,
+      ...taskTools,
     ];
 
     if (session.executionMode !== 'plan') {
@@ -6679,11 +6677,6 @@ ${stitchGuidance}
           return { error };
         }
 
-        if (this.shouldEnforceTodoGuard(session, tool.name)) {
-          // Advisory-only: keep light telemetry, never block execution on todo state.
-          session.nonTodoToolCallsSinceTodoUpdate += 1;
-        }
-
         if (tool.requiresPermission) {
           const request = tool.requiresPermission(args);
           if (request) {
@@ -6757,10 +6750,6 @@ ${stitchGuidance}
             duration,
           });
           this.recordArtifactForTool(session, tool.name, args, limitedOutput);
-          if (result.success && this.isTodoTool(tool.name)) {
-            session.hasTodoStateThisTurn = true;
-            session.nonTodoToolCallsSinceTodoUpdate = 0;
-          }
 
           // Update ToolStartItem and emit ToolResultItem
           toolStartItem.status = result.success ? 'completed' : 'error';
@@ -6890,6 +6879,15 @@ ${stitchGuidance}
 
         if (!request.tools || request.tools.length === 0) {
           return handler(request);
+        }
+
+        // Filter out DeepAgents built-in write_todos — replaced by custom task_* tools
+        const filtered = request.tools.filter((tool) => {
+          const name = (tool as { name?: string })?.name;
+          return name !== 'write_todos';
+        });
+        if (filtered.length !== request.tools.length) {
+          request = { ...request, tools: filtered };
         }
 
         const deduped = new Map<string, typeof request.tools[number]>();
@@ -7033,11 +7031,6 @@ ${stitchGuidance}
           });
         }
 
-        if (this.shouldEnforceTodoGuard(session, toolName)) {
-          // Advisory-only: keep light telemetry, never block execution on todo state.
-          session.nonTodoToolCallsSinceTodoUpdate += 1;
-        }
-
         // Permission checks for DeepAgents native tools (read_file, write_file,
         // edit_file, delete_file, execute) are handled by the native HITL middleware
         // via interruptOn config. The graph interrupts before tool execution,
@@ -7079,10 +7072,6 @@ ${stitchGuidance}
             duration,
           });
           this.recordArtifactForTool(session, toolName, args, limitedOutput);
-          if (normalized.success && this.isTodoTool(toolName)) {
-            session.hasTodoStateThisTurn = true;
-            session.nonTodoToolCallsSinceTodoUpdate = 0;
-          }
 
           // Emit tool result
           emitToolResult(
@@ -7634,12 +7623,10 @@ ${stitchGuidance}
 
       const output = this.extractStateFromStreamEvent(event);
       if (output) {
-        this.syncTasksFromState(session, output);
         this.updateUsageFromState(session, output);
       }
 
       this.extractUsageFromStreamEvent(session, event);
-      this.syncTasksFromStreamEvent(session, event);
     }
 
     // Check for additional HITL interrupts (recursive)
@@ -7945,26 +7932,6 @@ ${stitchGuidance}
       session.workingDirectory,
     );
     return policy.allowed && isReadOnlySafeCommand(normalized);
-  }
-
-  private isTodoTool(toolName: string): boolean {
-    const lower = toolName.toLowerCase();
-    return (
-      lower === 'write_todos' ||
-      lower === 'todowrite' ||
-      lower === 'taskcreate' ||
-      lower === 'taskupdate' ||
-      lower === 'tasklist' ||
-      lower === 'taskget'
-    );
-  }
-
-  private shouldEnforceTodoGuard(session: ActiveSession, toolName: string): boolean {
-    // TODO discipline is advisory (system prompt operating practice), not a hard runtime block.
-    // Keep returning false so execution is never blocked with "run write_todos first" errors.
-    void session;
-    void toolName;
-    return false;
   }
 
   private isPlanModeToolAllowed(
@@ -8282,80 +8249,6 @@ ${stitchGuidance}
           content: normalized,
           createdAt: now(),
         };
-      }
-    }
-
-    return null;
-  }
-
-  private syncTasksFromState(session: ActiveSession, state: unknown): void {
-    const todos = this.extractTodos(state);
-    if (!todos) return;
-
-    this.applyTodosToSession(session, todos);
-  }
-
-  private syncTasksFromStreamEvent(session: ActiveSession, event: unknown): void {
-    const eventAny = event as { data?: unknown };
-    const todos = this.extractTodos(eventAny?.data ?? event);
-    if (!todos) return;
-    this.applyTodosToSession(session, todos);
-  }
-
-  private applyTodosToSession(
-    session: ActiveSession,
-    todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }>
-  ): void {
-    const signature = JSON.stringify(todos);
-    if (signature === session.lastTodosSignature) return;
-
-    const nowTs = Date.now();
-    const tasks: Task[] = todos.map((todo, index) => ({
-      id: `task-${session.id}-${index}-${this.hashTodo(todo)}`,
-      subject: todo.content,
-      status: todo.status,
-      createdAt: nowTs,
-    }));
-
-    session.lastTodosSignature = signature;
-    session.tasks = tasks;
-    session.hasTodoStateThisTurn = true;
-    session.nonTodoToolCallsSinceTodoUpdate = 0;
-    eventEmitter.taskSet(session.id, tasks);
-  }
-
-  private hashTodo(todo: { content: string; status: string }): string {
-    const input = `${todo.status}:${todo.content}`;
-    let hash = 0;
-    for (let i = 0; i < input.length; i += 1) {
-      hash = (hash * 31 + input.charCodeAt(i)) | 0;
-    }
-    return Math.abs(hash).toString(36);
-  }
-
-  private extractTodos(state: unknown): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> | null {
-    if (!state || typeof state !== 'object') return null;
-    const stateAny = state as Record<string, unknown>;
-    const candidates = [
-      stateAny,
-      stateAny.output as Record<string, unknown> | undefined,
-      stateAny.state as Record<string, unknown> | undefined,
-      stateAny.result as Record<string, unknown> | undefined,
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const todos = (candidate as { todos?: unknown }).todos;
-      if (Array.isArray(todos)) {
-        return todos.filter(
-          (todo): todo is { content: string; status: 'pending' | 'in_progress' | 'completed' } =>
-            todo &&
-            typeof (todo as { content?: string }).content === 'string' &&
-            typeof (todo as { status?: string }).status === 'string'
-        ).map((todo) => ({
-          content: String((todo as { content: string }).content),
-          status: (todo as { status: 'pending' | 'in_progress' | 'completed' }).status,
-        }));
       }
     }
 

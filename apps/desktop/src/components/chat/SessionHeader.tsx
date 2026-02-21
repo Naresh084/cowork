@@ -41,13 +41,6 @@ export function SessionHeader() {
       (ci) => ci.kind === 'tool_start' && ci.name.toLowerCase() === 'computer_use' && ci.status === 'running'
     );
   });
-  const isPlanApprovalPending = useChatStore((state) => {
-    if (!activeSessionId) return false;
-    const session = state.sessions[activeSessionId];
-    if (!session) return false;
-    return session.pendingQuestions.some((question) => question.header === 'Plan Approval');
-  });
-
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -89,7 +82,6 @@ export function SessionHeader() {
 
   const sessionTitle = activeSession?.title ||
     (activeSession?.firstMessage ? truncate(activeSession.firstMessage, 40) : 'New conversation');
-  const executionMode = activeSession?.executionMode || 'execute';
   const sessionMode = activeSession?.sessionMode || 'cowork';
 
   // Close menu when clicking outside
@@ -421,21 +413,6 @@ export function SessionHeader() {
           >
             <AlertTriangle className="w-3.5 h-3.5" />
             Start new session
-          </div>
-        ) : null}
-
-        {executionMode === 'plan' ? (
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#1D4ED8]/15 text-[#93C5FD] shrink-0"
-            title="Press Shift+Tab to switch back to Execute mode"
-          >
-            Plan mode active
-          </div>
-        ) : null}
-
-        {isPlanApprovalPending ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs bg-[#F5C400]/15 text-[#F5C400] shrink-0">
-            Review plan to continue
           </div>
         ) : null}
 

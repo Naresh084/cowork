@@ -1011,7 +1011,7 @@ function getToolKind(
   if (lower === 'task' || lower.includes('spawn_task') || lower.includes('subagent')) {
     return 'task';
   }
-  if (lower.includes('write_todos') || lower.includes('todo')) {
+  if (lower.startsWith('task_')) {
     return 'todos';
   }
   if (lower.includes('google_grounded_search') || lower.includes('grounded')) {
@@ -1046,33 +1046,17 @@ function normalizeTodoStatus(value: unknown): 'pending' | 'in_progress' | 'compl
 }
 
 function extractTodosFromArgs(args: Record<string, unknown>): Array<{ content: string; status: 'pending' | 'in_progress' | 'completed' }> | null {
-  const raw = args.todos ?? args.todo ?? args.tasks;
+  // Support new task_create format: { tasks: [{ subject, ... }] }
+  const raw = args.tasks ?? args.todos ?? args.todo ?? args.updates;
   if (!raw) return null;
   if (Array.isArray(raw)) {
     return raw
-      .filter((todo): todo is { content: string; status?: string } => !!todo && typeof (todo as { content?: unknown }).content === 'string')
-      .map((todo) => ({
-        content: String((todo as { content: string }).content),
-        status: normalizeTodoStatus((todo as { status?: string }).status),
-      }));
-  }
-
-  if (typeof raw === 'string') {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-          return parsed
-            .filter((todo): todo is { content: string; status?: string } => !!todo && typeof (todo as { content?: unknown }).content === 'string')
-            .map((todo) => ({
-              content: String((todo as { content: string }).content),
-              status: normalizeTodoStatus((todo as { status?: string }).status),
-            }));
-        }
-    } catch {
-      return null;
-    }
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+      .map((item) => ({
+        content: String((item as { subject?: string }).subject ?? (item as { content?: string }).content ?? ''),
+        status: normalizeTodoStatus((item as { status?: string }).status),
+      }))
+      .filter((item) => item.content.length > 0);
   }
 
   return null;
@@ -1355,8 +1339,8 @@ function buildToolSummary(tool: ToolExecution, isActive?: boolean): React.ReactN
     const todos = extractTodosFromArgs(args) || [];
     const completed = todos.filter((t) => t.status === 'completed').length;
     const label = todos.length > 0
-      ? `Updated todos (${completed}/${todos.length})`
-      : 'Updated todos';
+      ? `Task progress (${completed}/${todos.length})`
+      : 'Task progress';
     return (
       <>
         <span className="text-[11px] text-white/55">{label}</span>

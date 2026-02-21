@@ -435,6 +435,7 @@ export type AgentEventType =
   | 'question:answered'
   | 'task:create'
   | 'task:update'
+  | 'task:delete'
   | 'task:set'
   | 'artifact:created'
   | 'research:progress'
@@ -480,7 +481,9 @@ export interface Task {
   description?: string;
   status: 'pending' | 'in_progress' | 'completed';
   activeForm?: string;
+  blockedBy?: string[];
   createdAt: number;
+  updatedAt?: number;
   completedAt?: number;
 }
 

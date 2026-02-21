@@ -195,7 +195,7 @@ export function InputArea({
     defaultWorkingDirectory,
     updateSetting: updateSettings,
   } = useSettingsStore();
-  const { activeSessionId, sessions, updateSessionWorkingDirectory, setSessionExecutionMode } = useSessionStore();
+  const { activeSessionId, sessions, updateSessionWorkingDirectory } = useSessionStore();
   const pendingPermissions = useChatStore((state) => {
     if (!activeSessionId) return EMPTY_PENDING_PERMISSIONS;
     return state.sessions[activeSessionId]?.pendingPermissions ?? EMPTY_PENDING_PERMISSIONS;
@@ -601,20 +601,6 @@ export function InputArea({
   ]);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Tab' && e.shiftKey) {
-      e.preventDefault();
-      if (activeSessionId) {
-        const currentSession = sessions.find(s => s.id === activeSessionId);
-        const newMode = currentSession?.executionMode === 'plan' ? 'execute' : 'plan';
-        void setSessionExecutionMode(activeSessionId, newMode);
-        toast.info(
-          newMode === 'plan' ? 'Plan mode' : 'Execute mode',
-          newMode === 'plan' ? 'Agent will analyze and propose plans' : 'Agent will implement changes directly',
-          2000
-        );
-      }
-      return;
-    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
